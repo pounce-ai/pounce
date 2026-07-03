@@ -3,6 +3,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } fro
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
+import { Ionicons } from "@expo/vector-icons";
 import type { AgentId } from "@litter/shared";
 import {
   allDevices,
@@ -13,40 +14,51 @@ import {
   sessionsForRepo,
 } from "@/state/stores";
 import { Composer, type ComposerSubmit } from "@/components/Composer";
-import { AgentLogo, agentLabel, cn } from "@/ui";
+import { FolderBrowser } from "@/components/FolderBrowser";
+import { AgentLogo, agentLabel, cn, COLOR } from "@/ui";
 import { effectiveCaps } from "@/ui/agent-meta";
 
 const AGENTS: AgentId[] = ["claude", "codex", "opencode"];
 
-/** Start a new task: pick repo + agent, then compose with the full controls. */
+/** Repo key from an absolute path — mirrors the bridge's `repoInfo` basename. */
+function repoIdForCwd(cwd: string | null): string {
+  if (!cwd) return "repo:Scratch";
+  const base = cwd.replace(/\/+$/, "").split("/").pop() || "Scratch";
+  return `repo:${base}`;
+}
+
+/** Start a new task: pick device + folder + agent, then compose. */
 export default function NewTaskScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const devices = useSelector(() => allDevices());
   const repos = useSelector(() => reposByActivity());
-  const [repoId, setRepoId] = useState<string | null>(repos[0]?.id ?? null);
+
+  const [hostId, setHostId] = useState<string | undefined>(devices[0]?.id);
+  const [cwd, setCwd] = useState<string | null>(null);
   const [agent, setAgent] = useState<AgentId>("claude");
+  const [browsing, setBrowsing] = useState(false);
 
   const reportedCaps = useSelector(() => capsFor(agent));
   const caps = effectiveCaps(agent, reportedCaps);
 
-  // derive a cwd + host to launch in from the repo's most recent session
-  const cwd = useMemo(() => {
-    if (!repoId) return null;
-    return sessionsForRepo(repoId).find((s) => s.cwd)?.cwd ?? null;
-  }, [repoId]);
-  const hostId = useMemo(() => {
-    const rs = repoId ? sessionsForRepo(repoId)[0] : undefined;
-    return rs?.hostId ?? allDevices()[0]?.id;
-  }, [repoId]);
+  const folderLabel = useMemo(() => (cwd ? cwd.split("/").pop() || cwd : null), [cwd]);
+
+  // Quick-pick an existing repo: adopt its cwd + host so you land in a known dir.
+  const pickRepo = (repoId: string) => {
+    const s = sessionsForRepo(repoId).find((x) => x.cwd) ?? sessionsForRepo(repoId)[0];
+    if (s?.cwd) setCwd(s.cwd);
+    if (s?.hostId) setHostId(s.hostId);
+  };
+  const activeRepoId = repoIdForCwd(cwd);
 
   const launch = (s: ComposerSubmit) => {
     const id = `new_${Date.now()}`;
     const nowIso = new Date().toISOString();
-    const repoSession = repoId ? sessionsForRepo(repoId)[0] : undefined;
-    const device = repoSession ? { id: repoSession.hostId, name: repoSession.host } : allDevices()[0];
+    const device = devices.find((d) => d.id === hostId) ?? devices[0];
     sessions$[id].set({
       id,
-      repoId: repoId ?? "repo:Scratch",
+      repoId: repoIdForCwd(cwd),
       hostId: device?.id ?? "dev:local",
       host: device?.name ?? "local",
       agent,
@@ -79,12 +91,42 @@ export default function NewTaskScreen() {
       </View>
 
       <ScrollView className="flex-1 px-4" contentContainerStyle={{ gap: 16, paddingBottom: 16 }}>
-        <Field label="Repository">
-          <View className="flex-row flex-wrap gap-2">
-            {repos.map((r) => (
-              <Chip key={r.id} active={repoId === r.id} onPress={() => setRepoId(r.id)} label={r.name} />
-            ))}
-          </View>
+        {devices.length > 1 ? (
+          <Field label="Device">
+            <View className="flex-row flex-wrap gap-2">
+              {devices.map((d) => (
+                <Chip key={d.id} active={hostId === d.id} onPress={() => setHostId(d.id)} label={d.name} />
+              ))}
+            </View>
+          </Field>
+        ) : null}
+
+        <Field label="Folder">
+          <Pressable
+            onPress={() => setBrowsing(true)}
+            className="active:opacity-80 flex-row items-center gap-2 rounded-xl border border-border bg-surface px-3.5 py-3"
+          >
+            <Ionicons name="folder-outline" size={17} color={cwd ? COLOR.accent : COLOR.fgFaint} />
+            <View className="flex-1">
+              <Text numberOfLines={1} className={cn("text-[14px]", cwd ? "text-fg" : "text-fg-faint")}>
+                {folderLabel ?? "Choose a folder…"}
+              </Text>
+              {cwd ? (
+                <Text numberOfLines={1} className="font-mono text-[11px] text-fg-faint">
+                  {cwd}
+                </Text>
+              ) : null}
+            </View>
+            <Ionicons name="chevron-forward" size={15} color={COLOR.fgFaint} />
+          </Pressable>
+
+          {repos.length ? (
+            <View className="mt-2 flex-row flex-wrap gap-2">
+              {repos.map((r) => (
+                <Chip key={r.id} active={activeRepoId === r.id} onPress={() => pickRepo(r.id)} label={r.name} />
+              ))}
+            </View>
+          ) : null}
         </Field>
 
         <Field label="Agent">
@@ -119,6 +161,17 @@ export default function NewTaskScreen() {
           onSubmit={launch}
         />
       </View>
+
+      <FolderBrowser
+        hostId={hostId}
+        visible={browsing}
+        initialPath={cwd}
+        onClose={() => setBrowsing(false)}
+        onPick={(p) => {
+          setCwd(p);
+          setBrowsing(false);
+        }}
+      />
     </KeyboardAvoidingView>
   );
 }

@@ -5,7 +5,7 @@
  */
 import { Text, View } from "react-native";
 import Svg, { Path } from "react-native-svg";
-import { AGENT_HEX, agentLabel, COLOR } from "./index";
+import { AGENT_HEX, agentLabel, COLOR } from "./tokens";
 
 type MarkProps = { size: number; color: string };
 

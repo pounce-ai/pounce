@@ -27,7 +27,7 @@ export default function RootLayout() {
         <Stack.Screen name="changes" options={{ presentation: "modal" }} />
         <Stack.Screen name="terminal" options={{ presentation: "modal" }} />
         <Stack.Screen name="connect" options={{ presentation: "modal" }} />
-        <Stack.Screen name="settings" options={{ presentation: "modal" }} />
+        <Stack.Screen name="help" options={{ presentation: "modal" }} />
       </Stack>
     </Providers>
   );

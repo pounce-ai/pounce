@@ -18,7 +18,7 @@
  */
 import http from "node:http";
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import qrcode from "qrcode-terminal";
@@ -286,6 +286,27 @@ function rankEntries(all, q) {
   }
   scored.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   return scored.slice(0, 25).map((s) => s[2]);
+}
+
+/**
+ * Immediate subdirectories of `dir`, for the new-thread folder browser. Hides
+ * dotfolders and node_modules (browsing noise), resolves symlinked dirs, and
+ * flags git repos so the app can badge them. Sorted case-insensitively.
+ */
+function listDirs(dir) {
+  const out = [];
+  for (const d of readdirSync(dir, { withFileTypes: true })) {
+    if (d.name.startsWith(".") || d.name === "node_modules") continue;
+    let isDir = d.isDirectory();
+    const full = path.join(dir, d.name);
+    if (!isDir && d.isSymbolicLink()) {
+      try { isDir = statSync(full).isDirectory(); } catch { continue; }
+    }
+    if (!isDir) continue;
+    out.push({ name: d.name, path: full, isRepo: existsSync(path.join(full, ".git")) });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  return out;
 }
 
 /**
@@ -886,6 +907,17 @@ const server = http.createServer(async (req, res) => {
       if (!cwd || !existsSync(cwd)) return send(res, 200, { files: [] });
       const all = await repoEntries(cwd);
       return send(res, 200, { files: rankEntries(all, q) });
+    }
+    if (url.pathname === "/v1/dirs") {
+      // Folder browser for starting a thread in any directory. Defaults to
+      // (and can't go above) $HOME; `parent` is null at the home root.
+      const home = os.homedir();
+      let dir = url.searchParams.get("path") || home;
+      if (!existsSync(dir)) dir = home;
+      let entries = [];
+      try { entries = listDirs(dir); } catch { entries = []; }
+      const parent = dir === "/" || dir === home ? null : path.dirname(dir);
+      return send(res, 200, { path: dir, parent, home, entries });
     }
     if (url.pathname === "/v1/exec" && req.method === "POST") {
       const { cwd, command } = await readBody(req);

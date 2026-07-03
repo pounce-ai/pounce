@@ -5,7 +5,6 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { HeroUINativeProvider } from "heroui-native";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "../services/queryClient";
-import { TourProvider } from "./Tour";
 
 export function Providers({ children }: { children: ReactNode }) {
   return (
@@ -13,9 +12,7 @@ export function Providers({ children }: { children: ReactNode }) {
       <SafeAreaProvider>
         <KeyboardProvider>
           <HeroUINativeProvider>
-            <QueryClientProvider client={queryClient}>
-              <TourProvider>{children}</TourProvider>
-            </QueryClientProvider>
+            <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
           </HeroUINativeProvider>
         </KeyboardProvider>
       </SafeAreaProvider>

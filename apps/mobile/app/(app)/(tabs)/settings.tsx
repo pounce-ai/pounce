@@ -36,7 +36,7 @@ function parsePairing(data: string): Pairing | null {
   return null;
 }
 
-export default function SyncScreen() {
+export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const status = useSelector(() => connection$.status.get());
@@ -68,7 +68,7 @@ export default function SyncScreen() {
       const pairing = await fetchPairing(clean);
       if (pairing?.nodeId) await savePairing(pairing);
       Alert.alert("Synced", "Your devices are connected.");
-      router.back();
+      router.navigate("/");
     } catch (e) {
       Alert.alert("Couldn't sync", e instanceof Error ? e.message : String(e));
     } finally {
@@ -85,7 +85,7 @@ export default function SyncScreen() {
 
   const startScan = async () => {
     try {
-      const mod = await import("../src/components/QrScanner");
+      const mod = await import("@/components/QrScanner");
       setScanner(() => mod.default);
       setScanning(true);
     } catch {
@@ -123,15 +123,12 @@ export default function SyncScreen() {
   }
 
   return (
-    <View className="flex-1 bg-bg" style={{ paddingTop: insets.top + 8 }}>
-      <View className="flex-row items-center justify-between px-4 pb-3">
-        <Text className="text-[22px] font-bold text-fg">Sync</Text>
-        <Pressable onPress={() => router.back()} className="active:opacity-60">
-          <Text className="text-[15px] text-fg-muted">Done</Text>
-        </Pressable>
+    <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>
+      <View className="px-4 pb-2 pt-1">
+        <Text className="text-[26px] font-bold text-fg">Settings</Text>
       </View>
 
-      <ScrollView className="flex-1 px-4" contentContainerStyle={{ gap: 14, paddingBottom: 24 }}>
+      <ScrollView className="flex-1 px-4" contentContainerStyle={{ gap: 14, paddingBottom: insets.bottom + 120 }}>
         <View className="flex-row items-center gap-2">
           <View className={cn("h-2 w-2 rounded-full", live ? "bg-success" : "bg-fg-faint")} />
           <Text className="text-[13px] text-fg-muted">
@@ -207,6 +204,16 @@ export default function SyncScreen() {
             </Pressable>
           </View>
         ) : null}
+
+        {/* Help & FAQ */}
+        <Pressable
+          onPress={() => router.push("/help")}
+          className="active:opacity-80 flex-row items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-3"
+        >
+          <Ionicons name="help-circle-outline" size={18} color={COLOR.fgMuted} />
+          <Text className="flex-1 text-[14px] font-medium text-fg">Help &amp; FAQ</Text>
+          <Ionicons name="chevron-forward" size={15} color={COLOR.fgFaint} />
+        </Pressable>
 
       </ScrollView>
     </View>

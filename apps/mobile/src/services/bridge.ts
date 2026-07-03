@@ -385,6 +385,38 @@ export async function fetchFiles(
   }
 }
 
+export interface DirEntry {
+  name: string;
+  path: string;
+  /** Directory contains a `.git` — show it as a repo. */
+  isRepo: boolean;
+}
+export interface DirListing {
+  /** Absolute path currently listed. */
+  path: string;
+  /** Parent directory, or null at the browse root (home). */
+  parent: string | null;
+  home: string;
+  entries: DirEntry[];
+}
+
+/** Browse folders on a device to pick a working directory for a new thread. */
+export async function browseDirs(
+  hostId: string,
+  dirPath?: string,
+): Promise<DirListing | null> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return null;
+  try {
+    return await get<DirListing>(
+      cfg,
+      `/v1/dirs${dirPath ? `?path=${encodeURIComponent(dirPath)}` : ""}`,
+    );
+  } catch {
+    return null;
+  }
+}
+
 async function streamingFetch(): Promise<typeof fetch> {
   try {
     const { fetch: nitroFetch } = await import("react-native-nitro-fetch");
