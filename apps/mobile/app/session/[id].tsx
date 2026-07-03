@@ -4,12 +4,24 @@ import { KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
+import type { LegendListRef } from "@legendapp/list/react-native";
 import type { TimelineEvent } from "@litter/shared";
+import { isEmptyUserMessage, parseUserMessage } from "@litter/transcript";
 import { Timeline } from "@/components/Timeline";
 import { TimelineSkeleton } from "@/components/Skeleton";
 import { Composer, type ComposerSubmit } from "@/components/Composer";
+import { MarkerRail, type Marker } from "@/components/MarkerRail";
+import { MarkerSheet } from "@/components/MarkerSheet";
 import { useTimeline } from "@/hooks/useTimeline";
-import { capsFor, connection$, pendingTurns$, sessions$ } from "@/state/stores";
+import {
+  capsFor,
+  connection$,
+  isMarked,
+  markers$,
+  pendingTurns$,
+  sessions$,
+  toggleMarker,
+} from "@/state/stores";
 import { fetchMessages, interruptTurn, streamLiveMessage } from "@/services/bridge";
 import { Ionicons } from "@expo/vector-icons";
 import { ActivityDot, ACTIVITY_LABEL, AgentLogo, cn, COLOR } from "@/ui";
@@ -56,6 +68,45 @@ export default function SessionScreen() {
   }, [live, session?.id, session?.agent, session?.hostId]);
 
   const events = live ? liveEvents : demoTl.events;
+
+  // --- markers: user messages by default, overrides for adds/removals ---
+  const listRef = useRef<LegendListRef>(null);
+  const [markerSheet, setMarkerSheet] = useState(false);
+  // Derived inside useSelector so each message's override node is tracked —
+  // selecting the parent object breaks on toggles (same reference, no rerender).
+  const markers = useSelector<Marker[]>(() =>
+    events.flatMap((e, index) => {
+      if (e.type !== "user_message" && e.type !== "assistant_message") return [];
+      // Empty envelopes render nothing (UserRow returns null) — never dot them.
+      const def =
+        e.type === "user_message" &&
+        !isEmptyUserMessage(parseUserMessage(e.text, session?.agent));
+      if (!(markers$[id!][e.id].get() ?? def)) return [];
+      return [{ id: e.id, index, type: e.type, text: e.text, ts: e.ts }];
+    }),
+  );
+
+  const jumpTo = useCallback((index: number) => {
+    listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.1 });
+  }, []);
+
+  const onLongPressEvent = useCallback(
+    (ev: TimelineEvent) => {
+      // Optimistic ids are replaced on refetch — a toggle here would orphan.
+      if (ev.id.startsWith("opt:")) return;
+      const marked = isMarked(id!, ev);
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: [marked ? "Remove marker" : "Add marker", "Cancel"],
+          cancelButtonIndex: 1,
+        },
+        (i) => {
+          if (i === 0) toggleMarker(id!, ev);
+        },
+      );
+    },
+    [id],
+  );
 
   // Errors propagate so the Composer can restore the user's draft.
   const onSubmit = useCallback(async (s: ComposerSubmit) => {
@@ -133,6 +184,7 @@ export default function SessionScreen() {
   const openActions = () => {
     const acts: { label: string; run: () => void }[] = [];
     if (running) acts.push({ label: "Stop agent", run: () => void stop() });
+    if (markers.length) acts.push({ label: "Markers", run: () => setMarkerSheet(true) });
     if (session.cwd) {
       acts.push({ label: "View changes", run: () => router.push(`/changes?id=${session.id}`) });
       acts.push({ label: "Open terminal", run: () => router.push(`/terminal?id=${session.id}`) });
@@ -189,9 +241,29 @@ export default function SessionScreen() {
         {loading && events.length === 0 ? (
           <TimelineSkeleton />
         ) : (
-          <Timeline events={events} agent={session.agent} />
+          <Timeline
+            events={events}
+            agent={session.agent}
+            sessionId={id!}
+            listRef={listRef}
+            onLongPressEvent={onLongPressEvent}
+          />
         )}
+        <MarkerRail
+          markers={markers}
+          total={events.length}
+          onJump={jumpTo}
+          onOpenList={() => setMarkerSheet(true)}
+        />
       </View>
+
+      <MarkerSheet
+        visible={markerSheet}
+        markers={markers}
+        agent={session.agent}
+        onJump={jumpTo}
+        onClose={() => setMarkerSheet(false)}
+      />
 
       {/* Composer */}
       <View style={{ paddingBottom: insets.bottom + 8 }} className="border-t border-border bg-bg-elevated px-3 pt-2">

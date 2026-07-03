@@ -10,6 +10,7 @@ import type {
   Repository,
   RunImage,
   Session,
+  TimelineEvent,
   UserProfile,
 } from "@litter/shared";
 import { persist } from "../services/persistence";
@@ -56,6 +57,24 @@ export function activeFilterCount(): number {
   return (f.device ? 1 : 0) + (f.agent ? 1 : 0);
 }
 
+/** Marker overrides: sessionId → messageId → explicit marked state. Absent =
+ *  default (user messages marked, everything else unmarked). Keyed by the
+ *  route/session id, not conversationId, which can change across refetches. */
+export const markers$ = observable<Record<string, Record<string, boolean>>>({});
+
+/** Effective marker state for a message — explicit override or the default. */
+export function isMarked(sessionId: string, ev: TimelineEvent): boolean {
+  return markers$[sessionId][ev.id].get() ?? ev.type === "user_message";
+}
+
+export function toggleMarker(sessionId: string, ev: TimelineEvent): void {
+  const next = !isMarked(sessionId, ev);
+  const def = ev.type === "user_message";
+  // Store only deviations from the default so the map stays sparse.
+  if (next === def) markers$[sessionId][ev.id].delete();
+  else markers$[sessionId][ev.id].set(next);
+}
+
 export const user$ = observable<UserProfile>({
   id: "local",
   displayName: "You",
@@ -74,6 +93,7 @@ persist(devices$, "devices");
 persist(agentCaps$, "agentCaps");
 persist(repositories$, "repositories");
 persist(sessions$, "sessions");
+persist(markers$, "markers");
 persist(user$, "user");
 
 // --- selectors (respect active device/agent filters) ---
