@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { Providers } from "@/components/Providers";
+import { UpdateBanner } from "@/components/UpdateBanner";
 import { bootstrap } from "@/services/runtime";
 import { attachPushNavigation } from "@/services/push";
 
@@ -29,6 +30,7 @@ export default function RootLayout() {
         <Stack.Screen name="connect" options={{ presentation: "modal" }} />
         <Stack.Screen name="help" options={{ presentation: "modal" }} />
       </Stack>
+      <UpdateBanner />
     </Providers>
   );
 }
