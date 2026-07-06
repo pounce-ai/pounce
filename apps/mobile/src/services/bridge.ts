@@ -19,7 +19,7 @@ import type {
   Session,
   TimelineEvent,
 } from "@litter/shared";
-import { agentCaps$, connection$, hosts$, setWorkspace } from "../state/stores";
+import { agentCaps$, connection$, hosts$, recordSync, sessions$, setWorkspace } from "../state/stores";
 
 const BRIDGE_KEY = "pounce.bridge";
 
@@ -224,6 +224,8 @@ export async function syncLiveData(
     }),
   );
 
+  // Log what this sync actually brought in (per-repo) before we swap the store.
+  recordSync(sessions$.get(), sessions, repos, now);
   setWorkspace(repos, sessions, devices);
   return { repos: Object.keys(repos).length, sessions: Object.keys(sessions).length, devices: Object.keys(devices).length };
 }

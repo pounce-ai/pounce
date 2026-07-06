@@ -29,6 +29,7 @@ export default function RootLayout() {
         <Stack.Screen name="terminal" options={{ presentation: "modal" }} />
         <Stack.Screen name="connect" options={{ presentation: "modal" }} />
         <Stack.Screen name="help" options={{ presentation: "modal" }} />
+        <Stack.Screen name="sync-history" options={{ presentation: "modal" }} />
       </Stack>
       <UpdateBanner />
     </Providers>

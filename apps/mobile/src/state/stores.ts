@@ -75,6 +75,50 @@ export function toggleMarker(sessionId: string, ev: TimelineEvent): void {
   else markers$[sessionId][ev.id].set(next);
 }
 
+/** One sync event: which repos got new or newly-active sessions, and how many.
+ *  Powers the Sync history screen — a per-repo record of when agent activity
+ *  actually reached this device. */
+export interface SyncLogEntry {
+  /** ISO timestamp of the sync. */
+  at: string;
+  /** Repos that changed this sync, busiest first. */
+  repos: { repoId: string; name: string; count: number }[];
+}
+export const syncLog$ = observable<SyncLogEntry[]>([]);
+
+const SYNC_LOG_CAP = 100;
+
+/** Diff a fresh sync against the previous session map; if any session is new or
+ *  newly-active (its updatedAt advanced), append a timestamped entry grouped by
+ *  repo. No-op when nothing changed, so a plain refresh doesn't log noise.
+ *  There's no backfill — logging starts from the first sync after install. */
+export function recordSync(
+  prev: Record<string, Session>,
+  next: Record<string, Session>,
+  repos: Record<string, Repository>,
+  at: string,
+): void {
+  const counts = new Map<string, number>();
+  for (const [id, s] of Object.entries(next)) {
+    const before = prev[id];
+    if (!before || before.updatedAt !== s.updatedAt) {
+      counts.set(s.repoId, (counts.get(s.repoId) ?? 0) + 1);
+    }
+  }
+  if (counts.size === 0) return;
+  const entry: SyncLogEntry = {
+    at,
+    repos: [...counts.entries()]
+      .map(([repoId, count]) => ({
+        repoId,
+        name: repos[repoId]?.name ?? repoId.replace(/^repo:/, ""),
+        count,
+      }))
+      .sort((a, b) => b.count - a.count),
+  };
+  syncLog$.set([entry, ...syncLog$.get()].slice(0, SYNC_LOG_CAP));
+}
+
 export const user$ = observable<UserProfile>({
   id: "local",
   displayName: "You",
@@ -93,6 +137,7 @@ persist(devices$, "devices");
 persist(agentCaps$, "agentCaps");
 persist(repositories$, "repositories");
 persist(sessions$, "sessions");
+persist(syncLog$, "syncLog");
 persist(markers$, "markers");
 persist(user$, "user");
 
