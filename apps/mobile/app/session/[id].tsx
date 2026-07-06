@@ -55,17 +55,24 @@ export default function SessionScreen() {
   const demoTl = useTimeline(id!, undefined, !live);
   const [liveEvents, setLiveEvents] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(false);
+  // A live fetch can fail (host asleep, off Wi-Fi, bridge not running). We track
+  // it so an unreachable host shows "couldn't load · retry" instead of masking
+  // as an empty conversation. Bumping `reload` re-runs the fetch.
+  const [failed, setFailed] = useState(false);
+  const [reload, setReload] = useState(0);
+  const retry = useCallback(() => setReload((n) => n + 1), []);
 
   useEffect(() => {
     if (!live || !session?.id) return;
     let cancelled = false;
     setLoading(true);
+    setFailed(false);
     fetchMessages(session.hostId, session.agent, session.id)
-      .then((ev) => !cancelled && setLiveEvents(ev))
-      .catch(() => {})
+      .then((ev) => { if (!cancelled) { setLiveEvents(ev); setFailed(false); } })
+      .catch(() => { if (!cancelled) setFailed(true); })
       .finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
-  }, [live, session?.id, session?.agent, session?.hostId]);
+  }, [live, session?.id, session?.agent, session?.hostId, reload]);
 
   const events = live ? liveEvents : demoTl.events;
 
@@ -240,6 +247,23 @@ export default function SessionScreen() {
       <View className="flex-1">
         {loading && events.length === 0 ? (
           <TimelineSkeleton />
+        ) : live && failed && events.length === 0 ? (
+          <View className="flex-1 items-center justify-center px-8">
+            <Ionicons name="cloud-offline-outline" size={34} color={COLOR.fgFaint} />
+            <Text className="mt-3 text-center text-[15px] font-semibold text-fg">Couldn't load this conversation</Text>
+            <Text className="mt-1 text-center text-[13px] text-fg-muted">
+              Make sure {session.host || "your computer"} is awake and the Pounce Bridge is running on the same Wi‑Fi.
+            </Text>
+            <Pressable onPress={retry} className="active:opacity-80 mt-5 rounded-full bg-accent px-5 py-2.5">
+              <Text className="text-[14px] font-semibold text-white">Retry</Text>
+            </Pressable>
+          </View>
+        ) : events.length === 0 ? (
+          <View className="flex-1 items-center justify-center px-8">
+            <Text className="text-[34px]">💬</Text>
+            <Text className="mt-3 text-center text-[15px] font-semibold text-fg">No messages yet</Text>
+            <Text className="mt-1 text-center text-[13px] text-fg-muted">Send a message below to get this thread going.</Text>
+          </View>
         ) : (
           <Timeline
             events={events}
