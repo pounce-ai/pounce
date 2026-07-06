@@ -35,6 +35,12 @@ const PanelLayer: FC<IPanelLayerProps> & FunctionComponent<IPanelLayerProps> =
           pointerEvents={active ? "auto" : "none"}
           style={[styles.panelLayer, motion.style]}
         >
+          {/* Opaque backing so the thread list behind the tab bar can't bleed
+              through the popup (was near-invisible over an ultra-thin blur). */}
+          <Animated.View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]}
+          />
           <Animated.View
             onLayout={(event: LayoutChangeEvent) => {
               const { width, height } = event.nativeEvent.layout;
@@ -44,14 +50,6 @@ const PanelLayer: FC<IPanelLayerProps> & FunctionComponent<IPanelLayerProps> =
           >
             <PopupBody colors={colors} route={route} view={view} close={close} />
           </Animated.View>
-          {Platform.OS === "ios" && (
-            <motion.AnimatedBlurView
-              animatedProps={motion.blurProps}
-              pointerEvents="none"
-              tint={"systemUltraThinMaterialDark"}
-              style={StyleSheet.absoluteFill}
-            />
-          )}
         </Animated.View>
       );
     },

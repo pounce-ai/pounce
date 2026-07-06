@@ -8,7 +8,9 @@ import type { IPalette } from "../typings/motion-tabs";
 const POUNCE_DARK: IPalette = {
   foreground: "#ececf1",
   muted: "#9a9aa5",
-  surface: "rgba(18,18,24,0.92)",
+  // Near-opaque: the morphing popup uses this as a backing so the thread list
+  // behind the floating tab bar doesn't bleed through and wash it out.
+  surface: "rgba(17,17,23,0.98)",
   border: "rgba(255,255,255,0.08)",
   input: "rgba(255,255,255,0.06)",
   hover: "rgba(255,255,255,0.08)",
