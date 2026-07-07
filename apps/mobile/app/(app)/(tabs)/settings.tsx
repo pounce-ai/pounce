@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
 import { Component, useEffect, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
@@ -120,11 +120,18 @@ export default function SettingsScreen() {
     ]);
   };
 
+  // Inline feedback on the Refresh control itself: "Syncing…" with a spinner
+  // while the sync runs, a brief "Up to date" after — no developer-y alert.
+  const [syncState, setSyncState] = useState<"idle" | "syncing" | "done">("idle");
   const refresh = async () => {
     setBusy(true);
+    setSyncState("syncing");
     try {
-      const r = await syncLiveData();
-      Alert.alert("Refreshed", `${r.devices} device${r.devices === 1 ? "" : "s"} · ${r.sessions} session${r.sessions === 1 ? "" : "s"}`);
+      await syncLiveData();
+      setSyncState("done");
+      setTimeout(() => setSyncState("idle"), 2000);
+    } catch {
+      setSyncState("idle");
     } finally {
       setBusy(false);
     }
@@ -218,8 +225,19 @@ export default function SettingsScreen() {
                 </Pressable>
               </View>
             ))}
-            <Pressable onPress={refresh} disabled={busy} className="active:opacity-60 self-center pt-1">
-              <Text className="text-[13px] text-accent">Refresh</Text>
+            <Pressable
+              onPress={refresh}
+              disabled={busy}
+              className="active:opacity-60 h-7 flex-row items-center gap-1.5 self-center pt-1"
+            >
+              {syncState === "syncing" ? (
+                <ActivityIndicator size="small" color={COLOR.accent} />
+              ) : syncState === "done" ? (
+                <Ionicons name="checkmark-circle" size={15} color={COLOR.success} />
+              ) : null}
+              <Text className={cn("text-[13px]", syncState === "idle" ? "text-accent" : "text-fg-muted")}>
+                {syncState === "syncing" ? "Syncing…" : syncState === "done" ? "Up to date" : "Refresh"}
+              </Text>
             </Pressable>
           </View>
         ) : null}

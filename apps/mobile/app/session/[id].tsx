@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActionSheetIOS, Pressable, Text, View } from "react-native";
 import { KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -7,7 +7,7 @@ import { useSelector } from "@legendapp/state/react";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import type { TimelineEvent } from "@litter/shared";
 import { isEmptyUserMessage, parseUserMessage } from "@litter/transcript";
-import { Timeline } from "@/components/Timeline";
+import { collapseToolResults, Timeline } from "@/components/Timeline";
 import { TimelineSkeleton } from "@/components/Skeleton";
 import { Composer, type ComposerSubmit } from "@/components/Composer";
 import { MarkerRail, type Marker } from "@/components/MarkerRail";
@@ -74,7 +74,10 @@ export default function SessionScreen() {
     return () => { cancelled = true; };
   }, [live, session?.id, session?.agent, session?.hostId, reload]);
 
-  const events = live ? liveEvents : demoTl.events;
+  const rawEvents = live ? liveEvents : demoTl.events;
+  // Timeline collapses paired tool results into their call's accordion, so
+  // marker indices must be computed over the same collapsed array it renders.
+  const events = useMemo(() => collapseToolResults(rawEvents), [rawEvents]);
 
   // --- markers: user messages by default, overrides for adds/removals ---
   const listRef = useRef<LegendListRef>(null);
@@ -266,7 +269,7 @@ export default function SessionScreen() {
           </View>
         ) : (
           <Timeline
-            events={events}
+            events={rawEvents}
             agent={session.agent}
             sessionId={id!}
             listRef={listRef}

@@ -17,6 +17,7 @@
  * Auth: clients send `Authorization: Bearer <BRIDGE_TOKEN>` or `?token=`.
  */
 import http from "node:http";
+import net from "node:net";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -731,7 +732,9 @@ async function fetchTurns(agent, threadId) {
   const frames = await probe(
     ["--agent", agent, "--before-method", "thread/resume", "--before-params", JSON.stringify({ threadId }),
      "--method", "thread/turns/list", "--params", JSON.stringify({ threadId }),
-     "--linger-secs", "4", "--timeout-secs", "30"],
+     // turns/list is plain request/response — linger only waits *after* the
+     // response, so any value here is a flat delay added to every history load.
+     "--linger-secs", "0", "--timeout-secs", "30"],
     { timeout: 40000 },
   );
   const f = frames.find((x) => x?.result && Array.isArray(x.result.data) && x.id === 2);
@@ -1142,13 +1145,31 @@ function localIp() {
   return Object.values(os.networkInterfaces()).flat().find((i) => i?.family === "IPv4" && !i.internal)?.address;
 }
 
+// True if something already accepts connections on the port (a running bridge).
+function portInUse(port) {
+  return new Promise((resolve) => {
+    const sock = net.connect({ port, host: "127.0.0.1" });
+    sock.setTimeout(1500);
+    sock.once("connect", () => { sock.destroy(); resolve(true); });
+    sock.once("timeout", () => { sock.destroy(); resolve(false); });
+    sock.once("error", () => resolve(false));
+  });
+}
+
 /**
  * Start the bridge HTTP server. Resolves once listening, with the pairing info.
  * Used by both the CLI (`node server.mjs`) and the desktop app (Electrobun),
  * which calls it in-process and renders the returned deepLink as a QR.
  */
-export function startBridge({ port = PORT, quiet = false, appVersion = null } = {}) {
+export async function startBridge({ port = PORT, quiet = false, appVersion = null } = {}) {
   if (appVersion) APP_VERSION = appVersion;
+  // Never call listen() on a busy port: Bun's node:http shim throws an
+  // uncatchable async error on EADDRINUSE (on top of emitting "error"), which
+  // would crash the desktop app instead of falling back to the running bridge.
+  if (await portInUse(port)) {
+    if (!quiet) console.error(`Could not bind port ${port}: EADDRINUSE`);
+    return { error: "EADDRINUSE", alreadyRunning: true, port };
+  }
   return new Promise((resolve) => {
     server.once("error", (err) => {
       // A bridge is likely already running on this port — let the caller point

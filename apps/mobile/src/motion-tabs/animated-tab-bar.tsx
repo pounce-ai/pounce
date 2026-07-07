@@ -10,7 +10,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  Platform,
   Pressable,
   StyleSheet,
   View,
@@ -105,18 +104,15 @@ const AnimatedTabBar: FC<IAnimatedTabBarProps> &
             <GlassView
               // intensity={60}
               glassEffectStyle={"regular"}
-              style={[
-                styles.card,
-                {
-                  borderColor: colors.border,
-                  ...Platform.select({
-                    android: {
-                      backgroundColor: colors.surface,
-                    },
-                  }),
-                },
-              ]}
+              style={[styles.card, { borderColor: colors.border }]}
             >
+              {/* Solid backing on every platform: liquid glass alone lets the
+                  thread list bleed through the bar and popup, which made both
+                  unreadable while scrolling. */}
+              <View
+                pointerEvents="none"
+                style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]}
+              />
               <PanelStack
                 close={transition.close}
                 colors={colors}
