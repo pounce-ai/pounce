@@ -13,6 +13,9 @@ import {
   allAgentsInUse,
   allDevices,
   connection$,
+  deviceEmoji,
+  deviceLabel,
+  deviceOverrides$,
   filters$,
   rawSessions,
   repositories$,
@@ -139,6 +142,7 @@ function SearchPopup({ colors, close }: IPopupRenderContext) {
   const f = useSelector(() => filters$.get());
   const agents = useSelector(() => allAgentsInUse());
   const devices = useSelector(() => allDevices());
+  useSelector(() => deviceOverrides$.get());
   const hasFilter = !!(f.agent || f.device || f.needsOnly);
 
   return (
@@ -164,15 +168,18 @@ function SearchPopup({ colors, close }: IPopupRenderContext) {
         <View style={{ gap: 6 }}>
           <Text style={{ fontSize: 11, color: colors.muted, paddingHorizontal: 4 }}>Device</Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 4 }}>
-            {devices.map((d) => (
-              <Chip
-                key={d.id}
-                colors={colors}
-                label={d.name}
-                active={f.device === d.id}
-                onPress={() => filters$.device.set(f.device === d.id ? null : d.id)}
-              />
-            ))}
+            {devices.map((d) => {
+              const em = deviceEmoji(d.id);
+              return (
+                <Chip
+                  key={d.id}
+                  colors={colors}
+                  label={em ? `${em} ${deviceLabel(d.id, d.name)}` : deviceLabel(d.id, d.name)}
+                  active={f.device === d.id}
+                  onPress={() => filters$.device.set(f.device === d.id ? null : d.id)}
+                />
+              );
+            })}
           </View>
         </View>
       ) : null}

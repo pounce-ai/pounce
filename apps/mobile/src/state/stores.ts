@@ -119,6 +119,35 @@ export function recordSync(
   syncLog$.set([entry, ...syncLog$.get()].slice(0, SYNC_LOG_CAP));
 }
 
+/** Local per-device presentation overrides (rename + emoji), keyed by device id.
+ *  Kept separate from the synced Device record — setWorkspace replaces that
+ *  wholesale on every sync, so anything written onto the Device itself is wiped. */
+export const deviceOverrides$ = observable<
+  Record<string, { name?: string; emoji?: string }>
+>({});
+
+/** Merge a rename/emoji patch for a device; empty values clear the override. */
+export function setDeviceOverride(
+  id: string,
+  patch: { name?: string; emoji?: string },
+): void {
+  const next = { ...(deviceOverrides$[id].get() ?? {}), ...patch };
+  if (!next.name?.trim()) delete next.name;
+  if (!next.emoji?.trim()) delete next.emoji;
+  if (!next.name && !next.emoji) deviceOverrides$[id].delete();
+  else deviceOverrides$[id].set(next);
+}
+
+/** Display name for a device — user override wins over the synced name. */
+export function deviceLabel(id: string, fallback: string): string {
+  return deviceOverrides$[id].name.get()?.trim() || fallback;
+}
+
+/** Chosen emoji for a device, if any (overrides the inferred device icon). */
+export function deviceEmoji(id: string): string | undefined {
+  return deviceOverrides$[id].emoji.get()?.trim() || undefined;
+}
+
 export const user$ = observable<UserProfile>({
   id: "local",
   displayName: "You",
@@ -140,6 +169,7 @@ persist(sessions$, "sessions");
 persist(syncLog$, "syncLog");
 persist(markers$, "markers");
 persist(user$, "user");
+persist(deviceOverrides$, "deviceOverrides");
 
 // --- selectors (respect active device/agent filters) ---
 

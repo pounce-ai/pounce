@@ -91,11 +91,21 @@ export function DeviceIcon({
   name,
   color,
   size = 14,
+  emoji,
 }: {
   name: string;
   color: string;
   size?: number;
+  /** When set, replaces the inferred device glyph with the user's emoji. */
+  emoji?: string;
 }) {
+  if (emoji) {
+    return (
+      <Text style={{ fontSize: size, lineHeight: size + 2 }} allowFontScaling={false}>
+        {emoji}
+      </Text>
+    );
+  }
   return <Ionicons name={deviceIconName(name)} size={size} color={color} />;
 }
 
