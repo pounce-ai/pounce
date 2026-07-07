@@ -25,6 +25,9 @@ export default {
       "src/mainview/index.html": "views/mainview/index.html",
       "src/mainview/index.css": "views/mainview/index.css",
       "assets/tray.png": "views/tray.png",
+      // Full-color tray icon for Windows/Linux, where macOS template rendering
+      // doesn't exist and the dark template glyph would disappear.
+      "assets/icon.iconset/icon_32x32.png": "views/tray-color.png",
     },
     mac: {
       bundleCEF: false,
@@ -35,7 +38,9 @@ export default {
       codesign: !!process.env.ELECTROBUN_DEVELOPER_ID,
       notarize: !!(process.env.ELECTROBUN_APPLEID || process.env.ELECTROBUN_APPLEAPIKEY),
     },
-    linux: { bundleCEF: false },
-    win: { bundleCEF: false },
+    // PNG icons are auto-converted (png-to-ico for the Windows installer);
+    // png-to-ico caps input at 256px, so don't point it at the 512 variant.
+    linux: { bundleCEF: false, icon: "assets/icon.iconset/icon_512x512.png" },
+    win: { bundleCEF: false, icon: "assets/icon.iconset/icon_256x256.png" },
   },
 } satisfies ElectrobunConfig;
