@@ -134,22 +134,32 @@ function HomePopup({ colors, close }: IPopupRenderContext) {
   );
 }
 
-/** Search — narrow the list without leaving the bar. */
+/** Search — the app's one filter surface (status · device · agent). */
 function SearchPopup({ colors, close }: IPopupRenderContext) {
   const f = useSelector(() => filters$.get());
   const agents = useSelector(() => allAgentsInUse());
   const devices = useSelector(() => allDevices());
-  const hasFilter = !!(f.agent || f.device);
+  const hasFilter = !!(f.agent || f.device || f.needsOnly);
 
   return (
     <View style={{ padding: 10, minWidth: 268, gap: 12 }}>
-      <Row
-        colors={colors}
-        icon={f.needsOnly ? "checkbox" : "square-outline"}
-        label="Only what needs you"
-        tint={f.needsOnly ? "#7c6ff0" : undefined}
-        onPress={() => filters$.needsOnly.set(!f.needsOnly)}
-      />
+      <View style={{ gap: 6 }}>
+        <Text style={{ fontSize: 11, color: colors.muted, paddingHorizontal: 4 }}>Show</Text>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 4 }}>
+          <Chip
+            colors={colors}
+            label="Everything"
+            active={!f.needsOnly}
+            onPress={() => filters$.needsOnly.set(false)}
+          />
+          <Chip
+            colors={colors}
+            label="Needs you"
+            active={f.needsOnly}
+            onPress={() => filters$.needsOnly.set(true)}
+          />
+        </View>
+      </View>
       {devices.length > 1 ? (
         <View style={{ gap: 6 }}>
           <Text style={{ fontSize: 11, color: colors.muted, paddingHorizontal: 4 }}>Device</Text>
@@ -166,7 +176,7 @@ function SearchPopup({ colors, close }: IPopupRenderContext) {
           </View>
         </View>
       ) : null}
-      {agents.length ? (
+      {agents.length > 1 ? (
         <View style={{ gap: 6 }}>
           <Text style={{ fontSize: 11, color: colors.muted, paddingHorizontal: 4 }}>Agent</Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 4 }}>
@@ -186,9 +196,9 @@ function SearchPopup({ colors, close }: IPopupRenderContext) {
         <Row
           colors={colors}
           icon="close-circle-outline"
-          label="Clear filters"
+          label="Clear all"
           onPress={() => {
-            filters$.set({ ...filters$.get(), agent: null, device: null });
+            filters$.set({ device: null, agent: null, needsOnly: false });
             close();
           }}
         />
