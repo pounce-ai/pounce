@@ -41,7 +41,16 @@ openWindow();
 // Set the image in the constructor so the `template` flag is honored — macOS
 // then renders the paw adaptively (white on a dark menu bar, dark on a light
 // one). Calling setImage() afterward would drop the template flag.
-const tray = new Tray({ title: "", image: "views://tray.png", template: true, width: 18, height: 18 });
+// Windows/Linux have no template rendering, so the near-black template glyph
+// would vanish on their (usually dark) taskbars — use the full-color app icon.
+const isMac = process.platform === "darwin";
+const tray = new Tray({
+  title: "",
+  image: isMac ? "views://tray.png" : "views://tray-color.png",
+  template: isMac,
+  width: 18,
+  height: 18,
+});
 
 // Two labels drive the menu: the live connection status (top, not clickable)
 // and the manual updater item's transient state.
@@ -97,7 +106,8 @@ async function pollStatus() {
     lastLabel = label;
     connLabel = label;
     renderMenu();
-    tray.setTitle(label.startsWith("●") ? "●" : ""); // a green-ish dot in the menu bar when connected
+    // Text beside the tray icon is a macOS menu-bar concept; skip elsewhere.
+    if (isMac) tray.setTitle(label.startsWith("●") ? "●" : "");
   }
 }
 void pollStatus();

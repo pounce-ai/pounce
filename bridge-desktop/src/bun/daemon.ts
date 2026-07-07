@@ -9,25 +9,45 @@
 // daemon that's already running.
 import { spawn, execFile } from "node:child_process";
 import os from "node:os";
+import path from "node:path";
 
 const PKG = "kittylitter"; // npm package that ships the daemon binary
+const IS_WIN = process.platform === "win32";
 
-// A Finder/Dock-launched .app inherits a bare PATH (no Homebrew, no node
-// version-manager shims), so `npx`/`node` can go unresolved. Prepend the usual
-// install locations so the bootstrap works without a terminal.
+// A GUI-launched app inherits a bare PATH (no Homebrew, no node version-manager
+// shims), so `npx`/`node` can go unresolved. Prepend the usual install
+// locations so the bootstrap works without a terminal.
 function daemonEnv(): NodeJS.ProcessEnv {
   const home = os.homedir();
-  const extra = [
-    "/opt/homebrew/bin", "/usr/local/bin", `${home}/.local/bin`,
-    `${home}/.volta/bin`, `${home}/.bun/bin`,
-    `${home}/.nvm/current/bin`, `${home}/.fnm/aliases/default/bin`,
-  ];
-  return { ...process.env, PATH: [...extra, process.env.PATH || ""].filter(Boolean).join(":") };
+  const extra = (IS_WIN
+    ? [
+        process.env.ProgramFiles && path.join(process.env.ProgramFiles, "nodejs"),
+        process.env.APPDATA && path.join(process.env.APPDATA, "npm"),
+        path.join(home, ".bun", "bin"),
+        process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Volta", "bin"),
+      ]
+    : [
+        "/opt/homebrew/bin", "/usr/local/bin", `${home}/.local/bin`,
+        `${home}/.volta/bin`, `${home}/.bun/bin`,
+        `${home}/.nvm/current/bin`, `${home}/.fnm/aliases/default/bin`,
+      ]
+  ).filter((p): p is string => !!p);
+  return { ...process.env, PATH: [...extra, process.env.PATH || ""].filter(Boolean).join(path.delimiter) };
+}
+
+// Windows can't spawn npm's .cmd shims (npx, a global kittylitter) without a
+// shell, so route through cmd.exe there. Only ever used with the static,
+// hardcoded args below — never with user- or daemon-supplied strings, which
+// cmd.exe would reinterpret.
+function wrapForOS(bin: string, args: string[]): [string, string[]] {
+  if (!IS_WIN) return [bin, args];
+  return [process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", bin, ...args]];
 }
 
 function statusOk(bin: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const child = execFile(bin, ["status"], { timeout: 8000, env: daemonEnv() }, (err, stdout) => {
+    const [cmd, args] = wrapForOS(bin, ["status"]);
+    const child = execFile(cmd, args, { timeout: 8000, env: daemonEnv() }, (err, stdout) => {
       // `status` prints "pid: …" when the daemon is live (it also exits 0 in
       // file-only mode, so we check the output, not just the exit code).
       resolve(!err && /pid\s*:/i.test(stdout || ""));
@@ -39,10 +59,12 @@ function statusOk(bin: string): Promise<boolean> {
 function run(bin: string, args: string[], detached = false): Promise<boolean> {
   return new Promise((resolve) => {
     try {
-      const child = spawn(bin, args, {
+      const [cmd, wrapped] = wrapForOS(bin, args);
+      const child = spawn(cmd, wrapped, {
         detached,
         stdio: "ignore",
-        // npx needs a shell-resolvable PATH; a Finder-launched app has a bare
+        windowsHide: true,
+        // npx needs a shell-resolvable PATH; a GUI-launched app has a bare
         // one, so use an augmented PATH rather than the raw environment.
         env: daemonEnv(),
       });

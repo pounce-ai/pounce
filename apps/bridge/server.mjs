@@ -18,12 +18,16 @@
  */
 import http from "node:http";
 import { spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import { parseUserMessage, stripNoise } from "@litter/transcript";
+
+const IS_WIN = process.platform === "win32";
 
 const PORT = Number(process.env.BRIDGE_PORT || 8099);
 // How often the background watcher polls for state transitions to push.
@@ -43,6 +47,7 @@ let APP_VERSION = process.env.BRIDGE_APP_VERSION || null;
 // the same cache the daemon was installed into.
 function findKlBinary() {
   if (process.env.KITTYLITTER) return process.env.KITTYLITTER;
+  if (IS_WIN) return null; // Windows resolves the JS entry instead (findKlJsEntry)
   const npxRoot = `${os.homedir()}/.npm/_npx`;
   try {
     for (const hash of readdirSync(npxRoot)) {
@@ -53,27 +58,99 @@ function findKlBinary() {
   return null;
 }
 
+/** Read a kittylitter package dir's bin entry and resolve it to an absolute JS path. */
+function klJsFromPackage(pkgDir) {
+  try {
+    const pkg = JSON.parse(readFileSync(path.join(pkgDir, "package.json"), "utf8"));
+    const bin = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.kittylitter;
+    if (!bin) return null;
+    const entry = path.join(pkgDir, bin);
+    return existsSync(entry) ? entry : null;
+  } catch { return null; }
+}
+
+/**
+ * Windows: find kittylitter's JS entrypoint so we can run `node <entry> …`
+ * directly. The npm shims (.cmd/.ps1) can't be spawned without a shell — and a
+ * shell would let user text passed as probe params escape into cmd.exe — so the
+ * only safe invocation is node + the real script. Checks the npm global root
+ * first, then the npx cache the daemon bootstrap installs into.
+ */
+function findKlJsEntry() {
+  const candidates = [];
+  if (process.env.APPDATA) candidates.push(path.join(process.env.APPDATA, "npm", "node_modules", "kittylitter"));
+  const npxCaches = [
+    process.env.npm_config_cache,
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "npm-cache"),
+  ].filter(Boolean).map((c) => path.join(c, "_npx"));
+  for (const root of npxCaches) {
+    try {
+      for (const hash of readdirSync(root)) candidates.push(path.join(root, hash, "node_modules", "kittylitter"));
+    } catch {}
+  }
+  for (const dir of candidates) {
+    const entry = klJsFromPackage(dir);
+    if (entry) return entry;
+  }
+  return null;
+}
+
 // GUI apps launched from Finder/Dock get a bare PATH (no Homebrew, no node
 // version-manager shims), so `npx`/`node` and the binary's `env node` shebang can
 // fail to resolve. Prepend the usual install locations for every kittylitter call.
 function augmentedPath() {
   const home = os.homedir();
-  const extra = [
-    "/opt/homebrew/bin", "/usr/local/bin", `${home}/.local/bin`,
-    `${home}/.volta/bin`, `${home}/.bun/bin`,
-    `${home}/.nvm/current/bin`, `${home}/.fnm/aliases/default/bin`,
-  ];
-  return [...extra, process.env.PATH || ""].filter(Boolean).join(":");
+  const extra = IS_WIN
+    ? [
+        process.env.ProgramFiles && path.join(process.env.ProgramFiles, "nodejs"),
+        process.env.APPDATA && path.join(process.env.APPDATA, "npm"),
+        path.join(home, ".bun", "bin"),
+        process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Volta", "bin"),
+      ]
+    : [
+        "/opt/homebrew/bin", "/usr/local/bin", `${home}/.local/bin`,
+        `${home}/.volta/bin`, `${home}/.bun/bin`,
+        `${home}/.nvm/current/bin`, `${home}/.fnm/aliases/default/bin`,
+      ];
+  return [...extra.filter(Boolean), process.env.PATH || ""].filter(Boolean).join(path.delimiter);
 }
 const KL_ENV = { ...process.env, PATH: augmentedPath() };
 
-let _kl = null; // cached { cmd, prefix }
-/** How to invoke kittylitter: the cached binary if present, else via npx. */
+let _kl = null; // cached { cmd, prefix, viaCmdShell? }
+/**
+ * How to invoke kittylitter: the cached binary if present, else via npx.
+ * Windows: `node <js-entry>` when the package is findable (the npm .cmd shims
+ * can't be spawned shell-less), else npx through cmd.exe — but that fallback is
+ * restricted to static-argument commands (see klSpawn) because cmd.exe would
+ * reinterpret metacharacters in dynamic args like probe's JSON params.
+ */
 function klInvocation() {
   if (_kl) return _kl;
   const bin = findKlBinary();
-  _kl = bin ? { cmd: bin, prefix: [] } : { cmd: "npx", prefix: ["-y", "kittylitter@latest"] };
+  if (bin) _kl = { cmd: bin, prefix: [] };
+  else if (!IS_WIN) _kl = { cmd: "npx", prefix: ["-y", "kittylitter@latest"] };
+  else {
+    const entry = findKlJsEntry();
+    _kl = entry
+      ? { cmd: "node", prefix: [entry] }
+      : { cmd: process.env.ComSpec || "cmd.exe", prefix: ["/d", "/s", "/c", "npx", "-y", "kittylitter@latest"], viaCmdShell: true };
+  }
   return _kl;
+}
+
+// Only plain option/identifier-looking args may travel through the cmd.exe npx
+// fallback — cmd expands %VAR% and treats &|<>^" specially even inside a spawn
+// argv, so anything else (JSON params, free text) is refused outright.
+const CMD_SAFE_ARG = /^[A-Za-z0-9@._/:=,-]*$/;
+
+/** A stillborn child that only emits an error — for refused cmd.exe spawns. */
+function blockedChild(reason) {
+  const c = new EventEmitter();
+  c.stdout = new EventEmitter();
+  c.stderr = new EventEmitter();
+  c.kill = () => {};
+  queueMicrotask(() => c.emit("error", Object.assign(new Error(reason), { code: "EBLOCKED" })));
+  return c;
 }
 /** Forget the cached invocation so the next call re-scans the npx cache. Call
  *  this once the daemon is (re)installed so a fresh binary path is picked up
@@ -83,7 +160,10 @@ export function refreshKittylitter() { _kl = null; return klInvocation(); }
 /** Spawn kittylitter with the resolved invocation and an augmented PATH. */
 function klSpawn(args, opts = {}) {
   const inv = klInvocation();
-  return spawn(inv.cmd, [...inv.prefix, ...args], { env: KL_ENV, ...opts });
+  if (inv.viaCmdShell && !args.every((a) => CMD_SAFE_ARG.test(a))) {
+    return blockedChild("kittylitter not installed yet — refusing dynamic args via cmd.exe npx fallback");
+  }
+  return spawn(inv.cmd, [...inv.prefix, ...args], { env: KL_ENV, windowsHide: true, ...opts });
 }
 
 /** A human-readable form of the current invocation, e.g. for logs. */
@@ -317,16 +397,20 @@ function listDirs(dir) {
  *   it's an archived session (worktree was merged + cleaned up).
  */
 function repoInfo(cwd) {
-  if (!cwd || cwd === "/" || cwd === os.homedir()) {
+  // Normalize Windows separators so the worktree/basename parsing below only
+  // ever sees forward slashes; drive roots (C:\) count as root too.
+  const norm = (cwd || "").replace(/\\/g, "/");
+  const isRoot = norm === "/" || /^[A-Za-z]:\/?$/.test(norm);
+  if (!norm || isRoot || cwd === os.homedir()) {
     return { repo: "Scratch", isWorktree: false, isLive: false, worktree: null };
   }
   const live = existsSync(cwd);
-  const m = cwd.match(/\/worktrees\/([^/]+)\/(.+)$/);
+  const m = norm.match(/\/worktrees\/([^/]+)\/(.+)$/);
   if (m) {
     const ws = m[1];
     return { repo: `ws:${ws.slice(0, 8)}`, isWorktree: true, isLive: live, worktree: m[2] };
   }
-  const base = cwd.replace(/\/+$/, "").split("/").pop() || cwd;
+  const base = norm.replace(/\/+$/, "").split("/").pop() || norm;
   return { repo: base, isWorktree: false, isLive: live, worktree: null };
 }
 
@@ -935,14 +1019,19 @@ const server = http.createServer(async (req, res) => {
       if (!existsSync(dir)) dir = home;
       let entries = [];
       try { entries = listDirs(dir); } catch { entries = []; }
-      const parent = dir === "/" || dir === home ? null : path.dirname(dir);
+      // At home or a filesystem root there is no "up" — path.dirname of a root
+      // (/, C:\) returns itself, which would loop the folder browser forever.
+      const up = path.dirname(dir);
+      const parent = dir === home || up === dir ? null : up;
       return send(res, 200, { path: dir, parent, home, entries });
     }
     if (url.pathname === "/v1/exec" && req.method === "POST") {
       const { cwd, command } = await readBody(req);
       if (!command) return send(res, 400, { error: "command required" });
       const dir = cwd && existsSync(cwd) ? cwd : os.homedir();
-      const r = await exec("/bin/sh", ["-c", command], dir, 60_000);
+      const r = IS_WIN
+        ? await exec(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", command], dir, 60_000)
+        : await exec("/bin/sh", ["-c", command], dir, 60_000);
       let output = (r.out || "") + (r.err ? (r.out ? "\n" : "") + r.err : "");
       if (output.length > 100_000) output = output.slice(0, 100_000) + "\n… (truncated)";
       return send(res, 200, { code: r.code, output });
@@ -1095,8 +1184,9 @@ export function startBridge({ port = PORT, quiet = false, appVersion = null } = 
 
 // When run directly (node server.mjs / the pounce-bridge bin), start immediately
 // with the console QR. When imported (desktop app), the caller starts it.
+// pathToFileURL (not string concat) so Windows paths (C:\…) compare correctly.
 const isMain = (() => {
-  try { return !!process.argv[1] && import.meta.url === `file://${process.argv[1]}`; }
+  try { return !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href; }
   catch { return false; }
 })();
 if (isMain) void startBridge();

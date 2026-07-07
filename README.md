@@ -4,7 +4,7 @@
   <p><b>Control your coding agents from your pocket.</b></p>
   <p>
     <a href="https://peppyhop.github.io/pounce/">Website</a> ·
-    <a href="https://github.com/peppyhop/pounce/releases/latest">Download Mac Bridge</a> ·
+    <a href="https://github.com/peppyhop/pounce/releases/latest">Download the Bridge</a> (macOS · Windows · Linux) ·
     <a href="#getting-started-dev">Dev setup</a>
   </p>
 </div>
@@ -24,7 +24,7 @@ server, the shared packages, and the landing page.
 |---|---|
 | `apps/mobile` | The Pounce **Expo / React Native** app (iOS & Android) |
 | `apps/bridge` | The **bridge server** (`server.mjs`) — re‑exposes the Iroh‑only agent host over LAN HTTP for the app |
-| `bridge-desktop` | The **macOS Bridge app** ([Electrobun](https://electrobun.dev)) — double‑click, shows a pairing QR, runs the agent host |
+| `bridge-desktop` | The **desktop Bridge app** for macOS, Windows & Linux ([Electrobun](https://electrobun.dev)) — double‑click, shows a pairing QR, runs the agent host |
 | `packages/nitro` | Native **Iroh** client (Rust + Nitro) for direct device‑to‑device sync |
 | `packages/{shared,runtime,ui}` | Shared types, runtime/transport, and UI primitives |
 | `docs/` | The landing page (served via GitHub Pages) |
@@ -39,9 +39,14 @@ syncs — then keeps a direct identity to reach your machine afterward.
 
 ## Get the app
 
-- **Mac Bridge:** download the signed + notarized `.dmg` from
-  [**Releases**](https://github.com/peppyhop/pounce/releases/latest) — open it, drag to
-  Applications, launch, scan the QR.
+Grab the Bridge for your computer from [**Releases**](https://github.com/peppyhop/pounce/releases/latest),
+run it, and scan the QR:
+
+- **macOS (Apple Silicon):** `Pounce.dmg` (signed + notarized) — open, drag to Applications, launch.
+- **Windows (x64):** `Pounce-Setup-Windows.zip` — extract, run `Pounce-Setup.exe`. Unsigned for
+  now: if SmartScreen appears, choose *More info → Run anyway*.
+- **Linux (x64 / arm64):** `Pounce-Setup-Linux-<arch>.tar.gz` — extract, run `./installer`
+  (installs to `~/.local/share` and adds a desktop entry).
 - **iOS / Android:** in private beta — see the [website](https://peppyhop.github.io/pounce/).
 
 ## Getting started (dev)
@@ -64,13 +69,20 @@ cd bridge-desktop && bun install && bun run dev
 
 ### Releasing the Bridge
 
+Tag `bridge-v*` (e.g. `git tag bridge-v1.0.8 && git push --tags`) and CI builds all
+platforms — macOS (signed + notarized), Windows, Linux x64/arm64 — and attaches every
+installer + auto-update artifact to one GitHub Release — see
+[`.github/workflows/release-bridge.yml`](.github/workflows/release-bridge.yml).
+
+For a macOS-only release from your machine:
+
 ```bash
 bash scripts/release-bridge.sh ~/Downloads/<your-DeveloperID>.cer
 ```
 
 Builds, signs, notarizes (via the `asc` CLI), staples, and cuts a GitHub Release.
-CI does the same on a `bridge-v*` tag — see
-[`.github/workflows/release-bridge.yml`](.github/workflows/release-bridge.yml).
+(Note: a release cut this way carries no Windows/Linux update artifacts, so prefer CI
+once those platforms have shipped.)
 
 ## License
 
