@@ -170,6 +170,24 @@ export function allDevices(): Device[] {
   return Object.values(devices$.get());
 }
 
+/** Mark every known device offline. `online` is live connectivity, not state to
+ *  trust across launches — a successful sync flips reachable ones back on. Call
+ *  this at boot so a device paired in a past session doesn't show a green
+ *  "connected" dot before we've actually reached its host this session. */
+export function markDevicesOffline(): void {
+  const cur = devices$.get();
+  const next: Record<string, Device> = {};
+  for (const [id, d] of Object.entries(cur)) next[id] = { ...d, online: false };
+  devices$.set(next);
+}
+
+/** Drop a device from the live stores (its config is removed separately via
+ *  removeDeviceConfig). Clears both the device row and its host entry. */
+export function forgetDevice(id: string): void {
+  devices$[id].delete();
+  hosts$[id].delete();
+}
+
 export function allAgentsInUse(): string[] {
   return [...new Set(Object.values(sessions$.get()).map((s) => s.agent))].sort();
 }
