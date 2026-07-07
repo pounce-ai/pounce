@@ -1,4 +1,12 @@
+import { useEffect } from "react";
 import { Text, View } from "react-native";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from "react-native-reanimated";
 import { Skeleton } from "boneyard-js/native";
 
 /**
@@ -46,17 +54,19 @@ export function SessionListSkeleton({ count = 5 }: { count?: number }) {
 }
 
 /** One chat-bubble bone, sized/aligned like a real Timeline message. */
-function BubbleTemplate({ user, lines }: { user: boolean; lines: 1 | 2 | 3 }) {
+function BubbleBone({ user, lines }: { user: boolean; lines: 1 | 2 | 3 }) {
   const width = user ? "62%" : "80%";
   return (
     <View style={{ alignItems: user ? "flex-end" : "flex-start" }}>
       <View
-        style={{ maxWidth: "86%", width, borderRadius: 16, padding: 10, gap: 6, backgroundColor: "#777" }}
-      >
-        <Text className="text-[15px] leading-[21px] text-fg">a</Text>
-        {lines >= 2 ? <Text className="text-[15px] leading-[21px] text-fg">a</Text> : null}
-        {lines >= 3 ? <Text className="text-[15px] leading-[21px] text-fg">a</Text> : null}
-      </View>
+        style={{
+          maxWidth: "86%",
+          width,
+          height: 21 * lines + 20,
+          borderRadius: 16,
+          backgroundColor: "rgba(255,255,255,0.11)",
+        }}
+      />
     </View>
   );
 }
@@ -64,19 +74,28 @@ function BubbleTemplate({ user, lines }: { user: boolean; lines: 1 | 2 | 3 }) {
 /**
  * Chat-shaped bones for the initial history load — alternating bubbles that
  * mirror the Timeline layout, so the skeleton dissolves into real messages.
+ * Drawn as plain pulsing Views (no Boneyard): the native snapshot pass can
+ * silently produce nothing on this screen, which left a pitch-black timeline
+ * for the whole history fetch.
  */
 export function TimelineSkeleton() {
+  const pulse = useSharedValue(1);
+  useEffect(() => {
+    pulse.value = withRepeat(
+      withSequence(withTiming(0.45, { duration: 650 }), withTiming(1, { duration: 650 })),
+      -1,
+    );
+  }, [pulse]);
+  const style = useAnimatedStyle(() => ({ opacity: pulse.value }));
   return (
-    <Skeleton loading dark darkColor="rgba(255,255,255,0.11)" animate="shimmer">
-      <View className="flex-1 gap-3 px-3 pt-3" pointerEvents="none">
-        <BubbleTemplate user={false} lines={2} />
-        <BubbleTemplate user lines={1} />
-        <BubbleTemplate user={false} lines={3} />
-        <BubbleTemplate user={false} lines={1} />
-        <BubbleTemplate user lines={2} />
-        <BubbleTemplate user={false} lines={2} />
-        <BubbleTemplate user lines={1} />
-      </View>
-    </Skeleton>
+    <Animated.View style={style} className="flex-1 gap-3 px-3 pt-3" pointerEvents="none">
+      <BubbleBone user={false} lines={2} />
+      <BubbleBone user lines={1} />
+      <BubbleBone user={false} lines={3} />
+      <BubbleBone user={false} lines={1} />
+      <BubbleBone user lines={2} />
+      <BubbleBone user={false} lines={2} />
+      <BubbleBone user lines={1} />
+    </Animated.View>
   );
 }

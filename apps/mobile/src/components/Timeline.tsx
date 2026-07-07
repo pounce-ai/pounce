@@ -1,9 +1,14 @@
-import { memo } from "react";
+import { memo, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
-import { assertNeverEvent, type TimelineEvent } from "@litter/shared";
+import {
+  assertNeverEvent,
+  type TimelineEvent,
+  type ToolCallEvent,
+  type ToolResultEvent,
+} from "@litter/shared";
 import { isMarked } from "@/state/stores";
 import { cn, COLOR } from "@/ui";
 import {
@@ -11,6 +16,24 @@ import {
   isEmptyUserMessage,
   parseUserMessage,
 } from "@litter/transcript";
+
+function toolCallIds(events: TimelineEvent[]): Set<string> {
+  const s = new Set<string>();
+  for (const e of events) if (e.type === "tool_call") s.add(e.call.id || e.id);
+  return s;
+}
+
+/**
+ * Drop tool_result rows whose call renders them inline as an accordion.
+ * The session screen runs its marker indices through this same function so
+ * marker jumps stay aligned with the list Timeline actually renders.
+ */
+export function collapseToolResults(events: TimelineEvent[]): TimelineEvent[] {
+  const calls = toolCallIds(events);
+  return events.filter(
+    (e) => !(e.type === "tool_result" && calls.has(e.result.toolCallId || e.id.replace(/:o$/, ""))),
+  );
+}
 
 /** One virtualized timeline for a session — every event type, recycled rows. */
 export const Timeline = memo(function Timeline({
@@ -31,13 +54,32 @@ export const Timeline = memo(function Timeline({
   listRef?: React.Ref<LegendListRef>;
   onLongPressEvent?: (ev: TimelineEvent) => void;
 }) {
+  // Pair each tool result with its call so the call row renders both as one
+  // accordion; the paired result rows are dropped from the list data.
+  const resultByCallId = useMemo(() => {
+    const m = new Map<string, ToolResultEvent>();
+    for (const e of events) {
+      if (e.type === "tool_result") m.set(e.result.toolCallId || e.id.replace(/:o$/, ""), e);
+    }
+    return m;
+  }, [events]);
+  const data = useMemo(() => collapseToolResults(events), [events]);
+
   return (
     <LegendList
       ref={listRef}
-      data={events}
+      data={data}
       keyExtractor={(e) => e.id}
       renderItem={({ item }) => (
-        <Row event={item} agent={agent} sessionId={sessionId} onLongPressEvent={onLongPressEvent} />
+        <Row
+          event={item}
+          agent={agent}
+          sessionId={sessionId}
+          onLongPressEvent={onLongPressEvent}
+          pairedResult={
+            item.type === "tool_call" ? resultByCallId.get(item.call.id || item.id) : undefined
+          }
+        />
       )}
       estimatedItemSize={72}
       recycleItems
@@ -58,11 +100,14 @@ const Row = memo(function Row({
   agent,
   sessionId,
   onLongPressEvent,
+  pairedResult,
 }: {
   event: TimelineEvent;
   agent?: string;
   sessionId?: string;
   onLongPressEvent?: (ev: TimelineEvent) => void;
+  /** For tool_call rows: the matching tool_result, rendered inside the accordion. */
+  pairedResult?: ToolResultEvent;
 }) {
   // Unconditional hook — recycled rows must keep a stable hook order.
   const marked = useSelector(() => (sessionId ? isMarked(sessionId, event) : false));
@@ -90,7 +135,7 @@ const Row = memo(function Row({
     case "thinking_finished":
       return <Meta text={event.text ? `💭 ${event.text}` : "Thought"} />;
     case "tool_call":
-      return <ToolCard name={event.call.name} status={event.call.status} input={event.call.input} />;
+      return <ToolAccordion event={event} result={pairedResult} />;
     case "tool_result":
       return <ToolResult content={event.result.content} isError={event.result.isError} />;
     case "task_created":
@@ -208,42 +253,95 @@ function previewInput(input: unknown): string {
   return typeof input === "string" ? input : "";
 }
 
-function ToolCard({ name, status, input }: { name: string; status: string; input?: unknown }) {
-  const ok = status === "success";
+const SHELL_TOOLS = new Set(["shell", "bash", "exec", "terminal"]);
+const SHELL_GOLD = "#d29922";
+
+/**
+ * One tool invocation as a collapsible card. Collapsed it is a single quiet
+ * line — `$ command…` for shell, `⚙ name input…` otherwise — with a chevron.
+ * Expanding reveals the full command and the tool's output nested in the same
+ * card, instead of the output sprawling as its own full-width block.
+ */
+function ToolAccordion({ event, result }: { event: ToolCallEvent; result?: ToolResultEvent }) {
+  // Rows are recycled: key the expansion to the event id so an open accordion
+  // can't bleed into whatever event this component instance shows next.
+  const [openId, setOpenId] = useState<string | null>(null);
+  const open = openId === event.id;
+  const { name, status, input } = event.call;
+  const shell = SHELL_TOOLS.has(name.toLowerCase());
+  const preview = previewInput(input);
+  const failed = status === "error" || result?.result.isError === true;
+  const running = status === "pending" || status === "running";
+  const expandable = !!result || preview.includes("\n");
   return (
-    <View className="rounded-xl bg-surface-alt px-3 py-2">
-      <View className="flex-row items-center justify-between">
-        <Text className="font-mono text-[13px] text-fg">⚙ {name}</Text>
-        <Text className={cn("text-[11px]", ok ? "text-success" : status === "error" ? "text-danger" : "text-fg-muted")}>
-          {status}
+    <Pressable
+      disabled={!expandable}
+      onPress={() => setOpenId(open ? null : event.id)}
+      className={cn(
+        "rounded-xl border px-3 py-2",
+        failed ? "border-danger/40 bg-danger/10" : "border-border bg-surface-alt",
+      )}
+    >
+      <View className="flex-row items-center gap-2">
+        {shell ? (
+          <Text style={{ color: failed ? COLOR.danger : SHELL_GOLD }} className="font-mono text-[13px] font-semibold">
+            $
+          </Text>
+        ) : (
+          <Text className="font-mono text-[12px] text-fg">⚙ {name}</Text>
+        )}
+        <Text
+          numberOfLines={open ? undefined : 1}
+          className="flex-1 font-mono text-[12px] leading-[17px] text-fg-muted"
+        >
+          {open ? preview : preview.replace(/\s+/g, " ")}
         </Text>
+        {running ? (
+          <Text className="text-[11px] text-fg-muted">…</Text>
+        ) : expandable ? (
+          <Ionicons name={open ? "chevron-up" : "chevron-down"} size={13} color={COLOR.fgFaint} />
+        ) : null}
       </View>
-      {previewInput(input) ? (
-        <Text numberOfLines={2} className="mt-1 font-mono text-[11px] text-fg-muted">
-          {previewInput(input)}
-        </Text>
+      {open && result ? (
+        <View className="mt-2">
+          <ResultBody content={result.result.content} isError={result.result.isError} nested />
+        </View>
       ) : null}
-    </View>
+    </Pressable>
   );
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function ToolResult({ content, isError }: { content: any; isError: boolean }) {
+function ResultBody({ content, isError, nested }: { content: any; isError: boolean; nested?: boolean }) {
   if (content?.kind === "diff") {
     return (
-      <View className="overflow-hidden rounded-xl border border-border bg-[#0d0d12]">
+      <View className={cn("overflow-hidden rounded-xl border border-border bg-[#0d0d12]", nested && "rounded-lg")}>
         <Text className="border-b border-border px-3 py-1 font-mono text-[11px] text-fg-muted">{content.path || "diff"}</Text>
-        <Text numberOfLines={14} className="px-3 py-2 font-mono text-[11px] text-fg-muted">{content.patch}</Text>
+        <Text numberOfLines={nested ? 30 : 14} className="px-3 py-2 font-mono text-[11px] text-fg-muted">{content.patch}</Text>
       </View>
     );
   }
   const text = content?.kind === "text" ? content.text : content?.kind === "json" ? JSON.stringify(content.value) : "";
   if (!text) return null;
   return (
-    <View className={cn("rounded-xl bg-[#0d0d12] px-3 py-2", isError && "border border-danger/40")}>
-      <Text numberOfLines={12} className="font-mono text-[12px] text-[#cdd0d6]">{text}</Text>
+    <View
+      className={cn(
+        "rounded-xl bg-[#0d0d12] px-3 py-2",
+        nested && "rounded-lg border border-border",
+        isError && "border border-danger/40",
+      )}
+    >
+      <Text numberOfLines={nested ? 30 : 12} className="font-mono text-[12px] text-[#cdd0d6]">
+        {text}
+      </Text>
     </View>
   );
+}
+
+/** A tool result whose call isn't in the list — render standalone as before. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ToolResult({ content, isError }: { content: any; isError: boolean }) {
+  return <ResultBody content={content} isError={isError} />;
 }
 
 function Term({ data, stream }: { data: string; stream: string }) {
