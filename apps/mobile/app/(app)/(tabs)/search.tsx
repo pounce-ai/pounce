@@ -8,11 +8,11 @@ import type { Session } from "@litter/shared";
 import {
   activeFilterCount,
   applyFilters,
+  filters$,
   rawSessions,
   repositories$,
 } from "@/state/stores";
 import { SessionCard } from "@/components/SessionCard";
-import { FilterSheet } from "@/components/FilterSheet";
 import { COLOR } from "@/ui";
 
 const needsYou = (s: Session) =>
@@ -29,7 +29,6 @@ function rank(s: Session): number {
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState("");
-  const [filterOpen, setFilterOpen] = useState(false);
 
   const raw = useSelector(() => rawSessions());
   const repos = useSelector(() => repositories$.get());
@@ -57,21 +56,8 @@ export default function SearchScreen() {
 
   return (
     <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>
-      <View className="flex-row items-end justify-between px-4 pb-2 pt-1">
+      <View className="px-4 pb-2 pt-1">
         <Text className="text-[26px] font-bold text-fg">Search</Text>
-        <Pressable
-          onPress={() => setFilterOpen(true)}
-          className="active:opacity-70 h-9 w-9 items-center justify-center"
-        >
-          <View>
-            <Ionicons name="options-outline" size={22} color={filterCount ? COLOR.accent : COLOR.fgMuted} />
-            {filterCount ? (
-              <View className="absolute -right-1.5 -top-1 h-4 min-w-[16px] items-center justify-center rounded-full bg-accent px-1">
-                <Text className="text-[10px] font-bold text-white">{filterCount}</Text>
-              </View>
-            ) : null}
-          </View>
-        </Pressable>
       </View>
 
       {/* Search field */}
@@ -92,6 +78,22 @@ export default function SearchScreen() {
           </Pressable>
         ) : null}
       </View>
+
+      {/* Filters live in the Search tab's popup (tap the tab again); this pill
+          keeps an active filter visible — and clearable — from the results. */}
+      {filterCount ? (
+        <View className="mx-4 mb-2 flex-row">
+          <Pressable
+            onPress={() => filters$.set({ device: null, agent: null, needsOnly: false })}
+            className="active:opacity-70 flex-row items-center gap-1.5 rounded-full border border-accent/40 bg-accent/15 px-3 py-1.5"
+          >
+            <Ionicons name="funnel" size={11} color={COLOR.accent} />
+            <Text className="text-[12px] font-medium text-accent">
+              {filterCount} filter{filterCount === 1 ? "" : "s"} · Clear
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <LegendList
         style={{ flex: 1 }}
@@ -123,8 +125,6 @@ export default function SearchScreen() {
         }
         contentContainerStyle={{ paddingTop: 4, paddingBottom: insets.bottom + 120 }}
       />
-
-      <FilterSheet visible={filterOpen} onClose={() => setFilterOpen(false)} />
     </View>
   );
 }
