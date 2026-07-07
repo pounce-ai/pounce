@@ -1,17 +1,7 @@
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import type { Session } from "@litter/shared";
-import { ActivityDot, ACTIVITY_LABEL, AgentChip, cn } from "@/ui";
-
-function timeAgo(iso: string): string {
-  const s = Math.max(1, Math.floor((Date.now() - Date.parse(iso)) / 1000));
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  return `${Math.floor(h / 24)}d`;
-}
+import { ActivityDot, ACTIVITY_LABEL, AgentChip, cn, timeAgo } from "@/ui";
 
 export function SessionCard({ session }: { session: Session }) {
   const router = useRouter();

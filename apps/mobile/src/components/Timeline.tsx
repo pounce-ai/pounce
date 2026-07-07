@@ -1,8 +1,11 @@
 import { memo } from "react";
-import { Text, View } from "react-native";
-import { LegendList } from "@legendapp/list/react-native";
+import { Pressable, Text, View } from "react-native";
+import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
+import { useSelector } from "@legendapp/state/react";
+import { Ionicons } from "@expo/vector-icons";
 import { assertNeverEvent, type TimelineEvent } from "@litter/shared";
-import { cn } from "@/ui";
+import { isMarked } from "@/state/stores";
+import { cn, COLOR } from "@/ui";
 import {
   cleanAssistantText,
   isEmptyUserMessage,
@@ -14,17 +17,28 @@ export const Timeline = memo(function Timeline({
   events,
   agent,
   footer,
+  sessionId,
+  listRef,
+  onLongPressEvent,
 }: {
   events: TimelineEvent[];
   /** Which agent produced these events — selects the body-cleaning rules. */
   agent?: string;
   footer?: React.ReactElement;
+  /** Marker state is scoped per session — required for marked indicators. */
+  sessionId?: string;
+  /** Imperative list handle (scrollToIndex for marker jumps). */
+  listRef?: React.Ref<LegendListRef>;
+  onLongPressEvent?: (ev: TimelineEvent) => void;
 }) {
   return (
     <LegendList
+      ref={listRef}
       data={events}
       keyExtractor={(e) => e.id}
-      renderItem={({ item }) => <Row event={item} agent={agent} />}
+      renderItem={({ item }) => (
+        <Row event={item} agent={agent} sessionId={sessionId} onLongPressEvent={onLongPressEvent} />
+      )}
       estimatedItemSize={72}
       recycleItems
       maintainVisibleContentPosition
@@ -39,12 +53,38 @@ export const Timeline = memo(function Timeline({
   );
 });
 
-const Row = memo(function Row({ event, agent }: { event: TimelineEvent; agent?: string }) {
+const Row = memo(function Row({
+  event,
+  agent,
+  sessionId,
+  onLongPressEvent,
+}: {
+  event: TimelineEvent;
+  agent?: string;
+  sessionId?: string;
+  onLongPressEvent?: (ev: TimelineEvent) => void;
+}) {
+  // Unconditional hook — recycled rows must keep a stable hook order.
+  const marked = useSelector(() => (sessionId ? isMarked(sessionId, event) : false));
+  const onLongPress = onLongPressEvent ? () => onLongPressEvent(event) : undefined;
   switch (event.type) {
     case "user_message":
-      return <UserRow text={event.text} agent={agent} />;
+      return (
+        <Pressable onLongPress={onLongPress} delayLongPress={350}>
+          <UserRow text={event.text} agent={agent} />
+        </Pressable>
+      );
     case "assistant_message":
-      return <Bubble role="assistant" text={cleanAssistantText(event.text, agent)} streaming={event.streaming} />;
+      return (
+        <Pressable onLongPress={onLongPress} delayLongPress={350}>
+          <Bubble
+            role="assistant"
+            text={cleanAssistantText(event.text, agent)}
+            streaming={event.streaming}
+            marked={marked}
+          />
+        </Pressable>
+      );
     case "thinking_started":
       return <Meta text="Thinking…" />;
     case "thinking_finished":
@@ -129,14 +169,18 @@ function Bubble({
   role,
   text,
   streaming,
+  marked,
 }: {
   role: "user" | "assistant";
   text: string;
   streaming?: boolean;
+  /** Shows a bookmark beside assistant bubbles the user marked. User bubbles
+   *  are marked by default, so decorating them all would be noise. */
+  marked?: boolean;
 }) {
   const user = role === "user";
   return (
-    <View className={cn("flex-row", user ? "justify-end" : "justify-start")}>
+    <View className={cn("flex-row items-center gap-1.5", user ? "justify-end" : "justify-start")}>
       <View
         className={cn(
           "max-w-[86%] rounded-2xl px-3 py-2",
@@ -148,6 +192,7 @@ function Bubble({
           {streaming ? <Text className="text-accent"> ▋</Text> : null}
         </Text>
       </View>
+      {marked && !user ? <Ionicons name="bookmark" size={10} color={COLOR.accent} /> : null}
     </View>
   );
 }

@@ -18,6 +18,17 @@ export function cn(...parts: Array<string | false | null | undefined>): string {
   return twMerge(parts.filter(Boolean).join(" "));
 }
 
+/** Compact relative timestamp: 42s · 7m · 3h · 2d. */
+export function timeAgo(iso: string): string {
+  const s = Math.max(1, Math.floor((Date.now() - Date.parse(iso)) / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
+
 const ACTIVITY_DOT: Record<ActivityStatus, string> = {
   running: "bg-success",
   streaming: "bg-success",

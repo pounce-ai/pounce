@@ -19,7 +19,8 @@ import type {
   Session,
   TimelineEvent,
 } from "@litter/shared";
-import { agentCaps$, connection$, hosts$, setWorkspace } from "../state/stores";
+import { parseUserMessage } from "@litter/transcript";
+import { agentCaps$, connection$, hosts$, recordSync, sessions$, setWorkspace } from "../state/stores";
 
 const BRIDGE_KEY = "pounce.bridge";
 
@@ -125,6 +126,23 @@ function repoName(key: string): string {
   return key;
 }
 
+/**
+ * A readable thread title. The daemon's `preview` is the raw first user message,
+ * which for slash commands carries Claude's wrapper tags (<local-command-caveat>,
+ * <command-message>, <command-name>…). Run it through the transcript parser so
+ * the title is clean prose — or the `/command args` chip for command-only turns —
+ * instead of leaking markup.
+ */
+function threadTitle(name: string | null, preview: string | null, agent: string): string {
+  const p = parseUserMessage((name || preview || "").trim(), agent);
+  const title =
+    p.text ||
+    (p.command ? `${p.command.name}${p.command.args ? ` ${p.command.args}` : ""}` : "") ||
+    p.output?.text ||
+    "";
+  return title.trim().slice(0, 100) || "Untitled task";
+}
+
 interface BridgeStatus {
   device?: string;
   nodeId?: string;
@@ -193,7 +211,7 @@ export async function syncLiveData(
           hostId: cfg.id,
           host: deviceName,
           agent: t.agent,
-          title: t.name || t.preview?.slice(0, 100) || "Untitled task",
+          title: threadTitle(t.name, t.preview, t.agent),
           branch: t.gitBranch ?? (t.isWorktree ? t.worktree : null),
           worktree: t.worktree,
           cwd: t.cwd,
@@ -224,6 +242,8 @@ export async function syncLiveData(
     }),
   );
 
+  // Log what this sync actually brought in (per-repo) before we swap the store.
+  recordSync(sessions$.get(), sessions, repos, now);
   setWorkspace(repos, sessions, devices);
   return { repos: Object.keys(repos).length, sessions: Object.keys(sessions).length, devices: Object.keys(devices).length };
 }

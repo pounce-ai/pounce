@@ -13,7 +13,7 @@ import * as SecureStore from "expo-secure-store";
 import { HttpTransport, LitterRuntime } from "@litter/runtime";
 import type { Transport } from "@litter/runtime";
 import type { PairPayload } from "@litter/shared";
-import { connection$ } from "../state/stores";
+import { connection$, markDevicesOffline } from "../state/stores";
 import { connectBridge, loadBridgeConfig } from "./bridge";
 
 const PAIRING_KEY = "litter.pairing";
@@ -93,6 +93,9 @@ export async function refreshLive(fresh = false): Promise<void> {
 
 /** App boot: live bridge → paired host (first that succeeds, else disconnected). */
 export async function bootstrap(): Promise<void> {
+  // Persisted `online` is stale until a live sync proves each host reachable —
+  // otherwise past pairings show as "connected" on launch even when they're not.
+  markDevicesOffline();
   const bridge = await loadBridgeConfig();
   if (bridge && (await connectBridge(bridge))) {
     const { registerForPush } = await import("./push");

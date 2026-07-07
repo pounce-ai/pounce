@@ -7,11 +7,13 @@ import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 
 type ScannerProps = { onScan: (data: string) => void; onCancel: () => void };
-import { allDevices, connection$ } from "@/state/stores";
+import { allDevices, connection$, forgetDevice } from "@/state/stores";
+import type { Device } from "@litter/shared";
 import {
   connectBridge,
   fetchPairing,
   loadBridgeConfig,
+  removeDeviceConfig,
   saveBridgeConfig,
   syncLiveData,
 } from "@/services/bridge";
@@ -102,6 +104,20 @@ export default function SettingsScreen() {
     if (!parsed) return; // ignore unrelated QR codes
     setScanning(false);
     void doSync(parsed);
+  };
+
+  const forget = (d: Device) => {
+    Alert.alert("Remove device", `Stop syncing ${d.name}? You can pair it again anytime.`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
+          await removeDeviceConfig(d.id);
+          forgetDevice(d.id);
+        },
+      },
+    ]);
   };
 
   const refresh = async () => {
@@ -197,6 +213,9 @@ export default function SettingsScreen() {
                 <DeviceIcon name={d.name} color={d.online ? COLOR.fg : COLOR.fgFaint} />
                 <Text className="flex-1 text-[14px] font-medium text-fg">{d.name}</Text>
                 <View className={cn("h-2 w-2 rounded-full", d.online ? "bg-success" : "bg-fg-faint")} />
+                <Pressable onPress={() => forget(d)} hitSlop={8} className="active:opacity-60 pl-1">
+                  <Ionicons name="trash-outline" size={16} color={COLOR.fgFaint} />
+                </Pressable>
               </View>
             ))}
             <Pressable onPress={refresh} disabled={busy} className="active:opacity-60 self-center pt-1">
@@ -204,6 +223,16 @@ export default function SettingsScreen() {
             </Pressable>
           </View>
         ) : null}
+
+        {/* Sync history */}
+        <Pressable
+          onPress={() => router.push("/sync-history")}
+          className="active:opacity-80 flex-row items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-3"
+        >
+          <Ionicons name="time-outline" size={18} color={COLOR.fgMuted} />
+          <Text className="flex-1 text-[14px] font-medium text-fg">Sync history</Text>
+          <Ionicons name="chevron-forward" size={15} color={COLOR.fgFaint} />
+        </Pressable>
 
         {/* Help & FAQ */}
         <Pressable

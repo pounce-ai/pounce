@@ -138,6 +138,7 @@ function HomePopup({ colors, close }: IPopupRenderContext) {
 function SearchPopup({ colors, close }: IPopupRenderContext) {
   const f = useSelector(() => filters$.get());
   const agents = useSelector(() => allAgentsInUse());
+  const devices = useSelector(() => allDevices());
   const hasFilter = !!(f.agent || f.device);
 
   return (
@@ -149,17 +150,36 @@ function SearchPopup({ colors, close }: IPopupRenderContext) {
         tint={f.needsOnly ? "#7c6ff0" : undefined}
         onPress={() => filters$.needsOnly.set(!f.needsOnly)}
       />
+      {devices.length > 1 ? (
+        <View style={{ gap: 6 }}>
+          <Text style={{ fontSize: 11, color: colors.muted, paddingHorizontal: 4 }}>Device</Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 4 }}>
+            {devices.map((d) => (
+              <Chip
+                key={d.id}
+                colors={colors}
+                label={d.name}
+                active={f.device === d.id}
+                onPress={() => filters$.device.set(f.device === d.id ? null : d.id)}
+              />
+            ))}
+          </View>
+        </View>
+      ) : null}
       {agents.length ? (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 4 }}>
-          {agents.map((a) => (
-            <Chip
-              key={a}
-              colors={colors}
-              label={agentLabel(a)}
-              active={f.agent === a}
-              onPress={() => filters$.agent.set(f.agent === a ? null : a)}
-            />
-          ))}
+        <View style={{ gap: 6 }}>
+          <Text style={{ fontSize: 11, color: colors.muted, paddingHorizontal: 4 }}>Agent</Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 4 }}>
+            {agents.map((a) => (
+              <Chip
+                key={a}
+                colors={colors}
+                label={agentLabel(a)}
+                active={f.agent === a}
+                onPress={() => filters$.agent.set(f.agent === a ? null : a)}
+              />
+            ))}
+          </View>
         </View>
       ) : null}
       {hasFilter ? (
