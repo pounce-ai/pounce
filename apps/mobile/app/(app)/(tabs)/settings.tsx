@@ -1,13 +1,21 @@
 import type { ComponentType, ReactNode } from "react";
 import { Component, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 
 type ScannerProps = { onScan: (data: string) => void; onCancel: () => void };
-import { allDevices, connection$, forgetDevice } from "@/state/stores";
+import {
+  allDevices,
+  connection$,
+  deviceEmoji,
+  deviceLabel,
+  deviceOverrides$,
+  forgetDevice,
+  setDeviceOverride,
+} from "@/state/stores";
 import type { Device } from "@litter/shared";
 import {
   connectBridge,
@@ -43,7 +51,10 @@ export default function SettingsScreen() {
   const router = useRouter();
   const status = useSelector(() => connection$.status.get());
   const devices = useSelector(() => allDevices());
+  // Track overrides so device rows re-render when a rename/emoji is applied.
+  useSelector(() => deviceOverrides$.get());
 
+  const [editing, setEditing] = useState<Device | null>(null);
   const [busy, setBusy] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [manual, setManual] = useState(false);
@@ -217,9 +228,19 @@ export default function SettingsScreen() {
             <Text className="text-[12px] uppercase tracking-wide text-fg-faint">Your devices</Text>
             {devices.map((d) => (
               <View key={d.id} className="flex-row items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-2.5">
-                <DeviceIcon name={d.name} color={d.online ? COLOR.fg : COLOR.fgFaint} />
-                <Text className="flex-1 text-[14px] font-medium text-fg">{d.name}</Text>
+                <DeviceIcon
+                  name={d.name}
+                  emoji={deviceEmoji(d.id)}
+                  color={d.online ? COLOR.fg : COLOR.fgFaint}
+                  size={18}
+                />
+                <Text className="flex-1 text-[14px] font-medium text-fg" numberOfLines={1}>
+                  {deviceLabel(d.id, d.name)}
+                </Text>
                 <View className={cn("h-2 w-2 rounded-full", d.online ? "bg-success" : "bg-fg-faint")} />
+                <Pressable onPress={() => setEditing(d)} hitSlop={8} className="active:opacity-60 pl-1">
+                  <Ionicons name="pencil-outline" size={15} color={COLOR.fgFaint} />
+                </Pressable>
                 <Pressable onPress={() => forget(d)} hitSlop={8} className="active:opacity-60 pl-1">
                   <Ionicons name="trash-outline" size={16} color={COLOR.fgFaint} />
                 </Pressable>
@@ -263,7 +284,96 @@ export default function SettingsScreen() {
         </Pressable>
 
       </ScrollView>
+
+      <DeviceEditModal device={editing} onClose={() => setEditing(null)} />
     </View>
+  );
+}
+
+/** Quick-pick emoji palette for device icons — common machine / vibe glyphs. */
+const DEVICE_EMOJI = ["💻", "🖥️", "📱", "🖲️", "☁️", "🐧", "🍎", "🚀", "🔥", "⚡️", "🐳", "🦊", "🐱", "🐢", "🌙", "⭐️"];
+
+/** Bottom-sheet editor: rename a device and optionally pick an emoji icon. */
+function DeviceEditModal({ device, onClose }: { device: Device | null; onClose: () => void }) {
+  const insets = useSafeAreaInsets();
+  const [name, setName] = useState("");
+  const [emoji, setEmoji] = useState("");
+
+  // Seed the inputs from the current override each time a device opens.
+  useEffect(() => {
+    if (!device) return;
+    setName(deviceLabel(device.id, device.name));
+    setEmoji(deviceEmoji(device.id) ?? "");
+  }, [device]);
+
+  if (!device) return null;
+
+  const save = () => {
+    // A name equal to the synced default clears the override rather than pinning it.
+    const nextName = name.trim() === device.name.trim() ? "" : name.trim();
+    setDeviceOverride(device.id, { name: nextName, emoji: emoji.trim() });
+    onClose();
+  };
+
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable className="flex-1 bg-black/50" onPress={onClose} />
+      <View
+        style={{ paddingBottom: insets.bottom + 16 }}
+        className="gap-4 rounded-t-3xl border-t border-border bg-bg-elevated px-4 pt-3"
+      >
+        <View className="h-1 w-10 self-center rounded-full bg-border" />
+        <Text className="text-[18px] font-bold text-fg">Edit device</Text>
+
+        <View className="flex-row items-center gap-3">
+          <View className="h-12 w-12 items-center justify-center rounded-xl bg-surface-alt">
+            <DeviceIcon name={name || device.name} emoji={emoji} color={COLOR.fg} size={24} />
+          </View>
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            placeholder={device.name}
+            placeholderTextColor={COLOR.fgFaint}
+            autoCapitalize="words"
+            className="flex-1 rounded-xl bg-surface-alt px-3 py-2.5 text-[15px] text-fg"
+          />
+        </View>
+
+        <View className="gap-2">
+          <Text className="text-[12px] uppercase tracking-wide text-fg-faint">Icon</Text>
+          <View className="flex-row flex-wrap gap-2">
+            <Pressable
+              onPress={() => setEmoji("")}
+              className={cn(
+                "h-11 w-11 items-center justify-center rounded-xl border",
+                emoji === "" ? "border-accent bg-accent/15" : "border-border bg-surface-alt",
+              )}
+            >
+              <DeviceIcon name={device.name} color={COLOR.fg} size={20} />
+            </Pressable>
+            {DEVICE_EMOJI.map((e, i) => (
+              <Pressable
+                key={`${e}-${i}`}
+                onPress={() => setEmoji(e)}
+                className={cn(
+                  "h-11 w-11 items-center justify-center rounded-xl border",
+                  emoji === e ? "border-accent bg-accent/15" : "border-border bg-surface-alt",
+                )}
+              >
+                <Text className="text-[20px]" allowFontScaling={false}>{e}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+
+        <Pressable
+          onPress={save}
+          className="active:opacity-90 mt-1 h-12 items-center justify-center rounded-xl bg-accent"
+        >
+          <Text className="text-[15px] font-semibold text-white">Save</Text>
+        </Pressable>
+      </View>
+    </Modal>
   );
 }
 
