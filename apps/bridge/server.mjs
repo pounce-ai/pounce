@@ -23,7 +23,7 @@ import os from "node:os";
 import path from "node:path";
 import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
-import { stripNoise } from "@litter/transcript";
+import { parseUserMessage, stripNoise } from "@litter/transcript";
 
 const PORT = Number(process.env.BRIDGE_PORT || 8099);
 // How often the background watcher polls for state transitions to push.
@@ -330,6 +330,25 @@ function repoInfo(cwd) {
   return { repo: base, isWorktree: false, isLive: live, worktree: null };
 }
 
+/**
+ * The daemon's thread `preview` is the raw first user message, which for slash
+ * commands carries the agent's wrapper markup (<local-command-caveat>,
+ * <command-message>, <command-name>…). Normalize it here — at ingest, like the
+ * message bodies — so every client gets a clean title/preview and none has to
+ * re-strip it. Returns clean prose, a "/command args" chip for command-only
+ * turns, or null when nothing readable survives.
+ */
+function cleanPreview(raw, agent) {
+  if (!raw) return null;
+  const p = parseUserMessage(raw, agent);
+  const text =
+    p.text ||
+    (p.command ? `${p.command.name}${p.command.args ? ` ${p.command.args}` : ""}` : "") ||
+    p.output?.text ||
+    "";
+  return text.trim() || null;
+}
+
 async function listThreads(agent) {
   const frames = await probe(
     ["--agent", agent, "--method", "thread/list", "--linger-secs", "1", "--timeout-secs", "25"],
@@ -344,7 +363,7 @@ async function listThreads(agent) {
       agent,
       cwd: t.cwd || null,
       name: t.name || null,
-      preview: t.preview || null,
+      preview: cleanPreview(t.preview, agent),
       createdAt: typeof t.createdAt === "number"
         ? new Date(t.createdAt > 1e12 ? t.createdAt : t.createdAt * 1000).toISOString()
         : null,
