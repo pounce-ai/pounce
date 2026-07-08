@@ -78,3 +78,71 @@ export async function listenOnce(): Promise<string> {
     subs.push({ remove: () => clearTimeout(to) });
   });
 }
+
+export interface Dictation {
+  /** Stop listening and deliver the final transcript. */
+  stop: () => void;
+}
+
+/** Why dictation couldn't run, so the UI can show the right message. */
+export type VoiceErrorKind = "permission" | "unavailable" | "error";
+
+/**
+ * Continuous dictation for text input: streams the growing transcript through
+ * `onPartial` so the field fills as you speak, keeps listening until you stop
+ * (or the engine ends on a long silence), then delivers `onFinal`. Returns a
+ * handle whose `stop()` ends it on demand. Unlike {@link listenOnce}, this is
+ * built for a visible "listening" affordance the user controls.
+ */
+export async function startDictation(cb: {
+  onPartial: (text: string) => void;
+  onFinal: (text: string) => void;
+  onError: (kind: VoiceErrorKind) => void;
+}): Promise<Dictation> {
+  const noop = { stop: () => {} };
+  let perm;
+  try {
+    perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+  } catch {
+    cb.onError("unavailable"); // native module absent (old build / Expo Go)
+    return noop;
+  }
+  if (!perm.granted) {
+    cb.onError("permission");
+    return noop;
+  }
+
+  let best = "";
+  let done = false;
+  const subs: { remove: () => void }[] = [];
+  const cleanup = () => { subs.forEach((s) => s.remove()); subs.length = 0; };
+  const finish = () => {
+    if (done) return;
+    done = true;
+    cleanup();
+    try { ExpoSpeechRecognitionModule.stop(); } catch {}
+    cb.onFinal(best.trim());
+  };
+
+  subs.push(
+    ExpoSpeechRecognitionModule.addListener("result", (e: ExpoSpeechRecognitionResultEvent) => {
+      const t = e.results?.[0]?.transcript ?? "";
+      if (t) { best = t; cb.onPartial(t); }
+    }),
+    ExpoSpeechRecognitionModule.addListener("error", (e: ExpoSpeechRecognitionErrorEvent) => {
+      if (e.error === "no-speech" || e.error === "aborted") finish();
+      else if (!done) { done = true; cleanup(); cb.onError("error"); }
+    }),
+    ExpoSpeechRecognitionModule.addListener("end", () => finish()),
+  );
+
+  try {
+    ExpoSpeechRecognitionModule.start({ lang: "en-US", interimResults: true, continuous: true });
+  } catch {
+    cleanup();
+    cb.onError("unavailable");
+    return noop;
+  }
+
+  return { stop: finish };
+}

@@ -5,10 +5,20 @@ import {
   type EnrichedMarkdownTextInputInstance,
   type MarkdownTextInputStyle,
 } from "react-native-enriched-markdown";
+import Animated, {
+  cancelAnimation,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import type { AgentCapabilities, RunImage } from "@litter/shared";
 import { SLASH_COMMANDS } from "@/ui/agent-meta";
 import { fetchFiles, type RepoEntry } from "@/services/bridge";
+import { startDictation, type Dictation } from "@/services/voice";
 import { cn, COLOR } from "@/ui";
 
 const MENTION_RE = /((?:^|\s))@([^\s@]*)$/;
@@ -118,6 +128,44 @@ export function Composer({
     },
   }));
   const [images, setImages] = useState<Attachment[]>([]);
+
+  // Voice dictation: fills the input as you speak, with a visible listening state
+  // the user controls (tap to start, tap to stop). Base text is preserved so
+  // dictation appends to whatever is already typed.
+  const [listening, setListening] = useState(false);
+  const dictationRef = useRef<Dictation | null>(null);
+  const voiceBaseRef = useRef("");
+  const toggleVoice = async () => {
+    if (listening || dictationRef.current) {
+      dictationRef.current?.stop();
+      return;
+    }
+    setListening(true);
+    voiceBaseRef.current = markdownRef.current.trim();
+    const withBase = (t: string) => (voiceBaseRef.current ? `${voiceBaseRef.current} ${t}` : t);
+    dictationRef.current = await startDictation({
+      onPartial: (t) => setInput(withBase(t)),
+      onFinal: (t) => {
+        dictationRef.current = null;
+        setListening(false);
+        if (t) setInput(withBase(t));
+        inputRef.current?.focus();
+      },
+      onError: (kind) => {
+        dictationRef.current = null;
+        setListening(false);
+        if (kind === "permission") {
+          Alert.alert("Microphone access needed", "Enable Microphone and Speech Recognition for Pounce in Settings to dictate.");
+        } else if (kind === "unavailable") {
+          Alert.alert("Voice unavailable", "Rebuild the dev client (expo run:ios) to enable dictation.");
+        } else {
+          Alert.alert("Voice error", "Couldn't hear that — try again.");
+        }
+      },
+    });
+  };
+  // Stop the mic if the composer unmounts mid-dictation.
+  useEffect(() => () => dictationRef.current?.stop(), []);
 
   // Inline slash menu — triggered by a leading "/" while typing the command
   // token (before the first space), like a coding harness.
@@ -348,9 +396,13 @@ export function Composer({
         </View>
       ) : null}
 
+      {/* Live "listening" affordance while dictating. */}
+      {listening ? <ListeningBanner /> : null}
+
       {/* Input row */}
       <View className="flex-row items-end gap-2">
         {!disabled ? <IconButton icon="add" onPress={openAttach} /> : null}
+        {!disabled ? <MicButton listening={listening} onPress={toggleVoice} /> : null}
 
         <EnrichedMarkdownTextInput
           ref={inputRef}
@@ -413,5 +465,59 @@ function IconButton({
     <Pressable onPress={onPress} className="active:opacity-60 h-10 w-9 items-center justify-center">
       <Ionicons name={icon} size={22} color={COLOR.fgMuted} />
     </Pressable>
+  );
+}
+
+/** Mic toggle for dictation. Idle: an outline mic. Listening: a pulsing red dot
+ *  with a filled mic — unmistakable that the mic is live and how to stop it. */
+function MicButton({ listening, onPress }: { listening: boolean; onPress: () => void }) {
+  const s = useSharedValue(1);
+  useEffect(() => {
+    if (listening) {
+      s.value = withRepeat(withSequence(withTiming(1.15, { duration: 500 }), withTiming(0.85, { duration: 500 })), -1, true);
+    } else {
+      cancelAnimation(s);
+      s.value = 1;
+    }
+  }, [listening, s]);
+  const style = useAnimatedStyle(() => ({ transform: [{ scale: s.value }] }));
+  return (
+    <Pressable onPress={onPress} hitSlop={6} className="h-10 w-9 items-center justify-center">
+      {listening ? (
+        <Animated.View
+          style={[style, { width: 28, height: 28, borderRadius: 14, backgroundColor: COLOR.danger }]}
+          className="items-center justify-center"
+        >
+          <Ionicons name="mic" size={16} color="#fff" />
+        </Animated.View>
+      ) : (
+        <Ionicons name="mic-outline" size={22} color={COLOR.fgMuted} />
+      )}
+    </Pressable>
+  );
+}
+
+/** One equalizer bar for the listening banner. */
+function Bar({ delay }: { delay: number }) {
+  const h = useSharedValue(5);
+  useEffect(() => {
+    h.value = withDelay(delay, withRepeat(withSequence(withTiming(15, { duration: 340 }), withTiming(5, { duration: 340 })), -1, true));
+  }, [h, delay]);
+  const style = useAnimatedStyle(() => ({ height: h.value }));
+  return <Animated.View style={[style, { width: 3, borderRadius: 2, backgroundColor: COLOR.danger }]} />;
+}
+
+/** "Listening…" pill with an animated equalizer — shown while dictating. */
+function ListeningBanner() {
+  return (
+    <View className="mb-2 flex-row items-center gap-2 self-start rounded-full border border-danger/40 bg-danger/10 px-3 py-1.5">
+      <View className="flex-row items-end gap-0.5" style={{ height: 15 }}>
+        <Bar delay={0} />
+        <Bar delay={110} />
+        <Bar delay={220} />
+        <Bar delay={110} />
+      </View>
+      <Text className="text-[12px] font-medium text-danger">Listening… tap the mic to stop</Text>
+    </View>
   );
 }

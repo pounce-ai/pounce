@@ -4,7 +4,7 @@
  * Rendered by AnimatedTabBar (see (app)/(tabs)/_layout.tsx); actions dispatch
  * against expo-router + the global stores, then call `close()` to dismiss.
  */
-import { Alert, Pressable, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,12 +18,9 @@ import {
   deviceLabel,
   deviceOverrides$,
   filters$,
-  rawSessions,
   repositories$,
 } from "@/state/stores";
 import { refreshLive } from "@/services/runtime";
-import { listenOnce } from "@/services/voice";
-import { runVoiceCommand } from "@/services/voiceCommands";
 import { agentLabel } from "@/ui";
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
@@ -93,32 +90,9 @@ function Chip({
   );
 }
 
-/** Home — start / refresh / talk. */
+/** Home — start / refresh. (Voice moved to the composer as dictation.) */
 function HomePopup({ colors, close }: IPopupRenderContext) {
   const router = useRouter();
-
-  const onVoice = async () => {
-    close();
-    try {
-      const transcript = await listenOnce();
-      const result = runVoiceCommand(transcript, {
-        sessions: rawSessions(),
-        devices: allDevices(),
-        agents: allAgentsInUse(),
-        repos: repositories$.get(),
-        navigate: (p) => router.push(p as never),
-        setFilter: (next) => filters$.set({ ...filters$.get(), ...next }),
-      });
-      if (!result.ok) Alert.alert("Voice", result.say);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "";
-      if (msg === "voice-permission-denied") {
-        Alert.alert("Microphone access needed", "Enable Microphone and Speech Recognition for Pounce in Settings to use voice control.");
-      } else {
-        Alert.alert("Voice unavailable", "Couldn't start voice control. Try again, or update to the latest build.");
-      }
-    }
-  };
 
   return (
     <View style={{ padding: 8, minWidth: 236, gap: 2 }}>
@@ -133,7 +107,6 @@ function HomePopup({ colors, close }: IPopupRenderContext) {
         }}
       />
       <Row colors={colors} icon="refresh" label="Refresh" onPress={() => { close(); void refreshLive(true); }} />
-      <Row colors={colors} icon="mic-outline" label="Voice command" onPress={onVoice} />
     </View>
   );
 }
