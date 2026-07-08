@@ -1,5 +1,5 @@
 import { type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { Alert, Image, Pressable, Text, View } from "react-native";
+import { ActionSheetIOS, Alert, Image, Pressable, Text, View } from "react-native";
 import {
   EnrichedMarkdownTextInput,
   type EnrichedMarkdownTextInputInstance,
@@ -12,6 +12,35 @@ import { fetchFiles, type RepoEntry } from "@/services/bridge";
 import { cn, COLOR } from "@/ui";
 
 const MENTION_RE = /((?:^|\s))@([^\s@]*)$/;
+
+/** The daemon has no document channel, so a text file is embedded inline in the
+ *  message. Cap the inline size — bigger files should be referenced with @path. */
+const MAX_DOC_BYTES = 256 * 1024;
+
+const TEXT_EXT =
+  /\.(txt|md|markdown|log|json|jsonl|ya?ml|toml|xml|html?|css|scss|csv|tsv|ts|tsx|js|jsx|mjs|cjs|py|rb|go|rs|java|kt|swift|m|mm|c|h|cc|cpp|hpp|cs|php|sh|bash|zsh|fish|sql|env|ini|cfg|conf|gradle|properties|dockerfile|makefile|patch|diff|graphql|proto|vue|svelte)$/i;
+
+/** True when a picked document is plain text we can read and embed. */
+function isTextual(mime: string, name: string): boolean {
+  if (mime.startsWith("text/")) return true;
+  if (/^application\/(json|xml|.*\+xml|x-yaml|yaml|javascript|x-sh|toml|x-ndjson)/.test(mime)) return true;
+  return TEXT_EXT.test(name);
+}
+
+/** Markdown fence language for a filename, so embedded code highlights. "" if unknown. */
+function langForName(name: string): string {
+  const ext = name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? "";
+  const map: Record<string, string> = {
+    ts: "ts", tsx: "tsx", js: "js", jsx: "jsx", mjs: "js", cjs: "js", py: "python",
+    rb: "ruby", go: "go", rs: "rust", java: "java", kt: "kotlin", swift: "swift",
+    c: "c", h: "c", cc: "cpp", cpp: "cpp", hpp: "cpp", cs: "csharp", php: "php",
+    sh: "bash", bash: "bash", zsh: "bash", sql: "sql", html: "html", htm: "html",
+    css: "css", scss: "scss", json: "json", jsonl: "json", md: "markdown",
+    markdown: "markdown", yml: "yaml", yaml: "yaml", toml: "toml", xml: "xml",
+    graphql: "graphql", proto: "proto", vue: "vue", svelte: "svelte",
+  };
+  return map[ext] ?? "";
+}
 
 /** Inline formatting colours for the rich input (base text color/size come from
  *  the `style` prop). */
@@ -82,8 +111,6 @@ export function Composer({
     },
   }));
   const [images, setImages] = useState<Attachment[]>([]);
-  // The "+" is a dedicated attach button (mode/effort now live on the status bar).
-  const showAttach = caps.images;
 
   // Inline slash menu — triggered by a leading "/" while typing the command
   // token (before the first space), like a coding harness.
@@ -149,6 +176,63 @@ export function Composer({
       // Native module not in this dev client build yet.
       Alert.alert("Attachments unavailable", "Rebuild the dev client (expo run:ios) to enable photo attachments.");
     }
+  };
+
+  // Embed a text document's contents into the draft as a fenced block — the
+  // daemon accepts only text + images, so this is how docs reach the agent.
+  const appendDoc = (name: string, body: string) => {
+    const fence = `${name}:\n\`\`\`${langForName(name)}\n${body.replace(/\s+$/, "")}\n\`\`\``;
+    const cur = markdownRef.current.replace(/\s+$/, "");
+    setInput(cur ? `${cur}\n\n${fence}\n` : `${fence}\n`);
+    inputRef.current?.focus();
+  };
+
+  const pickDocument = async () => {
+    try {
+      const DocumentPicker = await import("expo-document-picker");
+      const res = await DocumentPicker.getDocumentAsync({ type: "*/*", copyToCacheDirectory: true });
+      if (res.canceled || !res.assets?.length) return;
+      const a = res.assets[0];
+      const mime = a.mimeType ?? "";
+      const { File } = await import("expo-file-system");
+      const file = new File(a.uri);
+      if (mime.startsWith("image/")) {
+        if (!caps.images) {
+          Alert.alert("Images not supported", "This agent can't accept image attachments.");
+          return;
+        }
+        const data = await file.base64();
+        setImages((cur) => [...cur, { uri: a.uri, data, mediaType: mime }]);
+        return;
+      }
+      if (isTextual(mime, a.name)) {
+        if ((a.size ?? 0) > MAX_DOC_BYTES) {
+          Alert.alert("File too large", `${a.name} is over 256 KB — reference it with @path or paste the relevant part.`);
+          return;
+        }
+        appendDoc(a.name, await file.text());
+        return;
+      }
+      Alert.alert("Unsupported file", `Can't attach ${a.name}. Only images and text files are supported.`);
+    } catch {
+      Alert.alert("Attachments unavailable", "Rebuild the dev client (expo run:ios) to enable file attachments.");
+    }
+  };
+
+  // "+" offers the camera roll (image models only) and the Files app. With a
+  // single option it opens straight through — no needless menu.
+  const openAttach = () => {
+    const opts: { label: string; run: () => void }[] = [];
+    if (caps.images) opts.push({ label: "Photo Library", run: pickImage });
+    opts.push({ label: "Files", run: pickDocument });
+    if (opts.length === 1) {
+      opts[0].run();
+      return;
+    }
+    ActionSheetIOS.showActionSheetWithOptions(
+      { options: [...opts.map((o) => o.label), "Cancel"], cancelButtonIndex: opts.length },
+      (i) => { if (i >= 0 && i < opts.length) opts[i].run(); },
+    );
   };
 
   const canSend = !disabled && !sending && (draft.trim().length > 0 || images.length > 0);
@@ -255,9 +339,7 @@ export function Composer({
 
       {/* Input row */}
       <View className="flex-row items-end gap-2">
-        {!disabled && showAttach ? (
-          <IconButton icon="add" onPress={pickImage} />
-        ) : null}
+        {!disabled ? <IconButton icon="add" onPress={openAttach} /> : null}
 
         <EnrichedMarkdownTextInput
           ref={inputRef}

@@ -41,6 +41,8 @@
         "expo-blur": "~57.0.0",
         "expo-camera": "~57.0.0",
         "expo-constants": "~57.0.2",
+        "expo-document-picker": "~57.0.0",
+        "expo-file-system": "~57.0.0",
         "expo-glass-effect": "~57.0.0",
         "expo-image-picker": "~57.0.1",
         "expo-linking": "~57.0.1",
@@ -1115,6 +1117,8 @@
     "expo-camera": ["expo-camera@57.0.0", "", { "dependencies": { "barcode-detector": "^3.0.0" }, "peerDependencies": { "expo": "*", "react": "*", "react-native": "*", "react-native-web": "*" }, "optionalPeers": ["react-native-web"] }, "sha512-Ilp2hzmUW1oDjgnRrowPzbdzGZ8BdtCYMAGnQh3yoZBW4dJb21sObIbacf0PenkMSFE73d0xK03jw8/Cl5Z9Yw=="],
 
     "expo-constants": ["expo-constants@57.0.2", "", { "dependencies": { "@expo/env": "~2.4.0" }, "peerDependencies": { "expo": "*", "react-native": "*" } }, "sha512-Bq0lIOB+olAQrYCS/fZi0cu1i8V0lo/YNr9fqMELerOfYYFkg8zTVrVaRjdFdMYBmz3dtym26UEBxV5dyUYZOg=="],
+
+    "expo-document-picker": ["expo-document-picker@57.0.0", "", { "peerDependencies": { "expo": "*" } }, "sha512-foT1pA3tD7KvcqXwjQBh4qEDjHT9U9MhZ6H2aF38VolCiHRhXDQLtKQqCeXjbHxJhSf8HC/YPV3IRxDxFTL2sA=="],
 
     "expo-eas-client": ["expo-eas-client@57.0.0", "", {}, "sha512-HYroDzqYFpALIXW5tpQD2WHqij3iUal+fXzVJhIYV3OdVcbobxt+p6209OJDARlU431CANZwp4vPmS7yRCWTCw=="],
 
