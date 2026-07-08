@@ -64,7 +64,8 @@
         }
       ],
       "expo-status-bar",
-      "react-native-enriched-markdown"
+      "react-native-enriched-markdown",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

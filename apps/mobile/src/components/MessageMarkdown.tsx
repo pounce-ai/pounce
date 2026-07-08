@@ -7,11 +7,20 @@ import {
   type Md4cFlags,
 } from "react-native-enriched-markdown";
 import { Highlight, themes } from "prism-react-renderer";
+import * as WebBrowser from "expo-web-browser";
 import remend from "remend";
 import { splitCodeBlocks } from "@/components/runnableBlocks";
 import { COLOR } from "@/ui";
 
 const MONO = "JetBrainsMono";
+
+/** Open tapped links in an in-app browser (SFSafariViewController / Custom Tabs)
+ *  so the user stays inside Pounce instead of being kicked out to Safari. Only
+ *  http(s) opens in-app; other schemes are ignored (the engine won't hand us one
+ *  in practice). */
+function openLink(url: string): void {
+  if (/^https?:\/\//i.test(url)) void WebBrowser.openBrowserAsync(url).catch(() => {});
+}
 
 /** latex on for the assistant's math; underline/sub/superscript off so prose
  *  like a__b or ~n isn't reinterpreted. GFM strikethrough comes from
@@ -140,6 +149,7 @@ function MarkdownBody({
         flavor="github"
         streamingAnimation={!!streaming}
         selectable={!streaming}
+        onLinkPress={({ url }) => openLink(url)}
       />
     </MarkdownErrorBoundary>
   );

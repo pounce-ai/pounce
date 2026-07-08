@@ -502,6 +502,54 @@ function repoInfo(cwd) {
   return { repo: base, isWorktree: false, isLive: live, worktree: null };
 }
 
+// Worktree sessions live under `…/worktrees/<workspace>/<name>`, so repoInfo can
+// only see the opaque workspace id (`ws:<id>`) — the daemon never reports which
+// real repo the worktree was cut from. But every git worktree's .git points back
+// to its origin, so we resolve the true repo name here (bridge runs on the same
+// machine) and fold worktree sessions into that project's folder instead of a
+// generic, collision-prone "Workspace". All worktrees under one workspace share
+// an origin, so resolve once per workspace id and cache the hit permanently.
+const wsRepoCache = new Map(); // workspace id -> real repo name
+
+/** Origin repo name for a worktree cwd, via its git common dir (…/<repo>/.git). */
+async function realRepoForWorktree(cwd) {
+  const { out } = await git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  const commonDir = out.trim().split(/\r?\n/)[0]?.replace(/\\/g, "/");
+  if (!commonDir) return null;
+  const repoDir = commonDir.replace(/\/\.git\/?$/, "").replace(/\/+$/, "");
+  const name = repoDir.split("/").pop();
+  return name && name !== ".git" ? name : null;
+}
+
+/** Rewrite worktree threads' `repo` from `ws:<id>` to their real origin repo,
+ *  so they group with that project. Best-effort: unresolved workspaces keep the
+ *  `ws:` label. Mutates threads in place. */
+async function resolveWorktreeRepos(threads) {
+  const byWs = new Map();
+  for (const t of threads) {
+    if (!t.isWorktree || !t.cwd) continue;
+    const m = t.cwd.replace(/\\/g, "/").match(/\/worktrees\/([^/]+)\//);
+    if (!m) continue;
+    const group = byWs.get(m[1]) || byWs.set(m[1], []).get(m[1]);
+    group.push(t);
+  }
+  await Promise.all(
+    [...byWs.entries()].map(async ([ws, group]) => {
+      let name = wsRepoCache.get(ws);
+      if (!name) {
+        // Only a live worktree dir can run git; skip archived (merged/cleaned) ones.
+        for (const t of group) {
+          if (!t.isLive) continue;
+          name = await realRepoForWorktree(t.cwd).catch(() => null);
+          if (name) break;
+        }
+        if (name) wsRepoCache.set(ws, name); // leave unset on failure so we retry next sync
+      }
+      if (name) for (const t of group) t.repo = name;
+    }),
+  );
+}
+
 /**
  * The daemon's thread `preview` is the raw first user message, which for slash
  * commands carries the agent's wrapper markup (<local-command-caveat>,
@@ -588,6 +636,10 @@ async function getThreads(fresh = false) {
     const avail = agents.filter((a) => a.available && a.wire === "jsonl" && a.id !== "shell");
     const lists = await Promise.all(avail.map((a) => listThreads(a.id).catch(() => [])));
     const threads = lists.flat().sort((x, y) => (y.createdAt || "").localeCompare(x.createdAt || ""));
+
+    // Fold worktree sessions into their real origin repo before clients see the
+    // list (cheap: one git call per unresolved workspace, then cached).
+    await resolveWorktreeRepos(threads);
 
     // Provisional activity so the list returns fast — real activity is filled in
     // asynchronously below.

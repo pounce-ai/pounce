@@ -406,8 +406,18 @@ export function availableDevices(scope: Session[]): Device[] {
 
 export function reposByActivity(): Repository[] {
   const f = filters$.get();
+  // Folder options are scoped by the OTHER active filters (device/agent) but must
+  // ignore the folder selection itself — like availableAgents/availableDevices do
+  // for their own dimension. Deriving from allSessions() (which applies f.repos)
+  // collapses the option list to the one selected folder, so the whole PROJECT
+  // section disappears after a single pick, trapping the user with a filter they
+  // can no longer see or clear.
   const withSessions = f.device || f.agent
-    ? new Set(allSessions().map((s) => s.repoId))
+    ? new Set(
+        Object.values(sessions$.get())
+          .filter((s) => (!f.device || s.hostId === f.device) && (!f.agent || s.agent === f.agent))
+          .map((s) => s.repoId),
+      )
     : null;
   return Object.values(repositories$.get())
     .filter((r) => !isDotName(r.name) && (!withSessions || withSessions.has(r.id)))
