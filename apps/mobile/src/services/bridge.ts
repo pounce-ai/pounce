@@ -474,6 +474,52 @@ export async function registerPushToken(token: string): Promise<void> {
 }
 
 /** Halt a running agent turn on its host. Returns whether the daemon accepted. */
+/** Status of the host's agent daemon (kittylitter serve). */
+export interface DaemonInfo {
+  running: boolean;
+  pid: number | null;
+  /** ISO time the daemon process started — surfaced so a stale daemon is visible. */
+  startedAt: string | null;
+  uptimeSecs: number | null;
+  /** Turns the bridge is currently streaming — a restart while >0 needs `force`. */
+  activeTurns: number;
+}
+
+/** Fetch the host daemon's status (start time, uptime, busy). null on any error. */
+export async function fetchDaemon(hostId: string): Promise<DaemonInfo | null> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return null;
+  try {
+    const { daemon } = await get<{ daemon: DaemonInfo }>(cfg, "/v1/daemon");
+    return daemon;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Restart the host's agent daemon so it re-indexes recent sessions. Refuses with
+ * `{ busy: true }` if a turn is in flight unless `force` is set.
+ */
+export async function restartDaemon(
+  hostId: string,
+  force = false,
+): Promise<{ ok: boolean; busy?: boolean; daemon?: DaemonInfo }> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return { ok: false };
+  try {
+    const res = await fetch(`${cfg.url}/v1/daemon/restart${force ? "?force=1" : ""}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${cfg.token}` },
+    });
+    const j = (await res.json()) as { restarted?: boolean; daemon?: DaemonInfo; error?: string };
+    if (res.status === 409) return { ok: false, busy: true, daemon: j.daemon };
+    return { ok: !!j.restarted, daemon: j.daemon };
+  } catch {
+    return { ok: false };
+  }
+}
+
 export async function interruptTurn(
   hostId: string,
   agent: string,

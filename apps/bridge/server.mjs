@@ -285,6 +285,44 @@ function exec(cmd, args, cwd, timeoutMs = 0, env = undefined) {
 }
 const git = (cwd, args) => exec("git", ["-C", cwd, ...args]);
 
+// --- Daemon (kittylitter serve) lifecycle -----------------------------------
+// The bridge proxies the daemon but doesn't own its session index: a daemon that
+// has been up for a while stops surfacing sessions created since it indexed, so
+// recent threads silently vanish from the app. Expose its start time and a
+// restart (deterministic kill + respawn of the same binary the daemon runs — not
+// reliant on any auto-start) so a fresh daemon re-indexes everything.
+let activeTurns = 0; // turns this bridge is currently streaming — a restart guard
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function daemonPids() {
+  const { out } = await exec("pgrep", ["-f", "kittylitter serve"]);
+  return out.trim().split(/\s+/).filter(Boolean).map(Number).filter((n) => n && n !== process.pid);
+}
+
+async function daemonInfo() {
+  const pids = await daemonPids();
+  if (!pids.length) return { running: false, pid: null, startedAt: null, uptimeSecs: null, activeTurns };
+  const pid = pids[0];
+  const { out } = await exec("ps", ["-p", String(pid), "-o", "lstart="]);
+  const startedAt = out.trim() ? new Date(out.trim()).toISOString() : null;
+  const uptimeSecs = startedAt ? Math.max(0, Math.round((Date.now() - Date.parse(startedAt)) / 1000)) : null;
+  return { running: true, pid, startedAt, uptimeSecs, activeTurns };
+}
+
+async function restartDaemon() {
+  const pids = await daemonPids();
+  for (const p of pids) { try { process.kill(p, "SIGTERM"); } catch {} }
+  await sleep(800);
+  for (const p of pids) { try { process.kill(p, 0); process.kill(p, "SIGKILL"); } catch {} } // straggler
+  // Respawn the same binary detached so it re-indexes from a clean slate.
+  try {
+    spawn(kittylitterPath(), ["serve"], { cwd: "/", detached: true, stdio: "ignore" }).unref();
+  } catch {}
+  await sleep(1500);
+  cache.clear(); // daemon re-indexed — drop every cached list/probe result
+  return daemonInfo();
+}
+
 /** Uncommitted changes in `cwd`: branch, per-file status + counts, full diff. */
 async function gitChanges(cwd) {
   const [numstat, status, diff, branch] = await Promise.all([
@@ -1231,6 +1269,14 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { models: await getModels(agent) });
     }
     if (url.pathname === "/v1/status") return send(res, 200, { status: await status() });
+    if (url.pathname === "/v1/daemon" && req.method !== "POST") return send(res, 200, { daemon: await daemonInfo() });
+    if (url.pathname === "/v1/daemon/restart" && req.method === "POST") {
+      const info = await daemonInfo();
+      // Don't kill the daemon out from under a turn unless the client insists.
+      if (info.activeTurns > 0 && url.searchParams.get("force") !== "1")
+        return send(res, 409, { error: "busy", daemon: info });
+      return send(res, 200, { restarted: true, daemon: await restartDaemon() });
+    }
     if (url.pathname === "/v1/messages") {
       const agent = url.searchParams.get("agent");
       const thread = url.searchParams.get("thread");
@@ -1381,6 +1427,11 @@ const server = http.createServer(async (req, res) => {
         "access-control-allow-origin": "*",
       });
       const write = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      // Mark the bridge busy for the duration so a daemon restart won't cut the
+      // turn off mid-flight (decremented exactly once, whichever end fires first).
+      activeTurns++;
+      let settled = false;
+      const settle = () => { if (!settled) { settled = true; activeTurns = Math.max(0, activeTurns - 1); } };
       const stop = streamTurn(
         agent, threadId, text, cwd,
         (ev) => write({ event: ev }),
@@ -1392,11 +1443,12 @@ const server = http.createServer(async (req, res) => {
             cache.delete(`usage:${agent}:${realThreadId}`); // token totals grew this turn
           }
           cache.delete("threads");
+          settle();
           write({ done: true, threadId: realThreadId }); res.end();
         },
         { images, permissionMode, reasoningEffort, model },
       );
-      req.on("close", stop);
+      req.on("close", () => { settle(); stop(); });
       return;
     }
     return send(res, 404, { error: "not found" });

@@ -1,5 +1,5 @@
 import type { ComponentType, ReactNode } from "react";
-import { Component, useEffect, useState } from "react";
+import { Component, useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -19,9 +19,12 @@ import {
 import type { Device } from "@litter/shared";
 import {
   connectBridge,
+  type DaemonInfo,
+  fetchDaemon,
   fetchPairing,
   loadBridgeConfig,
   removeDeviceConfig,
+  restartDaemon,
   saveBridgeConfig,
   syncLiveData,
 } from "@/services/bridge";
@@ -227,23 +230,26 @@ export default function SettingsScreen() {
           <View className="gap-2">
             <Text className="text-[12px] uppercase tracking-wide text-fg-faint">Your devices</Text>
             {devices.map((d) => (
-              <View key={d.id} className="flex-row items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-2.5">
-                <DeviceIcon
-                  name={d.name}
-                  emoji={deviceEmoji(d.id)}
-                  color={d.online ? COLOR.fg : COLOR.fgFaint}
-                  size={18}
-                />
-                <Text className="flex-1 text-[14px] font-medium text-fg" numberOfLines={1}>
-                  {deviceLabel(d.id, d.name)}
-                </Text>
-                <View className={cn("h-2 w-2 rounded-full", d.online ? "bg-success" : "bg-fg-faint")} />
-                <Pressable onPress={() => setEditing(d)} hitSlop={8} className="active:opacity-60 pl-1">
-                  <Ionicons name="pencil-outline" size={15} color={COLOR.fgFaint} />
-                </Pressable>
-                <Pressable onPress={() => forget(d)} hitSlop={8} className="active:opacity-60 pl-1">
-                  <Ionicons name="trash-outline" size={16} color={COLOR.fgFaint} />
-                </Pressable>
+              <View key={d.id} className="overflow-hidden rounded-xl border border-border bg-surface">
+                <View className="flex-row items-center gap-2.5 px-3 py-2.5">
+                  <DeviceIcon
+                    name={d.name}
+                    emoji={deviceEmoji(d.id)}
+                    color={d.online ? COLOR.fg : COLOR.fgFaint}
+                    size={18}
+                  />
+                  <Text className="flex-1 text-[14px] font-medium text-fg" numberOfLines={1}>
+                    {deviceLabel(d.id, d.name)}
+                  </Text>
+                  <View className={cn("h-2 w-2 rounded-full", d.online ? "bg-success" : "bg-fg-faint")} />
+                  <Pressable onPress={() => setEditing(d)} hitSlop={8} className="active:opacity-60 pl-1">
+                    <Ionicons name="pencil-outline" size={15} color={COLOR.fgFaint} />
+                  </Pressable>
+                  <Pressable onPress={() => forget(d)} hitSlop={8} className="active:opacity-60 pl-1">
+                    <Ionicons name="trash-outline" size={16} color={COLOR.fgFaint} />
+                  </Pressable>
+                </View>
+                <DeviceDaemon hostId={d.id} hostName={deviceLabel(d.id, d.name)} online={d.online} />
               </View>
             ))}
             <Pressable
@@ -286,6 +292,85 @@ export default function SettingsScreen() {
       </ScrollView>
 
       <DeviceEditModal device={editing} onClose={() => setEditing(null)} />
+    </View>
+  );
+}
+
+/** "6d", "3h", "12m", "45s" from a seconds count. */
+function fmtAgo(secs: number): string {
+  if (secs < 60) return `${secs}s`;
+  if (secs < 3600) return `${Math.round(secs / 60)}m`;
+  if (secs < 86_400) return `${Math.round(secs / 3600)}h`;
+  return `${Math.round(secs / 86_400)}d`;
+}
+
+/**
+ * Compact per-device daemon footer inside a device card: the agent daemon's
+ * uptime and a Restart action (re-indexes recent sessions when threads go
+ * missing). Renders nothing when the host is offline or its bridge is too old to
+ * report a daemon — so it never clutters a device that can't use it.
+ */
+function DeviceDaemon({ hostId, hostName, online }: { hostId: string; hostName: string; online: boolean }) {
+  const [info, setInfo] = useState<DaemonInfo | null>(null);
+  const [restarting, setRestarting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!online) { setInfo(null); return; }
+    void fetchDaemon(hostId).then((d) => { if (!cancelled) setInfo(d); });
+    return () => { cancelled = true; };
+  }, [hostId, online]);
+
+  const doRestart = useCallback(async (force: boolean) => {
+    setRestarting(true);
+    try {
+      const r = await restartDaemon(hostId, force);
+      if (r.busy) {
+        Alert.alert("Agent is busy", "A turn is running. Restart anyway? It will interrupt in-progress replies.", [
+          { text: "Cancel", style: "cancel" },
+          { text: "Restart anyway", style: "destructive", onPress: () => void doRestart(true) },
+        ]);
+        return;
+      }
+      if (r.ok) {
+        setInfo(r.daemon ?? null);
+        Alert.alert("Daemon restarted", "Re-indexing sessions — pull to refresh in a few seconds.");
+      } else {
+        Alert.alert("Couldn't restart", `Make sure ${hostName} is reachable.`);
+      }
+    } finally {
+      setRestarting(false);
+    }
+  }, [hostId, hostName]);
+
+  const confirm = () =>
+    Alert.alert("Restart agent daemon?", `On ${hostName}. Agents disconnect briefly while it re-indexes.`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Restart", onPress: () => void doRestart(false) },
+    ]);
+
+  // Only show for hosts whose bridge actually reports a running daemon. The
+  // Restart pill sits bottom-left — diagonally away from the edit/delete icons in
+  // the row above — so the destructive controls aren't crowded together.
+  if (!info?.running) return null;
+  return (
+    <View className="flex-row items-center gap-2 border-t border-border/60 px-3 py-2">
+      <Pressable
+        onPress={confirm}
+        disabled={restarting}
+        hitSlop={6}
+        className="active:opacity-70 flex-row items-center gap-1 rounded-full bg-surface-alt px-2.5 py-1"
+      >
+        {restarting ? (
+          <ActivityIndicator size="small" color={COLOR.accent} />
+        ) : (
+          <Ionicons name="refresh" size={13} color={COLOR.accent} />
+        )}
+        <Text className="text-[12px] font-medium text-accent">{restarting ? "Restarting…" : "Restart"}</Text>
+      </Pressable>
+      <Text className="flex-1 text-right text-[11px] text-fg-faint">
+        daemon · up {info.uptimeSecs != null ? fmtAgo(info.uptimeSecs) : "?"}
+      </Text>
     </View>
   );
 }
