@@ -481,7 +481,7 @@ export default function SessionScreen() {
       />
 
       {/* Composer (model·effort, mode, mic and send now live inside its card) */}
-      <View style={{ paddingBottom: insets.bottom + 8 }} className="border-t border-border bg-bg-elevated px-3 pt-2">
+      <View style={{ paddingBottom: insets.bottom + 8 }} className="bg-bg-elevated px-3 pt-2">
         {!canSteer ? (
           <Text className="px-1 pb-2 text-[12px] text-fg-faint">
             Archived session — worktree was removed. Read-only.
