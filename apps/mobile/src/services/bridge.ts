@@ -674,17 +674,24 @@ export async function streamLiveMessage(
 /** Add a device (a machine's bridge) and load all devices' live data. */
 export async function connectBridge(cfg: BridgeConfig): Promise<boolean> {
   connection$.status.set("connecting");
+  const id = deviceId(cfg.url.replace(/\/$/, ""));
+  // Only a brand-new pairing is rolled back on failure. An already-paired device
+  // must survive a transient blip (bridge restart, cold daemon) — unpairing it
+  // there would force a re-scan for what is really a momentary hiccup.
+  const wasPaired = (await listDeviceConfigs()).some((d) => d.id === id);
   try {
     const dev = await addDeviceConfig(cfg.url, cfg.token);
+    // Reachability (health) is the sole gate for "connected". Sync is best-effort:
+    // a cold daemon returning nothing for a tick must not fail the connection or
+    // unpair the device — it just retries on the next sync.
     await get<{ ok: boolean }>(dev, "/health").catch(() => { throw new Error("bridge unreachable"); });
-    await syncLiveData();
     connection$.demo.set(false);
     connection$.activeHostId.set(dev.id);
+    await syncLiveData().catch(() => {});
     connection$.status.set("connected");
     return true;
   } catch {
-    // roll back the just-added device if it was unreachable
-    await removeDeviceConfig(deviceId(cfg.url.replace(/\/$/, "")));
+    if (!wasPaired) await removeDeviceConfig(id);
     connection$.status.set("disconnected");
     return false;
   }

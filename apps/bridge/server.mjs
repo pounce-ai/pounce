@@ -323,6 +323,55 @@ async function restartDaemon() {
   return daemonInfo();
 }
 
+// Auto-restart: when a recently-written session on disk isn't in the daemon's
+// thread list, the daemon has fallen behind — restart it (only while idle, rate-
+// limited) so newly-created threads appear without the user lifting a finger.
+const DAEMON_AUTO_RESTART = process.env.DAEMON_AUTO_RESTART !== "0"; // opt out with =0
+const STALE_LOOKBACK_MS = 30 * 60_000;       // only act on sessions touched this recently
+const AUTORESTART_COOLDOWN_MS = 30 * 60_000; // and no more than once per window
+const AUTORESTART_EVERY_MS = 5 * 60_000;     // how often we check
+let lastAutoRestart = 0;
+let lastAutoRestartFor = null; // don't loop on a session a restart can't index
+
+/** The id of the most-recently-written Claude session on disk, if touched within
+ *  the lookback window — the thing the daemon is most likely to be missing. */
+function newestRecentSessionId() {
+  const root = path.join(os.homedir(), ".claude", "projects");
+  let dirs;
+  try { dirs = readdirSync(root); } catch { return null; }
+  let bestDir = null, bestDirMs = 0; // cheapest path: newest project dir, then its newest file
+  for (const d of dirs) {
+    let st; try { st = statSync(path.join(root, d)); } catch { continue; }
+    if (st.isDirectory() && st.mtimeMs > bestDirMs) { bestDirMs = st.mtimeMs; bestDir = d; }
+  }
+  if (!bestDir || Date.now() - bestDirMs > STALE_LOOKBACK_MS) return null;
+  let id = null, ms = 0;
+  let files; try { files = readdirSync(path.join(root, bestDir)); } catch { return null; }
+  for (const f of files) {
+    if (!f.endsWith(".jsonl")) continue;
+    let st; try { st = statSync(path.join(root, bestDir, f)); } catch { continue; }
+    if (st.mtimeMs > ms) { ms = st.mtimeMs; id = f.slice(0, -6); }
+  }
+  return id && Date.now() - ms <= STALE_LOOKBACK_MS ? id : null;
+}
+
+async function maybeAutoRestartDaemon() {
+  if (!DAEMON_AUTO_RESTART) return;
+  if (activeTurns > 0) return;                                  // a turn is streaming through us
+  if (Date.now() - lastAutoRestart < AUTORESTART_COOLDOWN_MS) return;
+  const newId = newestRecentSessionId();
+  if (!newId) return;                                          // nothing fresh to catch up on
+  let threads;
+  try { threads = await getThreads(); } catch { return; }
+  if (threads.some((t) => t.id === newId)) { lastAutoRestartFor = null; return; } // already fresh
+  if (newId === lastAutoRestartFor) return;                    // a restart didn't index it — don't loop
+  if (threads.some((t) => t.activity === "running" || t.activity === "streaming")) return; // busy elsewhere
+  lastAutoRestart = Date.now();
+  lastAutoRestartFor = newId;
+  console.log(`[daemon] stale: session ${newId} on disk but not indexed — auto-restarting (idle)`);
+  try { await restartDaemon(); } catch (e) { console.log(`[daemon] auto-restart failed: ${e?.message || e}`); }
+}
+
 /** Uncommitted changes in `cwd`: branch, per-file status + counts, full diff. */
 async function gitChanges(cwd) {
   const [numstat, status, diff, branch] = await Promise.all([
@@ -1515,6 +1564,9 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
       };
       warm();
       setInterval(() => { if (Date.now() - lastClientSeen < 90_000) warm(); }, 15_000);
+      // Keep the daemon's index fresh on its own — restart it when it falls behind
+      // and nothing is busy, so recent threads surface without manual action.
+      setInterval(() => { void maybeAutoRestartDaemon().catch(() => {}); }, AUTORESTART_EVERY_MS);
 
       setTimeout(watchTick, WATCH_MS);
       resolve({ server, token: TOKEN, kittylitter: klDisplay(), ...PAIR });
