@@ -603,7 +603,9 @@ async function runTurn(agent, threadId, text) {
     { timeout: 260000 },
   );
   cache.delete("threads");
-  return getMessages(agent, threadId);
+  // The turn added a user message + agent reply — force a fresh read so the
+  // cached history isn't stale.
+  return getMessages(agent, threadId, true);
 }
 
 /** Stateful extractor: feed it stdout chunks, get back newly-complete objects. */
@@ -741,8 +743,70 @@ async function fetchTurns(agent, threadId) {
   return f?.result?.data || [];
 }
 
-async function getMessages(agent, threadId) {
-  return normalizeTurns(await fetchTurns(agent, threadId), threadId, agent);
+/** Cache key for a thread's normalized history. */
+const msgKey = (agent, threadId) => `msg:${agent}:${threadId}`;
+
+// Opening a thread was ~4s because every /v1/messages spawned a fresh
+// `kittylitter probe`, and each probe pays a full cold Iroh dial (relay
+// handshake + QUIC setup) — ~4s wall-clock even at ~0 CPU. A second request on
+// an already-warm connection costs ~0.3s, so the fix is to never make the user
+// wait on a cold dial: cache history like every sibling endpoint (getThreads /
+// getAgents / status) already do, and pre-warm it in the background so the tap
+// hits a hot cache instead of a cold probe.
+// History is immutable except when a turn completes — and we invalidate the key
+// explicitly then (runTurn / streamTurn). So it can hold longer than the 20s
+// list cache; a longer TTL means the background warm loop re-probes far less
+// often. Pull-to-refresh still forces a fresh read via `fresh=1`.
+const MSG_CACHE_MS = 60_000;
+
+async function getMessages(agent, threadId, fresh = false) {
+  const key = msgKey(agent, threadId);
+  if (fresh) cache.delete(key);
+  return cached(key, MSG_CACHE_MS, async () =>
+    normalizeTurns(await fetchTurns(agent, threadId), threadId, agent));
+}
+
+// How many threads to keep hot in the background at once.
+const WARM_THREADS = 6;
+// How long a client's usage-based hint stays authoritative before we revert to
+// the recency fallback (the app refreshes it every sync; this just bounds a
+// stale hint from a phone that went away).
+const WARM_HINT_TTL = 5 * 60_000;
+
+// The app knows which threads this user actually opens; it ranks them (frecency
+// + needs-attention) and posts the ids here via /v1/warm. Empty or expired →
+// we fall back to the most-recently-active threads.
+let warmHints = { at: 0, ids: [] };
+function setWarmHints(ids) {
+  warmHints = { at: Date.now(), ids: Array.isArray(ids) ? ids.slice(0, WARM_THREADS) : [] };
+}
+
+/**
+ * Pre-warm history for the threads most likely to be opened next, so the tap
+ * lands on a hot cache (a LAN round-trip) instead of a cold ~4s Iroh probe.
+ * Prioritizes the app's usage-predicted hints, then fills the budget with the
+ * most-recently-active threads as a fallback. `getMessages` is cached, so
+ * already-warm threads return instantly and only cold ones actually probe —
+ * this is self-limiting. Best-effort; runs only while a phone is connected
+ * (gated by the warm-loop's lastClientSeen check).
+ */
+async function warmMessages(threads) {
+  const live = (threads || []).filter((t) => t.isLive);
+  const byId = new Map(live.map((t) => [t.id, t]));
+  const picked = [];
+  const seen = new Set();
+  const add = (t) => { if (t && !seen.has(t.id)) { seen.add(t.id); picked.push(t); } };
+  // 1) usage-predicted threads first (while the hint is fresh).
+  if (Date.now() - warmHints.at < WARM_HINT_TTL) {
+    for (const id of warmHints.ids) add(byId.get(id));
+  }
+  // 2) fall back to most-recently-active threads to fill the budget.
+  for (const t of live) { if (picked.length >= WARM_THREADS) break; add(t); }
+  // Low concurrency: each cold probe holds an Iroh dial for ~4s; don't stampede
+  // the daemon. Warm threads short-circuit, so this rarely does real work.
+  await mapLimit(picked.slice(0, WARM_THREADS), 2, async (t) => {
+    try { await getMessages(t.agent, t.id); } catch {}
+  });
 }
 
 function tsToIso(n) {
@@ -999,7 +1063,18 @@ const server = http.createServer(async (req, res) => {
       const agent = url.searchParams.get("agent");
       const thread = url.searchParams.get("thread");
       if (!agent || !thread) return send(res, 400, { error: "agent and thread required" });
-      return send(res, 200, { events: await getMessages(agent, thread) });
+      const fresh = url.searchParams.get("fresh") === "1";
+      return send(res, 200, { events: await getMessages(agent, thread, fresh) });
+    }
+    if (url.pathname === "/v1/warm" && req.method === "POST") {
+      // The app's ranking of which threads to keep hot (usage-predicted). We
+      // pre-warm them in the background so opening one is instant.
+      const body = await readBody(req);
+      setWarmHints(body?.threads);
+      // Warm immediately off the cached thread list so a just-updated ranking
+      // doesn't wait for the next 15s tick.
+      void getThreads().then(warmMessages).catch(() => {});
+      return send(res, 200, { ok: true });
     }
     if (url.pathname === "/v1/turn" && req.method === "POST") {
       const body = await readBody(req);
@@ -1129,7 +1204,13 @@ const server = http.createServer(async (req, res) => {
       const stop = streamTurn(
         agent, threadId, text, cwd,
         (ev) => write({ event: ev }),
-        (realThreadId) => { write({ done: true, threadId: realThreadId }); res.end(); },
+        (realThreadId) => {
+          // The streamed turn changed this thread's history — drop the cache so
+          // the app's post-turn refetch (and the next open) reads it fresh.
+          if (realThreadId) cache.delete(msgKey(agent, realThreadId));
+          cache.delete("threads");
+          write({ done: true, threadId: realThreadId }); res.end();
+        },
         { images, permissionMode, reasoningEffort, model },
       );
       req.on("close", stop);
@@ -1193,7 +1274,10 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
       // Warm the data cache so the first phone sync is instant (the probe
       // handshakes happen now, before anyone scans), then keep it warm while a
       // phone is actively connected. Idle = no probing.
-      const warm = () => { void getAgents().catch(() => {}); void getThreads().catch(() => {}); };
+      const warm = () => {
+        void getAgents().catch(() => {});
+        void getThreads().then(warmMessages).catch(() => {});
+      };
       warm();
       setInterval(() => { if (Date.now() - lastClientSeen < 90_000) warm(); }, 15_000);
 
