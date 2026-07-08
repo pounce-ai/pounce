@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Linking, Pressable, Text, TextInput, View } from "react-native";
 import { KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { DiffsView, type Theme } from "react-native-diffs";
+import { LegendList } from "@legendapp/list/react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
@@ -16,32 +16,22 @@ import {
 import { sessions$ } from "@/state/stores";
 import { cn, COLOR } from "@/ui";
 
-/** Native diff theme mapped onto Pounce's dark palette. */
-const DIFF_THEME: Theme = {
-  fonts: { codeSize: 12 },
-  colors: {
-    body: COLOR.fg,
-    code: "#cdd0d6",
-    codeBackground: "#0d0d12",
-    highlight: COLOR.accent,
-    emphasis: COLOR.fgMuted,
-    selectionTint: COLOR.accent,
-  },
-  diff: {
-    displayMode: "unified",
-    changeHighlightStyle: "both",
-    backgroundColor: "#0B0B0F",
-    gutterBackground: "#0d0d12",
-    gutterText: "#52525b",
-    addedLineBackground: "#22c55e1f",
-    removedLineBackground: "#dc26261f",
-    addedHighlightBackground: "#4ade8055",
-    removedHighlightBackground: "#dc262655",
-    hunkHeaderBackground: "#1b1b22",
-    hunkHeaderText: "#71717a",
-    separatorColor: "#26262f",
-    borderWidth: 0,
-  },
+type Kind = "header" | "hunk" | "add" | "del" | "ctx";
+
+function classify(line: string): Kind {
+  if (line.startsWith("@@")) return "hunk";
+  if (/^(diff --git|index |--- |\+\+\+ |new file|deleted file|rename )/.test(line)) return "header";
+  if (line.startsWith("+")) return "add";
+  if (line.startsWith("-")) return "del";
+  return "ctx";
+}
+
+const LINE_CLASS: Record<Kind, string> = {
+  header: "text-fg-faint",
+  hunk: "text-info",
+  add: "bg-diff-add-bg text-diff-add-fg",
+  del: "bg-diff-del-bg text-diff-del-fg",
+  ctx: "text-fg-muted",
 };
 
 export default function ChangesScreen() {
@@ -69,6 +59,7 @@ export default function ChangesScreen() {
     void load();
   }, [load]);
 
+  const lines = useMemo(() => (changes?.diff ? changes.diff.split("\n") : []), [changes?.diff]);
   const totals = useMemo(() => {
     const f = changes?.files ?? [];
     return { add: f.reduce((s, x) => s + x.additions, 0), del: f.reduce((s, x) => s + x.deletions, 0) };
@@ -163,12 +154,19 @@ export default function ChangesScreen() {
             <Text className="mt-1 text-center text-[13px] text-fg-muted">No uncommitted changes in this worktree.</Text>
           </View>
         ) : (
-          <DiffsView
-            content={changes?.diff ?? ""}
-            colorScheme="dark"
-            showsBlockHeaders={false}
-            theme={DIFF_THEME}
-            style={{ flex: 1, backgroundColor: "#0B0B0F" }}
+          <LegendList
+            data={lines}
+            keyExtractor={(_, i) => String(i)}
+            estimatedItemSize={18}
+            renderItem={({ item }) => {
+              const kind = classify(item);
+              return (
+                <Text className={cn("px-3 font-mono text-[11px] leading-[18px]", LINE_CLASS[kind])}>
+                  {item || " "}
+                </Text>
+              );
+            }}
+            contentContainerStyle={{ paddingVertical: 6 }}
           />
         )}
       </View>

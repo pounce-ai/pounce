@@ -47,7 +47,6 @@
     "react": "19.2.3",
     "react-native": "0.86.0",
     "react-native-copilot": "^3.3.3",
-    "react-native-diffs": "^1.0.3",
     "react-native-edge-to-edge": "^1.8.1",
     "react-native-enriched-markdown": "^0.7.3",
     "react-native-gesture-handler": "~2.32.0",
