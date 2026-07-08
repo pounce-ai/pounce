@@ -1,18 +1,13 @@
 import { type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { ActionSheetIOS, Alert, Image, Pressable, Text, View } from "react-native";
+import { Alert, Image, Pressable, Text, View } from "react-native";
 import {
   EnrichedMarkdownTextInput,
   type EnrichedMarkdownTextInputInstance,
   type MarkdownTextInputStyle,
 } from "react-native-enriched-markdown";
 import { Ionicons } from "@expo/vector-icons";
-import type { AgentCapabilities, PermissionMode, RunImage } from "@litter/shared";
-import {
-  modesFor,
-  REASONING_EFFORTS,
-  SLASH_COMMANDS,
-  type ReasoningEffort,
-} from "@/ui/agent-meta";
+import type { AgentCapabilities, RunImage } from "@litter/shared";
+import { SLASH_COMMANDS } from "@/ui/agent-meta";
 import { fetchFiles, type RepoEntry } from "@/services/bridge";
 import { cn, COLOR } from "@/ui";
 
@@ -29,8 +24,6 @@ const INPUT_MD_STYLE: MarkdownTextInputStyle = {
 export interface ComposerSubmit {
   text: string;
   images: RunImage[];
-  permissionMode?: PermissionMode;
-  reasoningEffort?: ReasoningEffort;
 }
 
 /** Imperative handle so a parent (e.g. a "Run" button in the transcript) can
@@ -89,35 +82,8 @@ export function Composer({
     },
   }));
   const [images, setImages] = useState<Attachment[]>([]);
-  const [optionsOpen, setOptionsOpen] = useState(false);
-
-  const modes = modesFor(agent);
-  const showMode = modes.length > 1;
-  const showEffort = caps.thinking;
+  // The "+" is a dedicated attach button (mode/effort now live on the status bar).
   const showAttach = caps.images;
-  const hasOptions = showMode || showEffort || showAttach;
-
-  const [mode, setMode] = useState<PermissionMode | undefined>(modes[0]?.value);
-  const [effort, setEffort] = useState<ReasoningEffort | undefined>(undefined);
-
-  const modeLabel = modes.find((m) => m.value === mode)?.label ?? "Mode";
-  const effortLabel = REASONING_EFFORTS.find((e) => e.value === effort)?.label;
-
-  const sheet = (title: string, labels: string[], onPick: (i: number) => void) =>
-    ActionSheetIOS.showActionSheetWithOptions(
-      { title, options: [...labels, "Cancel"], cancelButtonIndex: labels.length },
-      (i) => {
-        if (i >= 0 && i < labels.length) onPick(i);
-      },
-    );
-
-  const openMode = () =>
-    sheet("Mode", modes.map((m) => `${m.label} · ${m.hint}`), (i) => setMode(modes[i].value));
-
-  const openEffort = () =>
-    sheet("Reasoning effort", REASONING_EFFORTS.map((e) => e.label), (i) =>
-      setEffort(REASONING_EFFORTS[i].value),
-    );
 
   // Inline slash menu — triggered by a leading "/" while typing the command
   // token (before the first space), like a coding harness.
@@ -198,8 +164,6 @@ export function Composer({
       await onSubmit({
         text: snapMarkdown.trim(),
         images: snapImages.map((i) => ({ data: i.data, mediaType: i.mediaType })),
-        permissionMode: showMode ? mode : undefined,
-        reasoningEffort: showEffort ? effort : undefined,
       });
     } catch {
       // restore on failure so the user doesn't lose their message
@@ -210,26 +174,6 @@ export function Composer({
 
   return (
     <View>
-      {/* Options — revealed by the "+", so the default composer stays minimal */}
-      {optionsOpen && !disabled ? (
-        <View className="mb-2 flex-row flex-wrap items-center gap-2">
-          {showMode ? (
-            <Pill icon="git-branch-outline" label={modeLabel} active={mode !== "default"} onPress={openMode} />
-          ) : null}
-          {showEffort ? (
-            <Pill
-              icon="flash-outline"
-              label={effortLabel ? `Effort · ${effortLabel}` : "Effort"}
-              active={!!effort && effort !== "off"}
-              onPress={openEffort}
-            />
-          ) : null}
-          {showAttach ? (
-            <Pill icon="image-outline" label="Image" active={images.length > 0} onPress={pickImage} />
-          ) : null}
-        </View>
-      ) : null}
-
       {/* Image thumbnails */}
       {images.length ? (
         <View className="mb-2 flex-row flex-wrap gap-2">
@@ -311,8 +255,8 @@ export function Composer({
 
       {/* Input row */}
       <View className="flex-row items-end gap-2">
-        {!disabled && hasOptions ? (
-          <IconButton icon={optionsOpen ? "close" : "add"} onPress={() => setOptionsOpen((o) => !o)} />
+        {!disabled && showAttach ? (
+          <IconButton icon="add" onPress={pickImage} />
         ) : null}
 
         <EnrichedMarkdownTextInput
@@ -353,32 +297,6 @@ export function Composer({
         </Pressable>
       </View>
     </View>
-  );
-}
-
-function Pill({
-  icon,
-  label,
-  active,
-  onPress,
-}: {
-  icon: React.ComponentProps<typeof Ionicons>["name"];
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      className={cn(
-        "h-8 flex-row items-center gap-1.5 rounded-full border px-3",
-        active ? "border-accent/60 bg-accent-soft" : "border-border bg-surface-alt active:bg-surface-hover",
-      )}
-    >
-      <Ionicons name={icon} size={13} color={active ? COLOR.accent : COLOR.fgMuted} />
-      <Text className={cn("text-[12px] font-medium", active ? "text-accent" : "text-fg-muted")}>{label}</Text>
-      <Ionicons name="chevron-down" size={12} color={active ? COLOR.accent : COLOR.fgFaint} />
-    </Pressable>
   );
 }
 

@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import type { LegendListRef } from "@legendapp/list/react-native";
-import type { TimelineEvent } from "@litter/shared";
+import type { PermissionMode, TimelineEvent } from "@litter/shared";
 import { isEmptyUserMessage, parseUserMessage } from "@litter/transcript";
 import { collapseToolResults, Timeline } from "@/components/Timeline";
 import { TimelineSkeleton } from "@/components/Skeleton";
@@ -32,7 +32,7 @@ import {
 import { fetchMessages, fetchUsage, interruptTurn, streamLiveMessage, type ThreadUsage } from "@/services/bridge";
 import { Ionicons } from "@expo/vector-icons";
 import { ActivityDot, ACTIVITY_LABEL, AgentLogo, cn, COLOR } from "@/ui";
-import { effectiveCaps } from "@/ui/agent-meta";
+import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "@/ui/agent-meta";
 
 function mergeById(cur: TimelineEvent[], inc: TimelineEvent[]): TimelineEvent[] {
   const out = cur.slice();
@@ -61,6 +61,10 @@ export default function SessionScreen() {
   const fav = useSelector(() => (session ? isFavThread(session.id) : false));
   const selectedModel = useSelector(() => (session ? modelForThread(session.id) : undefined));
   const [modelSheet, setModelSheet] = useState(false);
+  // Permission mode + reasoning effort live on the status bar now (moved out of
+  // the composer). Session-view state; undefined mode = the agent's default.
+  const [mode, setMode] = useState<PermissionMode | undefined>(undefined);
+  const [effort, setEffort] = useState<ReasoningEffort | undefined>(undefined);
   // A freshly-created thread still carries its temporary new_* id here; favouriting
   // it would orphan once live sync swaps in the real id, so gate the star on that.
   const canFavourite = !!session && !session.id.startsWith("new_");
@@ -180,8 +184,10 @@ export default function SessionScreen() {
           (ev) => setLiveEvents((e) => mergeById(e, [ev])),
           {
             images: s.images,
-            permissionMode: s.permissionMode,
-            reasoningEffort: s.reasoningEffort,
+            permissionMode: modesFor(session.agent).length > 1
+              ? (mode ?? modesFor(session.agent)[0]?.value)
+              : undefined,
+            reasoningEffort: effectiveCaps(session.agent, capsFor(session.agent)).thinking ? effort : undefined,
             model: modelForThread(session.id),
           },
         );
@@ -199,7 +205,7 @@ export default function SessionScreen() {
     } finally {
       setSending(false);
     }
-  }, [session, live, refreshUsage]);
+  }, [session, live, refreshUsage, mode, effort]);
 
   const stop = useCallback(async () => {
     if (!session) return;
@@ -233,6 +239,21 @@ export default function SessionScreen() {
   const canSteer = session.isLive;
   const caps = effectiveCaps(session.agent, reportedCaps);
   const running = sending || session.activity === "running" || session.activity === "streaming";
+
+  // Permission-mode + reasoning-effort controls (shown on the status bar).
+  const modes = modesFor(session.agent);
+  const showMode = modes.length > 1;
+  const showEffort = caps.thinking;
+  const activeMode = mode ?? modes[0]?.value;
+  const modeLabel = modes.find((m) => m.value === activeMode)?.label ?? "Mode";
+  const effortLabel = REASONING_EFFORTS.find((e) => e.value === effort)?.label ?? "Effort";
+  const pickSheet = (title: string, labels: string[], onPick: (i: number) => void) =>
+    ActionSheetIOS.showActionSheetWithOptions(
+      { title, options: [...labels, "Cancel"], cancelButtonIndex: labels.length },
+      (i) => { if (i >= 0 && i < labels.length) onPick(i); },
+    );
+  const openMode = () => pickSheet("Mode", modes.map((m) => `${m.label} · ${m.hint}`), (i) => setMode(modes[i].value));
+  const openEffort = () => pickSheet("Reasoning effort", REASONING_EFFORTS.map((e) => e.label), (i) => setEffort(REASONING_EFFORTS[i].value));
 
   // All session actions in one thumb-zone sheet (slides up from the bottom).
   const openActions = () => {
@@ -382,6 +403,8 @@ export default function SessionScreen() {
           model={selectedModel ?? usage?.model ?? null}
           canPickModel={live && !!session.cwd}
           onPressModel={() => setModelSheet(true)}
+          mode={canSteer && showMode ? { label: modeLabel, active: activeMode !== "default", onPress: openMode } : null}
+          effort={canSteer && showEffort ? { label: effortLabel, active: !!effort && effort !== "off", onPress: openEffort } : null}
           markerCount={markers.length}
           onOpenMarkers={() => setMarkerSheet(true)}
         />
