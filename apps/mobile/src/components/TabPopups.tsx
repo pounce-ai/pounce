@@ -139,7 +139,7 @@ function SearchPopup({ colors, close }: IPopupRenderContext) {
   const f = useSelector(() => filters$.get());
   const agents = useSelector(() => allAgentsInUse());
   const devices = useSelector(() => allDevices());
-  const hasFilter = !!(f.agent || f.device || f.needsOnly);
+  const hasFilter = !!(f.agent || f.device || f.needsOnly || f.favOnly);
 
   return (
     <View style={{ padding: 10, minWidth: 268, gap: 12 }}>
@@ -149,14 +149,20 @@ function SearchPopup({ colors, close }: IPopupRenderContext) {
           <Chip
             colors={colors}
             label="Everything"
-            active={!f.needsOnly}
-            onPress={() => filters$.needsOnly.set(false)}
+            active={!f.needsOnly && !f.favOnly}
+            onPress={() => filters$.set({ ...filters$.get(), needsOnly: false, favOnly: false })}
           />
           <Chip
             colors={colors}
             label="Needs you"
             active={f.needsOnly}
             onPress={() => filters$.needsOnly.set(true)}
+          />
+          <Chip
+            colors={colors}
+            label="Favourites"
+            active={f.favOnly}
+            onPress={() => filters$.favOnly.set(!f.favOnly)}
           />
         </View>
       </View>
@@ -198,7 +204,7 @@ function SearchPopup({ colors, close }: IPopupRenderContext) {
           icon="close-circle-outline"
           label="Clear all"
           onPress={() => {
-            filters$.set({ device: null, agent: null, needsOnly: false });
+            filters$.set({ device: null, agent: null, needsOnly: false, favOnly: false });
             close();
           }}
         />

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, RefreshControl, Text, View } from "react-native";
+import { ActionSheetIOS, Pressable, RefreshControl, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LegendList } from "@legendapp/list/react-native";
 import { useObservable, useSelector } from "@legendapp/state/react";
@@ -9,22 +9,33 @@ import type { Session } from "@litter/shared";
 import {
   activeFilterCount,
   connection$,
+  favRepos$,
+  favThreads$,
   filters$,
+  isFavRepo,
+  isFavThread,
   sessions$,
   repositories$,
+  toggleFavRepo,
+  toggleFavThread,
 } from "@/state/stores";
 import { SessionCard } from "@/components/SessionCard";
+import { RecentStrip } from "@/components/RecentStrip";
 import { SessionListSkeleton } from "@/components/Skeleton";
 import { COLOR } from "@/ui";
 import { refreshLive } from "@/services/runtime";
 
+/** Collapse key for the Favourites pseudo-group (shares the collapsed$ map). */
+const FAV_KEY = "__fav__";
+
 const needsYou = (s: Session) =>
   s.needsAttention || s.activity === "failed" || s.activity === "awaiting_input";
 
-/** A directory header, or one session beneath it. */
+/** A pinned favourites header, a directory header, or one session beneath either. */
 type Row =
-  | { type: "header"; repoId: string; name: string; count: number; attention: number; collapsed: boolean }
-  | { type: "session"; session: Session };
+  | { type: "favHeader"; count: number; collapsed: boolean }
+  | { type: "header"; repoId: string; name: string; count: number; attention: number; collapsed: boolean; fav: boolean }
+  | { type: "session"; session: Session; fav?: boolean };
 
 /** Sort order: needs-you → running → other live → archived; newest within each. */
 function rank(s: Session): number {
@@ -57,6 +68,10 @@ export default function HomeScreen() {
     const f = filters$.get();
     const repos = repositories$.get();
     const collapsedMap = collapsed$.get();
+    // Track the favourite maps so the view recomputes on toggle (selecting the
+    // parent object alone wouldn't re-run — the Legend-State object gotcha).
+    const favT = favThreads$.get();
+    const favR = favRepos$.get();
     let list = Object.values(sessions$.get()).filter(
       (s) => (!f.device || s.hostId === f.device) && (!f.agent || s.agent === f.agent),
     );
@@ -68,6 +83,16 @@ export default function HomeScreen() {
       (a, b) => rank(a) - rank(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
     );
 
+    const rows: Row[] = [];
+
+    // Pinned "Favourites" pseudo-group above the repo accordion.
+    const favSessions = sorted.filter((s) => favT[s.id]);
+    if (favSessions.length) {
+      const favCollapsed = !!collapsedMap[FAV_KEY];
+      rows.push({ type: "favHeader", count: favSessions.length, collapsed: favCollapsed });
+      if (!favCollapsed) for (const s of favSessions) rows.push({ type: "session", session: s, fav: true });
+    }
+
     const groups = new Map<string, Session[]>();
     for (const s of sorted) {
       const arr = groups.get(s.repoId);
@@ -75,6 +100,10 @@ export default function HomeScreen() {
       else groups.set(s.repoId, [s]);
     }
     const ordered = [...groups.entries()].sort((a, b) => {
+      // Favourited folders float to the top of the accordion region.
+      const fa = favR[a[0]] ? 0 : 1;
+      const fb = favR[b[0]] ? 0 : 1;
+      if (fa !== fb) return fa - fb;
       const ra = Math.min(...a[1].map(rank));
       const rb = Math.min(...b[1].map(rank));
       if (ra !== rb) return ra - rb;
@@ -82,7 +111,6 @@ export default function HomeScreen() {
       const tb = Math.max(...b[1].map((s) => Date.parse(s.updatedAt)));
       return tb - ta;
     });
-    const rows: Row[] = [];
     for (const [repoId, glist] of ordered) {
       const isCollapsed = !!collapsedMap[repoId];
       rows.push({
@@ -92,6 +120,7 @@ export default function HomeScreen() {
         count: glist.length,
         attention: glist.filter(needsYou).length,
         collapsed: isCollapsed,
+        fav: !!favR[repoId],
       });
       if (!isCollapsed) for (const s of glist) rows.push({ type: "session", session: s });
     }
@@ -103,6 +132,36 @@ export default function HomeScreen() {
     setRefreshing(true);
     try { await refreshLive(true); } finally { setRefreshing(false); }
   };
+
+  // Long-press a thread to favourite it. New threads carry a temporary id that's
+  // swapped for the real one after the first turn, so block favouriting until
+  // then — a favourite keyed on the temp id would orphan.
+  const onLongPressSession = (s: Session) => {
+    if (s.id.startsWith("new_")) return;
+    const fav = isFavThread(s.id);
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title: s.title,
+        options: [fav ? "Remove from favourites" : "Add to favourites", "Cancel"],
+        cancelButtonIndex: 1,
+      },
+      (i) => { if (i === 0) toggleFavThread(s.id); },
+    );
+  };
+
+  const onLongPressRepo = (repoId: string, name: string) => {
+    const fav = isFavRepo(repoId);
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title: name,
+        options: [fav ? "Unfavourite folder" : "Favourite folder", "Cancel"],
+        cancelButtonIndex: 1,
+      },
+      (i) => { if (i === 0) toggleFavRepo(repoId); },
+    );
+  };
+
+  const newInRepo = (repoId: string) => router.push({ pathname: "/new", params: { repoId } });
 
   return (
     <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>
@@ -132,19 +191,34 @@ export default function HomeScreen() {
       <LegendList
         style={{ flex: 1 }}
         data={rows}
-        keyExtractor={(r) => (r.type === "header" ? `h:${r.repoId}` : r.session.id)}
+        keyExtractor={(r) =>
+          r.type === "favHeader"
+            ? "favh"
+            : r.type === "header"
+              ? `h:${r.repoId}`
+              : `${r.fav ? "fav:" : ""}${r.session.id}`
+        }
         renderItem={({ item }) =>
-          item.type === "header" ? (
+          item.type === "favHeader" ? (
+            <FavHeader
+              count={item.count}
+              collapsed={item.collapsed}
+              onPress={() => toggleGroup(FAV_KEY)}
+            />
+          ) : item.type === "header" ? (
             <DirHeader
               name={item.name}
               count={item.count}
               attention={item.attention}
               collapsed={item.collapsed}
+              fav={item.fav}
               onPress={() => toggleGroup(item.repoId)}
+              onAdd={() => newInRepo(item.repoId)}
+              onLongPress={() => onLongPressRepo(item.repoId, item.name)}
             />
           ) : (
             <View className="px-4 pb-2.5">
-              <SessionCard session={item.session} />
+              <SessionCard session={item.session} onLongPress={onLongPressSession} />
             </View>
           )
         }
@@ -152,6 +226,7 @@ export default function HomeScreen() {
         getItemType={(r) => r.type}
         recycleItems
         keyboardDismissMode="on-drag"
+        ListHeaderComponent={connected ? <RecentStrip /> : null}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLOR.accent} />}
         ListEmptyComponent={
           loading ? (
@@ -184,17 +259,13 @@ export default function HomeScreen() {
   );
 }
 
-/** Collapsible directory section header on the Home list. */
-function DirHeader({
-  name,
+/** Pinned "Favourites" section header on the Home list. */
+function FavHeader({
   count,
-  attention,
   collapsed,
   onPress,
 }: {
-  name: string;
   count: number;
-  attention: number;
   collapsed: boolean;
   onPress: () => void;
 }) {
@@ -204,7 +275,46 @@ function DirHeader({
       className="active:opacity-70 flex-row items-center gap-2 px-4 pb-1.5 pt-3"
     >
       <Ionicons name={collapsed ? "chevron-forward" : "chevron-down"} size={13} color={COLOR.fgFaint} />
-      <Ionicons name="folder-outline" size={13} color={COLOR.fgFaint} />
+      <Ionicons name="star" size={13} color={COLOR.accent} />
+      <Text className="flex-1 text-[13px] font-semibold text-fg-muted">Favourites</Text>
+      <Text className="text-[12px] text-fg-faint">{count}</Text>
+    </Pressable>
+  );
+}
+
+/** Collapsible directory section header on the Home list. */
+function DirHeader({
+  name,
+  count,
+  attention,
+  collapsed,
+  fav,
+  onPress,
+  onAdd,
+  onLongPress,
+}: {
+  name: string;
+  count: number;
+  attention: number;
+  collapsed: boolean;
+  fav: boolean;
+  onPress: () => void;
+  onAdd: () => void;
+  onLongPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={350}
+      className="active:opacity-70 flex-row items-center gap-2 px-4 pb-1.5 pt-3"
+    >
+      <Ionicons name={collapsed ? "chevron-forward" : "chevron-down"} size={13} color={COLOR.fgFaint} />
+      <Ionicons
+        name={fav ? "star" : "folder-outline"}
+        size={13}
+        color={fav ? COLOR.accent : COLOR.fgFaint}
+      />
       <Text numberOfLines={1} className="flex-1 text-[13px] font-semibold text-fg-muted">
         {name}
       </Text>
@@ -214,6 +324,15 @@ function DirHeader({
         </View>
       ) : null}
       <Text className="text-[12px] text-fg-faint">{count}</Text>
+      {/* Nested Pressable + its own hit target so tapping "+" starts a task in
+          this folder instead of toggling the section. */}
+      <Pressable
+        onPress={onAdd}
+        hitSlop={8}
+        className="active:opacity-60 ml-0.5 h-7 w-7 items-center justify-center"
+      >
+        <Ionicons name="add" size={17} color={COLOR.fgMuted} />
+      </Pressable>
     </Pressable>
   );
 }

@@ -63,7 +63,8 @@
           "speechRecognitionPermission": "Pounce transcribes your spoken commands to navigate and filter your tasks."
         }
       ],
-      "expo-status-bar"
+      "expo-status-bar",
+      "react-native-enriched-markdown"
     ],
     "experiments": {
       "typedRoutes": true,

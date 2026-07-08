@@ -9,17 +9,20 @@ import type { TimelineEvent } from "@litter/shared";
 import { isEmptyUserMessage, parseUserMessage } from "@litter/transcript";
 import { collapseToolResults, Timeline } from "@/components/Timeline";
 import { TimelineSkeleton } from "@/components/Skeleton";
-import { Composer, type ComposerSubmit } from "@/components/Composer";
+import { Composer, type ComposerHandle, type ComposerSubmit } from "@/components/Composer";
 import { MarkerRail, type Marker } from "@/components/MarkerRail";
 import { MarkerSheet } from "@/components/MarkerSheet";
 import { useTimeline } from "@/hooks/useTimeline";
 import {
   capsFor,
   connection$,
+  isFavThread,
   isMarked,
+  markOpened,
   markers$,
   pendingTurns$,
   sessions$,
+  toggleFavThread,
   toggleMarker,
 } from "@/state/stores";
 import { fetchMessages, interruptTurn, streamLiveMessage } from "@/services/bridge";
@@ -51,6 +54,17 @@ export default function SessionScreen() {
   // though the host was reachable; fetchMessages already degrades gracefully.
   const live = useSelector(() => !connection$.demo.get());
   const reportedCaps = useSelector(() => (session ? capsFor(session.agent) : null));
+  const fav = useSelector(() => (session ? isFavThread(session.id) : false));
+  // A freshly-created thread still carries its temporary new_* id here; favouriting
+  // it would orphan once live sync swaps in the real id, so gate the star on that.
+  const canFavourite = !!session && !session.id.startsWith("new_");
+
+  // Record that the user opened this thread — drives the home "Jump back in" strip.
+  useEffect(() => {
+    if (session?.id && !session.id.startsWith("new_")) {
+      markOpened(session.id, new Date().toISOString());
+    }
+  }, [session?.id]);
 
   const demoTl = useTimeline(id!, undefined, !live);
   const [liveEvents, setLiveEvents] = useState<TimelineEvent[]>([]);
@@ -81,6 +95,13 @@ export default function SessionScreen() {
 
   // --- markers: user messages by default, overrides for adds/removals ---
   const listRef = useRef<LegendListRef>(null);
+  const composerRef = useRef<ComposerHandle>(null);
+  // Tapping "Run" on a shell code block queues !command into the composer for
+  // review. Stable so it doesn't churn Timeline's memoized rows.
+  const onRunCommand = useCallback(
+    (cmd: string) => composerRef.current?.insert(`!${cmd.trim()}`),
+    [],
+  );
   const [markerSheet, setMarkerSheet] = useState(false);
   // Derived inside useSelector so each message's override node is tracked —
   // selecting the parent object breaks on toggles (same reference, no rerender).
@@ -234,6 +255,18 @@ export default function SessionScreen() {
             </View>
           </View>
           <AgentLogo agent={session.agent} size={16} />
+          {canFavourite ? (
+            <Pressable
+              onPress={() => toggleFavThread(session.id)}
+              className="active:opacity-60 h-9 w-9 items-center justify-center"
+            >
+              <Ionicons
+                name={fav ? "star" : "star-outline"}
+                size={19}
+                color={fav ? COLOR.accent : COLOR.fgMuted}
+              />
+            </Pressable>
+          ) : null}
           <Pressable
             onPress={openActions}
             className="active:opacity-60 h-9 w-9 items-center justify-center"
@@ -274,6 +307,7 @@ export default function SessionScreen() {
             sessionId={id!}
             listRef={listRef}
             onLongPressEvent={onLongPressEvent}
+            onRunCommand={canSteer ? onRunCommand : undefined}
           />
         )}
         <MarkerRail
@@ -300,6 +334,7 @@ export default function SessionScreen() {
           </Text>
         ) : null}
         <Composer
+          ref={composerRef}
           agent={session.agent}
           caps={caps}
           disabled={!canSteer}

@@ -8,6 +8,7 @@ import type { Session } from "@litter/shared";
 import {
   activeFilterCount,
   applyFilters,
+  favThreads$,
   filters$,
   rawSessions,
   repositories$,
@@ -33,10 +34,13 @@ export default function SearchScreen() {
   const raw = useSelector(() => rawSessions());
   const repos = useSelector(() => repositories$.get());
   const filterCount = useSelector(() => activeFilterCount());
+  const favOnly = useSelector(() => filters$.favOnly.get());
+  const favMap = useSelector(() => favThreads$.get());
 
   const results = useMemo<Session[]>(() => {
     const t = query.trim().toLowerCase();
     let list = applyFilters(raw);
+    if (favOnly) list = list.filter((s) => favMap[s.id]);
     if (t) {
       list = list.filter((s) => {
         const repo = repos[s.repoId]?.name ?? "";
@@ -50,7 +54,7 @@ export default function SearchScreen() {
       });
     }
     return [...list].sort((a, b) => rank(a) - rank(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-  }, [raw, repos, query]);
+  }, [raw, repos, query, favOnly, favMap]);
 
   const showAll = query.trim().length === 0;
 
@@ -84,7 +88,7 @@ export default function SearchScreen() {
       {filterCount ? (
         <View className="mx-4 mb-2 flex-row">
           <Pressable
-            onPress={() => filters$.set({ device: null, agent: null, needsOnly: false })}
+            onPress={() => filters$.set({ device: null, agent: null, needsOnly: false, favOnly: false })}
             className="active:opacity-70 flex-row items-center gap-1.5 rounded-full border border-accent/40 bg-accent/15 px-3 py-1.5"
           >
             <Ionicons name="funnel" size={11} color={COLOR.accent} />

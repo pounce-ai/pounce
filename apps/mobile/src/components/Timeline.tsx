@@ -11,6 +11,7 @@ import {
 } from "@litter/shared";
 import { isMarked } from "@/state/stores";
 import { cn, COLOR } from "@/ui";
+import { MessageMarkdown } from "@/components/MessageMarkdown";
 import {
   cleanAssistantText,
   isEmptyUserMessage,
@@ -43,6 +44,7 @@ export const Timeline = memo(function Timeline({
   sessionId,
   listRef,
   onLongPressEvent,
+  onRunCommand,
 }: {
   events: TimelineEvent[];
   /** Which agent produced these events — selects the body-cleaning rules. */
@@ -53,6 +55,9 @@ export const Timeline = memo(function Timeline({
   /** Imperative list handle (scrollToIndex for marker jumps). */
   listRef?: React.Ref<LegendListRef>;
   onLongPressEvent?: (ev: TimelineEvent) => void;
+  /** Queue a shell command into the composer (Run buttons on shell code blocks).
+   *  Absent for read-only threads. */
+  onRunCommand?: (command: string) => void;
 }) {
   // Pair each tool result with its call so the call row renders both as one
   // accordion; the paired result rows are dropped from the list data.
@@ -76,6 +81,7 @@ export const Timeline = memo(function Timeline({
           agent={agent}
           sessionId={sessionId}
           onLongPressEvent={onLongPressEvent}
+          onRunCommand={onRunCommand}
           pairedResult={
             item.type === "tool_call" ? resultByCallId.get(item.call.id || item.id) : undefined
           }
@@ -100,12 +106,14 @@ const Row = memo(function Row({
   agent,
   sessionId,
   onLongPressEvent,
+  onRunCommand,
   pairedResult,
 }: {
   event: TimelineEvent;
   agent?: string;
   sessionId?: string;
   onLongPressEvent?: (ev: TimelineEvent) => void;
+  onRunCommand?: (command: string) => void;
   /** For tool_call rows: the matching tool_result, rendered inside the accordion. */
   pairedResult?: ToolResultEvent;
 }) {
@@ -127,6 +135,7 @@ const Row = memo(function Row({
             text={cleanAssistantText(event.text, agent)}
             streaming={event.streaming}
             marked={marked}
+            onRun={onRunCommand}
           />
         </Pressable>
       );
@@ -215,6 +224,7 @@ function Bubble({
   text,
   streaming,
   marked,
+  onRun,
 }: {
   role: "user" | "assistant";
   text: string;
@@ -222,6 +232,8 @@ function Bubble({
   /** Shows a bookmark beside assistant bubbles the user marked. User bubbles
    *  are marked by default, so decorating them all would be noise. */
   marked?: boolean;
+  /** Enables shell "Run" cards on assistant turns (queues !cmd to composer). */
+  onRun?: (command: string) => void;
 }) {
   const user = role === "user";
   return (
@@ -232,10 +244,10 @@ function Bubble({
           user ? "bg-accent" : "border border-border bg-surface",
         )}
       >
-        <Text className={cn("text-[15px] leading-[21px]", user ? "text-white" : "text-fg")}>
-          {text}
-          {streaming ? <Text className="text-accent"> ▋</Text> : null}
-        </Text>
+        {/* Both roles render as rich markdown (native md4c) — the user composes
+            markdown too. Streaming turns repair partial syntax (remend) and use
+            the native streaming animation, so no manual caret. */}
+        <MessageMarkdown text={text} role={role} streaming={streaming} onRun={onRun} />
       </View>
       {marked && !user ? <Ionicons name="bookmark" size={10} color={COLOR.accent} /> : null}
     </View>

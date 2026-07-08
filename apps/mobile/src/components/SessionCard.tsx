@@ -3,12 +3,20 @@ import { useRouter } from "expo-router";
 import type { Session } from "@litter/shared";
 import { ActivityDot, ACTIVITY_LABEL, AgentChip, cn, timeAgo } from "@/ui";
 
-export function SessionCard({ session }: { session: Session }) {
+export function SessionCard({
+  session,
+  onLongPress,
+}: {
+  session: Session;
+  onLongPress?: (session: Session) => void;
+}) {
   const router = useRouter();
   const needs = session.needsAttention;
   return (
     <Pressable
       onPress={() => router.push(`/session/${session.id}`)}
+      onLongPress={onLongPress ? () => onLongPress(session) : undefined}
+      delayLongPress={350}
       className={cn(
         "active:bg-surface-hover rounded-2xl border border-border bg-surface p-3.5",
         needs && "border-warning/40",

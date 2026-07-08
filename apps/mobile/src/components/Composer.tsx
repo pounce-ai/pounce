@@ -1,5 +1,10 @@
-import { useEffect, useState } from "react";
-import { ActionSheetIOS, Alert, Image, Pressable, Text, TextInput, View } from "react-native";
+import { type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { ActionSheetIOS, Alert, Image, Pressable, Text, View } from "react-native";
+import {
+  EnrichedMarkdownTextInput,
+  type EnrichedMarkdownTextInputInstance,
+  type MarkdownTextInputStyle,
+} from "react-native-enriched-markdown";
 import { Ionicons } from "@expo/vector-icons";
 import type { AgentCapabilities, PermissionMode, RunImage } from "@litter/shared";
 import {
@@ -13,11 +18,25 @@ import { cn, COLOR } from "@/ui";
 
 const MENTION_RE = /((?:^|\s))@([^\s@]*)$/;
 
+/** Inline formatting colours for the rich input (base text color/size come from
+ *  the `style` prop). */
+const INPUT_MD_STYLE: MarkdownTextInputStyle = {
+  strong: { color: COLOR.fg },
+  em: { color: COLOR.fg },
+  link: { color: COLOR.accent, underline: false },
+};
+
 export interface ComposerSubmit {
   text: string;
   images: RunImage[];
   permissionMode?: PermissionMode;
   reasoningEffort?: ReasoningEffort;
+}
+
+/** Imperative handle so a parent (e.g. a "Run" button in the transcript) can
+ *  drop text into the composer for the user to review before sending. */
+export interface ComposerHandle {
+  insert: (text: string) => void;
 }
 
 interface Attachment {
@@ -40,6 +59,7 @@ export function Composer({
   hostId,
   cwd,
   onSubmit,
+  ref,
 }: {
   agent: string;
   caps: AgentCapabilities;
@@ -49,8 +69,25 @@ export function Composer({
   hostId?: string;
   cwd?: string | null;
   onSubmit: (s: ComposerSubmit) => Promise<void> | void;
+  ref?: Ref<ComposerHandle>;
 }) {
+  // The rich input is uncontrolled: `draft` mirrors its plain text (drives the
+  // slash/mention menus + canSend), `markdownRef` mirrors the markdown we send,
+  // and we push text back through the imperative ref (not a `value` prop).
   const [draft, setDraft] = useState("");
+  const inputRef = useRef<EnrichedMarkdownTextInputInstance>(null);
+  const markdownRef = useRef("");
+  const setInput = (next: string) => {
+    markdownRef.current = next;
+    setDraft(next);
+    inputRef.current?.setValue(next);
+  };
+  useImperativeHandle(ref, () => ({
+    insert: (t: string) => {
+      setInput(t);
+      inputRef.current?.focus();
+    },
+  }));
   const [images, setImages] = useState<Attachment[]>([]);
   const [optionsOpen, setOptionsOpen] = useState(false);
 
@@ -89,7 +126,7 @@ export function Composer({
   const slashMatches = slashQuery
     ? SLASH_COMMANDS.filter((c) => c.cmd.toLowerCase().startsWith(slashQuery))
     : [];
-  const applySlash = (cmd: string) => setDraft(`${cmd} `);
+  const applySlash = (cmd: string) => setInput(`${cmd} `);
 
   // Inline @-mention — file/folder autocomplete from the host's cwd. Active
   // when an "@token" is being typed at the end of the input (slash takes
@@ -122,7 +159,7 @@ export function Composer({
   }, [mentionQuery, hostId, cwd]);
 
   const applyMention = (path: string) =>
-    setDraft((d) => d.replace(MENTION_RE, (_m, lead: string) => `${lead}@${path} `));
+    setInput(draft.replace(MENTION_RE, (_m, lead: string) => `${lead}@${path} `));
 
   const pickImage = async () => {
     try {
@@ -152,20 +189,21 @@ export function Composer({
 
   const submit = async () => {
     if (!canSend) return;
-    const snapText = draft;
+    // Send the markdown the user composed, not the flattened plain text.
+    const snapMarkdown = markdownRef.current;
     const snapImages = images;
-    setDraft("");
+    setInput("");
     setImages([]);
     try {
       await onSubmit({
-        text: snapText.trim(),
+        text: snapMarkdown.trim(),
         images: snapImages.map((i) => ({ data: i.data, mediaType: i.mediaType })),
         permissionMode: showMode ? mode : undefined,
         reasoningEffort: showEffort ? effort : undefined,
       });
     } catch {
       // restore on failure so the user doesn't lose their message
-      setDraft(snapText);
+      setInput(snapMarkdown);
       setImages(snapImages);
     }
   };
@@ -277,17 +315,30 @@ export function Composer({
           <IconButton icon={optionsOpen ? "close" : "add"} onPress={() => setOptionsOpen((o) => !o)} />
         ) : null}
 
-        <TextInput
-          value={draft}
+        <EnrichedMarkdownTextInput
+          ref={inputRef}
           onChangeText={setDraft}
+          onChangeMarkdown={(md) => {
+            markdownRef.current = md;
+          }}
           editable={!disabled && !sending}
           placeholder={disabled ? "Read-only" : placeholder}
           placeholderTextColor="#62626D"
           multiline
-          className={cn(
-            "max-h-[120px] min-h-[40px] flex-1 rounded-2xl bg-surface-alt px-3 pt-2 text-[15px] text-fg",
-            disabled && "opacity-50",
-          )}
+          markdownStyle={INPUT_MD_STYLE}
+          style={{
+            flex: 1,
+            minHeight: 40,
+            maxHeight: 120,
+            backgroundColor: "#1b1b22",
+            borderRadius: 16,
+            paddingHorizontal: 12,
+            paddingTop: 8,
+            paddingBottom: 8,
+            fontSize: 15,
+            color: COLOR.fg,
+            opacity: disabled ? 0.5 : 1,
+          }}
         />
 
         <Pressable

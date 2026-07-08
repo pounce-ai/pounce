@@ -44,17 +44,63 @@ export const filters$ = observable<{
   device: string | null;
   agent: string | null;
   needsOnly: boolean;
+  favOnly: boolean;
 }>({
   device: null,
   agent: null,
   needsOnly: true, // default view = what needs you
+  favOnly: false,
 });
 
-/** Count of *narrowing* filters (device/agent) for the bottom bar badge.
- *  needsOnly is the default view, so it doesn't badge. */
+/** Count of *narrowing* filters (device/agent/favourites) for the bottom bar
+ *  badge. needsOnly is the default view, so it doesn't badge. */
 export function activeFilterCount(): number {
   const f = filters$.get();
-  return (f.device ? 1 : 0) + (f.agent ? 1 : 0);
+  return (f.device ? 1 : 0) + (f.agent ? 1 : 0) + (f.favOnly ? 1 : 0);
+}
+
+/** Favourited thread ids (sessionId → true). Sparse, on-device only — the bridge
+ *  has no per-user store, so favourites don't sync across phones. */
+export const favThreads$ = observable<Record<string, true>>({});
+/** Favourited folder ids (repoId → true). */
+export const favRepos$ = observable<Record<string, true>>({});
+
+/** Last time the user *opened* each thread (sessionId → ISO). Drives the home
+ *  "Jump back in" strip. Distinct from Session.updatedAt, which tracks agent
+ *  activity, not user visits. */
+export const recentOpens$ = observable<Record<string, string>>({});
+
+const RECENT_OPENS_CAP = 40;
+
+export const isFavThread = (id: string): boolean => !!favThreads$[id].get();
+export const isFavRepo = (id: string): boolean => !!favRepos$[id].get();
+
+export function toggleFavThread(id: string): void {
+  if (favThreads$[id].get()) favThreads$[id].delete();
+  else favThreads$[id].set(true);
+}
+
+export function toggleFavRepo(id: string): void {
+  if (favRepos$[id].get()) favRepos$[id].delete();
+  else favRepos$[id].set(true);
+}
+
+/** Record that the user opened a thread. Called from the session screen on mount.
+ *  Trims the map to the most recent RECENT_OPENS_CAP so it can't grow unbounded. */
+export function markOpened(id: string, atIso: string): void {
+  const next = { ...recentOpens$.get(), [id]: atIso };
+  const entries = Object.entries(next).sort((a, b) => Date.parse(b[1]) - Date.parse(a[1]));
+  recentOpens$.set(Object.fromEntries(entries.slice(0, RECENT_OPENS_CAP)));
+}
+
+/** Threads the user opened most recently, newest first, that still exist. */
+export function recentSessions(): Session[] {
+  const opens = recentOpens$.get();
+  const sessions = sessions$.get();
+  return Object.keys(opens)
+    .map((id) => sessions[id])
+    .filter((s): s is Session => !!s)
+    .sort((a, b) => Date.parse(opens[b.id]) - Date.parse(opens[a.id]));
 }
 
 /** Marker overrides: sessionId → messageId → explicit marked state. Absent =
@@ -139,6 +185,9 @@ persist(repositories$, "repositories");
 persist(sessions$, "sessions");
 persist(syncLog$, "syncLog");
 persist(markers$, "markers");
+persist(favThreads$, "favThreads");
+persist(favRepos$, "favRepos");
+persist(recentOpens$, "recentOpens");
 persist(user$, "user");
 
 // --- selectors (respect active device/agent filters) ---

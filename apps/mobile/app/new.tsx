@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import type { AgentId } from "@litter/shared";
@@ -31,6 +31,7 @@ function repoIdForCwd(cwd: string | null): string {
 export default function NewTaskScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { repoId } = useLocalSearchParams<{ repoId?: string }>();
   const devices = useSelector(() => allDevices());
   const repos = useSelector(() => reposByActivity());
 
@@ -51,6 +52,13 @@ export default function NewTaskScreen() {
     if (s?.hostId) setHostId(s.hostId);
   };
   const activeRepoId = repoIdForCwd(cwd);
+
+  // Seeded from a folder's "+" on Home: adopt that repo's cwd + device on mount
+  // so the user lands straight on the composer for that folder.
+  useEffect(() => {
+    if (repoId) pickRepo(repoId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repoId]);
 
   const launch = (s: ComposerSubmit) => {
     const id = `new_${Date.now()}`;
