@@ -57,6 +57,89 @@ export function activeFilterCount(): number {
   return (f.device ? 1 : 0) + (f.agent ? 1 : 0);
 }
 
+/**
+ * Cached thread history, keyed by session/thread id. Persisted to MMKV so
+ * reopening a thread paints instantly from the last-seen transcript while the
+ * network revalidates in the background — instead of a blank 4s skeleton on
+ * every open. `at` powers LRU pruning so the cache can't grow unbounded.
+ */
+export interface CachedTimeline {
+  events: TimelineEvent[];
+  at: number;
+}
+export const timelines$ = observable<Record<string, CachedTimeline>>({});
+
+/** Keep the transcript cache to the N most-recently-opened threads. */
+const TIMELINE_CAP = 40;
+
+/** Read a thread's cached transcript (empty if never fetched). */
+export function getCachedTimeline(id: string): TimelineEvent[] {
+  return timelines$[id].events.peek() ?? [];
+}
+
+/** Store a thread's transcript and evict the least-recently-opened over the cap. */
+export function cacheTimeline(id: string, events: TimelineEvent[]): void {
+  if (!events.length) return; // never overwrite a real transcript with nothing
+  timelines$[id].set({ events, at: Date.now() });
+  const all = timelines$.peek();
+  const ids = Object.keys(all);
+  if (ids.length <= TIMELINE_CAP) return;
+  const stale = ids
+    .sort((a, b) => (all[a]?.at ?? 0) - (all[b]?.at ?? 0))
+    .slice(0, ids.length - TIMELINE_CAP);
+  for (const sid of stale) timelines$[sid].delete();
+}
+
+/**
+ * Per-thread open stats, the raw signal for predicting what the user opens next.
+ * `count` = lifetime opens, `lastAt` = last open (ms). Persisted so the ranking
+ * survives restarts. Feeds warmCandidatesByHost → the bridge's warm set.
+ */
+export const threadStats$ = observable<Record<string, { count: number; lastAt: number }>>({});
+
+/** Record that the user opened a thread (called when its screen mounts). */
+export function recordThreadOpen(id: string): void {
+  const cur = threadStats$[id].peek();
+  threadStats$[id].set({ count: (cur?.count ?? 0) + 1, lastAt: Date.now() });
+}
+
+const HINTS_PER_HOST = 6;
+const RECENCY_HORIZON_MS = 6 * 60 * 60 * 1000; // opens fade over ~6h
+
+/** Frecency: frequent + recent both raise the score; recency dominates. */
+function frecency(stat: { count: number; lastAt: number } | undefined, now: number): number {
+  if (!stat) return 0;
+  const recency = Math.max(0, 1 - (now - stat.lastAt) / RECENCY_HORIZON_MS);
+  return Math.log2(stat.count + 1) + recency * 3;
+}
+
+/**
+ * The threads this user is most likely to open next, grouped by host, best
+ * first. Combines open frecency with a boost for threads that need attention
+ * (agent just finished/awaiting you) or are actively running — both strong
+ * "you'll look at this" signals even without prior opens. Threads with no
+ * signal are omitted, leaving the bridge's recency fallback to cover them.
+ */
+export function warmCandidatesByHost(now = Date.now()): Record<string, string[]> {
+  const stats = threadStats$.get();
+  const scored = Object.values(sessions$.get())
+    .filter((s) => s.isLive)
+    .map((s) => {
+      let score = frecency(stats[s.id], now);
+      if (s.needsAttention) score += 5;
+      else if (s.activity === "running" || s.activity === "streaming") score += 2;
+      return { s, score };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score);
+  const byHost: Record<string, string[]> = {};
+  for (const { s } of scored) {
+    const list = (byHost[s.hostId] ??= []);
+    if (list.length < HINTS_PER_HOST) list.push(s.id);
+  }
+  return byHost;
+}
+
 /** Marker overrides: sessionId → messageId → explicit marked state. Absent =
  *  default (user messages marked, everything else unmarked). Keyed by the
  *  route/session id, not conversationId, which can change across refetches. */
@@ -170,6 +253,8 @@ persist(syncLog$, "syncLog");
 persist(markers$, "markers");
 persist(user$, "user");
 persist(deviceOverrides$, "deviceOverrides");
+persist(timelines$, "timelines");
+persist(threadStats$, "threadStats");
 
 // --- selectors (respect active device/agent filters) ---
 

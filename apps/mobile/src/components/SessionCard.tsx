@@ -1,13 +1,19 @@
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import type { Session } from "@litter/shared";
+import { prefetchTimeline } from "@/services/bridge";
 import { ActivityDot, ACTIVITY_LABEL, AgentChip, cn, timeAgo } from "@/ui";
 
 export function SessionCard({ session }: { session: Session }) {
   const router = useRouter();
   const needs = session.needsAttention;
+  // Kick the history fetch the instant the finger lands — it runs during the
+  // press + navigation animation, so the thread screen usually opens to a warm
+  // cache instead of a cold spinner.
+  const warm = () => prefetchTimeline(session.hostId, session.agent, session.id);
   return (
     <Pressable
+      onPressIn={warm}
       onPress={() => router.push(`/session/${session.id}`)}
       className={cn(
         "active:bg-surface-hover rounded-2xl border border-border bg-surface p-3.5",

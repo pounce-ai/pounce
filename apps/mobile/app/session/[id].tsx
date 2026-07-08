@@ -14,11 +14,14 @@ import { MarkerRail, type Marker } from "@/components/MarkerRail";
 import { MarkerSheet } from "@/components/MarkerSheet";
 import { useTimeline } from "@/hooks/useTimeline";
 import {
+  cacheTimeline,
   capsFor,
   connection$,
+  getCachedTimeline,
   isMarked,
   markers$,
   pendingTurns$,
+  recordThreadOpen,
   sessions$,
   toggleMarker,
 } from "@/state/stores";
@@ -53,7 +56,9 @@ export default function SessionScreen() {
   const reportedCaps = useSelector(() => (session ? capsFor(session.agent) : null));
 
   const demoTl = useTimeline(id!, undefined, !live);
-  const [liveEvents, setLiveEvents] = useState<TimelineEvent[]>([]);
+  // Seed from the persisted transcript so a re-open paints instantly (no blank
+  // skeleton) while the live fetch revalidates in the background.
+  const [liveEvents, setLiveEvents] = useState<TimelineEvent[]>(() => getCachedTimeline(id!));
   const [loading, setLoading] = useState(false);
   // A live fetch can fail (host asleep, off Wi-Fi, bridge not running). We track
   // it so an unreachable host shows "couldn't load · retry" instead of masking
@@ -62,17 +67,28 @@ export default function SessionScreen() {
   const [reload, setReload] = useState(0);
   const retry = useCallback(() => setReload((n) => n + 1), []);
 
+  // Feed the usage signal that ranks which threads the bridge keeps warm.
+  useEffect(() => { if (id) recordThreadOpen(id); }, [id]);
+
   useEffect(() => {
     if (!live || !session?.id) return;
     let cancelled = false;
+    // Repaint from cache in case the id changed within this mount.
+    const cached = getCachedTimeline(id!);
+    if (cached.length) setLiveEvents(cached);
     setLoading(true);
     setFailed(false);
     fetchMessages(session.hostId, session.agent, session.id)
-      .then((ev) => { if (!cancelled) { setLiveEvents(ev); setFailed(false); } })
+      .then((ev) => {
+        if (cancelled) return;
+        setLiveEvents(ev);
+        cacheTimeline(id!, ev); // persist for the next instant open
+        setFailed(false);
+      })
       .catch(() => { if (!cancelled) setFailed(true); })
       .finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
-  }, [live, session?.id, session?.agent, session?.hostId, reload]);
+  }, [live, session?.id, session?.agent, session?.hostId, reload, id]);
 
   const rawEvents = live ? liveEvents : demoTl.events;
   // Timeline collapses paired tool results into their call's accordion, so
@@ -142,7 +158,11 @@ export default function SessionScreen() {
           (ev) => setLiveEvents((e) => mergeById(e, [ev])),
           { images: s.images, permissionMode: s.permissionMode, reasoningEffort: s.reasoningEffort },
         );
-        if (threadId) setLiveEvents(await fetchMessages(session.hostId, session.agent, threadId));
+        if (threadId) {
+          const fresh = await fetchMessages(session.hostId, session.agent, threadId);
+          setLiveEvents(fresh);
+          cacheTimeline(id!, fresh);
+        }
       } else {
         const { getRuntime } = await import("@/services/runtime");
         const rt = await getRuntime();

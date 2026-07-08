@@ -20,7 +20,7 @@ import type {
   TimelineEvent,
 } from "@litter/shared";
 import { parseUserMessage } from "@litter/transcript";
-import { agentCaps$, connection$, hosts$, recordSync, sessions$, setWorkspace } from "../state/stores";
+import { agentCaps$, cacheTimeline, connection$, hosts$, recordSync, sessions$, setWorkspace, warmCandidatesByHost } from "../state/stores";
 
 const BRIDGE_KEY = "pounce.bridge";
 
@@ -245,7 +245,36 @@ export async function syncLiveData(
   // Log what this sync actually brought in (per-repo) before we swap the store.
   recordSync(sessions$.get(), sessions, repos, now);
   setWorkspace(repos, sessions, devices);
+  // Refresh each device's warm set from the just-updated sessions (ranking picks
+  // up new opens + attention changes). Fire-and-forget — never block the sync.
+  void pushWarmHints();
   return { repos: Object.keys(repos).length, sessions: Object.keys(sessions).length, devices: Object.keys(devices).length };
+}
+
+/**
+ * Tell each device which threads to keep warm, based on this user's actual
+ * open history (frecency) + attention signals. The bridge pre-warms these ahead
+ * of a tap, falling back to its own recency heuristic when we send nothing. Sent
+ * per host so a device only ever gets ids it owns. Best-effort.
+ */
+export async function pushWarmHints(): Promise<void> {
+  const byHost = warmCandidatesByHost();
+  const configs = await listDeviceConfigs();
+  await Promise.all(
+    configs.map(async (cfg) => {
+      const threads = byHost[cfg.id];
+      if (!threads?.length) return; // nothing predicted → let the bridge fall back
+      try {
+        await fetch(`${cfg.url}/v1/warm`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+          body: JSON.stringify({ threads }),
+        });
+      } catch {
+        /* device offline — next sync retries */
+      }
+    }),
+  );
 }
 
 /** Fetch a session's real message history from its device. */
@@ -261,6 +290,25 @@ export async function fetchMessages(
     `/v1/messages?agent=${encodeURIComponent(agent)}&thread=${encodeURIComponent(threadId)}`,
   );
   return events;
+}
+
+// Coalesce concurrent/rapid prefetches of the same thread (e.g. press-in fires
+// repeatedly) so a scroll or double-tap doesn't launch duplicate cold probes.
+const prefetchInFlight = new Set<string>();
+
+/**
+ * Warm a thread's history into the persisted client cache ahead of a tap, so
+ * opening it paints instantly. Fire-and-forget — failures are ignored (the
+ * screen still fetches on mount). The bridge caches server-side too, so a
+ * prefetch that loses the race just primes that cache for the real open.
+ */
+export function prefetchTimeline(hostId: string, agent: string, threadId: string): void {
+  if (prefetchInFlight.has(threadId)) return;
+  prefetchInFlight.add(threadId);
+  fetchMessages(hostId, agent, threadId)
+    .then((ev) => { if (ev.length) cacheTimeline(threadId, ev); })
+    .catch(() => {})
+    .finally(() => prefetchInFlight.delete(threadId));
 }
 
 /** Run a one-shot shell command in a session's cwd on its host. */
