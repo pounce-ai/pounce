@@ -19,14 +19,19 @@ export function cn(...parts: Array<string | false | null | undefined>): string {
 }
 
 /** Compact relative timestamp: 42s · 7m · 3h · 2d. */
-export function timeAgo(iso: string): string {
-  const s = Math.max(1, Math.floor((Date.now() - Date.parse(iso)) / 1000));
+/** Compact duration bucket: 45s / 12m / 3h / 6d (floored). */
+export function fmtDuration(secs: number): string {
+  const s = Math.max(0, Math.floor(secs));
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m`;
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h`;
   return `${Math.floor(h / 24)}d`;
+}
+
+export function timeAgo(iso: string): string {
+  return fmtDuration(Math.max(1, (Date.now() - Date.parse(iso)) / 1000));
 }
 
 const ACTIVITY_DOT: Record<ActivityStatus, string> = {

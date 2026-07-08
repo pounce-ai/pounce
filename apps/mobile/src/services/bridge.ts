@@ -408,6 +408,14 @@ export interface GitChanges {
   diff: string;
 }
 
+/** Summed additions/deletions across changed files. */
+export function diffTotals(files: GitFile[]): { add: number; del: number } {
+  return files.reduce(
+    (t, f) => ({ add: t.add + f.additions, del: t.del + f.deletions }),
+    { add: 0, del: 0 },
+  );
+}
+
 /** Uncommitted changes in a session's worktree. */
 export async function fetchGitChanges(hostId: string, cwd: string): Promise<GitChanges> {
   const cfg = await deviceForHost(hostId);

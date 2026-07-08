@@ -519,19 +519,6 @@ function ControlPill({
   );
 }
 
-function IconButton({
-  icon,
-  onPress,
-}: {
-  icon: React.ComponentProps<typeof Ionicons>["name"];
-  onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress} className="active:opacity-60 h-10 w-9 items-center justify-center">
-      <Ionicons name={icon} size={22} color={COLOR.fgMuted} />
-    </Pressable>
-  );
-}
 
 /** Mic toggle for dictation. Idle: an outline mic. Listening: a pulsing red dot
  *  with a filled mic — unmistakable that the mic is live and how to stop it. */

@@ -1,4 +1,4 @@
-import { Component, type ReactNode } from "react";
+import { Component, memo, type ReactNode, useMemo } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -98,10 +98,12 @@ export function MessageMarkdown({
 }) {
   // User turns and live streaming (incomplete fences) stay on the native
   // markdown path; settled assistant turns get syntax-highlighted code blocks.
-  if (role !== "assistant" || streaming) {
+  // Memoized so a row re-render (recycling, marker toggle) doesn't re-split.
+  const highlight = role === "assistant" && !streaming;
+  const segments = useMemo(() => (highlight ? splitCodeBlocks(text) : null), [highlight, text]);
+  if (!highlight || !segments) {
     return <MarkdownBody text={text} role={role} streaming={streaming} />;
   }
-  const segments = splitCodeBlocks(text);
   if (segments.length === 1 && segments[0].type === "md") {
     return <MarkdownBody text={text} role="assistant" />;
   }
@@ -156,7 +158,7 @@ const PRISM_LANG: Record<string, string> = {
  * A fenced code block: a dark card with a language header (and a "Run" action for
  * shell blocks), Prism-highlighted and horizontally scrollable for long lines.
  */
-function CodeBlock({ lang, code, onRun }: { lang: string; code: string; onRun?: (c: string) => void }) {
+const CodeBlock = memo(function CodeBlock({ lang, code, onRun }: { lang: string; code: string; onRun?: (c: string) => void }) {
   const prismLang = PRISM_LANG[lang] ?? lang;
   return (
     <View className="overflow-hidden rounded-xl border border-border bg-[#0d0d12]">
@@ -203,7 +205,7 @@ function CodeBlock({ lang, code, onRun }: { lang: string; code: string; onRun?: 
       </ScrollView>
     </View>
   );
-}
+});
 
 class MarkdownErrorBoundary extends Component<
   { text: string; role: "user" | "assistant"; children: ReactNode },

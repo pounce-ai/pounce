@@ -118,7 +118,7 @@ const Row = memo(function Row({
   pairedResult?: ToolResultEvent;
 }) {
   // Unconditional hook — recycled rows must keep a stable hook order.
-  const marked = useSelector(() => (sessionId ? isMarked(sessionId, event) : false));
+  const marked = useSelector(() => (sessionId ? isMarked(sessionId, event, agent) : false));
   const onLongPress = onLongPressEvent ? () => onLongPressEvent(event) : undefined;
   switch (event.type) {
     case "user_message":
@@ -130,9 +130,9 @@ const Row = memo(function Row({
     case "assistant_message":
       return (
         <Pressable onLongPress={onLongPress} delayLongPress={350}>
-          <Bubble
-            role="assistant"
-            text={cleanAssistantText(event.text, agent)}
+          <AssistantBubble
+            text={event.text}
+            agent={agent}
             streaming={event.streaming}
             marked={marked}
             onRun={onRunCommand}
@@ -170,8 +170,27 @@ const Row = memo(function Row({
  * first, then render whichever pieces survive (command chip, output note, and/or
  * a prose bubble). Empty envelopes (lone caveats/reminders) render nothing.
  */
+/** Assistant turn — memoizes the (regex-heavy) body cleaning so a row re-render
+ *  (recycling / marker toggle) doesn't re-clean unchanged text. */
+function AssistantBubble({
+  text,
+  agent,
+  streaming,
+  marked,
+  onRun,
+}: {
+  text: string;
+  agent?: string;
+  streaming?: boolean;
+  marked?: boolean;
+  onRun?: (command: string) => void;
+}) {
+  const clean = useMemo(() => cleanAssistantText(text, agent), [text, agent]);
+  return <Bubble role="assistant" text={clean} streaming={streaming} marked={marked} onRun={onRun} />;
+}
+
 function UserRow({ text, agent }: { text: string; agent?: string }) {
-  const p = parseUserMessage(text, agent);
+  const p = useMemo(() => parseUserMessage(text, agent), [text, agent]);
   if (isEmptyUserMessage(p)) return null;
   return (
     <View className="gap-1.5">

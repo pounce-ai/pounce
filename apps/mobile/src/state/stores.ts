@@ -14,6 +14,7 @@ import type {
   UserProfile,
 } from "@litter/shared";
 import type { ModelInfo } from "../services/bridge";
+import { parseUserMessage } from "@litter/transcript";
 import { persist } from "../services/persistence";
 
 export type ConnectionStatus =
@@ -78,6 +79,24 @@ export function toggleRepoIgnore(repoId: string): void {
 export function activeFilterCount(): number {
   const f = filters$.get();
   return (f.device ? 1 : 0) + (f.agent ? 1 : 0) + (f.repos.length ? 1 : 0) + (f.favOnly ? 1 : 0);
+}
+
+/** Whether any filter deviates from the default view (drives "Clear all"). */
+export function hasActiveFilter(): boolean {
+  const f = filters$.get();
+  return !!(f.agent || f.device || f.repos.length || f.needsOnly || f.favOnly);
+}
+
+/** A session that wants the user's attention (failed / awaiting input). */
+export const needsYou = (s: Session): boolean =>
+  s.needsAttention || s.activity === "failed" || s.activity === "awaiting_input";
+
+/** Sort rank for a session list: attention → active → live → done. */
+export function rankSession(s: Session): number {
+  if (needsYou(s)) return 0;
+  if (s.activity === "running" || s.activity === "streaming") return 1;
+  if (s.isLive) return 2;
+  return 3;
 }
 
 /** Favourited thread ids (sessionId → true). Sparse, on-device only — the bridge
@@ -149,16 +168,22 @@ export function recentSessions(): Session[] {
  *  route/session id, not conversationId, which can change across refetches. */
 export const markers$ = observable<Record<string, Record<string, boolean>>>({});
 
-/** Effective marker state for a message — explicit override or the default. */
-export function isMarked(sessionId: string, ev: TimelineEvent): boolean {
-  return markers$[sessionId][ev.id].get() ?? ev.type === "user_message";
+/** A message is marked by default only if it carries prose — a plain message, or
+ *  a command with an accompanying message. A bare slash command (/exit, /clear)
+ *  has no text and is never auto-marked. Single source for every marker surface. */
+export function defaultMarked(ev: TimelineEvent, agent?: string): boolean {
+  return ev.type === "user_message" && parseUserMessage(ev.text, agent).text.trim().length > 0;
 }
 
-export function toggleMarker(sessionId: string, ev: TimelineEvent): void {
-  const next = !isMarked(sessionId, ev);
-  const def = ev.type === "user_message";
+/** Effective marker state for a message — explicit override or the default. */
+export function isMarked(sessionId: string, ev: TimelineEvent, agent?: string): boolean {
+  return markers$[sessionId][ev.id].get() ?? defaultMarked(ev, agent);
+}
+
+export function toggleMarker(sessionId: string, ev: TimelineEvent, agent?: string): void {
+  const next = !isMarked(sessionId, ev, agent);
   // Store only deviations from the default so the map stays sparse.
-  if (next === def) markers$[sessionId][ev.id].delete();
+  if (next === defaultMarked(ev, agent)) markers$[sessionId][ev.id].delete();
   else markers$[sessionId][ev.id].set(next);
 }
 
@@ -268,22 +293,27 @@ persist(deviceOverrides$, "deviceOverrides");
 // --- selectors (respect active device/agent filters) ---
 
 /** Dotfolders (e.g. .deepsec) are treated as hidden — never surfaced anywhere. */
-function isHiddenRepo(repoId: string): boolean {
-  return (repositories$.get()[repoId]?.name || "").startsWith(".");
-}
+const isDotName = (name: string): boolean => name.startsWith(".");
 
-function passesFilter(s: Session): boolean {
+/** Build the active session predicate once (reads each observable a single time),
+ *  so a full-list filter pass doesn't re-materialize the filter/ignore/repo trees
+ *  per session. Reads happen in the caller's tracking scope, so it stays reactive. */
+function makeSessionFilter(): (s: Session) => boolean {
   const f = filters$.get();
-  // Permanently-ignored folders — and hidden dotfolders — are never shown.
-  if (ignoredRepos$.get()[s.repoId] || isHiddenRepo(s.repoId)) return false;
-  if (f.device && s.hostId !== f.device) return false;
-  if (f.agent && s.agent !== f.agent) return false;
-  if (f.repos.length && !f.repos.includes(s.repoId)) return false;
-  return true;
+  const ignored = ignoredRepos$.get();
+  const repos = repositories$.get();
+  return (s) => {
+    // Permanently-ignored folders — and hidden dotfolders — are never shown.
+    if (ignored[s.repoId] || isDotName(repos[s.repoId]?.name || "")) return false;
+    if (f.device && s.hostId !== f.device) return false;
+    if (f.agent && s.agent !== f.agent) return false;
+    if (f.repos.length && !f.repos.includes(s.repoId)) return false;
+    return true;
+  };
 }
 
 export function allSessions(): Session[] {
-  return Object.values(sessions$.get()).filter(passesFilter);
+  return Object.values(sessions$.get()).filter(makeSessionFilter());
 }
 
 export function sessionsForRepo(repoId: string): Session[] {
@@ -336,7 +366,7 @@ export function rawSessions(): Session[] {
 
 /** Apply the active device/agent filters to an arbitrary session list. */
 export function applyFilters(list: Session[]): Session[] {
-  return list.filter(passesFilter);
+  return list.filter(makeSessionFilter());
 }
 
 // --- smart (dependent) filter options ---
@@ -380,7 +410,7 @@ export function reposByActivity(): Repository[] {
     ? new Set(allSessions().map((s) => s.repoId))
     : null;
   return Object.values(repositories$.get())
-    .filter((r) => !r.name.startsWith(".") && (!withSessions || withSessions.has(r.id)))
+    .filter((r) => !isDotName(r.name) && (!withSessions || withSessions.has(r.id)))
     .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt));
 }
 

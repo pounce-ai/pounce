@@ -7,6 +7,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import {
+  diffTotals,
   fetchGitChanges,
   gitCommit,
   gitPush,
@@ -60,10 +61,7 @@ export default function ChangesScreen() {
   }, [load]);
 
   const lines = useMemo(() => (changes?.diff ? changes.diff.split("\n") : []), [changes?.diff]);
-  const totals = useMemo(() => {
-    const f = changes?.files ?? [];
-    return { add: f.reduce((s, x) => s + x.additions, 0), del: f.reduce((s, x) => s + x.deletions, 0) };
-  }, [changes?.files]);
+  const totals = useMemo(() => diffTotals(changes?.files ?? []), [changes?.files]);
 
   const commit = async () => {
     if (!session?.cwd || !message.trim()) return;

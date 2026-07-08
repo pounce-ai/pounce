@@ -10,6 +10,8 @@ import {
   activeFilterCount,
   applyFilters,
   connection$,
+  needsYou,
+  rankSession,
   deviceEmoji,
   deviceLabel,
   deviceOverrides$,
@@ -34,9 +36,6 @@ import { refreshLive } from "@/services/runtime";
 /** Collapse key for the Favourites pseudo-group (shares the collapsed$ map). */
 const FAV_KEY = "__fav__";
 
-const needsYou = (s: Session) =>
-  s.needsAttention || s.activity === "failed" || s.activity === "awaiting_input";
-
 /** A pinned favourites header, a directory header, or one session beneath either.
  *  When every session in a directory lives on one device, the header carries that
  *  device's name/emoji so it can show the device glyph instead of a generic folder. */
@@ -55,13 +54,6 @@ type Row =
     }
   | { type: "session"; session: Session; fav?: boolean };
 
-/** Sort order: needs-you → running → other live → archived; newest within each. */
-function rank(s: Session): number {
-  if (needsYou(s)) return 0;
-  if (s.activity === "running" || s.activity === "streaming") return 1;
-  if (s.isLive) return 2;
-  return 3;
-}
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -101,7 +93,7 @@ export default function HomeScreen() {
     // needs you we show everything rather than an empty screen.
     if (f.needsOnly && attention > 0) list = list.filter(needsYou);
     const sorted = [...list].sort(
-      (a, b) => rank(a) - rank(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+      (a, b) => rankSession(a) - rankSession(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
     );
 
     const rows: Row[] = [];
@@ -125,8 +117,8 @@ export default function HomeScreen() {
       const fa = favR[a[0]] ? 0 : 1;
       const fb = favR[b[0]] ? 0 : 1;
       if (fa !== fb) return fa - fb;
-      const ra = Math.min(...a[1].map(rank));
-      const rb = Math.min(...b[1].map(rank));
+      const ra = Math.min(...a[1].map(rankSession));
+      const rb = Math.min(...b[1].map(rankSession));
       if (ra !== rb) return ra - rb;
       const ta = Math.max(...a[1].map((s) => Date.parse(s.updatedAt)));
       const tb = Math.max(...b[1].map((s) => Date.parse(s.updatedAt)));

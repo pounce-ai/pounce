@@ -9,22 +9,13 @@ import {
   applyFilters,
   favThreads$,
   filters$,
+  rankSession,
   rawSessions,
   repositories$,
 } from "@/state/stores";
 import { SessionCard } from "@/components/SessionCard";
 import { FilterButton, FilterSheet } from "@/components/FilterSheet";
 import { COLOR } from "@/ui";
-
-const needsYou = (s: Session) =>
-  s.needsAttention || s.activity === "failed" || s.activity === "awaiting_input";
-
-function rank(s: Session): number {
-  if (needsYou(s)) return 0;
-  if (s.activity === "running" || s.activity === "streaming") return 1;
-  if (s.isLive) return 2;
-  return 3;
-}
 
 /** Full-screen thread search — matches title, branch, host, agent, repo. */
 export default function SearchScreen() {
@@ -53,7 +44,7 @@ export default function SearchScreen() {
         );
       });
     }
-    return [...list].sort((a, b) => rank(a) - rank(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+    return [...list].sort((a, b) => rankSession(a) - rankSession(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
   }, [raw, repos, query, favOnly, favMap]);
 
   const showAll = query.trim().length === 0;

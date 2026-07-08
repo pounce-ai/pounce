@@ -3,7 +3,7 @@ import { Modal, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@litter/shared";
-import { fetchGitChanges, type GitChanges } from "@/services/bridge";
+import { diffTotals, fetchGitChanges, type GitChanges } from "@/services/bridge";
 import { COLOR } from "@/ui";
 
 /** One row in the environment sheet — icon · label · trailing value/chevron. */
@@ -73,8 +73,7 @@ export function EnvironmentSheet({
     return () => { cancelled = true; };
   }, [visible, session.hostId, session.cwd]);
 
-  const add = git?.files.reduce((s, f) => s + f.additions, 0) ?? 0;
-  const del = git?.files.reduce((s, f) => s + f.deletions, 0) ?? 0;
+  const { add, del } = diffTotals(git?.files ?? []);
   const branch = git?.branch ?? session.branch ?? null;
   const act = (run: () => void) => () => { onClose(); run(); };
 

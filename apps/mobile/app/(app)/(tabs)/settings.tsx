@@ -29,7 +29,7 @@ import {
   syncLiveData,
 } from "@/services/bridge";
 import { savePairing } from "@/services/runtime";
-import { cn, COLOR, DeviceIcon } from "@/ui";
+import { cn, COLOR, DeviceIcon, fmtDuration } from "@/ui";
 
 interface Pairing { url: string; token: string }
 
@@ -296,14 +296,6 @@ export default function SettingsScreen() {
   );
 }
 
-/** "6d", "3h", "12m", "45s" from a seconds count. */
-function fmtAgo(secs: number): string {
-  if (secs < 60) return `${secs}s`;
-  if (secs < 3600) return `${Math.round(secs / 60)}m`;
-  if (secs < 86_400) return `${Math.round(secs / 3600)}h`;
-  return `${Math.round(secs / 86_400)}d`;
-}
-
 /**
  * Compact per-device daemon footer inside a device card: the agent daemon's
  * uptime and a Restart action (re-indexes recent sessions when threads go
@@ -369,7 +361,7 @@ function DeviceDaemon({ hostId, hostName, online }: { hostId: string; hostName: 
         <Text className="text-[12px] font-medium text-accent">{restarting ? "Restarting…" : "Restart"}</Text>
       </Pressable>
       <Text className="flex-1 text-right text-[11px] text-fg-faint">
-        daemon · up {info.uptimeSecs != null ? fmtAgo(info.uptimeSecs) : "?"}
+        daemon · up {info.uptimeSecs != null ? fmtDuration(info.uptimeSecs) : "?"}
       </Text>
     </View>
   );

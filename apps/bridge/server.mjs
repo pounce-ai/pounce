@@ -521,48 +521,61 @@ function cleanPreview(raw, agent) {
   return text.trim() || null;
 }
 
-async function listThreads(agent) {
-  // thread/list is paginated (~25/page) via result.nextCursor — same convention
-  // as model/list. Following the cursor is essential: without it only the first
-  // page shows, so a machine's older/recent sessions silently vanish from the app.
+/**
+ * Walk a paginated daemon list method — frames carry `result.data` +
+ * `result.nextCursor`. Maps each raw item (return null to skip) and dedupes by
+ * the mapped `id`, so a mishandled cursor can't loop. thread/list and model/list
+ * share this convention; this is the single place that implements it.
+ */
+async function probePaginated(agent, method, mapItem, { max = 60 } = {}) {
   const out = [];
   const seen = new Set();
   let cursor;
-  for (let i = 0; i < 60; i++) { // guard: ~25/page → up to ~1500 threads
+  for (let i = 0; i < max; i++) {
     const frames = await probe(
-      ["--agent", agent, "--method", "thread/list",
+      ["--agent", agent, "--method", method,
        "--params", JSON.stringify(cursor ? { cursor } : {}),
        "--linger-secs", "1", "--timeout-secs", "25"],
       { timeout: 30000 },
     ).catch(() => []);
     const f = frames.find((x) => x?.result && Array.isArray(x.result.data));
     let added = 0;
-    for (const t of f?.result?.data || []) {
-      if (!t.id || seen.has(t.id)) continue; // dedupe: a mishandled cursor can't loop
-      seen.add(t.id);
+    for (const raw of f?.result?.data || []) {
+      const item = mapItem(raw);
+      if (!item || seen.has(item.id)) continue;
+      seen.add(item.id);
+      out.push(item);
       added++;
-      const info = repoInfo(t.cwd || "");
-      out.push({
-        id: t.id,
-        agent,
-        cwd: t.cwd || null,
-        name: t.name || null,
-        preview: cleanPreview(t.preview, agent),
-        createdAt: typeof t.createdAt === "number"
-          ? new Date(t.createdAt > 1e12 ? t.createdAt : t.createdAt * 1000).toISOString()
-          : null,
-        gitBranch: t.gitInfo?.branch || null,
-        modelProvider: t.modelProvider || null,
-        repo: info.repo,
-        worktree: info.worktree,
-        isWorktree: info.isWorktree,
-        isLive: info.isLive,
-      });
     }
     cursor = f?.result?.nextCursor;
     if (!cursor || added === 0) break; // no more pages, or the cursor stopped advancing
   }
   return out;
+}
+
+async function listThreads(agent) {
+  // ~25/page — following the cursor is essential or a machine's older/recent
+  // sessions silently vanish from the app. Guard ~1500 threads (60 pages).
+  return probePaginated(agent, "thread/list", (t) => {
+    if (!t.id) return null;
+    const info = repoInfo(t.cwd || "");
+    return {
+      id: t.id,
+      agent,
+      cwd: t.cwd || null,
+      name: t.name || null,
+      preview: cleanPreview(t.preview, agent),
+      createdAt: typeof t.createdAt === "number"
+        ? new Date(t.createdAt > 1e12 ? t.createdAt : t.createdAt * 1000).toISOString()
+        : null,
+      gitBranch: t.gitInfo?.branch || null,
+      modelProvider: t.modelProvider || null,
+      repo: info.repo,
+      worktree: info.worktree,
+      isWorktree: info.isWorktree,
+      isLive: info.isLive,
+    };
+  });
 }
 
 async function getThreads(fresh = false) {
@@ -995,28 +1008,14 @@ function getUsage(agent, thread, cwd) {
 const MODELS_CACHE_MS = 300_000;
 
 function getModels(agent) {
-  return cached(`models:${agent}`, MODELS_CACHE_MS, async () => {
-    const out = [];
-    let cursor;
-    for (let i = 0; i < 10; i++) { // pagination guard
-      const frames = await probe(
-        ["--agent", agent, "--method", "model/list",
-         "--params", JSON.stringify(cursor ? { cursor } : {}),
-         "--linger-secs", "1", "--timeout-secs", "25"],
-        { timeout: 30000 },
-      ).catch(() => []);
-      const f = frames.find((x) => x?.result && Array.isArray(x.result.data));
-      for (const m of f?.result?.data || []) {
-        if (m?.hidden === true) continue;
-        const id = m.id ?? m.model;
-        if (!id) continue;
-        out.push({ id, name: m.displayName || id, description: m.description || null, isDefault: !!m.isDefault, deprecated: !!m.deprecated });
-      }
-      cursor = f?.result?.nextCursor;
-      if (!cursor) break;
-    }
-    return out;
-  });
+  return cached(`models:${agent}`, MODELS_CACHE_MS, () =>
+    probePaginated(agent, "model/list", (m) => {
+      if (m?.hidden === true) return null;
+      const id = m.id ?? m.model;
+      if (!id) return null;
+      return { id, name: m.displayName || id, description: m.description || null, isDefault: !!m.isDefault, deprecated: !!m.deprecated };
+    }, { max: 10 }),
+  );
 }
 
 // How many threads to keep hot in the background at once.

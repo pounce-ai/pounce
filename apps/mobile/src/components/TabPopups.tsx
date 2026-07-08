@@ -13,6 +13,7 @@ import {
   allAgentsInUse,
   allDevices,
   CLEARED_FILTERS,
+  hasActiveFilter,
   connection$,
   deviceEmoji,
   deviceLabel,
@@ -117,7 +118,7 @@ function SearchPopup({ colors, close }: IPopupRenderContext) {
   const agents = useSelector(() => allAgentsInUse());
   const devices = useSelector(() => allDevices());
   useSelector(() => deviceOverrides$.get());
-  const hasFilter = !!(f.agent || f.device || f.repos.length || f.needsOnly || f.favOnly);
+  const hasFilter = hasActiveFilter();
 
   return (
     <View style={{ padding: 10, minWidth: 268, gap: 12 }}>

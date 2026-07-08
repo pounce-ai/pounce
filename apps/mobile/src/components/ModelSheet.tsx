@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import { warmModels, type ModelInfo } from "@/services/bridge";
+import { shortModel } from "@/components/ThreadStatusBar";
 import { cachedModels } from "@/state/stores";
 import { cn, COLOR } from "@/ui";
 
@@ -22,14 +23,10 @@ import { cn, COLOR } from "@/ui";
  * spinner once a device's models have been seen. Source is the daemon's
  * model/list, so there's no hardcoded catalog.
  */
-/** Prettify a model id not in the daemon catalog: "claude-opus-4-8" → "Opus 4.8". */
+/** Prettify a model id not in the daemon catalog: "claude-opus-4-8" → "Opus 4.8".
+ *  Title-cases the shared short form so the two stay in lockstep. */
 function prettyModel(id: string): string {
-  const s = id
-    .replace(/^claude-/, "")
-    .replace(/-\d{8}$/, "")
-    .replace(/-(\d+)-(\d+)$/, " $1.$2")
-    .replace(/-(\d+)$/, " $1");
-  return s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+  return shortModel(id).replace(/\b[a-z]/g, (c) => c.toUpperCase());
 }
 
 export function ModelSheet({

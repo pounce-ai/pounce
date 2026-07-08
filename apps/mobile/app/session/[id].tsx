@@ -7,7 +7,6 @@ import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import type { PermissionMode, TimelineEvent } from "@litter/shared";
-import { parseUserMessage } from "@litter/transcript";
 import { collapseToolResults, Timeline } from "@/components/Timeline";
 import { WorkingIndicator } from "@/components/WorkingIndicator";
 import { TimelineSkeleton } from "@/components/Skeleton";
@@ -22,6 +21,7 @@ import {
   capsFor,
   connection$,
   isFavThread,
+  defaultMarked,
   isMarked,
   markOpened,
   markers$,
@@ -147,9 +147,7 @@ export default function SessionScreen() {
       // Only prose is marker-worthy: a plain message, or a command with an
       // accompanying message. A bare slash command (/exit, /clear) has no text,
       // so it's never auto-marked.
-      const def =
-        e.type === "user_message" && parseUserMessage(e.text, session?.agent).text.trim().length > 0;
-      if (!(markers$[id!][e.id].get() ?? def)) return [];
+      if (!(markers$[id!][e.id].get() ?? defaultMarked(e, session?.agent))) return [];
       return [{ id: e.id, index, type: e.type, text: e.text, ts: e.ts }];
     }),
   );
@@ -162,14 +160,14 @@ export default function SessionScreen() {
     (ev: TimelineEvent) => {
       // Optimistic ids are replaced on refetch — a toggle here would orphan.
       if (ev.id.startsWith("opt:")) return;
-      const marked = isMarked(id!, ev);
+      const marked = isMarked(id!, ev, session.agent);
       ActionSheetIOS.showActionSheetWithOptions(
         {
           options: [marked ? "Remove marker" : "Add marker", "Cancel"],
           cancelButtonIndex: 1,
         },
         (i) => {
-          if (i === 0) toggleMarker(id!, ev);
+          if (i === 0) toggleMarker(id!, ev, session.agent);
         },
       );
     },

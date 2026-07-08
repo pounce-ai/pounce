@@ -18,6 +18,7 @@ import {
   activeFilterCount,
   allDevices,
   CLEARED_FILTERS,
+  hasActiveFilter,
   deviceEmoji,
   deviceLabel,
   deviceOverrides$,
@@ -102,7 +103,7 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
   // room without pushing the sheet off-screen by default.
   const [expanded, setExpanded] = useState(false);
   const folderMax = expanded ? Math.round(height * 0.5) : 220;
-  const hasFilter = !!(f.agent || f.device || f.repos.length || f.needsOnly || f.favOnly);
+  const hasFilter = hasActiveFilter();
   const shownRepos = useMemo(() => {
     const q = repoQuery.trim().toLowerCase();
     return q ? repos.filter((r) => r.name.toLowerCase().includes(q)) : repos;
