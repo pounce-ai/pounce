@@ -6,17 +6,15 @@ import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@litter/shared";
 import {
-  activeFilterCount,
   applyFilters,
-  CLEARED_FILTERS,
   favThreads$,
   filters$,
   rawSessions,
   repositories$,
 } from "@/state/stores";
 import { SessionCard } from "@/components/SessionCard";
-import { FilterSheet } from "@/components/FilterSheet";
-import { cn, COLOR } from "@/ui";
+import { FilterButton, FilterSheet } from "@/components/FilterSheet";
+import { COLOR } from "@/ui";
 
 const needsYou = (s: Session) =>
   s.needsAttention || s.activity === "failed" || s.activity === "awaiting_input";
@@ -36,7 +34,6 @@ export default function SearchScreen() {
 
   const raw = useSelector(() => rawSessions());
   const repos = useSelector(() => repositories$.get());
-  const filterCount = useSelector(() => activeFilterCount());
   const favOnly = useSelector(() => filters$.favOnly.get());
   const favMap = useSelector(() => favThreads$.get());
 
@@ -65,19 +62,7 @@ export default function SearchScreen() {
     <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>
       <View className="flex-row items-center justify-between px-4 pb-2 pt-1">
         <Text className="text-[26px] font-bold text-fg">Search</Text>
-        <Pressable
-          onPress={() => setShowFilters(true)}
-          className={cn(
-            "active:opacity-80 h-9 w-9 items-center justify-center rounded-full",
-            showFilters || filterCount ? "bg-accent/15" : "bg-surface-alt",
-          )}
-        >
-          <Ionicons
-            name="options-outline"
-            size={18}
-            color={showFilters || filterCount ? COLOR.accent : COLOR.fgMuted}
-          />
-        </Pressable>
+        <FilterButton active={showFilters} onPress={() => setShowFilters(true)} />
       </View>
 
       {/* Search field */}
@@ -99,21 +84,6 @@ export default function SearchScreen() {
         ) : null}
       </View>
 
-      {/* Active-filter pill: quick "Clear" from the results, complementing the
-          header filter button (which opens the full sheet). */}
-      {filterCount ? (
-        <View className="mx-4 mb-2 flex-row">
-          <Pressable
-            onPress={() => filters$.set(CLEARED_FILTERS)}
-            className="active:opacity-70 flex-row items-center gap-1.5 rounded-full border border-accent/40 bg-accent/15 px-3 py-1.5"
-          >
-            <Ionicons name="funnel" size={11} color={COLOR.accent} />
-            <Text className="text-[12px] font-medium text-accent">
-              {filterCount} filter{filterCount === 1 ? "" : "s"} · Clear
-            </Text>
-          </Pressable>
-        </View>
-      ) : null}
 
       <LegendList
         style={{ flex: 1 }}

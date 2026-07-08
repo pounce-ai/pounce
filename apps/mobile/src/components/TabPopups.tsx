@@ -144,7 +144,7 @@ function SearchPopup({ colors, close }: IPopupRenderContext) {
   const agents = useSelector(() => allAgentsInUse());
   const devices = useSelector(() => allDevices());
   useSelector(() => deviceOverrides$.get());
-  const hasFilter = !!(f.agent || f.device || f.repo || f.needsOnly || f.favOnly);
+  const hasFilter = !!(f.agent || f.device || f.repos.length || f.needsOnly || f.favOnly);
 
   return (
     <View style={{ padding: 10, minWidth: 268, gap: 12 }}>

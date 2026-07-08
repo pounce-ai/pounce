@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@litter/shared";
 import {
   activeFilterCount,
+  applyFilters,
   connection$,
   deviceEmoji,
   deviceLabel,
@@ -26,7 +27,7 @@ import {
 import { SessionCard } from "@/components/SessionCard";
 import { RecentStrip } from "@/components/RecentStrip";
 import { SessionListSkeleton } from "@/components/Skeleton";
-import { FilterSheet } from "@/components/FilterSheet";
+import { FilterButton, FilterSheet } from "@/components/FilterSheet";
 import { cn, COLOR, DeviceIcon } from "@/ui";
 import { refreshLive } from "@/services/runtime";
 
@@ -92,9 +93,9 @@ export default function HomeScreen() {
     // parent object alone wouldn't re-run — the Legend-State object gotcha).
     const favT = favThreads$.get();
     const favR = favRepos$.get();
-    let list = Object.values(sessions$.get()).filter(
-      (s) => (!f.device || s.hostId === f.device) && (!f.agent || s.agent === f.agent),
-    );
+    // applyFilters handles device + agent + selected folders + permanently
+    // ignored folders; needsOnly is applied below with its smart default.
+    let list = applyFilters(Object.values(sessions$.get()));
     const attention = list.filter(needsYou).length;
     // Smart default: "needs you" narrows to attention items, but when nothing
     // needs you we show everything rather than an empty screen.
@@ -207,24 +208,7 @@ export default function HomeScreen() {
           </Pressable>
         </View>
         <View className="flex-row items-center gap-2 shrink-0">
-          <Pressable
-            onPress={() => setShowFilters(true)}
-            className={cn(
-              "active:opacity-80 h-9 w-9 items-center justify-center rounded-full",
-              showFilters || filterCount ? "bg-accent/15" : "bg-surface-alt",
-            )}
-          >
-            <Ionicons
-              name="filter"
-              size={17}
-              color={showFilters || filterCount ? COLOR.accent : COLOR.fgMuted}
-            />
-            {filterCount ? (
-              <View className="absolute -right-0.5 -top-0.5 h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1">
-                <Text className="text-[10px] font-bold text-white">{filterCount}</Text>
-              </View>
-            ) : null}
-          </Pressable>
+          <FilterButton active={showFilters} onPress={() => setShowFilters(true)} />
           <Pressable onPress={() => router.push("/new")} className="active:opacity-80 h-9 flex-row items-center gap-1 rounded-full bg-accent px-3.5">
             <Ionicons name="add" size={17} color="#fff" />
             <Text className="text-[14px] font-semibold text-white">New</Text>

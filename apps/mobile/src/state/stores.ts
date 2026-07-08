@@ -44,25 +44,40 @@ export const pendingTurns$ = observable<Record<string, PendingTurn>>({});
 export const filters$ = observable<{
   device: string | null;
   agent: string | null;
-  repo: string | null;
+  repos: string[]; // multi-select projects/folders; empty = all
   needsOnly: boolean;
   favOnly: boolean;
 }>({
   device: null,
   agent: null,
-  repo: null,
+  repos: [],
   needsOnly: true, // default view = what needs you
   favOnly: false,
 });
 
 /** The zero state for every filter — a single source for "Clear all". */
-export const CLEARED_FILTERS = { device: null, agent: null, repo: null, needsOnly: false, favOnly: false };
+export const CLEARED_FILTERS = { device: null, agent: null, repos: [], needsOnly: false, favOnly: false };
+
+/** Folders the user has permanently hidden (repoId → true). Persisted, and
+ *  applied in passesFilter so ignored folders' threads never show anywhere. */
+export const ignoredRepos$ = observable<Record<string, true>>({});
+export const isRepoIgnored = (repoId: string): boolean => !!ignoredRepos$[repoId].get();
+export function toggleRepoIgnore(repoId: string): void {
+  if (ignoredRepos$[repoId].get()) {
+    ignoredRepos$[repoId].delete();
+  } else {
+    ignoredRepos$[repoId].set(true);
+    // An ignored folder shouldn't linger in the active filter selection.
+    const sel = filters$.repos.get();
+    if (sel.includes(repoId)) filters$.repos.set(sel.filter((id) => id !== repoId));
+  }
+}
 
 /** Count of *narrowing* filters (device/agent/favourites) for the bottom bar
  *  badge. needsOnly is the default view, so it doesn't badge. */
 export function activeFilterCount(): number {
   const f = filters$.get();
-  return (f.device ? 1 : 0) + (f.agent ? 1 : 0) + (f.repo ? 1 : 0) + (f.favOnly ? 1 : 0);
+  return (f.device ? 1 : 0) + (f.agent ? 1 : 0) + (f.repos.length ? 1 : 0) + (f.favOnly ? 1 : 0);
 }
 
 /** Favourited thread ids (sessionId → true). Sparse, on-device only — the bridge
@@ -242,6 +257,8 @@ persist(syncLog$, "syncLog");
 persist(markers$, "markers");
 persist(favThreads$, "favThreads");
 persist(favRepos$, "favRepos");
+persist(filters$, "filters"); // remember the user's last filter selection
+persist(ignoredRepos$, "ignoredRepos");
 persist(recentOpens$, "recentOpens");
 persist(threadModels$, "threadModels");
 persist(agentModels$, "agentModels");
@@ -252,9 +269,11 @@ persist(deviceOverrides$, "deviceOverrides");
 
 function passesFilter(s: Session): boolean {
   const f = filters$.get();
+  // Permanently-ignored folders are hidden everywhere, regardless of filters.
+  if (ignoredRepos$.get()[s.repoId]) return false;
   if (f.device && s.hostId !== f.device) return false;
   if (f.agent && s.agent !== f.agent) return false;
-  if (f.repo && s.repoId !== f.repo) return false;
+  if (f.repos.length && !f.repos.includes(s.repoId)) return false;
   return true;
 }
 
