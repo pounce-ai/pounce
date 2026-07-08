@@ -1,17 +1,17 @@
 import { Component, type ReactNode } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   EnrichedMarkdownText,
   type MarkdownStyle,
   type Md4cFlags,
 } from "react-native-enriched-markdown";
+import { Highlight, themes } from "prism-react-renderer";
 import remend from "remend";
-import { splitShellBlocks } from "@/components/runnableBlocks";
+import { splitCodeBlocks } from "@/components/runnableBlocks";
 import { COLOR } from "@/ui";
 
 const MONO = "JetBrainsMono";
-const SHELL_GOLD = "#d29922";
 
 /** latex on for the assistant's math; underline/sub/superscript off so prose
  *  like a__b or ~n isn't reinterpreted. GFM strikethrough comes from
@@ -96,19 +96,20 @@ export function MessageMarkdown({
   /** Present only for live assistant turns — enables shell "Run" cards. */
   onRun?: (command: string) => void;
 }) {
-  // Only assistant turns, once settled, and only when running is possible.
-  if (role !== "assistant" || streaming || !onRun) {
+  // User turns and live streaming (incomplete fences) stay on the native
+  // markdown path; settled assistant turns get syntax-highlighted code blocks.
+  if (role !== "assistant" || streaming) {
     return <MarkdownBody text={text} role={role} streaming={streaming} />;
   }
-  const segments = splitShellBlocks(text);
+  const segments = splitCodeBlocks(text);
   if (segments.length === 1 && segments[0].type === "md") {
     return <MarkdownBody text={text} role="assistant" />;
   }
   return (
     <View style={{ gap: 8 }}>
       {segments.map((seg, i) =>
-        seg.type === "run" ? (
-          <RunnableCodeBlock key={`r${i}`} command={seg.command} onRun={onRun} />
+        seg.type === "code" ? (
+          <CodeBlock key={`c${i}`} lang={seg.lang} code={seg.code} onRun={seg.runnable ? onRun : undefined} />
         ) : (
           <MarkdownBody key={`m${i}`} text={seg.text} role="assistant" />
         ),
@@ -142,30 +143,64 @@ function MarkdownBody({
   );
 }
 
-/** A shell command from the assistant, as a "$ …" card with a Run button that
- *  queues `!command` into the composer for review. */
-function RunnableCodeBlock({
-  command,
-  onRun,
-}: {
-  command: string;
-  onRun: (command: string) => void;
-}) {
+/** Map our fenced-block language tags to Prism language ids (aliases prism
+ *  doesn't know natively). Unknown → passed through; empty → plain text. */
+const PRISM_LANG: Record<string, string> = {
+  ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", mjs: "javascript", cjs: "javascript",
+  py: "python", rb: "ruby", sh: "bash", shell: "bash", zsh: "bash", console: "bash",
+  "shell-session": "bash", yml: "yaml", md: "markdown", "c++": "cpp", "c#": "csharp",
+  text: "", txt: "", "": "",
+};
+
+/**
+ * A fenced code block: a dark card with a language header (and a "Run" action for
+ * shell blocks), Prism-highlighted and horizontally scrollable for long lines.
+ */
+function CodeBlock({ lang, code, onRun }: { lang: string; code: string; onRun?: (c: string) => void }) {
+  const prismLang = PRISM_LANG[lang] ?? lang;
   return (
-    <View className="overflow-hidden rounded-xl border border-border bg-surface-alt">
-      <View className="flex-row items-start gap-2 px-3 py-2.5">
-        <Text style={{ color: SHELL_GOLD }} className="font-mono text-[13px] font-semibold">
-          $
-        </Text>
-        <Text className="flex-1 font-mono text-[12px] leading-[17px] text-fg">{command}</Text>
-      </View>
-      <Pressable
-        onPress={() => onRun(command)}
-        className="active:opacity-80 flex-row items-center justify-center gap-1.5 border-t border-border bg-accent-soft py-2"
-      >
-        <Ionicons name="play" size={13} color={COLOR.accent} />
-        <Text className="text-[12px] font-semibold text-accent">Run</Text>
-      </Pressable>
+    <View className="overflow-hidden rounded-xl border border-border bg-[#0d0d12]">
+      {lang || onRun ? (
+        <View className="flex-row items-center gap-2 border-b border-border/70 px-3 py-1.5">
+          <Text className="flex-1 font-mono text-[11px] lowercase text-fg-faint">{lang || "code"}</Text>
+          {onRun ? (
+            <Pressable onPress={() => onRun(code)} hitSlop={6} className="active:opacity-70 flex-row items-center gap-1">
+              <Ionicons name="play" size={12} color={COLOR.accent} />
+              <Text className="text-[12px] font-semibold text-accent">Run</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: 10 }}>
+        <Highlight code={code} language={prismLang || "text"} theme={themes.vsDark}>
+          {({ tokens, getTokenProps }) => (
+            <View>
+              {tokens.map((line, i) => (
+                <View key={i} className="flex-row">
+                  {line.length === 0 ? <Text style={{ fontSize: 12.5, lineHeight: 18 }}> </Text> : null}
+                  {line.map((token, j) => {
+                    const { style } = getTokenProps({ token });
+                    return (
+                      <Text
+                        key={j}
+                        style={{
+                          fontFamily: MONO,
+                          fontSize: 12.5,
+                          lineHeight: 18,
+                          color: (style?.color as string) ?? "#cdd0d6",
+                          fontStyle: style?.fontStyle as "italic" | undefined,
+                        }}
+                      >
+                        {token.content}
+                      </Text>
+                    );
+                  })}
+                </View>
+              ))}
+            </View>
+          )}
+        </Highlight>
+      </ScrollView>
     </View>
   );
 }

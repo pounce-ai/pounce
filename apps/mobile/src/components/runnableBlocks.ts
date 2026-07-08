@@ -1,7 +1,7 @@
 /**
- * Split assistant markdown into renderable segments, lifting shell code blocks
- * out so the UI can give them a "Run" affordance. Everything else — prose and
- * non-shell code blocks — stays as markdown and renders through the normal
+ * Split assistant markdown into renderable segments, lifting *all* fenced code
+ * blocks out so the UI can syntax-highlight them (and give shell blocks a "Run"
+ * affordance). Prose between fences stays markdown and renders through the
  * native markdown view.
  */
 
@@ -16,10 +16,10 @@ const SHELL_LANGS = new Set([
   "sh-session",
 ]);
 
-/** A run of prose/markdown, or a single runnable shell command. */
+/** A run of prose/markdown, or a fenced code block (runnable if it's a shell). */
 export type Segment =
   | { type: "md"; text: string }
-  | { type: "run"; command: string };
+  | { type: "code"; lang: string; code: string; runnable: boolean };
 
 // Fenced block: ```lang\n …body… ``` (lang optional). Non-greedy body.
 const FENCE_RE = /```([\w-]*)[ \t]*\r?\n([\s\S]*?)```/g;
@@ -36,14 +36,14 @@ function stripPrompts(body: string): string {
 }
 
 /**
- * Break `text` into segments. Shell-tagged fenced blocks become `run` segments;
- * everything else stays in `md` segments. If there are no shell blocks, returns
- * a single `md` segment (the whole text) so rendering is unchanged.
+ * Break `text` into segments. Every fenced block becomes a `code` segment
+ * (shell-tagged ones marked `runnable`); prose stays in `md` segments. With no
+ * fenced blocks, returns a single `md` segment so rendering is unchanged.
  */
-export function splitShellBlocks(text: string): Segment[] {
+export function splitCodeBlocks(text: string): Segment[] {
   const segments: Segment[] = [];
   let lastIndex = 0;
-  let hasRun = false;
+  let hasCode = false;
 
   const pushMd = (chunk: string) => {
     const trimmed = chunk.trim();
@@ -54,16 +54,16 @@ export function splitShellBlocks(text: string): Segment[] {
   let m: RegExpExecArray | null;
   while ((m = FENCE_RE.exec(text)) !== null) {
     const lang = m[1].toLowerCase();
-    if (!SHELL_LANGS.has(lang)) continue; // leave non-shell blocks inside md
-    const command = stripPrompts(m[2]);
-    if (!command) continue;
+    const runnable = SHELL_LANGS.has(lang);
+    const code = runnable ? stripPrompts(m[2]) : m[2].replace(/\r\n/g, "\n").replace(/\n$/, "");
+    if (!code.trim()) continue;
     pushMd(text.slice(lastIndex, m.index));
-    segments.push({ type: "run", command });
+    segments.push({ type: "code", lang, code, runnable });
     lastIndex = m.index + m[0].length;
-    hasRun = true;
+    hasCode = true;
   }
 
-  if (!hasRun) return [{ type: "md", text }];
+  if (!hasCode) return [{ type: "md", text }];
   pushMd(text.slice(lastIndex));
   return segments;
 }
