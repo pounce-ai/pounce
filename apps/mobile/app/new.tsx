@@ -37,6 +37,7 @@ export default function NewTaskScreen() {
 
   const [hostId, setHostId] = useState<string | undefined>(devices[0]?.id);
   const [cwd, setCwd] = useState<string | null>(null);
+  const [selectedRepoId, setSelectedRepoId] = useState<string | null>(null);
   const [agent, setAgent] = useState<AgentId>("claude");
   const [browsing, setBrowsing] = useState(false);
 
@@ -45,13 +46,19 @@ export default function NewTaskScreen() {
 
   const folderLabel = useMemo(() => (cwd ? cwd.split("/").pop() || cwd : null), [cwd]);
 
-  // Quick-pick an existing repo: adopt its cwd + host so you land in a known dir.
-  const pickRepo = (repoId: string) => {
-    const s = sessionsForRepo(repoId).find((x) => x.cwd) ?? sessionsForRepo(repoId)[0];
+  // Quick-pick an existing repo: adopt its working dir + host so you land in a
+  // known dir. Prefer a non-worktree session so a new task starts in the repo
+  // root rather than some worktree. Remember the folder explicitly — since the
+  // bridge folds worktrees into their origin repo, repoId no longer equals the
+  // cwd basename, so it can't be re-derived from cwd.
+  const pickRepo = (rid: string) => {
+    const list = sessionsForRepo(rid);
+    const s = list.find((x) => x.cwd && !x.worktree) ?? list.find((x) => x.cwd) ?? list[0];
+    setSelectedRepoId(rid);
     if (s?.cwd) setCwd(s.cwd);
     if (s?.hostId) setHostId(s.hostId);
   };
-  const activeRepoId = repoIdForCwd(cwd);
+  const activeRepoId = selectedRepoId ?? repoIdForCwd(cwd);
 
   // Seeded from a folder's "+" on Home: adopt that repo's cwd + device on mount
   // so the user lands straight on the composer for that folder.
@@ -66,7 +73,7 @@ export default function NewTaskScreen() {
     const device = devices.find((d) => d.id === hostId) ?? devices[0];
     sessions$[id].set({
       id,
-      repoId: repoIdForCwd(cwd),
+      repoId: selectedRepoId ?? repoIdForCwd(cwd),
       hostId: device?.id ?? "dev:local",
       host: device?.name ?? "local",
       agent,
@@ -177,6 +184,7 @@ export default function NewTaskScreen() {
         onClose={() => setBrowsing(false)}
         onPick={(p) => {
           setCwd(p);
+          setSelectedRepoId(repoIdForCwd(p));
           setBrowsing(false);
         }}
       />

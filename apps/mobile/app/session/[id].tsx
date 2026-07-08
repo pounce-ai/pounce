@@ -215,6 +215,19 @@ export default function SessionScreen() {
       );
       if (threadId) setLiveEvents(chrono(await fetchMessages(session.hostId, session.agent, threadId)));
       refreshUsage();
+      // A freshly-created task carries a temporary `new_*` id the daemon doesn't
+      // know. Once the first turn returns the real thread id, re-key the local
+      // session onto it and swap the route — otherwise the session stays orphaned
+      // ("Queued" forever, empty on reopen) while sync surfaces the real thread as
+      // a separate entry.
+      if (threadId && threadId !== session.id && session.id.startsWith("new_")) {
+        const data = sessions$[session.id].get();
+        if (data) {
+          sessions$[threadId].set({ ...data, id: threadId, activity: "idle" });
+          sessions$[session.id].delete();
+          router.replace(`/session/${threadId}`);
+        }
+      }
     } else {
       const { getRuntime } = await import("@/services/runtime");
       const rt = await getRuntime();
@@ -224,7 +237,7 @@ export default function SessionScreen() {
         text: s.text,
       });
     }
-  }, [session, live, refreshUsage, mode, effort]);
+  }, [session, live, refreshUsage, mode, effort, router]);
 
   // Follow-ups typed while a turn runs are queued and drained in order — the
   // Claude Code / Codex model. inFlightRef gates re-entrancy synchronously so a
