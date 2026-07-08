@@ -7,13 +7,13 @@ import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import type { PermissionMode, TimelineEvent } from "@litter/shared";
-import { isEmptyUserMessage, parseUserMessage } from "@litter/transcript";
+import { parseUserMessage } from "@litter/transcript";
 import { collapseToolResults, Timeline } from "@/components/Timeline";
 import { WorkingIndicator } from "@/components/WorkingIndicator";
 import { TimelineSkeleton } from "@/components/Skeleton";
 import { Composer, type ComposerHandle, type ComposerSubmit } from "@/components/Composer";
 import { MarkerSheet, type Marker } from "@/components/MarkerSheet";
-import { ThreadStatusBar, ThreadUsageSummary } from "@/components/ThreadStatusBar";
+import { shortModel, ThreadUsageSummary } from "@/components/ThreadStatusBar";
 import { ModelSheet } from "@/components/ModelSheet";
 import { useTimeline } from "@/hooks/useTimeline";
 import {
@@ -142,10 +142,11 @@ export default function SessionScreen() {
   const markers = useSelector<Marker[]>(() =>
     events.flatMap((e, index) => {
       if (e.type !== "user_message" && e.type !== "assistant_message") return [];
-      // Empty envelopes render nothing (UserRow returns null) — never dot them.
+      // Only prose is marker-worthy: a plain message, or a command with an
+      // accompanying message. A bare slash command (/exit, /clear) has no text,
+      // so it's never auto-marked.
       const def =
-        e.type === "user_message" &&
-        !isEmptyUserMessage(parseUserMessage(e.text, session?.agent));
+        e.type === "user_message" && parseUserMessage(e.text, session?.agent).text.trim().length > 0;
       if (!(markers$[id!][e.id].get() ?? def)) return [];
       return [{ id: e.id, index, type: e.type, text: e.text, ts: e.ts }];
     }),
@@ -317,6 +318,12 @@ export default function SessionScreen() {
   const openMode = () => pickSheet("Mode", modes.map((m) => `${m.label} · ${m.hint}`), (i) => setMode(modes[i].value));
   const openEffort = () => pickSheet("Reasoning effort", REASONING_EFFORTS.map((e) => e.label), (i) => setEffort(REASONING_EFFORTS[i].value));
 
+  // Combined model·effort pill label for the composer, e.g. "opus 4.7 · High".
+  const activeModel = selectedModel ?? usage?.model ?? null;
+  const modelName = activeModel ? shortModel(activeModel) : "Model";
+  const modelPillLabel =
+    showEffort && effort && effort !== "off" ? `${modelName} · ${effortLabel}` : modelName;
+
   // All session actions in one thumb-zone sheet (slides up from the bottom).
   const openActions = () => {
     const acts: { label: string; run: () => void }[] = [];
@@ -362,6 +369,16 @@ export default function SessionScreen() {
               <ThreadUsageSummary usage={usage} />
             </View>
           </View>
+          {markers.length ? (
+            <Pressable
+              onPress={() => setMarkerSheet(true)}
+              hitSlop={4}
+              className="active:opacity-70 h-7 flex-row items-center gap-1 rounded-full bg-surface-alt px-2"
+            >
+              <Ionicons name="bookmark" size={12} color={COLOR.accent} />
+              <Text className="text-[12px] font-semibold text-fg-muted">{markers.length}</Text>
+            </Pressable>
+          ) : null}
           {canFavourite ? (
             <Pressable
               onPress={() => toggleFavThread(session.id)}
@@ -459,21 +476,12 @@ export default function SessionScreen() {
             }]),
           );
         }}
+        effort={canSteer && showEffort ? { label: effortLabel, onPress: openEffort } : null}
         onClose={() => setModelSheet(false)}
       />
 
-      {/* Status bar + Composer */}
+      {/* Composer (model·effort, mode, mic and send now live inside its card) */}
       <View style={{ paddingBottom: insets.bottom + 8 }} className="border-t border-border bg-bg-elevated px-3 pt-2">
-        <ThreadStatusBar
-          agent={session.agent}
-          model={selectedModel ?? usage?.model ?? null}
-          canPickModel={live && !!session.cwd}
-          onPressModel={() => setModelSheet(true)}
-          mode={canSteer && showMode ? { label: modeLabel, active: activeMode !== "default", onPress: openMode } : null}
-          effort={canSteer && showEffort ? { label: effortLabel, active: !!effort && effort !== "off", onPress: openEffort } : null}
-          markerCount={markers.length}
-          onOpenMarkers={() => setMarkerSheet(true)}
-        />
         {!canSteer ? (
           <Text className="px-1 pb-2 text-[12px] text-fg-faint">
             Archived session — worktree was removed. Read-only.
@@ -509,6 +517,8 @@ export default function SessionScreen() {
           cwd={session.cwd}
           onSubmit={onSubmit}
           onStop={stop}
+          model={live && !!session.cwd ? { label: modelPillLabel, onPress: () => setModelSheet(true) } : null}
+          mode={canSteer && showMode ? { label: modeLabel, active: activeMode !== "default", onPress: openMode } : null}
         />
       </View>
     </KeyboardAvoidingView>

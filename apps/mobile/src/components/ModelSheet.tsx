@@ -39,6 +39,7 @@ export function ModelSheet({
   current,
   pinned = [],
   onSelect,
+  effort,
   onClose,
 }: {
   visible: boolean;
@@ -51,6 +52,8 @@ export function ModelSheet({
    *  always switch back. */
   pinned?: string[];
   onSelect: (id: string) => void;
+  /** Reasoning-effort control, shown as a row below the models (null to hide). */
+  effort?: { label: string; onPress: () => void } | null;
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -158,6 +161,17 @@ export function ModelSheet({
             ) : null}
           </ScrollView>
         )}
+
+        {effort ? (
+          <Pressable
+            onPress={effort.onPress}
+            className="active:opacity-80 mt-2 flex-row items-center rounded-2xl bg-surface-alt px-4 py-3.5"
+          >
+            <Text className="flex-1 text-[15px] font-semibold text-fg">Effort</Text>
+            <Text className="text-[15px] text-fg-muted">{effort.label}</Text>
+            <Ionicons name="chevron-forward" size={16} color={COLOR.fgFaint} style={{ marginLeft: 6 }} />
+          </Pressable>
+        ) : null}
       </View>
     </Modal>
   );

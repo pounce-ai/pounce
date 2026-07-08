@@ -19,7 +19,7 @@ import type { AgentCapabilities, RunImage } from "@litter/shared";
 import { SLASH_COMMANDS } from "@/ui/agent-meta";
 import { fetchFiles, type RepoEntry } from "@/services/bridge";
 import { startDictation, type Dictation } from "@/services/voice";
-import { cn, COLOR } from "@/ui";
+import { AgentLogo, cn, COLOR } from "@/ui";
 
 const MENTION_RE = /((?:^|\s))@([^\s@]*)$/;
 
@@ -93,6 +93,8 @@ export function Composer({
   cwd,
   onSubmit,
   onStop,
+  model,
+  mode,
   ref,
 }: {
   agent: string;
@@ -108,6 +110,10 @@ export function Composer({
   onSubmit: (s: ComposerSubmit) => Promise<void> | void;
   /** Interrupt the running turn (from the stop button). */
   onStop?: () => void;
+  /** Combined model·effort control pill (null to hide). */
+  model?: { label: string; onPress: () => void } | null;
+  /** Permission-mode control pill (null to hide). */
+  mode?: { label: string; active: boolean; onPress: () => void } | null;
   ref?: Ref<ComposerHandle>;
 }) {
   // The rich input is uncontrolled: `draft` mirrors its plain text (drives the
@@ -399,11 +405,9 @@ export function Composer({
       {/* Live "listening" affordance while dictating. */}
       {listening ? <ListeningBanner /> : null}
 
-      {/* Input row */}
-      <View className="flex-row items-end gap-2">
-        {!disabled ? <IconButton icon="add" onPress={openAttach} /> : null}
-        {!disabled ? <MicButton listening={listening} onPress={toggleVoice} /> : null}
-
+      {/* Unified composer card: the text sits above one row of controls —
+          attach · model·effort · mode … mic · send — like the Claude app. */}
+      <View className="rounded-3xl border border-border bg-surface-alt px-2.5 pb-2 pt-1.5">
         <EnrichedMarkdownTextInput
           ref={inputRef}
           onChangeText={setDraft}
@@ -416,41 +420,102 @@ export function Composer({
           multiline
           markdownStyle={INPUT_MD_STYLE}
           style={{
-            flex: 1,
-            minHeight: 40,
+            minHeight: 38,
             maxHeight: 120,
-            backgroundColor: "#1b1b22",
-            borderRadius: 16,
-            paddingHorizontal: 12,
-            paddingTop: 8,
-            paddingBottom: 8,
+            backgroundColor: "transparent",
+            paddingHorizontal: 6,
+            paddingTop: 6,
+            paddingBottom: 4,
             fontSize: 15,
             color: COLOR.fg,
             opacity: disabled ? 0.5 : 1,
           }}
         />
 
-        {showStop ? (
-          <Pressable
-            onPress={onStop}
-            className="active:opacity-80 h-10 w-10 items-center justify-center rounded-full bg-danger"
-          >
-            <Ionicons name="stop" size={16} color="#fff" />
-          </Pressable>
-        ) : (
-          <Pressable
-            onPress={submit}
-            disabled={!canSend}
-            className={cn(
-              "h-10 w-10 items-center justify-center rounded-full bg-accent",
-              !canSend && "opacity-40",
-            )}
-          >
-            <Ionicons name="arrow-up" size={20} color="#fff" />
-          </Pressable>
-        )}
+        <View className="mt-1 flex-row items-center gap-1.5">
+          {!disabled ? <RoundButton icon="add" onPress={openAttach} /> : null}
+          {model ? <ControlPill agent={agent} label={model.label} onPress={model.onPress} /> : null}
+          {mode ? (
+            <ControlPill icon="git-branch-outline" label={mode.label} active={mode.active} onPress={mode.onPress} />
+          ) : null}
+
+          <View className="flex-1" />
+
+          {!disabled ? <MicButton listening={listening} onPress={toggleVoice} /> : null}
+          {showStop ? (
+            <Pressable
+              onPress={onStop}
+              className="active:opacity-80 h-9 w-9 items-center justify-center rounded-full bg-danger"
+            >
+              <Ionicons name="stop" size={15} color="#fff" />
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={submit}
+              disabled={!canSend}
+              className={cn(
+                "h-9 w-9 items-center justify-center rounded-full bg-accent",
+                !canSend && "opacity-40",
+              )}
+            >
+              <Ionicons name="arrow-up" size={18} color="#fff" />
+            </Pressable>
+          )}
+        </View>
       </View>
     </View>
+  );
+}
+
+/** A circular icon button (e.g. attach) sized for the composer control row. */
+function RoundButton({
+  icon,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      className="active:opacity-70 h-8 w-8 items-center justify-center rounded-full bg-surface"
+    >
+      <Ionicons name={icon} size={19} color={COLOR.fgMuted} />
+    </Pressable>
+  );
+}
+
+/** A pill control in the composer row — model·effort, or the permission mode.
+ *  Shows the agent logo (model) or an icon (mode) + a trailing chevron. */
+function ControlPill({
+  agent,
+  icon,
+  label,
+  active,
+  onPress,
+}: {
+  agent?: string;
+  icon?: React.ComponentProps<typeof Ionicons>["name"];
+  label: string;
+  active?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={4}
+      className={cn(
+        "active:opacity-70 h-8 flex-row items-center gap-1.5 rounded-full px-2.5",
+        active ? "bg-accent-soft" : "bg-surface",
+      )}
+    >
+      {agent ? <AgentLogo agent={agent} size={13} /> : null}
+      {icon ? <Ionicons name={icon} size={12} color={active ? COLOR.accent : COLOR.fgMuted} /> : null}
+      <Text numberOfLines={1} className={cn("max-w-[150px] text-[13px] font-medium", active ? "text-accent" : "text-fg")}>
+        {label}
+      </Text>
+      <Ionicons name="chevron-down" size={11} color={active ? COLOR.accent : COLOR.fgFaint} />
+    </Pressable>
   );
 }
 

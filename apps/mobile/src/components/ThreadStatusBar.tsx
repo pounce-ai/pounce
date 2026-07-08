@@ -28,7 +28,7 @@ function fmtCost(cost: number): string {
 }
 
 /** "claude-opus-4-8" → "opus 4.8"; "claude-haiku-4-5-20251001" → "haiku 4.5". */
-function shortModel(model: string): string {
+export function shortModel(model: string): string {
   return model
     .replace(/^claude-/, "")
     .replace(/-\d{8}$/, "")
