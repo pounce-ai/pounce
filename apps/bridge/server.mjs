@@ -725,13 +725,21 @@ function streamTurn(agent, threadId, text, cwd, onEvent, onDone, opts = {}) {
       return;
     }
 
-    // text deltas: item/agentMessage/delta -> {delta, itemId}
-    if (/^item\/.+\/delta$/.test(m)) {
+    // Streaming deltas: item/<kind>/delta -> {delta, itemId}. Route reasoning
+    // deltas to a thinking trace (shown like Codex/Grok) and message deltas to a
+    // streaming assistant bubble, so the two don't get conflated.
+    const dm = m.match(/^item\/(.+)\/delta$/);
+    if (dm) {
       const itemId = p.itemId;
       if (!itemId || typeof p.delta !== "string") return;
       const text = (acc.get(itemId) || "") + p.delta;
       acc.set(itemId, text);
-      onEvent({ id: itemId, conversationId: threadId, seq: ++seq, ts: now(), type: "assistant_message", text, streaming: true });
+      const s = ++seq;
+      if (/reason|think/i.test(dm[1])) {
+        onEvent({ id: itemId, conversationId: threadId, seq: s, ts: now(), type: "thinking_finished", text, durationMs: 0 });
+      } else {
+        onEvent({ id: itemId, conversationId: threadId, seq: s, ts: now(), type: "assistant_message", text, streaming: true });
+      }
       return;
     }
     if (m === "item/started" || m === "item/completed") {

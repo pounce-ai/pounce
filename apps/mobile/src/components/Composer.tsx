@@ -77,20 +77,27 @@ export function Composer({
   caps,
   disabled = false,
   sending = false,
+  running = false,
   placeholder = "Message or steer the agent…",
   hostId,
   cwd,
   onSubmit,
+  onStop,
   ref,
 }: {
   agent: string;
   caps: AgentCapabilities;
   disabled?: boolean;
   sending?: boolean;
+  /** A turn is in flight — swaps the send button for a stop button (when the
+   *  input is empty) and lets the user type/queue a follow-up meanwhile. */
+  running?: boolean;
   placeholder?: string;
   hostId?: string;
   cwd?: string | null;
   onSubmit: (s: ComposerSubmit) => Promise<void> | void;
+  /** Interrupt the running turn (from the stop button). */
+  onStop?: () => void;
   ref?: Ref<ComposerHandle>;
 }) {
   // The rich input is uncontrolled: `draft` mirrors its plain text (drives the
@@ -235,7 +242,11 @@ export function Composer({
     );
   };
 
-  const canSend = !disabled && !sending && (draft.trim().length > 0 || images.length > 0);
+  // Sending stays allowed while a turn runs — the parent queues follow-ups.
+  const hasContent = draft.trim().length > 0 || images.length > 0;
+  const canSend = !disabled && hasContent;
+  // Empty input during a turn → the primary button interrupts instead of sends.
+  const showStop = running && !hasContent && !!onStop;
 
   const submit = async () => {
     if (!canSend) return;
@@ -347,8 +358,8 @@ export function Composer({
           onChangeMarkdown={(md) => {
             markdownRef.current = md;
           }}
-          editable={!disabled && !sending}
-          placeholder={disabled ? "Read-only" : placeholder}
+          editable={!disabled}
+          placeholder={disabled ? "Read-only" : running ? "Queue a follow-up or steer…" : placeholder}
           placeholderTextColor="#62626D"
           multiline
           markdownStyle={INPUT_MD_STYLE}
@@ -367,16 +378,25 @@ export function Composer({
           }}
         />
 
-        <Pressable
-          onPress={submit}
-          disabled={!canSend}
-          className={cn(
-            "h-10 w-10 items-center justify-center rounded-full bg-accent",
-            !canSend && "opacity-40",
-          )}
-        >
-          <Ionicons name="arrow-up" size={20} color="#fff" />
-        </Pressable>
+        {showStop ? (
+          <Pressable
+            onPress={onStop}
+            className="active:opacity-80 h-10 w-10 items-center justify-center rounded-full bg-danger"
+          >
+            <Ionicons name="stop" size={16} color="#fff" />
+          </Pressable>
+        ) : (
+          <Pressable
+            onPress={submit}
+            disabled={!canSend}
+            className={cn(
+              "h-10 w-10 items-center justify-center rounded-full bg-accent",
+              !canSend && "opacity-40",
+            )}
+          >
+            <Ionicons name="arrow-up" size={20} color="#fff" />
+          </Pressable>
+        )}
       </View>
     </View>
   );

@@ -9,6 +9,7 @@ import type { LegendListRef } from "@legendapp/list/react-native";
 import type { PermissionMode, TimelineEvent } from "@litter/shared";
 import { isEmptyUserMessage, parseUserMessage } from "@litter/transcript";
 import { collapseToolResults, Timeline } from "@/components/Timeline";
+import { WorkingIndicator } from "@/components/WorkingIndicator";
 import { TimelineSkeleton } from "@/components/Skeleton";
 import { Composer, type ComposerHandle, type ComposerSubmit } from "@/components/Composer";
 import { MarkerSheet, type Marker } from "@/components/MarkerSheet";
@@ -172,64 +173,99 @@ export default function SessionScreen() {
     [id],
   );
 
-  // Errors propagate so the Composer can restore the user's draft.
-  const onSubmit = useCallback(async (s: ComposerSubmit) => {
+  // One message → one streamed turn. Errors propagate so the Composer can
+  // restore the user's draft (or the queue drain can surface the failure).
+  const runTurn = useCallback(async (s: ComposerSubmit) => {
     if (!session) return;
-    setSending(true);
-    try {
-      if (live) {
-        const optimistic: TimelineEvent = {
-          id: `opt:${Date.now()}`,
-          conversationId: session.id,
-          seq: Number.MAX_SAFE_INTEGER,
-          ts: new Date().toISOString(),
-          type: "user_message",
-          text: s.text || (s.images.length ? "🖼️ Image" : ""),
-        };
-        setLiveEvents((e) => mergeById(e, [optimistic]));
-        const { threadId } = await streamLiveMessage(
-          session.hostId,
-          session.agent,
-          session.id,
-          session.cwd,
-          s.text,
-          (ev) =>
-            setLiveEvents((e) => {
-              // The daemon echoes the user turn as it streams; drop our optimistic
-              // placeholder then so the message isn't shown twice.
-              const base =
-                ev.type === "user_message" && !ev.id.startsWith("opt:")
-                  ? e.filter((x) => !x.id.startsWith("opt:"))
-                  : e;
-              return mergeById(base, [ev]);
-            }),
-          {
-            images: s.images,
-            permissionMode: modesFor(session.agent).length > 1
-              ? (mode ?? modesFor(session.agent)[0]?.value)
-              : undefined,
-            reasoningEffort: effectiveCaps(session.agent, capsFor(session.agent)).thinking ? effort : undefined,
-            model: modelForThread(session.id),
-          },
-        );
-        if (threadId) setLiveEvents(chrono(await fetchMessages(session.hostId, session.agent, threadId)));
-        refreshUsage();
-      } else {
-        const { getRuntime } = await import("@/services/runtime");
-        const rt = await getRuntime();
-        await rt.sendMessage({
-          conversation: { id: session.id, agent: session.agent, threadId: session.id } as never,
-          project: { path: session.cwd ?? "" } as never,
-          text: s.text,
-        });
-      }
-    } finally {
-      setSending(false);
+    if (live) {
+      const optimistic: TimelineEvent = {
+        id: `opt:${Date.now()}`,
+        conversationId: session.id,
+        seq: Number.MAX_SAFE_INTEGER,
+        ts: new Date().toISOString(),
+        type: "user_message",
+        text: s.text || (s.images.length ? "🖼️ Image" : ""),
+      };
+      setLiveEvents((e) => mergeById(e, [optimistic]));
+      const { threadId } = await streamLiveMessage(
+        session.hostId,
+        session.agent,
+        session.id,
+        session.cwd,
+        s.text,
+        (ev) =>
+          setLiveEvents((e) => {
+            // The daemon echoes the user turn as it streams; drop our optimistic
+            // placeholder then so the message isn't shown twice.
+            const base =
+              ev.type === "user_message" && !ev.id.startsWith("opt:")
+                ? e.filter((x) => !x.id.startsWith("opt:"))
+                : e;
+            return mergeById(base, [ev]);
+          }),
+        {
+          images: s.images,
+          permissionMode: modesFor(session.agent).length > 1
+            ? (mode ?? modesFor(session.agent)[0]?.value)
+            : undefined,
+          reasoningEffort: effectiveCaps(session.agent, capsFor(session.agent)).thinking ? effort : undefined,
+          model: modelForThread(session.id),
+        },
+      );
+      if (threadId) setLiveEvents(chrono(await fetchMessages(session.hostId, session.agent, threadId)));
+      refreshUsage();
+    } else {
+      const { getRuntime } = await import("@/services/runtime");
+      const rt = await getRuntime();
+      await rt.sendMessage({
+        conversation: { id: session.id, agent: session.agent, threadId: session.id } as never,
+        project: { path: session.cwd ?? "" } as never,
+        text: s.text,
+      });
     }
   }, [session, live, refreshUsage, mode, effort]);
 
+  // Follow-ups typed while a turn runs are queued and drained in order — the
+  // Claude Code / Codex model. inFlightRef gates re-entrancy synchronously so a
+  // fast second submit can't start a parallel turn before `sending` updates.
+  const inFlightRef = useRef(false);
+  const queueRef = useRef<ComposerSubmit[]>([]);
+  const [queued, setQueued] = useState<ComposerSubmit[]>([]);
+
+  const onSubmit = useCallback(async (s: ComposerSubmit) => {
+    if (inFlightRef.current) {
+      queueRef.current = [...queueRef.current, s];
+      setQueued(queueRef.current);
+      return;
+    }
+    inFlightRef.current = true;
+    setSending(true);
+    try {
+      await runTurn(s);
+      // Drain queued follow-ups, unless a stop cleared the flag mid-way.
+      while (inFlightRef.current && queueRef.current.length) {
+        const [next, ...rest] = queueRef.current;
+        queueRef.current = rest;
+        setQueued(rest);
+        await runTurn(next);
+      }
+    } finally {
+      inFlightRef.current = false;
+      setSending(false);
+    }
+  }, [runTurn]);
+
+  const cancelQueued = useCallback((i: number) => {
+    queueRef.current = queueRef.current.filter((_, n) => n !== i);
+    setQueued(queueRef.current);
+  }, []);
+
   const stop = useCallback(async () => {
     if (!session) return;
+    // Cancel pending follow-ups and halt the drain loop, then interrupt the turn.
+    queueRef.current = [];
+    setQueued([]);
+    inFlightRef.current = false;
     setStopping(true);
     try {
       await interruptTurn(session.hostId, session.agent, session.id);
@@ -260,6 +296,11 @@ export default function SessionScreen() {
   const canSteer = session.isLive;
   const caps = effectiveCaps(session.agent, reportedCaps);
   const running = sending || session.activity === "running" || session.activity === "streaming";
+  // Phase label for the working indicator: "Responding…" once assistant text is
+  // streaming, otherwise "Thinking…".
+  const tail = rawEvents[rawEvents.length - 1];
+  const workLabel =
+    tail?.type === "assistant_message" && tail.streaming ? "Responding…" : "Thinking…";
 
   // Permission-mode + reasoning-effort controls (shown on the status bar).
   const modes = modesFor(session.agent);
@@ -376,6 +417,7 @@ export default function SessionScreen() {
               listRef={listRef}
               onLongPressEvent={onLongPressEvent}
               onRunCommand={canSteer ? onRunCommand : undefined}
+              footer={running ? <WorkingIndicator agent={session.agent} label={workLabel} /> : undefined}
             />
           </Animated.View>
         )}
@@ -437,15 +479,36 @@ export default function SessionScreen() {
             Archived session — worktree was removed. Read-only.
           </Text>
         ) : null}
+        {queued.length > 0 ? (
+          <View className="mb-2 gap-1.5">
+            {queued.map((q, i) => (
+              <View
+                key={i}
+                className="flex-row items-center gap-2 rounded-xl border border-border bg-surface-alt px-3 py-2"
+              >
+                <Ionicons name="time-outline" size={13} color={COLOR.fgFaint} />
+                <Text numberOfLines={1} className="flex-1 text-[12px] text-fg-muted">
+                  {q.text || (q.images.length ? "🖼️ Image" : "")}
+                </Text>
+                <Pressable onPress={() => cancelQueued(i)} hitSlop={8}>
+                  <Ionicons name="close" size={14} color={COLOR.fgMuted} />
+                </Pressable>
+              </View>
+            ))}
+            <Text className="px-1 text-[11px] text-fg-faint">Queued — sends after the current reply</Text>
+          </View>
+        ) : null}
         <Composer
           ref={composerRef}
           agent={session.agent}
           caps={caps}
           disabled={!canSteer}
           sending={sending}
+          running={running}
           hostId={session.hostId}
           cwd={session.cwd}
           onSubmit={onSubmit}
+          onStop={stop}
         />
       </View>
     </KeyboardAvoidingView>
