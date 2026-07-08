@@ -11,7 +11,7 @@ import { collapseToolResults, Timeline } from "@/components/Timeline";
 import { TimelineSkeleton } from "@/components/Skeleton";
 import { Composer, type ComposerHandle, type ComposerSubmit } from "@/components/Composer";
 import { MarkerSheet, type Marker } from "@/components/MarkerSheet";
-import { ThreadStatusBar } from "@/components/ThreadStatusBar";
+import { ThreadStatusBar, ThreadUsageSummary } from "@/components/ThreadStatusBar";
 import { ModelSheet } from "@/components/ModelSheet";
 import { useTimeline } from "@/hooks/useTimeline";
 import {
@@ -296,7 +296,8 @@ export default function SessionScreen() {
             <View className="mt-0.5 flex-row items-center gap-2">
               <ActivityDot status={session.activity} size={7} />
               <Text className="text-[12px] text-fg-muted">{ACTIVITY_LABEL[session.activity]}</Text>
-              {session.branch ? <Text numberOfLines={1} className="font-mono text-[11px] text-fg-faint">⎇ {session.branch}</Text> : null}
+              {session.branch ? <Text numberOfLines={1} className="shrink font-mono text-[11px] text-fg-faint">⎇ {session.branch}</Text> : null}
+              <ThreadUsageSummary usage={usage} />
             </View>
           </View>
           {canFavourite ? (
@@ -399,7 +400,6 @@ export default function SessionScreen() {
       <View style={{ paddingBottom: insets.bottom + 8 }} className="border-t border-border bg-bg-elevated px-3 pt-2">
         <ThreadStatusBar
           agent={session.agent}
-          usage={usage}
           model={selectedModel ?? usage?.model ?? null}
           canPickModel={live && !!session.cwd}
           onPressModel={() => setModelSheet(true)}

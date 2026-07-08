@@ -37,14 +37,14 @@ function shortModel(model: string): string {
 }
 
 /**
- * A thin toolbar above the composer: an interactive model chip, subtle usage
- * chips (tokens · cost), and a markers chip. Everything is left-aligned in its
- * own row of pills with real hit targets — the right side stays clear of the
- * send button so nothing mis-fires into the input.
+ * A thin toolbar above the composer holding only interactive controls: the
+ * model picker, the mode/effort chips, and the markers chip. Static usage
+ * (tokens · cost) lives in the header via {@link ThreadUsageSummary}. Everything
+ * is left-aligned with real hit targets — the right side stays clear of the send
+ * button so nothing mis-fires into the input.
  */
 export function ThreadStatusBar({
   agent,
-  usage,
   model,
   canPickModel,
   onPressModel,
@@ -54,7 +54,6 @@ export function ThreadStatusBar({
   onOpenMarkers,
 }: {
   agent: string;
-  usage: ThreadUsage | null;
   /** Effective model id (selection ?? last-used). */
   model: string | null;
   canPickModel: boolean;
@@ -66,7 +65,6 @@ export function ThreadStatusBar({
   markerCount: number;
   onOpenMarkers: () => void;
 }) {
-  const hasUsage = !!(usage?.available && usage.tokens);
   return (
     <View className="mb-2.5 flex-row flex-wrap items-center gap-1.5 px-0.5">
       {/* Model — the primary control, a clearly-tappable pill */}
@@ -106,18 +104,6 @@ export function ThreadStatusBar({
         <ControlChip icon="flash-outline" label={effort.label} active={effort.active} onPress={effort.onPress} />
       ) : null}
 
-      {/* Usage — subtle, non-interactive info chips */}
-      {hasUsage ? (
-        <>
-          <InfoChip text={fmtTokens(usage!.tokens!.total)} />
-          {usage!.cost != null ? (
-            <InfoChip
-              text={`${usage!.costComplete === false ? "~" : ""}${fmtCost(usage!.cost)}`}
-            />
-          ) : null}
-        </>
-      ) : null}
-
       {/* Markers — tappable pill */}
       {markerCount > 0 ? (
         <Pressable
@@ -133,11 +119,19 @@ export function ThreadStatusBar({
   );
 }
 
-function InfoChip({ text }: { text: string }) {
+/**
+ * Static usage readout for the thread header: "79.4M · $61.03" (a leading "~"
+ * marks an incomplete cost estimate). Renders nothing until usage is available.
+ */
+export function ThreadUsageSummary({ usage }: { usage: ThreadUsage | null }) {
+  if (!usage?.available || !usage.tokens) return null;
+  const cost =
+    usage.cost != null ? `${usage.costComplete === false ? "~" : ""}${fmtCost(usage.cost)}` : null;
   return (
-    <View className="rounded-full bg-surface-alt px-2 py-1">
-      <Text className="text-[12px] text-fg-muted">{text}</Text>
-    </View>
+    <Text numberOfLines={1} className="text-[11px] text-fg-faint">
+      {fmtTokens(usage.tokens.total)}
+      {cost ? ` · ${cost}` : ""}
+    </Text>
   );
 }
 
