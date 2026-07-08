@@ -72,7 +72,15 @@ function extract(s, name) {
 
 /** @type {AgentRules} */
 const CLAUDE = {
-  noise: ["system-reminder", "local-command-caveat", "user-prompt-submit-hook", "command-message"],
+  // `task-notification` wraps a `<task-id>…</task-id>` block the harness injects
+  // when a background task reports back — pure plumbing, never worth showing.
+  noise: [
+    "system-reminder",
+    "local-command-caveat",
+    "user-prompt-submit-hook",
+    "command-message",
+    "task-notification",
+  ],
   command: { name: "command-name", args: "command-args" },
   output: {
     stdout: ["local-command-stdout", "bash-stdout"],

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ActionSheetIOS, Pressable, RefreshControl, Text, View } from "react-native";
+import { ActionSheetIOS, Modal, Pressable, RefreshControl, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LegendList } from "@legendapp/list/react-native";
 import { useObservable, useSelector } from "@legendapp/state/react";
@@ -8,7 +8,13 @@ import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@litter/shared";
 import {
   activeFilterCount,
+  allAgentsInUse,
+  allDevices,
   connection$,
+  deviceEmoji,
+  deviceLabel,
+  deviceOverrides$,
+  devices$,
   favRepos$,
   favThreads$,
   filters$,
@@ -22,7 +28,7 @@ import {
 import { SessionCard } from "@/components/SessionCard";
 import { RecentStrip } from "@/components/RecentStrip";
 import { SessionListSkeleton } from "@/components/Skeleton";
-import { COLOR } from "@/ui";
+import { agentLabel, cn, COLOR, DeviceIcon } from "@/ui";
 import { refreshLive } from "@/services/runtime";
 
 /** Collapse key for the Favourites pseudo-group (shares the collapsed$ map). */
@@ -31,10 +37,22 @@ const FAV_KEY = "__fav__";
 const needsYou = (s: Session) =>
   s.needsAttention || s.activity === "failed" || s.activity === "awaiting_input";
 
-/** A pinned favourites header, a directory header, or one session beneath either. */
+/** A pinned favourites header, a directory header, or one session beneath either.
+ *  When every session in a directory lives on one device, the header carries that
+ *  device's name/emoji so it can show the device glyph instead of a generic folder. */
 type Row =
   | { type: "favHeader"; count: number; collapsed: boolean }
-  | { type: "header"; repoId: string; name: string; count: number; attention: number; collapsed: boolean; fav: boolean }
+  | {
+      type: "header";
+      repoId: string;
+      name: string;
+      count: number;
+      attention: number;
+      collapsed: boolean;
+      fav: boolean;
+      deviceName?: string;
+      deviceEmoji?: string;
+    }
   | { type: "session"; session: Session; fav?: boolean };
 
 /** Sort order: needs-you → running → other live → archived; newest within each. */
@@ -50,6 +68,7 @@ export default function HomeScreen() {
   const router = useRouter();
 
   const [refreshing, setRefreshing] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
   const collapsed$ = useObservable<Record<string, boolean>>({});
   const toggleGroup = (repoId: string) => collapsed$[repoId].set((v) => !v);
 
@@ -67,6 +86,8 @@ export default function HomeScreen() {
   const view$ = useObservable(() => {
     const f = filters$.get();
     const repos = repositories$.get();
+    const deviceMap = devices$.get();
+    deviceOverrides$.get(); // track so header glyphs refresh on rename/emoji
     const collapsedMap = collapsed$.get();
     // Track the favourite maps so the view recomputes on toggle (selecting the
     // parent object alone wouldn't re-run — the Legend-State object gotcha).
@@ -113,6 +134,8 @@ export default function HomeScreen() {
     });
     for (const [repoId, glist] of ordered) {
       const isCollapsed = !!collapsedMap[repoId];
+      const hostIds = new Set(glist.map((s) => s.hostId));
+      const dev = hostIds.size === 1 ? deviceMap[[...hostIds][0]!] : undefined;
       rows.push({
         type: "header",
         repoId,
@@ -121,6 +144,8 @@ export default function HomeScreen() {
         attention: glist.filter(needsYou).length,
         collapsed: isCollapsed,
         fav: !!favR[repoId],
+        deviceName: dev ? deviceLabel(dev.id, dev.name) : undefined,
+        deviceEmoji: dev ? deviceEmoji(dev.id) : undefined,
       });
       if (!isCollapsed) for (const s of glist) rows.push({ type: "session", session: s });
     }
@@ -182,11 +207,33 @@ export default function HomeScreen() {
             </Text>
           </Pressable>
         </View>
-        <Pressable onPress={() => router.push("/new")} className="active:opacity-80 h-9 flex-row items-center gap-1 rounded-full bg-accent px-3.5 shrink-0">
-          <Ionicons name="add" size={17} color="#fff" />
-          <Text className="text-[14px] font-semibold text-white">New</Text>
-        </Pressable>
+        <View className="flex-row items-center gap-2 shrink-0">
+          <Pressable
+            onPress={() => setShowFilters(true)}
+            className={cn(
+              "active:opacity-80 h-9 w-9 items-center justify-center rounded-full",
+              showFilters || filterCount ? "bg-accent/15" : "bg-surface-alt",
+            )}
+          >
+            <Ionicons
+              name="filter"
+              size={17}
+              color={showFilters || filterCount ? COLOR.accent : COLOR.fgMuted}
+            />
+            {filterCount ? (
+              <View className="absolute -right-0.5 -top-0.5 h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1">
+                <Text className="text-[10px] font-bold text-white">{filterCount}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+          <Pressable onPress={() => router.push("/new")} className="active:opacity-80 h-9 flex-row items-center gap-1 rounded-full bg-accent px-3.5">
+            <Ionicons name="add" size={17} color="#fff" />
+            <Text className="text-[14px] font-semibold text-white">New</Text>
+          </Pressable>
+        </View>
       </View>
+
+      <HomeFilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
 
       <LegendList
         style={{ flex: 1 }}
@@ -212,6 +259,8 @@ export default function HomeScreen() {
               attention={item.attention}
               collapsed={item.collapsed}
               fav={item.fav}
+              deviceName={item.deviceName}
+              deviceEmoji={item.deviceEmoji}
               onPress={() => toggleGroup(item.repoId)}
               onAdd={() => newInRepo(item.repoId)}
               onLongPress={() => onLongPressRepo(item.repoId, item.name)}
@@ -282,13 +331,16 @@ function FavHeader({
   );
 }
 
-/** Collapsible directory section header on the Home list. */
+/** Collapsible directory section header on the Home list. The glyph shows the
+ *  favourite star, else a single-device glyph, else a generic folder. */
 function DirHeader({
   name,
   count,
   attention,
   collapsed,
   fav,
+  deviceName,
+  deviceEmoji: emoji,
   onPress,
   onAdd,
   onLongPress,
@@ -298,6 +350,8 @@ function DirHeader({
   attention: number;
   collapsed: boolean;
   fav: boolean;
+  deviceName?: string;
+  deviceEmoji?: string;
   onPress: () => void;
   onAdd: () => void;
   onLongPress: () => void;
@@ -310,11 +364,13 @@ function DirHeader({
       className="active:opacity-70 flex-row items-center gap-2 px-4 pb-1.5 pt-3"
     >
       <Ionicons name={collapsed ? "chevron-forward" : "chevron-down"} size={13} color={COLOR.fgFaint} />
-      <Ionicons
-        name={fav ? "star" : "folder-outline"}
-        size={13}
-        color={fav ? COLOR.accent : COLOR.fgFaint}
-      />
+      {fav ? (
+        <Ionicons name="star" size={13} color={COLOR.accent} />
+      ) : deviceName ? (
+        <DeviceIcon name={deviceName} emoji={emoji} color={COLOR.fgFaint} size={13} />
+      ) : (
+        <Ionicons name="folder-outline" size={13} color={COLOR.fgFaint} />
+      )}
       <Text numberOfLines={1} className="flex-1 text-[13px] font-semibold text-fg-muted">
         {name}
       </Text>
@@ -334,5 +390,122 @@ function DirHeader({
         <Ionicons name="add" size={17} color={COLOR.fgMuted} />
       </Pressable>
     </Pressable>
+  );
+}
+
+/** A pill filter toggle. */
+function FilterChip({
+  label,
+  active,
+  onPress,
+  icon,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+  icon?: React.ReactNode;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      className={cn(
+        "active:opacity-80 h-8 flex-row items-center gap-1.5 rounded-full border px-3",
+        active ? "border-accent bg-accent/15" : "border-border bg-surface-alt",
+      )}
+    >
+      {icon}
+      <Text className={cn("text-[13px]", active ? "text-accent" : "text-fg")}>{label}</Text>
+    </Pressable>
+  );
+}
+
+/** Filter bottom sheet on Home — status · device · agent, mirroring the Search
+ *  filter surface but reachable right where the list lives. Writes straight to
+ *  the shared `filters$`, so Home and Search stay in lockstep. */
+function HomeFilterSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const insets = useSafeAreaInsets();
+  const f = useSelector(() => filters$.get());
+  const devices = useSelector(() => allDevices());
+  const agents = useSelector(() => allAgentsInUse());
+  useSelector(() => deviceOverrides$.get());
+  const hasFilter = !!(f.agent || f.device || f.needsOnly);
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable className="flex-1 bg-black/50" onPress={onClose} />
+      <View
+        style={{ paddingBottom: insets.bottom + 16 }}
+        className="gap-4 rounded-t-3xl border-t border-border bg-bg-elevated px-4 pt-3"
+      >
+        <View className="h-1 w-10 self-center rounded-full bg-border" />
+        <View className="flex-row items-center justify-between">
+          <Text className="text-[18px] font-bold text-fg">Filter</Text>
+          {hasFilter ? (
+            <Pressable
+              onPress={() => filters$.set({ device: null, agent: null, needsOnly: false, favOnly: false })}
+              className="active:opacity-60 flex-row items-center gap-1.5"
+            >
+              <Ionicons name="close-circle-outline" size={15} color={COLOR.fgMuted} />
+              <Text className="text-[13px] text-fg-muted">Clear all</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        <View className="gap-1.5">
+          <Text className="text-[11px] uppercase tracking-wide text-fg-faint">Show</Text>
+          <View className="flex-row flex-wrap gap-2">
+            <FilterChip label="Needs you" active={f.needsOnly} onPress={() => filters$.needsOnly.set(true)} />
+            <FilterChip label="Everything" active={!f.needsOnly} onPress={() => filters$.needsOnly.set(false)} />
+          </View>
+        </View>
+
+        {devices.length > 1 ? (
+          <View className="gap-1.5">
+            <Text className="text-[11px] uppercase tracking-wide text-fg-faint">Device</Text>
+            <View className="flex-row flex-wrap gap-2">
+              {devices.map((d) => (
+                <FilterChip
+                  key={d.id}
+                  label={deviceLabel(d.id, d.name)}
+                  active={f.device === d.id}
+                  onPress={() => filters$.device.set(f.device === d.id ? null : d.id)}
+                  icon={
+                    <DeviceIcon
+                      name={d.name}
+                      emoji={deviceEmoji(d.id)}
+                      color={f.device === d.id ? COLOR.accent : COLOR.fgMuted}
+                      size={13}
+                    />
+                  }
+                />
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {agents.length > 1 ? (
+          <View className="gap-1.5">
+            <Text className="text-[11px] uppercase tracking-wide text-fg-faint">Agent</Text>
+            <View className="flex-row flex-wrap gap-2">
+              {agents.map((a) => (
+                <FilterChip
+                  key={a}
+                  label={agentLabel(a)}
+                  active={f.agent === a}
+                  onPress={() => filters$.agent.set(f.agent === a ? null : a)}
+                />
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        <Pressable
+          onPress={onClose}
+          className="active:opacity-90 mt-1 h-12 items-center justify-center rounded-xl bg-accent"
+        >
+          <Text className="text-[15px] font-semibold text-white">Done</Text>
+        </Pressable>
+      </View>
+    </Modal>
   );
 }
