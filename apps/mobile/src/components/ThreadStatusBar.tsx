@@ -109,7 +109,7 @@ export function ThreadStatusBar({
       {/* Usage — subtle, non-interactive info chips */}
       {hasUsage ? (
         <>
-          <InfoChip text={`${fmtTokens(usage!.tokens!.total)} tokens`} />
+          <InfoChip text={fmtTokens(usage!.tokens!.total)} />
           {usage!.cost != null ? (
             <InfoChip
               text={`${usage!.costComplete === false ? "~" : ""}${fmtCost(usage!.cost)}`}

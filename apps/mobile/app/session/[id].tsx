@@ -245,7 +245,7 @@ export default function SessionScreen() {
   const showMode = modes.length > 1;
   const showEffort = caps.thinking;
   const activeMode = mode ?? modes[0]?.value;
-  const modeLabel = modes.find((m) => m.value === activeMode)?.label ?? "Mode";
+  const modeLabel = activeMode === "default" ? "Mode" : modes.find((m) => m.value === activeMode)?.label ?? "Mode";
   const effortLabel = REASONING_EFFORTS.find((e) => e.value === effort)?.label ?? "Effort";
   const pickSheet = (title: string, labels: string[], onPick: (i: number) => void) =>
     ActionSheetIOS.showActionSheetWithOptions(
