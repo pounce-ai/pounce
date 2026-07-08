@@ -582,11 +582,23 @@ function itemToEvents(it, conversationId, seq, ts, streaming = false, agent) {
 function normalizeTurns(turns, conversationId, agent) {
   const events = [];
   let seq = 0;
-  for (const turn of turns) {
+  // The daemon may hand back turns newest-first (thread/list is sorted DESC);
+  // render order is turn order, so sort ascending by creation time or a
+  // once-reversed thread shows its latest turn above the older history.
+  const ordered = (turns || [])
+    .map((t, i) => [t, i])
+    .sort(([a, ai], [b, bi]) => tturn(a) - tturn(b) || ai - bi)
+    .map(([t]) => t);
+  for (const turn of ordered) {
     const ts = new Date(turn.completedAt || turn.createdAt || Date.now()).toISOString();
     for (const it of turn.items || []) events.push(...itemToEvents(it, conversationId, ++seq, ts, false, agent));
   }
   return events;
+}
+
+/** A turn's chronological key (createdAt preferred; completedAt as fallback). */
+function tturn(t) {
+  return new Date(t?.createdAt || t?.completedAt || 0).getTime();
 }
 
 /**

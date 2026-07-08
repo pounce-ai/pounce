@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActionSheetIOS, Pressable, Text, View } from "react-native";
 import { KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Animated, { FadeIn } from "react-native-reanimated";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import type { LegendListRef } from "@legendapp/list/react-native";
@@ -33,6 +34,17 @@ import { fetchMessages, fetchUsage, interruptTurn, streamLiveMessage, type Threa
 import { Ionicons } from "@expo/vector-icons";
 import { ActivityDot, ACTIVITY_LABEL, AgentLogo, cn, COLOR } from "@/ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "@/ui/agent-meta";
+
+/** Order host-fetched history chronologically. Turns share one timestamp, so a
+ *  stable sort keeps items within a turn in place while fixing turn order — a
+ *  guard against a bridge that returns turns newest-first. Only safe on pure
+ *  host-side arrays (uniform host clock), never on the mixed streaming buffer. */
+function chrono(events: TimelineEvent[]): TimelineEvent[] {
+  return events
+    .map((e, i) => [e, i] as const)
+    .sort(([a, ai], [b, bi]) => (a.ts ?? "").localeCompare(b.ts ?? "") || ai - bi)
+    .map(([e]) => e);
+}
 
 function mergeById(cur: TimelineEvent[], inc: TimelineEvent[]): TimelineEvent[] {
   const out = cur.slice();
@@ -103,7 +115,7 @@ export default function SessionScreen() {
     setLoading(true);
     setFailed(false);
     fetchMessages(session.hostId, session.agent, session.id)
-      .then((ev) => { if (!cancelled) { setLiveEvents(ev); setFailed(false); } })
+      .then((ev) => { if (!cancelled) { setLiveEvents(chrono(ev)); setFailed(false); } })
       .catch(() => { if (!cancelled) setFailed(true); })
       .finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
@@ -181,7 +193,16 @@ export default function SessionScreen() {
           session.id,
           session.cwd,
           s.text,
-          (ev) => setLiveEvents((e) => mergeById(e, [ev])),
+          (ev) =>
+            setLiveEvents((e) => {
+              // The daemon echoes the user turn as it streams; drop our optimistic
+              // placeholder then so the message isn't shown twice.
+              const base =
+                ev.type === "user_message" && !ev.id.startsWith("opt:")
+                  ? e.filter((x) => !x.id.startsWith("opt:"))
+                  : e;
+              return mergeById(base, [ev]);
+            }),
           {
             images: s.images,
             permissionMode: modesFor(session.agent).length > 1
@@ -191,7 +212,7 @@ export default function SessionScreen() {
             model: modelForThread(session.id),
           },
         );
-        if (threadId) setLiveEvents(await fetchMessages(session.hostId, session.agent, threadId));
+        if (threadId) setLiveEvents(chrono(await fetchMessages(session.hostId, session.agent, threadId)));
         refreshUsage();
       } else {
         const { getRuntime } = await import("@/services/runtime");
@@ -346,14 +367,17 @@ export default function SessionScreen() {
             <Text className="mt-1 text-center text-[13px] text-fg-muted">Send a message below to get this thread going.</Text>
           </View>
         ) : (
-          <Timeline
-            events={rawEvents}
-            agent={session.agent}
-            sessionId={id!}
-            listRef={listRef}
-            onLongPressEvent={onLongPressEvent}
-            onRunCommand={canSteer ? onRunCommand : undefined}
-          />
+          // Fade the history in so it doesn't snap in after the skeleton.
+          <Animated.View className="flex-1" entering={FadeIn.duration(260)}>
+            <Timeline
+              events={rawEvents}
+              agent={session.agent}
+              sessionId={id!}
+              listRef={listRef}
+              onLongPressEvent={onLongPressEvent}
+              onRunCommand={canSteer ? onRunCommand : undefined}
+            />
+          </Animated.View>
         )}
       </View>
 
