@@ -267,10 +267,15 @@ persist(deviceOverrides$, "deviceOverrides");
 
 // --- selectors (respect active device/agent filters) ---
 
+/** Dotfolders (e.g. .deepsec) are treated as hidden — never surfaced anywhere. */
+function isHiddenRepo(repoId: string): boolean {
+  return (repositories$.get()[repoId]?.name || "").startsWith(".");
+}
+
 function passesFilter(s: Session): boolean {
   const f = filters$.get();
-  // Permanently-ignored folders are hidden everywhere, regardless of filters.
-  if (ignoredRepos$.get()[s.repoId]) return false;
+  // Permanently-ignored folders — and hidden dotfolders — are never shown.
+  if (ignoredRepos$.get()[s.repoId] || isHiddenRepo(s.repoId)) return false;
   if (f.device && s.hostId !== f.device) return false;
   if (f.agent && s.agent !== f.agent) return false;
   if (f.repos.length && !f.repos.includes(s.repoId)) return false;
@@ -375,7 +380,7 @@ export function reposByActivity(): Repository[] {
     ? new Set(allSessions().map((s) => s.repoId))
     : null;
   return Object.values(repositories$.get())
-    .filter((r) => !withSessions || withSessions.has(r.id))
+    .filter((r) => !r.name.startsWith(".") && (!withSessions || withSessions.has(r.id)))
     .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt));
 }
 
