@@ -435,31 +435,47 @@ function cleanPreview(raw, agent) {
 }
 
 async function listThreads(agent) {
-  const frames = await probe(
-    ["--agent", agent, "--method", "thread/list", "--linger-secs", "1", "--timeout-secs", "25"],
-    { timeout: 30000 },
-  );
-  // the thread/list response is the frame whose result has a `data` array
-  const f = frames.find((x) => x?.result && Array.isArray(x.result.data));
-  return (f?.result?.data || []).map((t) => {
-    const info = repoInfo(t.cwd || "");
-    return {
-      id: t.id,
-      agent,
-      cwd: t.cwd || null,
-      name: t.name || null,
-      preview: cleanPreview(t.preview, agent),
-      createdAt: typeof t.createdAt === "number"
-        ? new Date(t.createdAt > 1e12 ? t.createdAt : t.createdAt * 1000).toISOString()
-        : null,
-      gitBranch: t.gitInfo?.branch || null,
-      modelProvider: t.modelProvider || null,
-      repo: info.repo,
-      worktree: info.worktree,
-      isWorktree: info.isWorktree,
-      isLive: info.isLive,
-    };
-  });
+  // thread/list is paginated (~25/page) via result.nextCursor — same convention
+  // as model/list. Following the cursor is essential: without it only the first
+  // page shows, so a machine's older/recent sessions silently vanish from the app.
+  const out = [];
+  const seen = new Set();
+  let cursor;
+  for (let i = 0; i < 60; i++) { // guard: ~25/page → up to ~1500 threads
+    const frames = await probe(
+      ["--agent", agent, "--method", "thread/list",
+       "--params", JSON.stringify(cursor ? { cursor } : {}),
+       "--linger-secs", "1", "--timeout-secs", "25"],
+      { timeout: 30000 },
+    ).catch(() => []);
+    const f = frames.find((x) => x?.result && Array.isArray(x.result.data));
+    let added = 0;
+    for (const t of f?.result?.data || []) {
+      if (!t.id || seen.has(t.id)) continue; // dedupe: a mishandled cursor can't loop
+      seen.add(t.id);
+      added++;
+      const info = repoInfo(t.cwd || "");
+      out.push({
+        id: t.id,
+        agent,
+        cwd: t.cwd || null,
+        name: t.name || null,
+        preview: cleanPreview(t.preview, agent),
+        createdAt: typeof t.createdAt === "number"
+          ? new Date(t.createdAt > 1e12 ? t.createdAt : t.createdAt * 1000).toISOString()
+          : null,
+        gitBranch: t.gitInfo?.branch || null,
+        modelProvider: t.modelProvider || null,
+        repo: info.repo,
+        worktree: info.worktree,
+        isWorktree: info.isWorktree,
+        isLive: info.isLive,
+      });
+    }
+    cursor = f?.result?.nextCursor;
+    if (!cursor || added === 0) break; // no more pages, or the cursor stopped advancing
+  }
+  return out;
 }
 
 async function getThreads(fresh = false) {
