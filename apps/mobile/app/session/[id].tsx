@@ -14,6 +14,7 @@ import { TimelineSkeleton } from "@/components/Skeleton";
 import { Composer, type ComposerHandle, type ComposerSubmit } from "@/components/Composer";
 import { MarkerSheet, type Marker } from "@/components/MarkerSheet";
 import { shortModel, ThreadUsageSummary } from "@/components/ThreadStatusBar";
+import { EnvironmentSheet } from "@/components/EnvironmentSheet";
 import { ModelSheet } from "@/components/ModelSheet";
 import { useTimeline } from "@/hooks/useTimeline";
 import {
@@ -137,6 +138,7 @@ export default function SessionScreen() {
     [],
   );
   const [markerSheet, setMarkerSheet] = useState(false);
+  const [envSheet, setEnvSheet] = useState(false);
   // Derived inside useSelector so each message's override node is tracked —
   // selecting the parent object breaks on toggles (same reference, no rerender).
   const markers = useSelector<Marker[]>(() =>
@@ -324,27 +326,7 @@ export default function SessionScreen() {
   const modelPillLabel =
     showEffort && effort && effort !== "off" ? `${modelName} · ${effortLabel}` : modelName;
 
-  // All session actions in one thumb-zone sheet (slides up from the bottom).
-  const openActions = () => {
-    const acts: { label: string; run: () => void }[] = [];
-    if (running) acts.push({ label: "Stop agent", run: () => void stop() });
-    if (markers.length) acts.push({ label: "Markers", run: () => setMarkerSheet(true) });
-    if (session.cwd) {
-      acts.push({ label: "View changes", run: () => router.push(`/changes?id=${session.id}`) });
-      acts.push({ label: "Open terminal", run: () => router.push(`/terminal?id=${session.id}`) });
-    }
-    if (!acts.length) return;
-    const labels = acts.map((a) => a.label);
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        title: session.title,
-        options: [...labels, "Cancel"],
-        cancelButtonIndex: labels.length,
-        destructiveButtonIndex: running ? 0 : undefined,
-      },
-      (i) => { if (i >= 0 && i < acts.length) acts[i].run(); },
-    );
-  };
+  // Session actions now live in the Environment sheet — the "…" button opens it.
 
   return (
     <KeyboardAvoidingView
@@ -392,7 +374,7 @@ export default function SessionScreen() {
             </Pressable>
           ) : null}
           <Pressable
-            onPress={openActions}
+            onPress={() => setEnvSheet(true)}
             className="active:opacity-60 h-9 w-9 items-center justify-center"
           >
             <Ionicons
@@ -446,6 +428,16 @@ export default function SessionScreen() {
         agent={session.agent}
         onJump={jumpTo}
         onClose={() => setMarkerSheet(false)}
+      />
+
+      <EnvironmentSheet
+        visible={envSheet}
+        session={session}
+        running={running}
+        onClose={() => setEnvSheet(false)}
+        onStop={() => void stop()}
+        onViewChanges={() => router.push(`/changes?id=${session.id}`)}
+        onTerminal={() => router.push(`/terminal?id=${session.id}`)}
       />
 
       <ModelSheet
