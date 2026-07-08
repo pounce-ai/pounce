@@ -38,12 +38,25 @@ const ASSISTANT_STYLE: MarkdownStyle = {
   em: { fontStyle: "italic", color: COLOR.fg },
   strikethrough: { color: COLOR.fgMuted },
   link: { color: COLOR.accent, underline: false },
-  code: { fontFamily: MONO, fontSize: 13, color: "#cdd0d6", backgroundColor: "#1b1b22" },
+  // Subtle chip — the enriched default gives inline code a pink border, so pin
+  // the border to the fill to hide it.
+  code: { fontFamily: MONO, fontSize: 13.5, color: "#e6c07b", backgroundColor: "#23232c", borderColor: "#23232c" },
   codeBlock: { fontFamily: MONO, fontSize: 13, color: "#cdd0d6", backgroundColor: "#0d0d12", borderColor: "#26262f", borderWidth: 1, borderRadius: 10, padding: 10 },
-  blockquote: { borderColor: "#33333e", borderWidth: 3, gapWidth: 8, backgroundColor: "transparent" },
-  list: { bulletColor: COLOR.fgMuted, markerColor: COLOR.fgMuted, gapWidth: 6 },
-  table: { borderColor: "#26262f", borderWidth: 1 },
-  thematicBreak: { color: "#26262f", height: 1, marginTop: 6, marginBottom: 6 },
+  blockquote: { color: COLOR.fgMuted, borderColor: "#33333e", borderWidth: 3, gapWidth: 10, backgroundColor: "transparent" },
+  // list.color defaults to a light-theme color (invisible on dark) — set it.
+  list: { color: COLOR.fg, bulletColor: COLOR.fgMuted, markerColor: COLOR.fgMuted, gapWidth: 8 },
+  // Table defaults are light-theme (white bg / near-black text) — theme it dark.
+  table: {
+    color: COLOR.fg,
+    headerBackgroundColor: "#1b1b22",
+    headerTextColor: COLOR.fg,
+    rowEvenBackgroundColor: "#141419",
+    rowOddBackgroundColor: "#101016",
+    borderColor: "#2b2b35",
+    borderWidth: 1,
+    borderRadius: 8,
+  },
+  thematicBreak: { color: "#26262f", height: 1, marginTop: 8, marginBottom: 8 },
 };
 
 /** Same, but on the accent (user) bubble — text is white-on-purple. */
@@ -56,7 +69,8 @@ const USER_STYLE: MarkdownStyle = {
   h2: { ...ASSISTANT_STYLE.h2, color: "#ffffff" },
   h3: { ...ASSISTANT_STYLE.h3, color: "#ffffff" },
   link: { color: "#ffffff", underline: true },
-  code: { fontFamily: MONO, fontSize: 13, color: "#f4f2ff", backgroundColor: "rgba(255,255,255,0.18)" },
+  code: { fontFamily: MONO, fontSize: 13.5, color: "#f4f2ff", backgroundColor: "rgba(255,255,255,0.20)", borderColor: "rgba(255,255,255,0.20)" },
+  list: { color: "#ffffff", bulletColor: "rgba(255,255,255,0.7)", markerColor: "rgba(255,255,255,0.7)", gapWidth: 8 },
 };
 
 /**

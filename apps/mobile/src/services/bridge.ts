@@ -20,7 +20,7 @@ import type {
   TimelineEvent,
 } from "@litter/shared";
 import { parseUserMessage } from "@litter/transcript";
-import { agentCaps$, connection$, hosts$, recordSync, sessions$, setWorkspace } from "../state/stores";
+import { agentCaps$, cachedModels, connection$, hosts$, recordSync, sessions$, setCachedModels, setWorkspace } from "../state/stores";
 
 const BRIDGE_KEY = "pounce.bridge";
 
@@ -245,6 +245,15 @@ export async function syncLiveData(
   // Log what this sync actually brought in (per-repo) before we swap the store.
   recordSync(sessions$.get(), sessions, repos, now);
   setWorkspace(repos, sessions, devices);
+  // Warm the model catalog for each device+agent in the background, so opening
+  // the model picker later is instant. Fire-and-forget; throttled per key.
+  const warmed = new Set<string>();
+  for (const s of Object.values(sessions)) {
+    const key = `${s.hostId}:${s.agent}`;
+    if (warmed.has(key)) continue;
+    warmed.add(key);
+    void warmModels(s.hostId, s.agent);
+  }
   return { repos: Object.keys(repos).length, sessions: Object.keys(sessions).length, devices: Object.keys(devices).length };
 }
 
@@ -261,6 +270,81 @@ export async function fetchMessages(
     `/v1/messages?agent=${encodeURIComponent(agent)}&thread=${encodeURIComponent(threadId)}`,
   );
   return events;
+}
+
+/** Per-thread token usage + cost, read from the host's agent transcript. */
+export interface ThreadUsage {
+  available: boolean;
+  model?: string | null;
+  models?: string[];
+  tokens?: { input: number; output: number; cacheRead: number; cacheCreation: number; total: number };
+  cost?: number;
+  costComplete?: boolean;
+  messages?: number;
+  reason?: string;
+}
+
+/** Fetch a thread's token/cost usage from its device. Returns null on any error
+ *  (the status bar just hides). */
+export async function fetchUsage(
+  hostId: string,
+  agent: string,
+  threadId: string,
+  cwd: string | null,
+): Promise<ThreadUsage | null> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return null;
+  try {
+    const { usage } = await get<{ usage: ThreadUsage }>(
+      cfg,
+      `/v1/usage?agent=${encodeURIComponent(agent)}&thread=${encodeURIComponent(threadId)}${
+        cwd ? `&cwd=${encodeURIComponent(cwd)}` : ""
+      }`,
+    );
+    return usage;
+  } catch {
+    return null;
+  }
+}
+
+/** One selectable model for an agent, from the daemon's model/list. */
+export interface ModelInfo {
+  id: string;
+  name: string;
+  description?: string | null;
+  isDefault?: boolean;
+  deprecated?: boolean;
+}
+
+/** Fetch models and cache them into `agentModels$`, so the picker opens
+ *  instantly. Throttled per device+agent and skipped while a recent cache
+ *  exists — safe to call on every sync and on sheet-open (stale-while-revalidate).
+ *  Never overwrites a good cache with an empty (error) result. */
+const modelWarmAt = new Map<string, number>();
+const MODEL_WARM_TTL = 10 * 60_000;
+export async function warmModels(hostId: string, agent: string): Promise<void> {
+  const key = `${hostId}:${agent}`;
+  const last = modelWarmAt.get(key) ?? 0;
+  if (cachedModels(hostId, agent) && Date.now() - last < MODEL_WARM_TTL) return;
+  modelWarmAt.set(key, Date.now());
+  const models = await fetchModels(hostId, agent);
+  if (models.length) setCachedModels(hostId, agent, models);
+  else modelWarmAt.delete(key); // let a failed warm retry sooner
+}
+
+/** Available models for an agent on a device (daemon model/list). [] on error. */
+export async function fetchModels(hostId: string, agent: string): Promise<ModelInfo[]> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return [];
+  try {
+    const { models } = await get<{ models: ModelInfo[] }>(
+      cfg,
+      `/v1/models?agent=${encodeURIComponent(agent)}`,
+    );
+    return models ?? [];
+  } catch {
+    return [];
+  }
 }
 
 /** Run a one-shot shell command in a session's cwd on its host. */

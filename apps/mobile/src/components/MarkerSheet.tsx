@@ -3,7 +3,16 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { cleanAssistantText, parseUserMessage } from "@litter/transcript";
 import { AgentLogo, COLOR, timeAgo } from "@/ui";
-import type { Marker } from "./MarkerRail";
+
+/** A marked message, resolved against the current event list. */
+export interface Marker {
+  id: string;
+  /** Index into the timeline's `events` array (for scrollToIndex). */
+  index: number;
+  type: "user_message" | "assistant_message";
+  text: string;
+  ts: string;
+}
 
 /** Bottom-sheet jump list of every marker in the thread, with previews.
  *  Tapping a row scrolls the timeline (still visible under the transparent

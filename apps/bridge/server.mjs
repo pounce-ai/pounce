@@ -702,6 +702,17 @@ function streamTurn(agent, threadId, text, cwd, onEvent, onDone, opts = {}) {
 
     if (m === "thread/started") { realThreadId = p.thread?.id || p.threadId || realThreadId; return; }
 
+    // The daemon warns when the model was rerouted / is deprecated / has config
+    // notes (e.g. switching models re-sends full context). Surface it inline.
+    if (m === "model/rerouted") {
+      const text = p.warning || p.configWarning || p.deprecationNotice;
+      if (text) {
+        const s = ++seq;
+        onEvent({ id: `sysmodel:${s}`, conversationId: threadId, seq: s, ts: now(), type: "system_event", message: String(text), level: "warning" });
+      }
+      return;
+    }
+
     // text deltas: item/agentMessage/delta -> {delta, itemId}
     if (/^item\/.+\/delta$/.test(m)) {
       const itemId = p.itemId;
@@ -764,6 +775,125 @@ async function getMessages(agent, threadId, fresh = false) {
   if (fresh) cache.delete(key);
   return cached(key, MSG_CACHE_MS, async () =>
     normalizeTurns(await fetchTurns(agent, threadId), threadId, agent));
+}
+
+// --- Per-thread token usage + cost -----------------------------------------
+// The daemon exposes no usage, but Claude Code records `message.usage` +
+// `message.model` on each assistant line of its own transcript
+// (~/.claude/projects/<escaped-cwd>/<sessionId>.jsonl). We read that directly.
+// Prices are USD per 1M tokens; cache-read ≈ 0.1× input, cache-write(5m) ≈ 1.25× input.
+const MODEL_PRICES = {
+  "claude-opus-4-8": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  "claude-opus-4-7": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  "claude-opus-4-6": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  "claude-opus-4-5": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  "claude-opus-4-1": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  "claude-fable-5": { in: 10, out: 50, cacheRead: 1.0, cacheWrite: 12.5 },
+  "claude-mythos-5": { in: 10, out: 50, cacheRead: 1.0, cacheWrite: 12.5 },
+  "claude-sonnet-5": { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  "claude-sonnet-4-6": { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  "claude-sonnet-4-5": { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  "claude-haiku-4-5": { in: 1, out: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+};
+
+/** Price row for a model id, tolerating date-suffixed ids (…-20251001). */
+function priceFor(model) {
+  if (!model) return null;
+  return MODEL_PRICES[model] || MODEL_PRICES[Object.keys(MODEL_PRICES).find((k) => model.startsWith(k))] || null;
+}
+
+/** USD for one assistant message's usage, weighting cache tokens per the model. */
+function msgCost(model, u) {
+  const p = priceFor(model);
+  if (!p) return null;
+  return (
+    ((u.input_tokens || 0) * p.in +
+      (u.output_tokens || 0) * p.out +
+      (u.cache_read_input_tokens || 0) * p.cacheRead +
+      (u.cache_creation_input_tokens || 0) * p.cacheWrite) /
+    1_000_000
+  );
+}
+
+/** Claude Code escapes a cwd into its projects-dir name by replacing / and . with -. */
+function escapeCwd(cwd) {
+  return cwd.replace(/[/.]/g, "-");
+}
+
+/** Locate a thread's transcript file. The daemon threadId equals the Claude
+ *  Code session id (== the .jsonl filename), so this is a direct lookup — we
+ *  deliberately don't guess a sibling file when it's missing, since showing a
+ *  different thread's cost is worse than showing none. */
+function transcriptPath(thread, cwd) {
+  if (!cwd || !/^[0-9a-f-]{8,}$/i.test(thread)) return null;
+  const file = path.join(os.homedir(), ".claude", "projects", escapeCwd(cwd), `${thread}.jsonl`);
+  return existsSync(file) ? file : null;
+}
+
+/** Sum token usage + cost across a thread's Claude Code transcript. Claude-only;
+ *  other agents keep their transcripts elsewhere in other formats. */
+function getUsage(agent, thread, cwd) {
+  return cached(`usage:${agent}:${thread}`, CACHE_MS, async () => {
+    if (agent !== "claude") return { available: false, reason: "unsupported-agent" };
+    const file = transcriptPath(thread, cwd);
+    if (!file) return { available: false, reason: "no-transcript" };
+    let raw;
+    try { raw = readFileSync(file, "utf8"); } catch { return { available: false, reason: "no-transcript" }; }
+    const tokens = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
+    const outByModel = new Map();
+    let cost = 0, costComplete = true, messages = 0;
+    for (const line of raw.split("\n")) {
+      if (!line) continue;
+      let o;
+      try { o = JSON.parse(line); } catch { continue; }
+      if (o.type !== "assistant") continue;
+      const m = o.message;
+      const u = m && m.usage;
+      if (!u) continue;
+      messages++;
+      tokens.input += u.input_tokens || 0;
+      tokens.output += u.output_tokens || 0;
+      tokens.cacheRead += u.cache_read_input_tokens || 0;
+      tokens.cacheCreation += u.cache_creation_input_tokens || 0;
+      const c = msgCost(m.model, u);
+      if (c == null) costComplete = false; else cost += c;
+      if (m.model) outByModel.set(m.model, (outByModel.get(m.model) || 0) + (u.output_tokens || 0));
+    }
+    if (!messages) return { available: false, reason: "no-usage" };
+    const models = [...outByModel.keys()];
+    const model = models.slice().sort((a, b) => outByModel.get(b) - outByModel.get(a))[0] || null;
+    const total = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreation;
+    return { available: true, model, models, tokens: { ...tokens, total }, cost: Math.round(cost * 100) / 100, costComplete, messages };
+  });
+}
+
+// --- Available models per agent (from the daemon's model/list — the same source
+// as the daemon's own /model command). Cached; models rarely change. ----------
+const MODELS_CACHE_MS = 300_000;
+
+function getModels(agent) {
+  return cached(`models:${agent}`, MODELS_CACHE_MS, async () => {
+    const out = [];
+    let cursor;
+    for (let i = 0; i < 10; i++) { // pagination guard
+      const frames = await probe(
+        ["--agent", agent, "--method", "model/list",
+         "--params", JSON.stringify(cursor ? { cursor } : {}),
+         "--linger-secs", "1", "--timeout-secs", "25"],
+        { timeout: 30000 },
+      ).catch(() => []);
+      const f = frames.find((x) => x?.result && Array.isArray(x.result.data));
+      for (const m of f?.result?.data || []) {
+        if (m?.hidden === true) continue;
+        const id = m.id ?? m.model;
+        if (!id) continue;
+        out.push({ id, name: m.displayName || id, description: m.description || null, isDefault: !!m.isDefault, deprecated: !!m.deprecated });
+      }
+      cursor = f?.result?.nextCursor;
+      if (!cursor) break;
+    }
+    return out;
+  });
 }
 
 // How many threads to keep hot in the background at once.
@@ -1058,6 +1188,12 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === "/v1/agents") return send(res, 200, { agents: await getAgents(url.searchParams.get("fresh") === "1") });
     if (url.pathname === "/v1/threads") return send(res, 200, { threads: await getThreads(url.searchParams.get("fresh") === "1") });
+    if (url.pathname === "/v1/models") {
+      const agent = url.searchParams.get("agent");
+      if (!agent) return send(res, 400, { error: "agent required" });
+      if (url.searchParams.get("fresh") === "1") cache.delete(`models:${agent}`);
+      return send(res, 200, { models: await getModels(agent) });
+    }
     if (url.pathname === "/v1/status") return send(res, 200, { status: await status() });
     if (url.pathname === "/v1/messages") {
       const agent = url.searchParams.get("agent");
@@ -1065,6 +1201,14 @@ const server = http.createServer(async (req, res) => {
       if (!agent || !thread) return send(res, 400, { error: "agent and thread required" });
       const fresh = url.searchParams.get("fresh") === "1";
       return send(res, 200, { events: await getMessages(agent, thread, fresh) });
+    }
+    if (url.pathname === "/v1/usage") {
+      const agent = url.searchParams.get("agent");
+      const thread = url.searchParams.get("thread");
+      const cwd = url.searchParams.get("cwd");
+      if (!agent || !thread) return send(res, 400, { error: "agent and thread required" });
+      if (url.searchParams.get("fresh") === "1") cache.delete(`usage:${agent}:${thread}`);
+      return send(res, 200, { usage: await getUsage(agent, thread, cwd) });
     }
     if (url.pathname === "/v1/warm" && req.method === "POST") {
       // The app's ranking of which threads to keep hot (usage-predicted). We
@@ -1207,7 +1351,10 @@ const server = http.createServer(async (req, res) => {
         (realThreadId) => {
           // The streamed turn changed this thread's history — drop the cache so
           // the app's post-turn refetch (and the next open) reads it fresh.
-          if (realThreadId) cache.delete(msgKey(agent, realThreadId));
+          if (realThreadId) {
+            cache.delete(msgKey(agent, realThreadId));
+            cache.delete(`usage:${agent}:${realThreadId}`); // token totals grew this turn
+          }
           cache.delete("threads");
           write({ done: true, threadId: realThreadId }); res.end();
         },

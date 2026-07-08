@@ -235,21 +235,24 @@ function Bubble({
   /** Enables shell "Run" cards on assistant turns (queues !cmd to composer). */
   onRun?: (command: string) => void;
 }) {
-  const user = role === "user";
-  return (
-    <View className={cn("flex-row items-center gap-1.5", user ? "justify-end" : "justify-start")}>
-      <View
-        className={cn(
-          "max-w-[86%] rounded-2xl px-3 py-2",
-          user ? "bg-accent" : "border border-border bg-surface",
-        )}
-      >
-        {/* Both roles render as rich markdown (native md4c) — the user composes
-            markdown too. Streaming turns repair partial syntax (remend) and use
-            the native streaming animation, so no manual caret. */}
-        <MessageMarkdown text={text} role={role} streaming={streaming} onRun={onRun} />
+  // User turns are compact right-aligned accent bubbles; assistant turns render
+  // full-width (rich markdown/code needs the room), no bubble chrome. Both go
+  // through the native md4c renderer — the user composes markdown too.
+  if (role === "user") {
+    return (
+      <View className="flex-row justify-end">
+        <View className="max-w-[86%] rounded-2xl bg-accent px-3 py-1.5">
+          <MessageMarkdown text={text} role="user" streaming={streaming} />
+        </View>
       </View>
-      {marked && !user ? <Ionicons name="bookmark" size={10} color={COLOR.accent} /> : null}
+    );
+  }
+  return (
+    <View className="flex-row items-start gap-1">
+      <View className="flex-1">
+        <MessageMarkdown text={text} role="assistant" streaming={streaming} onRun={onRun} />
+      </View>
+      {marked ? <Ionicons name="bookmark" size={10} color={COLOR.accent} style={{ marginTop: 3 }} /> : null}
     </View>
   );
 }

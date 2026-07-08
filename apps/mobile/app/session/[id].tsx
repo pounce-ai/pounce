@@ -10,22 +10,26 @@ import { isEmptyUserMessage, parseUserMessage } from "@litter/transcript";
 import { collapseToolResults, Timeline } from "@/components/Timeline";
 import { TimelineSkeleton } from "@/components/Skeleton";
 import { Composer, type ComposerHandle, type ComposerSubmit } from "@/components/Composer";
-import { MarkerRail, type Marker } from "@/components/MarkerRail";
-import { MarkerSheet } from "@/components/MarkerSheet";
+import { MarkerSheet, type Marker } from "@/components/MarkerSheet";
+import { ThreadStatusBar } from "@/components/ThreadStatusBar";
+import { ModelSheet } from "@/components/ModelSheet";
 import { useTimeline } from "@/hooks/useTimeline";
 import {
+  cachedModels,
   capsFor,
   connection$,
   isFavThread,
   isMarked,
   markOpened,
   markers$,
+  modelForThread,
   pendingTurns$,
   sessions$,
+  setThreadModel,
   toggleFavThread,
   toggleMarker,
 } from "@/state/stores";
-import { fetchMessages, interruptTurn, streamLiveMessage } from "@/services/bridge";
+import { fetchMessages, fetchUsage, interruptTurn, streamLiveMessage, type ThreadUsage } from "@/services/bridge";
 import { Ionicons } from "@expo/vector-icons";
 import { ActivityDot, ACTIVITY_LABEL, AgentLogo, cn, COLOR } from "@/ui";
 import { effectiveCaps } from "@/ui/agent-meta";
@@ -55,6 +59,8 @@ export default function SessionScreen() {
   const live = useSelector(() => !connection$.demo.get());
   const reportedCaps = useSelector(() => (session ? capsFor(session.agent) : null));
   const fav = useSelector(() => (session ? isFavThread(session.id) : false));
+  const selectedModel = useSelector(() => (session ? modelForThread(session.id) : undefined));
+  const [modelSheet, setModelSheet] = useState(false);
   // A freshly-created thread still carries its temporary new_* id here; favouriting
   // it would orphan once live sync swaps in the real id, so gate the star on that.
   const canFavourite = !!session && !session.id.startsWith("new_");
@@ -75,6 +81,17 @@ export default function SessionScreen() {
   const [failed, setFailed] = useState(false);
   const [reload, setReload] = useState(0);
   const retry = useCallback(() => setReload((n) => n + 1), []);
+
+  // Token/cost usage for the status bar — best-effort, refreshed on open and
+  // after each turn. Skipped for freshly-created (new_*) threads.
+  const [usage, setUsage] = useState<ThreadUsage | null>(null);
+  const refreshUsage = useCallback(() => {
+    if (!live || !session?.id || session.id.startsWith("new_")) return;
+    fetchUsage(session.hostId, session.agent, session.id, session.cwd)
+      .then(setUsage)
+      .catch(() => {});
+  }, [live, session?.hostId, session?.agent, session?.id, session?.cwd]);
+  useEffect(() => { refreshUsage(); }, [refreshUsage, reload]);
 
   useEffect(() => {
     if (!live || !session?.id) return;
@@ -161,9 +178,15 @@ export default function SessionScreen() {
           session.cwd,
           s.text,
           (ev) => setLiveEvents((e) => mergeById(e, [ev])),
-          { images: s.images, permissionMode: s.permissionMode, reasoningEffort: s.reasoningEffort },
+          {
+            images: s.images,
+            permissionMode: s.permissionMode,
+            reasoningEffort: s.reasoningEffort,
+            model: modelForThread(session.id),
+          },
         );
         if (threadId) setLiveEvents(await fetchMessages(session.hostId, session.agent, threadId));
+        refreshUsage();
       } else {
         const { getRuntime } = await import("@/services/runtime");
         const rt = await getRuntime();
@@ -176,7 +199,7 @@ export default function SessionScreen() {
     } finally {
       setSending(false);
     }
-  }, [session, live]);
+  }, [session, live, refreshUsage]);
 
   const stop = useCallback(async () => {
     if (!session) return;
@@ -246,6 +269,7 @@ export default function SessionScreen() {
           <Pressable onPress={() => router.back()} className="active:opacity-60 h-9 w-9 items-center justify-center">
             <Text className="text-[22px] text-fg">‹</Text>
           </Pressable>
+          <AgentLogo agent={session.agent} size={18} />
           <View className="flex-1">
             <Text numberOfLines={1} className="text-[15px] font-semibold text-fg">{session.title}</Text>
             <View className="mt-0.5 flex-row items-center gap-2">
@@ -254,7 +278,6 @@ export default function SessionScreen() {
               {session.branch ? <Text numberOfLines={1} className="font-mono text-[11px] text-fg-faint">⎇ {session.branch}</Text> : null}
             </View>
           </View>
-          <AgentLogo agent={session.agent} size={16} />
           {canFavourite ? (
             <Pressable
               onPress={() => toggleFavThread(session.id)}
@@ -310,12 +333,6 @@ export default function SessionScreen() {
             onRunCommand={canSteer ? onRunCommand : undefined}
           />
         )}
-        <MarkerRail
-          markers={markers}
-          total={events.length}
-          onJump={jumpTo}
-          onOpenList={() => setMarkerSheet(true)}
-        />
       </View>
 
       <MarkerSheet
@@ -326,8 +343,48 @@ export default function SessionScreen() {
         onClose={() => setMarkerSheet(false)}
       />
 
-      {/* Composer */}
+      <ModelSheet
+        visible={modelSheet}
+        hostId={session.hostId}
+        agent={session.agent}
+        current={selectedModel ?? usage?.model ?? null}
+        pinned={[selectedModel, usage?.model, ...(usage?.models ?? [])].filter(
+          (m): m is string => !!m && m !== "<synthetic>",
+        )}
+        onSelect={(modelId) => {
+          setThreadModel(session.id, modelId);
+          setModelSheet(false);
+          // Immediate, informative confirmation — switching invalidates the
+          // per-model prompt cache, so the next turn re-sends the full
+          // conversation to the new model. Any daemon warning (deprecation,
+          // reroute) still arrives inline when that turn runs.
+          const name = cachedModels(session.hostId, session.agent)?.find((m) => m.id === modelId)?.name ?? modelId;
+          setLiveEvents((e) =>
+            mergeById(e, [{
+              id: `switch:${Date.now()}`,
+              conversationId: session.id,
+              seq: Number.MAX_SAFE_INTEGER,
+              ts: new Date().toISOString(),
+              type: "system_event",
+              level: "info",
+              message: `Switched to ${name}. Your next message re-sends the full conversation as context to it (fresh cache).`,
+            }]),
+          );
+        }}
+        onClose={() => setModelSheet(false)}
+      />
+
+      {/* Status bar + Composer */}
       <View style={{ paddingBottom: insets.bottom + 8 }} className="border-t border-border bg-bg-elevated px-3 pt-2">
+        <ThreadStatusBar
+          agent={session.agent}
+          usage={usage}
+          model={selectedModel ?? usage?.model ?? null}
+          canPickModel={live && !!session.cwd}
+          onPressModel={() => setModelSheet(true)}
+          markerCount={markers.length}
+          onOpenMarkers={() => setMarkerSheet(true)}
+        />
         {!canSteer ? (
           <Text className="px-1 pb-2 text-[12px] text-fg-faint">
             Archived session — worktree was removed. Read-only.

@@ -13,6 +13,7 @@ import type {
   TimelineEvent,
   UserProfile,
 } from "@litter/shared";
+import type { ModelInfo } from "../services/bridge";
 import { persist } from "../services/persistence";
 
 export type ConnectionStatus =
@@ -91,6 +92,26 @@ export function markOpened(id: string, atIso: string): void {
   const next = { ...recentOpens$.get(), [id]: atIso };
   const entries = Object.entries(next).sort((a, b) => Date.parse(b[1]) - Date.parse(a[1]));
   recentOpens$.set(Object.fromEntries(entries.slice(0, RECENT_OPENS_CAP)));
+}
+
+/** User-selected model per thread (sessionId → model id). Sticky, on-device;
+ *  passed as the turn `model` on subsequent turns until changed. */
+export const threadModels$ = observable<Record<string, string>>({});
+export const modelForThread = (id: string): string | undefined => threadModels$[id].get();
+export function setThreadModel(id: string, model: string | null): void {
+  if (model) threadModels$[id].set(model);
+  else threadModels$[id].delete();
+}
+
+/** Cached model catalogs per device+agent ("hostId:agent" → models). Warmed on
+ *  sync so the picker renders instantly; persisted so it survives restarts. */
+export const agentModels$ = observable<Record<string, ModelInfo[]>>({});
+export const modelsKey = (hostId: string, agent: string): string => `${hostId}:${agent}`;
+export function cachedModels(hostId: string, agent: string): ModelInfo[] | undefined {
+  return agentModels$[modelsKey(hostId, agent)].get();
+}
+export function setCachedModels(hostId: string, agent: string, models: ModelInfo[]): void {
+  agentModels$[modelsKey(hostId, agent)].set(models);
 }
 
 /** Threads the user opened most recently, newest first, that still exist. */
@@ -217,6 +238,8 @@ persist(markers$, "markers");
 persist(favThreads$, "favThreads");
 persist(favRepos$, "favRepos");
 persist(recentOpens$, "recentOpens");
+persist(threadModels$, "threadModels");
+persist(agentModels$, "agentModels");
 persist(user$, "user");
 persist(deviceOverrides$, "deviceOverrides");
 
