@@ -6,10 +6,12 @@ import { Providers } from "@/components/Providers";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { bootstrap } from "@/services/runtime";
 import { attachPushNavigation } from "@/services/push";
+import { initLocalNotifications } from "@/services/notify";
 
 export default function RootLayout() {
   useEffect(() => {
     void bootstrap();
+    void initLocalNotifications();
     return attachPushNavigation();
   }, []);
 

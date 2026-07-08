@@ -21,6 +21,7 @@ import type {
 } from "@litter/shared";
 import { parseUserMessage } from "@litter/transcript";
 import { agentCaps$, cachedModels, connection$, hosts$, recordSync, sessions$, setCachedModels, setWorkspace } from "../state/stores";
+import { clearNotify, notifyOnce } from "./notify";
 
 const BRIDGE_KEY = "pounce.bridge";
 
@@ -150,6 +151,26 @@ interface BridgeStatus {
 }
 
 /** Pull agents + threads from ALL configured devices and aggregate. */
+// A connect-time sync often sees an empty daemon for one tick (cold Iroh dial),
+// so only alert once the "reachable but no agents" state survives a second sync —
+// a transient cold start never fires, a genuinely-down daemon does.
+let daemonDownStreak = 0;
+function flagDaemonHealth(daemonDown: string[]): void {
+  if (daemonDown.length) {
+    daemonDownStreak++;
+    if (daemonDownStreak >= 2) {
+      void notifyOnce(
+        "daemon-unreachable",
+        "Coding agents unreachable",
+        `Pounce reached ${daemonDown[0]} but no agents responded. Restart the Pounce Bridge (or your coding agent), then pull to refresh.`,
+      );
+    }
+  } else {
+    daemonDownStreak = 0;
+    clearNotify("daemon-unreachable");
+  }
+}
+
 export async function syncLiveData(
   opts?: { fresh?: boolean },
 ): Promise<{ repos: number; sessions: number; devices: number }> {
@@ -161,12 +182,16 @@ export async function syncLiveData(
   const sessions: Record<string, Session> = {};
   const devices: Record<string, Device> = {};
   const now = new Date().toISOString();
+  // Devices whose bridge answered but whose agent daemon reported nothing — the
+  // "reachable but no agents" state the user has to fix (restart the bridge/agent).
+  const daemonDown: string[] = [];
 
   await Promise.all(
     configs.map(async (cfg) => {
       let deviceName = cfg.name;
       let online = true;
       let agentsAvail: string[] = [];
+      let agentsReported = 0;
       let threads: BridgeThread[] = [];
       try {
         const [{ status }, { agents }, t] = await Promise.all([
@@ -175,6 +200,7 @@ export async function syncLiveData(
           get<{ threads: BridgeThread[] }>(cfg, `/v1/threads${q}`),
         ]);
         deviceName = status?.device || cfg.name;
+        agentsReported = (agents || []).length;
         agentsAvail = (agents || []).filter((a) => a.available).map((a) => a.id);
         // Record per-agent capabilities so the composer can gate its controls.
         for (const a of agents || []) {
@@ -184,6 +210,8 @@ export async function syncLiveData(
       } catch {
         online = false;
       }
+      // Bridge reachable (status OK) but the daemon handed back zero agents.
+      if (online && agentsReported === 0) daemonDown.push(deviceName);
 
       devices[cfg.id] = {
         id: cfg.id,
@@ -245,6 +273,7 @@ export async function syncLiveData(
   // Log what this sync actually brought in (per-repo) before we swap the store.
   recordSync(sessions$.get(), sessions, repos, now);
   setWorkspace(repos, sessions, devices);
+  flagDaemonHealth(daemonDown);
   // Warm the model catalog for each device+agent in the background, so opening
   // the model picker later is instant. Fire-and-forget; throttled per key.
   const warmed = new Set<string>();
