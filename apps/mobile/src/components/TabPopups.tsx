@@ -12,6 +12,7 @@ import type { IPalette, IPopupRenderContext, TPopupRenderer } from "@/motion-tab
 import {
   allAgentsInUse,
   allDevices,
+  CLEARED_FILTERS,
   connection$,
   deviceEmoji,
   deviceLabel,
@@ -143,7 +144,7 @@ function SearchPopup({ colors, close }: IPopupRenderContext) {
   const agents = useSelector(() => allAgentsInUse());
   const devices = useSelector(() => allDevices());
   useSelector(() => deviceOverrides$.get());
-  const hasFilter = !!(f.agent || f.device || f.needsOnly || f.favOnly);
+  const hasFilter = !!(f.agent || f.device || f.repo || f.needsOnly || f.favOnly);
 
   return (
     <View style={{ padding: 10, minWidth: 268, gap: 12 }}>
@@ -211,7 +212,7 @@ function SearchPopup({ colors, close }: IPopupRenderContext) {
           icon="close-circle-outline"
           label="Clear all"
           onPress={() => {
-            filters$.set({ device: null, agent: null, needsOnly: false, favOnly: false });
+            filters$.set(CLEARED_FILTERS);
             close();
           }}
         />

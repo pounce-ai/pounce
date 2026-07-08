@@ -44,20 +44,25 @@ export const pendingTurns$ = observable<Record<string, PendingTurn>>({});
 export const filters$ = observable<{
   device: string | null;
   agent: string | null;
+  repo: string | null;
   needsOnly: boolean;
   favOnly: boolean;
 }>({
   device: null,
   agent: null,
+  repo: null,
   needsOnly: true, // default view = what needs you
   favOnly: false,
 });
+
+/** The zero state for every filter — a single source for "Clear all". */
+export const CLEARED_FILTERS = { device: null, agent: null, repo: null, needsOnly: false, favOnly: false };
 
 /** Count of *narrowing* filters (device/agent/favourites) for the bottom bar
  *  badge. needsOnly is the default view, so it doesn't badge. */
 export function activeFilterCount(): number {
   const f = filters$.get();
-  return (f.device ? 1 : 0) + (f.agent ? 1 : 0) + (f.favOnly ? 1 : 0);
+  return (f.device ? 1 : 0) + (f.agent ? 1 : 0) + (f.repo ? 1 : 0) + (f.favOnly ? 1 : 0);
 }
 
 /** Favourited thread ids (sessionId → true). Sparse, on-device only — the bridge
@@ -249,6 +254,7 @@ function passesFilter(s: Session): boolean {
   const f = filters$.get();
   if (f.device && s.hostId !== f.device) return false;
   if (f.agent && s.agent !== f.agent) return false;
+  if (f.repo && s.repoId !== f.repo) return false;
   return true;
 }
 

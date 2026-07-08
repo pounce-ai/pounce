@@ -8,8 +8,6 @@ import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@litter/shared";
 import {
   activeFilterCount,
-  allAgentsInUse,
-  allDevices,
   connection$,
   deviceEmoji,
   deviceLabel,
@@ -28,7 +26,8 @@ import {
 import { SessionCard } from "@/components/SessionCard";
 import { RecentStrip } from "@/components/RecentStrip";
 import { SessionListSkeleton } from "@/components/Skeleton";
-import { agentLabel, cn, COLOR, DeviceIcon } from "@/ui";
+import { FilterSheet } from "@/components/FilterSheet";
+import { cn, COLOR, DeviceIcon } from "@/ui";
 import { refreshLive } from "@/services/runtime";
 
 /** Collapse key for the Favourites pseudo-group (shares the collapsed$ map). */
@@ -233,7 +232,7 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      <HomeFilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
+      <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
 
       <LegendList
         style={{ flex: 1 }}
@@ -390,122 +389,5 @@ function DirHeader({
         <Ionicons name="add" size={17} color={COLOR.fgMuted} />
       </Pressable>
     </Pressable>
-  );
-}
-
-/** A pill filter toggle. */
-function FilterChip({
-  label,
-  active,
-  onPress,
-  icon,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-  icon?: React.ReactNode;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      className={cn(
-        "active:opacity-80 h-8 flex-row items-center gap-1.5 rounded-full border px-3",
-        active ? "border-accent bg-accent/15" : "border-border bg-surface-alt",
-      )}
-    >
-      {icon}
-      <Text className={cn("text-[13px]", active ? "text-accent" : "text-fg")}>{label}</Text>
-    </Pressable>
-  );
-}
-
-/** Filter bottom sheet on Home — status · device · agent, mirroring the Search
- *  filter surface but reachable right where the list lives. Writes straight to
- *  the shared `filters$`, so Home and Search stay in lockstep. */
-function HomeFilterSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
-  const f = useSelector(() => filters$.get());
-  const devices = useSelector(() => allDevices());
-  const agents = useSelector(() => allAgentsInUse());
-  useSelector(() => deviceOverrides$.get());
-  const hasFilter = !!(f.agent || f.device || f.needsOnly);
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable className="flex-1 bg-black/50" onPress={onClose} />
-      <View
-        style={{ paddingBottom: insets.bottom + 16 }}
-        className="gap-4 rounded-t-3xl border-t border-border bg-bg-elevated px-4 pt-3"
-      >
-        <View className="h-1 w-10 self-center rounded-full bg-border" />
-        <View className="flex-row items-center justify-between">
-          <Text className="text-[18px] font-bold text-fg">Filter</Text>
-          {hasFilter ? (
-            <Pressable
-              onPress={() => filters$.set({ device: null, agent: null, needsOnly: false, favOnly: false })}
-              className="active:opacity-60 flex-row items-center gap-1.5"
-            >
-              <Ionicons name="close-circle-outline" size={15} color={COLOR.fgMuted} />
-              <Text className="text-[13px] text-fg-muted">Clear all</Text>
-            </Pressable>
-          ) : null}
-        </View>
-
-        <View className="gap-1.5">
-          <Text className="text-[11px] uppercase tracking-wide text-fg-faint">Show</Text>
-          <View className="flex-row flex-wrap gap-2">
-            <FilterChip label="Needs you" active={f.needsOnly} onPress={() => filters$.needsOnly.set(true)} />
-            <FilterChip label="Everything" active={!f.needsOnly} onPress={() => filters$.needsOnly.set(false)} />
-          </View>
-        </View>
-
-        {devices.length > 1 ? (
-          <View className="gap-1.5">
-            <Text className="text-[11px] uppercase tracking-wide text-fg-faint">Device</Text>
-            <View className="flex-row flex-wrap gap-2">
-              {devices.map((d) => (
-                <FilterChip
-                  key={d.id}
-                  label={deviceLabel(d.id, d.name)}
-                  active={f.device === d.id}
-                  onPress={() => filters$.device.set(f.device === d.id ? null : d.id)}
-                  icon={
-                    <DeviceIcon
-                      name={d.name}
-                      emoji={deviceEmoji(d.id)}
-                      color={f.device === d.id ? COLOR.accent : COLOR.fgMuted}
-                      size={13}
-                    />
-                  }
-                />
-              ))}
-            </View>
-          </View>
-        ) : null}
-
-        {agents.length > 1 ? (
-          <View className="gap-1.5">
-            <Text className="text-[11px] uppercase tracking-wide text-fg-faint">Agent</Text>
-            <View className="flex-row flex-wrap gap-2">
-              {agents.map((a) => (
-                <FilterChip
-                  key={a}
-                  label={agentLabel(a)}
-                  active={f.agent === a}
-                  onPress={() => filters$.agent.set(f.agent === a ? null : a)}
-                />
-              ))}
-            </View>
-          </View>
-        ) : null}
-
-        <Pressable
-          onPress={onClose}
-          className="active:opacity-90 mt-1 h-12 items-center justify-center rounded-xl bg-accent"
-        >
-          <Text className="text-[15px] font-semibold text-white">Done</Text>
-        </Pressable>
-      </View>
-    </Modal>
   );
 }
