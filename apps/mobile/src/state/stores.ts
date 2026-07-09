@@ -370,6 +370,21 @@ export function dropThreadMessages(threadId: string): void {
   deleteIds(messages, ids);
 }
 
+/** Earliest persisted user-message text per thread (by daemon `seq`). Lets a
+ *  thread the daemon gave no preview borrow a title from its first message —
+ *  using only local, already-synced data (no per-thread fetch), recomputed each
+ *  sync so it's deterministic and never fights the sync writer. */
+export function firstUserMessages(): Map<string, { seq: number; text: string }> {
+  const best = new Map<string, { seq: number; text: string }>();
+  for (const m of messages.toArray) {
+    const ev = m.event;
+    if (ev.type !== "user_message" || typeof ev.text !== "string" || !ev.text.trim()) continue;
+    const cur = best.get(m.threadId);
+    if (!cur || ev.seq < cur.seq) best.set(m.threadId, { seq: ev.seq, text: ev.text });
+  }
+  return best;
+}
+
 // --- optimistic thread writes (new-task composer, session re-key) ---
 
 /** Insert a locally-created thread (optimistic, before the first turn lands). */

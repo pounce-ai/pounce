@@ -20,7 +20,7 @@ import type {
   TimelineEvent,
 } from "@litter/shared";
 import { parseUserMessage } from "@litter/transcript";
-import { cachedModels, connection$, mergeWorkspace, setAgentCaps, setCachedModels, syncWorkspace, upsertHosts } from "../state/stores";
+import { cachedModels, connection$, firstUserMessages, mergeWorkspace, setAgentCaps, setCachedModels, syncWorkspace, upsertHosts } from "../state/stores";
 import { clearNotify, notifyOnce } from "./notify";
 
 const BRIDGE_KEY = "pounce.bridge";
@@ -139,20 +139,31 @@ function repoName(key: string): string {
 }
 
 /**
- * A readable thread title. The daemon's `preview` is the raw first user message,
- * which for slash commands carries Claude's wrapper tags (<local-command-caveat>,
- * <command-message>, <command-name>…). Run it through the transcript parser so
- * the title is clean prose — or the `/command args` chip for command-only turns —
- * instead of leaking markup.
+ * Clean prose from a raw user message. The daemon's `preview` (and a persisted
+ * first message) is the raw first user turn, which for slash commands carries
+ * Claude's wrapper tags (<local-command-caveat>, <command-message>…). Run it
+ * through the transcript parser so we get clean prose. For a slash command we
+ * take only its ARGUMENTS ("/goal ship the beta" → "ship the beta") — a bare
+ * command ("/clear") makes a poor title, so it yields nothing and the caller
+ * falls through to the next signal.
  */
-function threadTitle(name: string | null, preview: string | null, agent: string): string {
-  const p = parseUserMessage((name || preview || "").trim(), agent);
-  const title =
-    p.text ||
-    (p.command ? `${p.command.name}${p.command.args ? ` ${p.command.args}` : ""}` : "") ||
-    p.output?.text ||
-    "";
-  return title.trim().slice(0, 100) || "Untitled task";
+function messageProse(raw: string, agent: string): string {
+  const p = parseUserMessage(raw.trim(), agent);
+  return (p.text || p.command?.args || p.output?.text || "").trim();
+}
+
+/**
+ * A readable thread title, best-effort from data we already have (no per-thread
+ * fetch, so sync stays fast). In order of preference:
+ *   1. the daemon's first-message preview;
+ *   2. the first user message we've persisted locally (threads you've opened);
+ *   3. a plain "Untitled session" — never a bare "Untitled task".
+ */
+function threadTitle(t: BridgeThread, firstMessage: string | null): string {
+  const prose =
+    messageProse(t.name || t.preview || "", t.agent) ||
+    (firstMessage ? messageProse(firstMessage, t.agent) : "");
+  return prose.slice(0, 100) || "Untitled session";
 }
 
 interface BridgeStatus {
@@ -182,12 +193,18 @@ function flagDaemonHealth(daemonDown: string[]): void {
   }
 }
 
+/** Earliest-user-message-per-thread lookup, computed once per sync (never per
+ *  streamed page) and threaded through so titling stays O(messages) not
+ *  O(pages × messages). */
+type FirstMessages = ReturnType<typeof firstUserMessages>;
+
 /** Map accumulated per-device threads into the app's repo/session shape. Mirrors
  *  the batch mapping in syncLiveData; kept separate so streaming can rebuild the
  *  store incrementally without touching the batch path. */
 function buildWorkspace(
   threadsByDevice: Record<string, { name: string; threads: BridgeThread[] }>,
   now: string,
+  firstMsg: FirstMessages,
 ): { repos: Record<string, Repository>; sessions: Record<string, Session> } {
   const repos: Record<string, Repository> = {};
   const sessions: Record<string, Session> = {};
@@ -204,7 +221,7 @@ function buildWorkspace(
         hostId: devId,
         host: deviceName,
         agent: t.agent,
-        title: threadTitle(t.name, t.preview, t.agent),
+        title: threadTitle(t, firstMsg.get(t.id)?.text ?? null),
         branch: t.gitBranch ?? (t.isWorktree ? t.worktree : null),
         worktree: t.worktree,
         cwd: t.cwd,
@@ -281,6 +298,7 @@ async function streamThreadsFromBridge(
 export async function syncLiveDataStreaming(): Promise<{ repos: number; sessions: number; devices: number }> {
   const configs = await listDeviceConfigs();
   const now = new Date().toISOString();
+  const firstMsg = firstUserMessages(); // scan the message store once, not per page
   const devices: Record<string, Device> = {};
   const threadsByDevice: Record<string, { name: string; threads: BridgeThread[] }> = {};
   const daemonDown: string[] = [];
@@ -290,7 +308,7 @@ export async function syncLiveDataStreaming(): Promise<{ repos: number; sessions
   // fills in live, never blanking or shrinking. The authoritative replace (which
   // drops now-gone sessions) happens once at the end.
   const merge = () => {
-    const { repos, sessions } = buildWorkspace(threadsByDevice, now);
+    const { repos, sessions } = buildWorkspace(threadsByDevice, now, firstMsg);
     mergeWorkspace({ repos, sessions, devices });
   };
 
@@ -334,7 +352,7 @@ export async function syncLiveDataStreaming(): Promise<{ repos: number; sessions
     }),
   );
 
-  const { repos, sessions } = buildWorkspace(threadsByDevice, now);
+  const { repos, sessions } = buildWorkspace(threadsByDevice, now, firstMsg);
   syncWorkspace({ repos, sessions, devices });
   flagDaemonHealth(daemonDown);
   const warmed = new Set<string>();
@@ -358,6 +376,7 @@ export async function syncLiveData(
   const sessions: Record<string, Session> = {};
   const devices: Record<string, Device> = {};
   const now = new Date().toISOString();
+  const firstMsg = firstUserMessages(); // local first-message titles, once per sync
   // Devices whose bridge answered but whose agent daemon reported nothing — the
   // "reachable but no agents" state the user has to fix (restart the bridge/agent).
   const daemonDown: string[] = [];
@@ -415,7 +434,7 @@ export async function syncLiveData(
           hostId: cfg.id,
           host: deviceName,
           agent: t.agent,
-          title: threadTitle(t.name, t.preview, t.agent),
+          title: threadTitle(t, firstMsg.get(t.id)?.text ?? null),
           branch: t.gitBranch ?? (t.isWorktree ? t.worktree : null),
           worktree: t.worktree,
           cwd: t.cwd,
