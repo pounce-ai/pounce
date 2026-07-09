@@ -576,14 +576,19 @@ function cleanPreview(raw, agent) {
  * the mapped `id`, so a mishandled cursor can't loop. thread/list and model/list
  * share this convention; this is the single place that implements it.
  */
-async function probePaginated(agent, method, mapItem, { max = 60 } = {}) {
+async function probePaginated(agent, method, mapItem, { max = 60, pageSize } = {}) {
   const out = [];
   const seen = new Set();
   let cursor;
   for (let i = 0; i < max; i++) {
+    // Ask for a big page when we can: each page is a fresh probe paying a cold
+    // Iroh dial (~seconds), so fetching thousands of threads 25-at-a-time is the
+    // dominant connect-time cost. `pageSize` (honored by the daemon like turns/list's
+    // `limit`) collapses many round-trips into one; cursor-follow stays as fallback.
+    const params = { ...(cursor ? { cursor } : {}), ...(pageSize ? { limit: pageSize } : {}) };
     const frames = await probe(
       ["--agent", agent, "--method", method,
-       "--params", JSON.stringify(cursor ? { cursor } : {}),
+       "--params", JSON.stringify(params),
        "--linger-secs", "1", "--timeout-secs", "25"],
       { timeout: 30000 },
     ).catch(() => []);
@@ -624,7 +629,7 @@ async function listThreads(agent) {
       isWorktree: info.isWorktree,
       isLive: info.isLive,
     };
-  });
+  }, { pageSize: 1000 });
 }
 
 async function getThreads(fresh = false) {
