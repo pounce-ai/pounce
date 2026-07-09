@@ -65,7 +65,12 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const collapsed$ = useObservable<Record<string, boolean>>({});
-  const toggleGroup = (repoId: string) => collapsed$[repoId].set((v) => !v);
+  // Replace the whole map (not a mutate-in-place on one key) so `collapsed$.get()`
+  // returns a NEW reference — otherwise `useSelector` below sees the same object
+  // and the grouped `useMemo` (dep: collapsedMap) never rebuilds, so the accordion
+  // won't collapse. See legend-state object-selector gotcha.
+  const toggleGroup = (repoId: string) =>
+    collapsed$.set((m) => ({ ...m, [repoId]: !m[repoId] }));
 
   const status = useSelector(() => connection$.status.get());
   const filterCount = useSelector(() => activeFilterCount());
