@@ -1292,8 +1292,18 @@ const UI_HTML = `<!DOCTYPE html>
 .status{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600}
 .dot{width:9px;height:9px;border-radius:50%;background:var(--faint)}
 .dot.idle{background:var(--accent);box-shadow:0 0 0 4px rgba(124,58,237,.14)}
-.dot.ok{background:var(--ok);box-shadow:0 0 0 4px rgba(22,163,74,.16)}
+/* Connected: a gentle "breathing" glow so it reads as live, not frozen. */
+.dot.ok{background:var(--ok);animation:breathe 2.4s ease-in-out infinite}
+/* Syncing right now: faster accent pulse. */
+.dot.sync{background:var(--accent);animation:breathe-a .9s ease-in-out infinite}
 .dot.warn{background:var(--warn);box-shadow:0 0 0 4px rgba(217,119,6,.16)}
+@keyframes breathe{0%,100%{box-shadow:0 0 0 3px rgba(22,163,74,.18)}50%{box-shadow:0 0 0 8px rgba(22,163,74,.04)}}
+@keyframes breathe-a{0%,100%{box-shadow:0 0 0 3px rgba(124,58,237,.28)}50%{box-shadow:0 0 0 8px rgba(124,58,237,.06)}}
+/* Indeterminate progress bar — an accent segment sweeps while the phone syncs. */
+.syncbar{width:190px;height:4px;border-radius:3px;background:var(--border);overflow:hidden;opacity:0;transition:opacity .25s;margin-top:-2px}
+.syncbar.on{opacity:1}
+.syncbar>i{display:block;height:100%;width:38%;border-radius:3px;background:linear-gradient(90deg,rgba(124,58,237,.15),var(--accent),rgba(124,58,237,.15));animation:sweep 1.05s cubic-bezier(.5,0,.5,1) infinite}
+@keyframes sweep{0%{transform:translateX(-110%)}100%{transform:translateX(295%)}}
 .hint{margin:0;max-width:300px;text-align:center;font-size:12px;line-height:1.5;color:var(--muted)}
 .foot{margin-top:6px;text-align:center;font-size:11px;line-height:1.6;color:var(--faint)}
 .foot .ver{font-weight:600;color:var(--muted)}
@@ -1306,6 +1316,7 @@ const UI_HTML = `<!DOCTYPE html>
 <div class="qrwrap"><img id="qr" class="qr" alt="Pairing QR code"/></div>
 <div class="addr" id="addr">—</div>
 <div class="status"><span class="dot idle" id="dot"></span><span id="statusText">Starting…</span></div>
+<div class="syncbar" id="syncbar"><i></i></div>
 <p class="hint" id="hint">Open Pounce on your phone, go to Sync, and scan this code.</p>
 <footer class="foot">
 <div class="ver" id="ver">Pounce&nbsp;Bridge</div>
@@ -1322,20 +1333,29 @@ function tick(){
     if(d.daemon && d.daemon.version) ver += '  ·  agent host v' + d.daemon.version;
     set('ver', ver);
     var dot = document.getElementById('dot');
+    var bar = document.getElementById('syncbar');
     if(d.connected){
       var n = (d.devices && d.devices>0) ? d.devices : 1;
-      dot.className='dot ok'; set('statusText','Connected - '+n+' device'+(n===1?'':'s'));
-      set('hint','Your phone is talking to this computer. You are all set.');
+      if(d.syncing){
+        // Phone is actively talking to us right now — show the progress sweep.
+        dot.className='dot sync'; bar.className='syncbar on';
+        set('statusText','Syncing…');
+        set('hint','Your phone is syncing with this computer…');
+      } else {
+        dot.className='dot ok'; bar.className='syncbar';
+        set('statusText','Connected - '+n+' device'+(n===1?'':'s'));
+        set('hint','Your phone is talking to this computer. You are all set.');
+      }
     } else if(!d.daemonOk){
-      dot.className='dot warn'; set('statusText','Starting your agent host...');
+      dot.className='dot warn'; bar.className='syncbar'; set('statusText','Starting your agent host...');
       set('hint','Waiting for the Pounce agent host to come online.');
     } else {
-      dot.className='dot idle'; set('statusText','Ready to pair');
+      dot.className='dot idle'; bar.className='syncbar'; set('statusText','Ready to pair');
       set('hint','Open Pounce on your phone, go to Sync, and scan this code.');
     }
   }).catch(function(){ set('statusText','Starting...'); });
 }
-tick(); setInterval(tick, 3000);
+tick(); setInterval(tick, 1200);
 </script></body></html>`;
 
 const server = http.createServer(async (req, res) => {
@@ -1366,6 +1386,9 @@ const server = http.createServer(async (req, res) => {
       daemon,
       devices: pushTokens.size,
       connected: lastClientSeen > 0 && Date.now() - lastClientSeen < 60_000,
+      // "actively talking" — a request landed in the last few seconds, i.e. the
+      // phone is connecting / syncing right now. Drives the live sync animation.
+      syncing: lastClientSeen > 0 && Date.now() - lastClientSeen < 2500,
       lastSeenMsAgo: lastClientSeen ? Date.now() - lastClientSeen : null,
     });
   }
