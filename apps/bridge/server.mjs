@@ -20,7 +20,8 @@ import http from "node:http";
 import net from "node:net";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createInterface } from "node:readline";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -929,10 +930,16 @@ function streamTurn(agent, threadId, text, cwd, onEvent, onDone, opts = {}) {
   return () => p.kill("SIGKILL");
 }
 
-async function fetchTurns(agent, threadId) {
+async function fetchTurns(agent, threadId, limit) {
+  // `limit` (when the daemon honors it) caps how many turns come back — used by
+  // activity enrichment, which only needs the tail. Without it the daemon returns
+  // the FULL history; on multi-million-token threads that is 100s of MB, and the
+  // list-sync enriches many threads at once, so an unbounded fetch here is what
+  // spikes bridge memory on connect. See threadActivity.
+  const params = limit ? { threadId, limit } : { threadId };
   const frames = await probe(
     ["--agent", agent, "--before-method", "thread/resume", "--before-params", JSON.stringify({ threadId }),
-     "--method", "thread/turns/list", "--params", JSON.stringify({ threadId }),
+     "--method", "thread/turns/list", "--params", JSON.stringify(params),
      // turns/list is plain request/response — linger only waits *after* the
      // response, so any value here is a flat delay added to every history load.
      "--linger-secs", "0", "--timeout-secs", "30"],
@@ -1025,12 +1032,16 @@ function getUsage(agent, thread, cwd) {
     if (agent !== "claude") return { available: false, reason: "unsupported-agent" };
     const file = transcriptPath(thread, cwd);
     if (!file) return { available: false, reason: "no-transcript" };
-    let raw;
-    try { raw = readFileSync(file, "utf8"); } catch { return { available: false, reason: "no-transcript" }; }
     const tokens = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
     const outByModel = new Map();
     let cost = 0, costComplete = true, messages = 0;
-    for (const line of raw.split("\n")) {
+    // Stream the transcript line-by-line — reading a multi-million-token thread's
+    // JSONL fully into memory (readFileSync + split) is a large, avoidable spike.
+    let rl;
+    try {
+      rl = createInterface({ input: createReadStream(file, "utf8"), crlfDelay: Infinity });
+    } catch { return { available: false, reason: "no-transcript" }; }
+    for await (const line of rl) {
       if (!line) continue;
       let o;
       try { o = JSON.parse(line); } catch { continue; }
@@ -1127,7 +1138,9 @@ function tsToIso(n) {
  */
 function deriveActivity(turns) {
   if (!turns.length) return { activity: "idle", lastActivityAt: null };
-  const last = turns[turns.length - 1];
+  // Most-recent turn by timestamp — don't assume positional order, since the
+  // enrichment fetch (limit:1) and the daemon's own sort may hand back either end.
+  const last = turns.reduce((a, b) => (tturn(b) >= tturn(a) ? b : a));
   const lastActivityAt = tsToIso(last.completedAt) || tsToIso(last.createdAt);
   if (!last.completedAt) return { activity: "running", lastActivityAt };
   const failed =
@@ -1138,7 +1151,9 @@ function deriveActivity(turns) {
 function threadActivity(agent, threadId) {
   return cached(`act:${threadId}`, CACHE_MS, async () => {
     try {
-      return deriveActivity(await fetchTurns(agent, threadId));
+      // Only the latest turn's state is needed — fetch just that (limit:1) so
+      // enrichment never loads a huge thread's full history into memory.
+      return deriveActivity(await fetchTurns(agent, threadId, 1));
     } catch {
       return { activity: "idle", lastActivityAt: null };
     }
