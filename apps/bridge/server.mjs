@@ -576,7 +576,7 @@ function cleanPreview(raw, agent) {
  * the mapped `id`, so a mishandled cursor can't loop. thread/list and model/list
  * share this convention; this is the single place that implements it.
  */
-async function probePaginated(agent, method, mapItem, { max = 60, pageSize } = {}) {
+async function probePaginated(agent, method, mapItem, { max = 60, pageSize, onPage } = {}) {
   const out = [];
   const seen = new Set();
   let cursor;
@@ -593,21 +593,24 @@ async function probePaginated(agent, method, mapItem, { max = 60, pageSize } = {
       { timeout: 30000 },
     ).catch(() => []);
     const f = frames.find((x) => x?.result && Array.isArray(x.result.data));
-    let added = 0;
+    const page = [];
     for (const raw of f?.result?.data || []) {
       const item = mapItem(raw);
       if (!item || seen.has(item.id)) continue;
       seen.add(item.id);
-      out.push(item);
-      added++;
+      page.push(item);
     }
+    out.push(...page);
+    // Emit each page as it arrives so callers can stream to the app instead of
+    // waiting for every (cold-dial) page to finish.
+    if (onPage && page.length) await onPage(page);
     cursor = f?.result?.nextCursor;
-    if (!cursor || added === 0) break; // no more pages, or the cursor stopped advancing
+    if (!cursor || page.length === 0) break; // no more pages, or the cursor stopped advancing
   }
   return out;
 }
 
-async function listThreads(agent) {
+async function listThreads(agent, onPage) {
   // ~25/page — following the cursor is essential or a machine's older/recent
   // sessions silently vanish from the app. Guard ~1500 threads (60 pages).
   return probePaginated(agent, "thread/list", (t) => {
@@ -629,7 +632,26 @@ async function listThreads(agent) {
       isWorktree: info.isWorktree,
       isLive: info.isLive,
     };
-  }, { pageSize: 1000 });
+  }, { pageSize: 1000, onPage });
+}
+
+/** Stream threads to `sink` page-by-page as the daemon paginates — same per-thread
+ *  shaping getThreads does (provisional activity + worktree→repo fold), applied
+ *  per page so the app can render progressively instead of blocking on every
+ *  cold-dial page. */
+async function streamThreads(sink) {
+  const agents = await getAgents();
+  const avail = agents.filter((a) => a.available && a.wire === "jsonl" && a.id !== "shell");
+  for (const a of avail) {
+    await listThreads(a.id, async (page) => {
+      for (const t of page) {
+        t.activity = t.isLive ? "idle" : "completed";
+        t.lastActivityAt = t.createdAt;
+      }
+      await resolveWorktreeRepos(page);
+      await sink(page);
+    });
+  }
 }
 
 async function getThreads(fresh = false) {
@@ -970,11 +992,14 @@ const msgKey = (agent, threadId) => `msg:${agent}:${threadId}`;
 // often. Pull-to-refresh still forces a fresh read via `fresh=1`.
 const MSG_CACHE_MS = 60_000;
 
-async function getMessages(agent, threadId, fresh = false) {
-  const key = msgKey(agent, threadId);
+async function getMessages(agent, threadId, fresh = false, limit) {
+  // `limit` returns just the last N turns (honored by the daemon) — used for the
+  // instant first paint of a thread before the full history backfills, so opening
+  // a multi-million-token conversation isn't gated on loading all of it.
+  const key = limit ? `${msgKey(agent, threadId)}:last${limit}` : msgKey(agent, threadId);
   if (fresh) cache.delete(key);
   return cached(key, MSG_CACHE_MS, async () =>
-    normalizeTurns(await fetchTurns(agent, threadId), threadId, agent));
+    normalizeTurns(await fetchTurns(agent, threadId, limit), threadId, agent));
 }
 
 // --- Per-thread token usage + cost -----------------------------------------
@@ -1405,6 +1430,27 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === "/v1/agents") return send(res, 200, { agents: await getAgents(url.searchParams.get("fresh") === "1") });
     if (url.pathname === "/v1/threads") return send(res, 200, { threads: await getThreads(url.searchParams.get("fresh") === "1") });
+    // SSE variant: emit each page of threads as it arrives so the app's initial
+    // connect renders progressively instead of blocking ~a minute on all the
+    // cold-dial pages. `data: {threads:[...]}` per page, then `data: {done:true}`.
+    if (url.pathname === "/v1/threads/stream") {
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+        "access-control-allow-origin": "*",
+      });
+      const write = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      let closed = false;
+      req.on("close", () => { closed = true; });
+      try {
+        await streamThreads((page) => { if (!closed) write({ threads: page }); });
+        if (!closed) write({ done: true });
+      } catch (e) {
+        if (!closed) write({ error: String(e?.message || e) });
+      }
+      return res.end();
+    }
     if (url.pathname === "/v1/models") {
       const agent = url.searchParams.get("agent");
       if (!agent) return send(res, 400, { error: "agent required" });
@@ -1425,7 +1471,8 @@ const server = http.createServer(async (req, res) => {
       const thread = url.searchParams.get("thread");
       if (!agent || !thread) return send(res, 400, { error: "agent and thread required" });
       const fresh = url.searchParams.get("fresh") === "1";
-      return send(res, 200, { events: await getMessages(agent, thread, fresh) });
+      const limit = Number(url.searchParams.get("limit")) || undefined;
+      return send(res, 200, { events: await getMessages(agent, thread, fresh, limit) });
     }
     if (url.pathname === "/v1/usage") {
       const agent = url.searchParams.get("agent");
