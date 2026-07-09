@@ -5,6 +5,9 @@ import { useProjectNames, useRecentSessions } from "@/state/db/hooks";
 import { ActivityDot, AgentLogo, cn } from "@/ui";
 
 const MAX_RECENT = 8;
+/** Title line height (px). Two lines are reserved so one- and two-line titles
+ *  keep every card the same height — derived, so the two stay in lockstep. */
+const TITLE_LINE_HEIGHT = 17;
 
 /**
  * "Jump back in" — a horizontal strip of the threads the user opened most
@@ -51,7 +54,13 @@ function RecentCard({ session, repoName }: { session: Session; repoName: string 
         <ActivityDot status={session.activity} size={7} />
         <AgentLogo agent={session.agent} size={13} />
       </View>
-      <Text numberOfLines={2} className="mt-2 text-[13px] font-semibold leading-[17px] text-fg">
+      {/* Reserve two lines so one- and two-line titles keep every card the same
+          height and pin the repo name to a consistent baseline across the strip. */}
+      <Text
+        numberOfLines={2}
+        style={{ minHeight: TITLE_LINE_HEIGHT * 2, lineHeight: TITLE_LINE_HEIGHT }}
+        className="mt-2 text-[13px] font-semibold text-fg"
+      >
         {session.title}
       </Text>
       <Text numberOfLines={1} className="mt-1.5 text-[11px] text-fg-faint">

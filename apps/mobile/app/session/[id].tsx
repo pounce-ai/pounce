@@ -42,7 +42,7 @@ import {
 } from "@/state/db/hooks";
 import { fetchMessages, fetchUsage, interruptTurn, streamLiveMessage, type ThreadUsage } from "@/services/bridge";
 import { Ionicons } from "@expo/vector-icons";
-import { ActivityDot, ACTIVITY_LABEL, AgentLogo, cn, COLOR } from "@/ui";
+import { ActivityDot, ACTIVITY_LABEL, AgentLogo, BranchChip, cn, COLOR } from "@/ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "@/ui/agent-meta";
 
 /** Order host-fetched history chronologically. Turns share one timestamp, so a
@@ -411,7 +411,9 @@ export default function SessionScreen() {
             <View className="mt-0.5 flex-row items-center gap-2">
               <ActivityDot status={session.activity} size={7} />
               <Text className="text-[12px] text-fg-muted">{ACTIVITY_LABEL[session.activity]}</Text>
-              {session.branch ? <Text numberOfLines={1} className="shrink font-mono text-[11px] text-fg-faint">⎇ {session.branch}</Text> : null}
+              {session.branch ? (
+                <BranchChip branch={session.branch} worktree={session.worktree} size={10} color={COLOR.fgFaint} className="shrink" />
+              ) : null}
               <ThreadUsageSummary usage={usage} />
             </View>
           </View>

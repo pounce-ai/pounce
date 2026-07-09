@@ -1,7 +1,7 @@
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import type { Session } from "@litter/shared";
-import { ActivityDot, ACTIVITY_LABEL, AgentChip, cn, timeAgo } from "@/ui";
+import { ActivityDot, ACTIVITY_LABEL, AgentChip, BranchChip, cn, timeAgo } from "@/ui";
 
 export function SessionCard({
   session,
@@ -23,7 +23,6 @@ export function SessionCard({
       )}
     >
       <View className="flex-row items-center gap-2">
-        <ActivityDot status={session.activity} />
         <Text numberOfLines={1} className="flex-1 text-[15px] font-semibold text-fg">
           {session.title}
         </Text>
@@ -33,9 +32,7 @@ export function SessionCard({
       <View className="mt-1.5 flex-row items-center gap-1.5">
         <Text className="text-[11px] text-fg-faint">{session.host}</Text>
         {session.branch ? (
-          <Text numberOfLines={1} className="max-w-[60%] font-mono text-[12px] text-fg-muted">
-            ⎇ {session.branch}
-          </Text>
+          <BranchChip branch={session.branch} worktree={session.worktree} className="max-w-[60%]" />
         ) : null}
         {!session.isLive ? (
           <Text className="rounded bg-surface-alt px-1.5 py-0.5 text-[10px] uppercase text-fg-faint">
@@ -45,14 +42,17 @@ export function SessionCard({
       </View>
 
       <View className="mt-2 flex-row items-center justify-between">
-        <Text
-          className={cn(
-            "text-[12px]",
-            needs ? "text-warning" : session.activity === "failed" ? "text-danger" : "text-fg-faint",
-          )}
-        >
-          {ACTIVITY_LABEL[session.activity]}
-        </Text>
+        <View className="flex-row items-center gap-1.5">
+          <ActivityDot status={session.activity} />
+          <Text
+            className={cn(
+              "text-[12px]",
+              needs ? "text-warning" : session.activity === "failed" ? "text-danger" : "text-fg-faint",
+            )}
+          >
+            {ACTIVITY_LABEL[session.activity]}
+          </Text>
+        </View>
         <Text className="text-[11px] text-fg-faint">{timeAgo(session.updatedAt)}</Text>
       </View>
     </Pressable>

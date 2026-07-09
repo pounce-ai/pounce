@@ -8,7 +8,7 @@ import { AgentLogo } from "./agent-logos";
 // Shared tokens live in tokens.ts (no circular dep with agent-logos); re-export
 // them here so call sites keep importing everything from "@/ui".
 export { COLOR, AGENT_LABEL, AGENT_HEX, agentLabel } from "./tokens";
-import { agentLabel } from "./tokens";
+import { agentLabel, COLOR } from "./tokens";
 
 /** Real brand logos for agents (Claude, Codex, OpenCode, Grok, …). */
 export { AgentLogo };
@@ -120,6 +120,32 @@ export function AgentChip({ agent, size = 14 }: { agent: string; size?: number }
     <View className="flex-row items-center gap-1.5">
       <AgentLogo agent={agent} size={size} />
       <Text className="text-[12px] font-medium text-fg-muted">{agentLabel(agent)}</Text>
+    </View>
+  );
+}
+
+/** Branch/worktree label with the matching glyph — a git branch (`git-branch`)
+ *  vs a worktree checkout (`git-network`). The single, uniform way to show a
+ *  session's branch everywhere (list card, session header). */
+export function BranchChip({
+  branch,
+  worktree,
+  size = 11,
+  color = COLOR.fgMuted,
+  className,
+}: {
+  branch: string;
+  worktree?: string | null;
+  size?: number;
+  color?: string;
+  className?: string;
+}) {
+  return (
+    <View className={cn("flex-row items-center gap-1", className)}>
+      <Ionicons name={worktree ? "git-network-outline" : "git-branch-outline"} size={size} color={color} />
+      <Text numberOfLines={1} style={{ color, fontSize: size + 1 }} className="shrink font-mono">
+        {branch}
+      </Text>
     </View>
   );
 }
