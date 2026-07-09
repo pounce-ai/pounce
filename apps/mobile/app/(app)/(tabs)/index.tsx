@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ActionSheetIOS, Modal, Pressable, RefreshControl, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LegendList } from "@legendapp/list/react-native";
@@ -14,18 +14,21 @@ import {
   rankSession,
   deviceEmoji,
   deviceLabel,
-  deviceOverrides$,
-  devices$,
-  favRepos$,
-  favThreads$,
   filters$,
   isFavRepo,
   isFavThread,
-  sessions$,
-  repositories$,
   toggleFavRepo,
   toggleFavThread,
 } from "@/state/stores";
+import {
+  useDeviceOverrides,
+  useDevicesById,
+  useFavRepoSet,
+  useFavThreadSet,
+  useIgnoredSet,
+  useProjects,
+  useThreads,
+} from "@/state/db/hooks";
 import { SessionCard } from "@/components/SessionCard";
 import { RecentStrip } from "@/components/RecentStrip";
 import { SessionListSkeleton } from "@/components/Skeleton";
@@ -70,24 +73,31 @@ export default function HomeScreen() {
   const connected = status === "connected";
   const loading = status === "connecting" || status === "reconnecting";
 
-  // Grouped rows as a legend-state computed: a STABLE value that only recomputes
-  // when sessions / filters / collapse actually change. Because an unrelated
-  // re-render (e.g. a connection-status flip) doesn't touch these, the row list
-  // keeps the same reference — so the LegendList, and an in-list tour spotlight,
-  // never churn. Directories needing attention float up; newest activity breaks ties.
-  const view$ = useObservable(() => {
-    const f = filters$.get();
-    const repos = repositories$.get();
-    const deviceMap = devices$.get();
-    deviceOverrides$.get(); // track so header glyphs refresh on rename/emoji
-    const collapsedMap = collapsed$.get();
-    // Track the favourite maps so the view recomputes on toggle (selecting the
-    // parent object alone wouldn't re-run — the Legend-State object gotcha).
-    const favT = favThreads$.get();
-    const favR = favRepos$.get();
+  // Reactive inputs from the react-db collections + the Legend filter singleton.
+  const f = useSelector(() => filters$.get());
+  const rawThreads = useThreads();
+  const projectList = useProjects();
+  const deviceMap = useDevicesById();
+  const favT = useFavThreadSet();
+  const favR = useFavRepoSet();
+  const ignored = useIgnoredSet();
+  useDeviceOverrides(); // subscribe so header glyphs refresh on rename/emoji
+  const collapsedMap = useSelector(() => collapsed$.get());
+
+  // Grouped rows, memoized to a STABLE value that only recomputes when the data
+  // that feeds it changes. An unrelated re-render (e.g. a connection-status flip)
+  // doesn't touch these deps, so the row list keeps the same reference — the
+  // LegendList (and any in-list tour spotlight) never churns. Directories needing
+  // attention float up; newest activity breaks ties.
+  const { rows, attention: attentionCount } = useMemo(() => {
+    const repos = Object.fromEntries(projectList.map((r) => [r.id, r]));
     // applyFilters handles device + agent + selected folders + permanently
     // ignored folders; needsOnly is applied below with its smart default.
-    let list = applyFilters(Object.values(sessions$.get()));
+    let list = applyFilters(rawThreads, {
+      filters: f,
+      ignored,
+      repoName: (id) => repos[id]?.name ?? "",
+    });
     const attention = list.filter(needsYou).length;
     // Smart default: "needs you" narrows to attention items, but when nothing
     // needs you we show everything rather than an empty screen.
@@ -99,7 +109,7 @@ export default function HomeScreen() {
     const rows: Row[] = [];
 
     // Pinned "Favourites" pseudo-group above the repo accordion.
-    const favSessions = sorted.filter((s) => favT[s.id]);
+    const favSessions = sorted.filter((s) => favT.has(s.id));
     if (favSessions.length) {
       const favCollapsed = !!collapsedMap[FAV_KEY];
       rows.push({ type: "favHeader", count: favSessions.length, collapsed: favCollapsed });
@@ -114,8 +124,8 @@ export default function HomeScreen() {
     }
     const ordered = [...groups.entries()].sort((a, b) => {
       // Favourited folders float to the top of the accordion region.
-      const fa = favR[a[0]] ? 0 : 1;
-      const fb = favR[b[0]] ? 0 : 1;
+      const fa = favR.has(a[0]) ? 0 : 1;
+      const fb = favR.has(b[0]) ? 0 : 1;
       if (fa !== fb) return fa - fb;
       const ra = Math.min(...a[1].map(rankSession));
       const rb = Math.min(...b[1].map(rankSession));
@@ -135,15 +145,14 @@ export default function HomeScreen() {
         count: glist.length,
         attention: glist.filter(needsYou).length,
         collapsed: isCollapsed,
-        fav: !!favR[repoId],
+        fav: favR.has(repoId),
         deviceName: dev ? deviceLabel(dev.id, dev.name) : undefined,
         deviceEmoji: dev ? deviceEmoji(dev.id) : undefined,
       });
       if (!isCollapsed) for (const s of glist) rows.push({ type: "session", session: s });
     }
     return { rows, attention };
-  });
-  const { rows, attention: attentionCount } = useSelector(view$);
+  }, [rawThreads, projectList, deviceMap, favT, favR, ignored, f, collapsedMap]);
 
   const onRefresh = async () => {
     setRefreshing(true);

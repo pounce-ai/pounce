@@ -1,7 +1,6 @@
 import { memo, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
-import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import {
   assertNeverEvent,
@@ -9,7 +8,8 @@ import {
   type ToolCallEvent,
   type ToolResultEvent,
 } from "@litter/shared";
-import { isMarked } from "@/state/stores";
+import { defaultMarked } from "@/state/stores";
+import { useThreadMarkers } from "@/state/db/hooks";
 import { cn, COLOR } from "@/ui";
 import { MessageMarkdown } from "@/components/MessageMarkdown";
 import {
@@ -73,6 +73,9 @@ export const Timeline = memo(function Timeline({
     return m;
   }, [events]);
   const data = useMemo(() => collapseToolResults(events), [events]);
+  // Subscribe to this thread's marker overrides once; each row gets its resolved
+  // marked state as a prop (a per-row live query would be far too heavy).
+  const markerMap = useThreadMarkers(sessionId);
 
   return (
     <LegendList
@@ -83,7 +86,7 @@ export const Timeline = memo(function Timeline({
         <Row
           event={item}
           agent={agent}
-          sessionId={sessionId}
+          marked={markerMap.get(item.id) ?? defaultMarked(item, agent)}
           onLongPressEvent={onLongPressEvent}
           onRunCommand={onRunCommand}
           pairedResult={
@@ -114,21 +117,20 @@ export const Timeline = memo(function Timeline({
 const Row = memo(function Row({
   event,
   agent,
-  sessionId,
+  marked,
   onLongPressEvent,
   onRunCommand,
   pairedResult,
 }: {
   event: TimelineEvent;
   agent?: string;
-  sessionId?: string;
+  /** Resolved marker state (override ▸ default), computed by the Timeline root. */
+  marked: boolean;
   onLongPressEvent?: (ev: TimelineEvent) => void;
   onRunCommand?: (command: string) => void;
   /** For tool_call rows: the matching tool_result, rendered inside the accordion. */
   pairedResult?: ToolResultEvent;
 }) {
-  // Unconditional hook — recycled rows must keep a stable hook order.
-  const marked = useSelector(() => (sessionId ? isMarked(sessionId, event, agent) : false));
   const onLongPress = onLongPressEvent ? () => onLongPressEvent(event) : undefined;
   switch (event.type) {
     case "user_message":

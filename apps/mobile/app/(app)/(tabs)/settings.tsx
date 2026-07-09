@@ -8,15 +8,14 @@ import { Ionicons } from "@expo/vector-icons";
 
 type ScannerProps = { onScan: (data: string) => void; onCancel: () => void };
 import {
-  allDevices,
   connection$,
   deviceEmoji,
   deviceLabel,
-  deviceOverrides$,
   forgetDevice,
   reconcileDevices,
   setDeviceOverride,
 } from "@/state/stores";
+import { useDeviceOverrides, useDevices } from "@/state/db/hooks";
 import type { Device } from "@litter/shared";
 import {
   connectBridge,
@@ -55,9 +54,9 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const status = useSelector(() => connection$.status.get());
-  const devices = useSelector(() => allDevices());
-  // Track overrides so device rows re-render when a rename/emoji is applied.
-  useSelector(() => deviceOverrides$.get());
+  const devices = useDevices();
+  // Subscribe to overrides so device rows re-render when a rename/emoji applies.
+  useDeviceOverrides();
 
   const [editing, setEditing] = useState<Device | null>(null);
   const [busy, setBusy] = useState(false);

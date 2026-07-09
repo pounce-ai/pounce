@@ -21,18 +21,25 @@ import {
   cachedModels,
   capsFor,
   connection$,
-  isFavThread,
   defaultMarked,
   isMarked,
   markOpened,
-  markers$,
   modelForThread,
   pendingTurns$,
-  sessions$,
+  rekeyThread,
+  saveThreadMessages,
   setThreadModel,
   toggleFavThread,
   toggleMarker,
 } from "@/state/stores";
+import {
+  useAgentCaps,
+  useFavThreadSet,
+  useMessages,
+  useThread,
+  useThreadMarkers,
+  useThreadModel,
+} from "@/state/db/hooks";
 import { fetchMessages, fetchUsage, interruptTurn, streamLiveMessage, type ThreadUsage } from "@/services/bridge";
 import { Ionicons } from "@expo/vector-icons";
 import { ActivityDot, ACTIVITY_LABEL, AgentLogo, cn, COLOR } from "@/ui";
@@ -67,14 +74,15 @@ export default function SessionScreen() {
   const [sending, setSending] = useState(false);
   const [stopping, setStopping] = useState(false);
 
-  const session = useSelector(() => sessions$[id!].get());
+  const session = useThread(id);
   // "live" = a real bridge is in use (not demo). Gating history on the transient
   // connection *status* meant a flaky/settling reconnect left threads blank even
   // though the host was reachable; fetchMessages already degrades gracefully.
   const live = useSelector(() => !connection$.demo.get());
-  const reportedCaps = useSelector(() => (session ? capsFor(session.agent) : null));
-  const fav = useSelector(() => (session ? isFavThread(session.id) : false));
-  const selectedModel = useSelector(() => (session ? modelForThread(session.id) : undefined));
+  const reportedCaps = useAgentCaps(session?.agent);
+  const favSet = useFavThreadSet();
+  const fav = session ? favSet.has(session.id) : false;
+  const selectedModel = useThreadModel(session?.id);
   const [modelSheet, setModelSheet] = useState(false);
   // Permission mode + reasoning effort live on the status bar now (moved out of
   // the composer). Session-view state; undefined mode = the agent's default.
@@ -139,11 +147,25 @@ export default function SessionScreen() {
     refreshUsage();
   }, [recentQ, fullQ, refreshUsage]);
 
-  // Seed the render list from the best available history (full ▸ recent).
+  // Persisted chat history from the DB — renders instantly (and offline) before
+  // the bridge answers.
+  const persisted = useMessages(tid);
+  useEffect(() => {
+    // Seed from persisted history once, only while nothing is shown yet — never
+    // clobber an in-flight turn or freshly-fetched data.
+    if (liveEvents.length === 0 && persisted.length) setLiveEvents(chrono(persisted));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [persisted]);
+
+  // Seed the render list from the best available history (full ▸ recent), and
+  // persist it so the thread opens instantly next time.
   useEffect(() => {
     const ev = fullQ.data ?? recentQ.data;
-    if (ev) setLiveEvents(chrono(ev));
-  }, [recentQ.data, fullQ.data]);
+    if (ev) {
+      setLiveEvents(chrono(ev));
+      if (tid) saveThreadMessages(tid, ev);
+    }
+  }, [recentQ.data, fullQ.data, tid]);
 
   // Loading only until *something* is renderable; failed only if we have nothing
   // and the full fetch errored (a failed recent still falls through to full).
@@ -166,17 +188,20 @@ export default function SessionScreen() {
   );
   const [markerSheet, setMarkerSheet] = useState(false);
   const [envSheet, setEnvSheet] = useState(false);
-  // Derived inside useSelector so each message's override node is tracked —
-  // selecting the parent object breaks on toggles (same reference, no rerender).
-  const markers = useSelector<Marker[]>(() =>
-    events.flatMap((e, index) => {
-      if (e.type !== "user_message" && e.type !== "assistant_message") return [];
-      // Only prose is marker-worthy: a plain message, or a command with an
-      // accompanying message. A bare slash command (/exit, /clear) has no text,
-      // so it's never auto-marked.
-      if (!(markers$[id!][e.id].get() ?? defaultMarked(e, session?.agent))) return [];
-      return [{ id: e.id, index, type: e.type, text: e.text, ts: e.ts }];
-    }),
+  // Marker overrides for this thread, live from the collection so the list
+  // recomputes on every toggle.
+  const markerMap = useThreadMarkers(id);
+  const markers = useMemo<Marker[]>(
+    () =>
+      events.flatMap((e, index) => {
+        if (e.type !== "user_message" && e.type !== "assistant_message") return [];
+        // Only prose is marker-worthy: a plain message, or a command with an
+        // accompanying message. A bare slash command (/exit, /clear) has no text,
+        // so it's never auto-marked.
+        if (!(markerMap.get(e.id) ?? defaultMarked(e, session?.agent))) return [];
+        return [{ id: e.id, index, type: e.type, text: e.text, ts: e.ts }];
+      }),
+    [events, markerMap, session?.agent],
   );
 
   const jumpTo = useCallback((index: number) => {
@@ -188,14 +213,14 @@ export default function SessionScreen() {
     (ev: TimelineEvent) => {
       // Optimistic ids are replaced on refetch — a toggle here would orphan.
       if (ev.id.startsWith("opt:")) return;
-      const marked = isMarked(id!, ev, session.agent);
+      const marked = isMarked(id!, ev, session?.agent);
       ActionSheetIOS.showActionSheetWithOptions(
         {
           options: [marked ? "Remove marker" : "Add marker", "Cancel"],
           cancelButtonIndex: 1,
         },
         (i) => {
-          if (i === 0) toggleMarker(id!, ev, session.agent);
+          if (i === 0) toggleMarker(id!, ev, session?.agent);
         },
       );
     },
@@ -241,7 +266,11 @@ export default function SessionScreen() {
           model: modelForThread(session.id),
         },
       );
-      if (threadId) setLiveEvents(chrono(await fetchMessages(session.hostId, session.agent, threadId)));
+      if (threadId) {
+        const fetched = await fetchMessages(session.hostId, session.agent, threadId);
+        setLiveEvents(chrono(fetched));
+        saveThreadMessages(threadId, fetched); // one persist per completed turn
+      }
       refreshUsage();
       // A freshly-created task carries a temporary `new_*` id the daemon doesn't
       // know. Once the first turn returns the real thread id, re-key the local
@@ -249,12 +278,8 @@ export default function SessionScreen() {
       // ("Queued" forever, empty on reopen) while sync surfaces the real thread as
       // a separate entry.
       if (threadId && threadId !== session.id && session.id.startsWith("new_")) {
-        const data = sessions$[session.id].get();
-        if (data) {
-          sessions$[threadId].set({ ...data, id: threadId, activity: "idle" });
-          sessions$[session.id].delete();
-          router.replace(`/session/${threadId}`);
-        }
+        rekeyThread(session.id, { ...session, id: threadId, activity: "idle" });
+        router.replace(`/session/${threadId}`);
       }
     } else {
       const { getRuntime } = await import("@/services/runtime");

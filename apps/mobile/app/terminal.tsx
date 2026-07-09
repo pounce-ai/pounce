@@ -3,10 +3,9 @@ import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 
 import { KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import { runExec } from "@/services/bridge";
-import { sessions$ } from "@/state/stores";
+import { useThread } from "@/state/db/hooks";
 import { cn, COLOR } from "@/ui";
 
 interface Entry {
@@ -20,7 +19,7 @@ export default function TerminalScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const session = useSelector(() => sessions$[id!].get());
+  const session = useThread(id);
 
   const [command, setCommand] = useState("");
   const [history, setHistory] = useState<Entry[]>([]);

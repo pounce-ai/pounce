@@ -14,20 +14,24 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import {
-  allAgentsInUse,
+  agentsInScope,
   activeFilterCount,
-  allDevices,
   CLEARED_FILTERS,
   hasActiveFilter,
   deviceEmoji,
   deviceLabel,
-  deviceOverrides$,
   filters$,
-  ignoredRepos$,
   isRepoIgnored,
   reposByActivity,
   toggleRepoIgnore,
 } from "@/state/stores";
+import {
+  useDeviceOverrides,
+  useDevices,
+  useIgnoredSet,
+  useProjects,
+  useThreads,
+} from "@/state/db/hooks";
 import { agentLabel, cn, COLOR, DeviceIcon } from "@/ui";
 
 /**
@@ -93,11 +97,16 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const f = useSelector(() => filters$.get());
-  const devices = useSelector(() => allDevices());
-  const agents = useSelector(() => allAgentsInUse());
-  const repos = useSelector(() => reposByActivity());
-  useSelector(() => deviceOverrides$.get());
-  useSelector(() => ignoredRepos$.get()); // re-render on ignore toggle
+  const devices = useDevices();
+  const rawThreads = useThreads();
+  const projectList = useProjects();
+  const agents = useMemo(() => agentsInScope(rawThreads), [rawThreads]);
+  const repos = useMemo(
+    () => reposByActivity(projectList, rawThreads, { device: f.device, agent: f.agent }),
+    [projectList, rawThreads, f.device, f.agent],
+  );
+  useDeviceOverrides(); // re-render on rename/emoji
+  useIgnoredSet(); // re-render on ignore toggle
   const [repoQuery, setRepoQuery] = useState("");
   // Tap the grabber to expand — gives the (potentially long) folder list far more
   // room without pushing the sheet off-screen by default.

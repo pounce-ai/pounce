@@ -10,11 +10,10 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import { warmModels, type ModelInfo } from "@/services/bridge";
 import { shortModel } from "@/components/ThreadStatusBar";
-import { cachedModels } from "@/state/stores";
+import { useAgentModels } from "@/state/db/hooks";
 import { cn, COLOR } from "@/ui";
 
 /**
@@ -58,7 +57,7 @@ export function ModelSheet({
   const [query, setQuery] = useState("");
   const [attempted, setAttempted] = useState(false);
   // Cache-first: this re-renders the moment a background warm fills the store.
-  const models = useSelector(() => cachedModels(hostId, agent) ?? null);
+  const models = useAgentModels(hostId, agent);
 
   useEffect(() => {
     if (!visible) return;

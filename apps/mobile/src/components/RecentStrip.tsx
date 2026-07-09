@@ -1,19 +1,19 @@
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { useSelector } from "@legendapp/state/react";
 import { useRouter } from "expo-router";
 import type { Session } from "@litter/shared";
-import { recentSessions, repositories$ } from "@/state/stores";
+import { useProjectNames, useRecentSessions } from "@/state/db/hooks";
 import { ActivityDot, AgentLogo, cn } from "@/ui";
 
 const MAX_RECENT = 8;
 
 /**
  * "Jump back in" — a horizontal strip of the threads the user opened most
- * recently. Ordering comes from recentOpens$ (user visits), not agent activity,
- * so it stays put unless *you* revisit something. Hidden when empty.
+ * recently. Ordering comes from user visits, not agent activity, so it stays
+ * put unless *you* revisit something. Hidden when empty.
  */
 export function RecentStrip() {
-  const recents = useSelector(() => recentSessions().slice(0, MAX_RECENT));
+  const recents = useRecentSessions(MAX_RECENT);
+  const repoNames = useProjectNames();
   if (recents.length === 0) return null;
   return (
     <View className="pb-1 pt-1">
@@ -26,18 +26,19 @@ export function RecentStrip() {
         contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
       >
         {recents.map((s) => (
-          <RecentCard key={s.id} session={s} />
+          <RecentCard
+            key={s.id}
+            session={s}
+            repoName={repoNames[s.repoId] ?? s.repoId.replace(/^repo:/, "")}
+          />
         ))}
       </ScrollView>
     </View>
   );
 }
 
-function RecentCard({ session }: { session: Session }) {
+function RecentCard({ session, repoName }: { session: Session; repoName: string }) {
   const router = useRouter();
-  const repoName = useSelector(
-    () => repositories$[session.repoId].name.get() ?? session.repoId.replace(/^repo:/, ""),
-  );
   return (
     <Pressable
       onPress={() => router.push(`/session/${session.id}`)}

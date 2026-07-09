@@ -20,7 +20,7 @@ import type {
   TimelineEvent,
 } from "@litter/shared";
 import { parseUserMessage } from "@litter/transcript";
-import { agentCaps$, cachedModels, connection$, devices$, hosts$, recordSync, sessions$, setCachedModels, setWorkspace } from "../state/stores";
+import { cachedModels, connection$, mergeWorkspace, setAgentCaps, setCachedModels, syncWorkspace, upsertHosts } from "../state/stores";
 import { clearNotify, notifyOnce } from "./notify";
 
 const BRIDGE_KEY = "pounce.bridge";
@@ -290,9 +290,8 @@ export async function syncLiveDataStreaming(): Promise<{ repos: number; sessions
   // fills in live, never blanking or shrinking. The authoritative replace (which
   // drops now-gone sessions) happens once at the end.
   const merge = () => {
-    const { sessions } = buildWorkspace(threadsByDevice, now);
-    sessions$.set({ ...sessions$.get(), ...sessions });
-    devices$.set({ ...devices$.get(), ...devices });
+    const { repos, sessions } = buildWorkspace(threadsByDevice, now);
+    mergeWorkspace({ repos, sessions, devices });
   };
 
   await Promise.all(
@@ -310,13 +309,13 @@ export async function syncLiveDataStreaming(): Promise<{ repos: number; sessions
         deviceName = status?.device || cfg.name;
         agentsReported = (agents || []).length;
         agentsAvail = (agents || []).filter((a) => a.available).map((a) => a.id);
-        for (const a of agents || []) if (a.capabilities) agentCaps$[a.id].set(a.capabilities);
+        for (const a of agents || []) if (a.capabilities) setAgentCaps(a.id, a.capabilities);
         threadsByDevice[cfg.id].name = deviceName;
         devices[cfg.id] = {
           id: cfg.id, name: deviceName, url: cfg.url, online,
           agents: agentsAvail as Device["agents"], sessionCount: 0, lastSyncAt: now,
         };
-        hosts$[cfg.id].set({ id: cfg.id, nodeId: cfg.id, name: deviceName, online, lastSeenAt: now } satisfies Host);
+        upsertHosts([{ id: cfg.id, nodeId: cfg.id, name: deviceName, online, lastSeenAt: now } satisfies Host]);
         // Stream threads; rebuild after each page so the list grows live.
         await streamThreadsFromBridge(cfg, (batch) => {
           threadsByDevice[cfg.id].threads.push(...batch);
@@ -336,8 +335,7 @@ export async function syncLiveDataStreaming(): Promise<{ repos: number; sessions
   );
 
   const { repos, sessions } = buildWorkspace(threadsByDevice, now);
-  recordSync(sessions$.get(), sessions, repos, now);
-  setWorkspace(repos, sessions, devices);
+  syncWorkspace({ repos, sessions, devices });
   flagDaemonHealth(daemonDown);
   const warmed = new Set<string>();
   for (const s of Object.values(sessions)) {
@@ -382,7 +380,7 @@ export async function syncLiveData(
         agentsAvail = (agents || []).filter((a) => a.available).map((a) => a.id);
         // Record per-agent capabilities so the composer can gate its controls.
         for (const a of agents || []) {
-          if (a.capabilities) agentCaps$[a.id].set(a.capabilities);
+          if (a.capabilities) setAgentCaps(a.id, a.capabilities);
         }
         threads = t.threads;
       } catch {
@@ -400,9 +398,9 @@ export async function syncLiveData(
         sessionCount: threads.length,
         lastSyncAt: now,
       };
-      hosts$[cfg.id].set({
+      upsertHosts([{
         id: cfg.id, nodeId: cfg.id, name: deviceName, online, lastSeenAt: now,
-      } satisfies Host);
+      } satisfies Host]);
 
       for (const t of threads) {
         const repoId = `repo:${t.repo}`;
@@ -448,9 +446,8 @@ export async function syncLiveData(
     }),
   );
 
-  // Log what this sync actually brought in (per-repo) before we swap the store.
-  recordSync(sessions$.get(), sessions, repos, now);
-  setWorkspace(repos, sessions, devices);
+  // syncWorkspace records the per-repo diff into Sync history before swapping.
+  syncWorkspace({ repos, sessions, devices });
   flagDaemonHealth(daemonDown);
   // Warm the model catalog for each device+agent in the background, so opening
   // the model picker later is instant. Fire-and-forget; throttled per key.

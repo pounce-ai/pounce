@@ -93,6 +93,12 @@ export async function refreshLive(fresh = false): Promise<void> {
 
 /** App boot: live bridge → paired host (first that succeeds, else disconnected). */
 export async function bootstrap(): Promise<void> {
+  // Hydrate the react-db collections from MMKV, then one-time import any legacy
+  // Legend State data. Both must finish before the first read/sync.
+  const { preloadDb } = await import("../state/db/collections");
+  const { migrateLegendToDb } = await import("../state/db/migrate");
+  await preloadDb();
+  migrateLegendToDb();
   // Persisted `online` is stale until a live sync proves each host reachable —
   // otherwise past pairings show as "connected" on launch even when they're not.
   markDevicesOffline();
