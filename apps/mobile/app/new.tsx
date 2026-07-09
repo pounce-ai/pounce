@@ -35,7 +35,11 @@ export default function NewTaskScreen() {
   const devices = useSelector(() => allDevices());
   const repos = useSelector(() => reposByActivity());
 
-  const [hostId, setHostId] = useState<string | undefined>(devices[0]?.id);
+  // Default to a REACHABLE device — a stale/dead pairing (e.g. an old IP) can
+  // otherwise sit at devices[0] and silently swallow the turn (no response).
+  const [hostId, setHostId] = useState<string | undefined>(
+    (devices.find((d) => d.online) ?? devices[0])?.id,
+  );
   const [cwd, setCwd] = useState<string | null>(null);
   const [selectedRepoId, setSelectedRepoId] = useState<string | null>(null);
   const [agent, setAgent] = useState<AgentId>("claude");
@@ -59,6 +63,12 @@ export default function NewTaskScreen() {
     if (s?.hostId) setHostId(s.hostId);
   };
   const activeRepoId = selectedRepoId ?? repoIdForCwd(cwd);
+
+  // Backfill the host once devices load (they may be empty on first mount), and
+  // only while nothing is selected yet — never override a user/folder choice.
+  useEffect(() => {
+    if (!hostId && devices.length) setHostId((devices.find((d) => d.online) ?? devices[0])?.id);
+  }, [hostId, devices]);
 
   // Seeded from a folder's "+" on Home: adopt that repo's cwd + device on mount
   // so the user lands straight on the composer for that folder.
