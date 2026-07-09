@@ -4,7 +4,7 @@
     "slug": "pounce",
     "owner": "peppyhop",
     "scheme": "pounce",
-    "version": "1.2.0",
+    "version": "1.0.0",
     "runtimeVersion": {
       "policy": "appVersion"
     },
@@ -19,7 +19,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.pounce.app",
-      "buildNumber": "14",
+      "buildNumber": "15",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSLocalNetworkUsageDescription": "Pounce connects to the alleycat host running on your local network to load your projects and conversations.",
@@ -32,7 +32,7 @@
     },
     "android": {
       "package": "com.pounce.app",
-      "versionCode": 11,
+      "versionCode": 12,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#f5eafb"
