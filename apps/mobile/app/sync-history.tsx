@@ -1,10 +1,10 @@
 import { useMemo } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useSelector } from "@legendapp/state/react";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { syncLog$, type SyncLogEntry } from "@/state/stores";
+import type { SyncLogEntry } from "@/state/stores";
+import { useSyncLog } from "@/state/db/hooks";
 import { COLOR, timeAgo } from "@/ui";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -58,7 +58,12 @@ function groupByDay(log: SyncLogEntry[]): DaySection[] {
 export default function SyncHistoryScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const log = useSelector(() => syncLog$.get());
+  const rows = useSyncLog();
+  // The collection isn't intrinsically ordered — present newest-first.
+  const log = useMemo(
+    () => [...rows].sort((a, b) => Date.parse(b.at) - Date.parse(a.at)),
+    [rows],
+  );
   const sections = useMemo(() => groupByDay(log), [log]);
 
   return (

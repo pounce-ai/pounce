@@ -13,8 +13,8 @@ import * as SecureStore from "expo-secure-store";
 import { HttpTransport, LitterRuntime } from "@litter/runtime";
 import type { Transport } from "@litter/runtime";
 import type { PairPayload } from "@litter/shared";
-import { connection$, markDevicesOffline } from "../state/stores";
-import { connectBridge, loadBridgeConfig } from "./bridge";
+import { connection$, markDevicesOffline, reconcileDevices } from "../state/stores";
+import { connectBridge, listDeviceConfigs, loadBridgeConfig } from "./bridge";
 
 const PAIRING_KEY = "litter.pairing";
 const HTTP_BASE_KEY = "litter.httpBase";
@@ -93,9 +93,19 @@ export async function refreshLive(fresh = false): Promise<void> {
 
 /** App boot: live bridge → paired host (first that succeeds, else disconnected). */
 export async function bootstrap(): Promise<void> {
+  // Hydrate the react-db collections from MMKV, then one-time import any legacy
+  // Legend State data. Both must finish before the first read/sync.
+  const { preloadDb } = await import("../state/db/collections");
+  const { migrateLegendToDb } = await import("../state/db/migrate");
+  await preloadDb();
+  migrateLegendToDb();
   // Persisted `online` is stale until a live sync proves each host reachable —
   // otherwise past pairings show as "connected" on launch even when they're not.
   markDevicesOffline();
+  // Sweep any state left behind by devices that are no longer paired (e.g. a
+  // machine re-paired under a new URL orphans its old threads). The persisted
+  // device configs are the source of truth for what's really paired.
+  reconcileDevices((await listDeviceConfigs()).map((d) => d.id));
   const bridge = await loadBridgeConfig();
   if (bridge && (await connectBridge(bridge))) {
     const { registerForPush } = await import("./push");

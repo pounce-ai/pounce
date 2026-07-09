@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ActionSheetIOS, Modal, Pressable, RefreshControl, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LegendList } from "@legendapp/list/react-native";
+import { AnimatedLegendList } from "@legendapp/list/reanimated";
+import { LinearTransition } from "react-native-reanimated";
 import { useObservable, useSelector } from "@legendapp/state/react";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -14,18 +15,21 @@ import {
   rankSession,
   deviceEmoji,
   deviceLabel,
-  deviceOverrides$,
-  devices$,
-  favRepos$,
-  favThreads$,
   filters$,
   isFavRepo,
   isFavThread,
-  sessions$,
-  repositories$,
   toggleFavRepo,
   toggleFavThread,
 } from "@/state/stores";
+import {
+  useDeviceOverrides,
+  useDevicesById,
+  useFavRepoSet,
+  useFavThreadSet,
+  useIgnoredSet,
+  useProjects,
+  useThreads,
+} from "@/state/db/hooks";
 import { SessionCard } from "@/components/SessionCard";
 import { RecentStrip } from "@/components/RecentStrip";
 import { SessionListSkeleton } from "@/components/Skeleton";
@@ -62,7 +66,12 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const collapsed$ = useObservable<Record<string, boolean>>({});
-  const toggleGroup = (repoId: string) => collapsed$[repoId].set((v) => !v);
+  // Replace the whole map (not a mutate-in-place on one key) so `collapsed$.get()`
+  // returns a NEW reference — otherwise `useSelector` below sees the same object
+  // and the grouped `useMemo` (dep: collapsedMap) never rebuilds, so the accordion
+  // won't collapse. See legend-state object-selector gotcha.
+  const toggleGroup = (repoId: string) =>
+    collapsed$.set((m) => ({ ...m, [repoId]: !m[repoId] }));
 
   const status = useSelector(() => connection$.status.get());
   const filterCount = useSelector(() => activeFilterCount());
@@ -70,36 +79,47 @@ export default function HomeScreen() {
   const connected = status === "connected";
   const loading = status === "connecting" || status === "reconnecting";
 
-  // Grouped rows as a legend-state computed: a STABLE value that only recomputes
-  // when sessions / filters / collapse actually change. Because an unrelated
-  // re-render (e.g. a connection-status flip) doesn't touch these, the row list
-  // keeps the same reference — so the LegendList, and an in-list tour spotlight,
-  // never churn. Directories needing attention float up; newest activity breaks ties.
-  const view$ = useObservable(() => {
-    const f = filters$.get();
-    const repos = repositories$.get();
-    const deviceMap = devices$.get();
-    deviceOverrides$.get(); // track so header glyphs refresh on rename/emoji
-    const collapsedMap = collapsed$.get();
-    // Track the favourite maps so the view recomputes on toggle (selecting the
-    // parent object alone wouldn't re-run — the Legend-State object gotcha).
-    const favT = favThreads$.get();
-    const favR = favRepos$.get();
+  // Reactive inputs from the react-db collections + the Legend filter singleton.
+  const f = useSelector(() => filters$.get());
+  const rawThreads = useThreads();
+  const projectList = useProjects();
+  const deviceMap = useDevicesById();
+  const favT = useFavThreadSet();
+  const favR = useFavRepoSet();
+  const ignored = useIgnoredSet();
+  useDeviceOverrides(); // subscribe so header glyphs refresh on rename/emoji
+  const collapsedMap = useSelector(() => collapsed$.get());
+
+  // Grouped rows, memoized to a STABLE value that only recomputes when the data
+  // that feeds it changes. An unrelated re-render (e.g. a connection-status flip)
+  // doesn't touch these deps, so the row list keeps the same reference — the
+  // LegendList (and any in-list tour spotlight) never churns. Most-recently
+  // worked-upon threads/folders float to the top; attention rank breaks ties.
+  const { rows, attention: attentionCount } = useMemo(() => {
+    const repos = Object.fromEntries(projectList.map((r) => [r.id, r]));
     // applyFilters handles device + agent + selected folders + permanently
     // ignored folders; needsOnly is applied below with its smart default.
-    let list = applyFilters(Object.values(sessions$.get()));
+    let list = applyFilters(rawThreads, {
+      filters: f,
+      ignored,
+      repoName: (id) => repos[id]?.name ?? "",
+    });
     const attention = list.filter(needsYou).length;
     // Smart default: "needs you" narrows to attention items, but when nothing
     // needs you we show everything rather than an empty screen.
     if (f.needsOnly && attention > 0) list = list.filter(needsYou);
+    // Parse each updatedAt once; the thread sort and the per-folder "latest
+    // activity" key both reuse it instead of re-parsing inside comparators.
+    const tsOf = new Map(list.map((s) => [s.id, Date.parse(s.updatedAt)]));
+    // Most-recently worked-upon first; attention rank only breaks exact-timestamp ties.
     const sorted = [...list].sort(
-      (a, b) => rankSession(a) - rankSession(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+      (a, b) => tsOf.get(b.id)! - tsOf.get(a.id)! || rankSession(a) - rankSession(b),
     );
 
     const rows: Row[] = [];
 
     // Pinned "Favourites" pseudo-group above the repo accordion.
-    const favSessions = sorted.filter((s) => favT[s.id]);
+    const favSessions = sorted.filter((s) => favT.has(s.id));
     if (favSessions.length) {
       const favCollapsed = !!collapsedMap[FAV_KEY];
       rows.push({ type: "favHeader", count: favSessions.length, collapsed: favCollapsed });
@@ -112,19 +132,19 @@ export default function HomeScreen() {
       if (arr) arr.push(s);
       else groups.set(s.repoId, [s]);
     }
-    const ordered = [...groups.entries()].sort((a, b) => {
-      // Favourited folders float to the top of the accordion region.
-      const fa = favR[a[0]] ? 0 : 1;
-      const fb = favR[b[0]] ? 0 : 1;
-      if (fa !== fb) return fa - fb;
-      const ra = Math.min(...a[1].map(rankSession));
-      const rb = Math.min(...b[1].map(rankSession));
-      if (ra !== rb) return ra - rb;
-      const ta = Math.max(...a[1].map((s) => Date.parse(s.updatedAt)));
-      const tb = Math.max(...b[1].map((s) => Date.parse(s.updatedAt)));
-      return tb - ta;
-    });
-    for (const [repoId, glist] of ordered) {
+    // Decorate each folder once, then sort on the precomputed keys: favourites
+    // pinned, then most-recent activity (glist[0] is newest since groups keep
+    // sorted order), then attention rank as the tie-breaker.
+    const ordered = [...groups.entries()]
+      .map(([repoId, glist]) => ({
+        repoId,
+        glist,
+        fav: favR.has(repoId) ? 0 : 1,
+        latest: tsOf.get(glist[0].id)!,
+        minRank: Math.min(...glist.map(rankSession)),
+      }))
+      .sort((a, b) => a.fav - b.fav || b.latest - a.latest || a.minRank - b.minRank);
+    for (const { repoId, glist } of ordered) {
       const isCollapsed = !!collapsedMap[repoId];
       const hostIds = new Set(glist.map((s) => s.hostId));
       const dev = hostIds.size === 1 ? deviceMap[[...hostIds][0]!] : undefined;
@@ -135,15 +155,14 @@ export default function HomeScreen() {
         count: glist.length,
         attention: glist.filter(needsYou).length,
         collapsed: isCollapsed,
-        fav: !!favR[repoId],
+        fav: favR.has(repoId),
         deviceName: dev ? deviceLabel(dev.id, dev.name) : undefined,
         deviceEmoji: dev ? deviceEmoji(dev.id) : undefined,
       });
       if (!isCollapsed) for (const s of glist) rows.push({ type: "session", session: s });
     }
     return { rows, attention };
-  });
-  const { rows, attention: attentionCount } = useSelector(view$);
+  }, [rawThreads, projectList, deviceMap, favT, favR, ignored, f, collapsedMap]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -210,9 +229,15 @@ export default function HomeScreen() {
 
       <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
 
-      <LegendList
+      <AnimatedLegendList
         style={{ flex: 1 }}
         data={rows}
+        // Subtle reorder: when a sync bumps a thread/folder's updatedAt and the
+        // order changes, items ease to their new position instead of snapping.
+        // NOTE: recycleItems must stay OFF with itemLayoutAnimation — a recycled
+        // view animates from the previous item's position and can be left
+        // mispositioned, which shows up as overlapping cards.
+        itemLayoutAnimation={LinearTransition.duration(260)}
         keyExtractor={(r) =>
           r.type === "favHeader"
             ? "favh"
@@ -248,7 +273,6 @@ export default function HomeScreen() {
         }
         estimatedItemSize={104}
         getItemType={(r) => r.type}
-        recycleItems
         keyboardDismissMode="on-drag"
         ListHeaderComponent={connected ? <RecentStrip /> : null}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLOR.accent} />}

@@ -2,17 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import type { AgentId } from "@litter/shared";
-import {
-  allDevices,
-  capsFor,
-  pendingTurns$,
-  reposByActivity,
-  sessions$,
-  sessionsForRepo,
-} from "@/state/stores";
+import { insertThread, pendingTurns$, reposByActivity } from "@/state/stores";
+import { useAgentCaps, useDevices, useProjects, useThreads } from "@/state/db/hooks";
 import { Composer, type ComposerSubmit } from "@/components/Composer";
 import { FolderBrowser } from "@/components/FolderBrowser";
 import { AgentLogo, agentLabel, cn, COLOR } from "@/ui";
@@ -32,8 +25,13 @@ export default function NewTaskScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { repoId } = useLocalSearchParams<{ repoId?: string }>();
-  const devices = useSelector(() => allDevices());
-  const repos = useSelector(() => reposByActivity());
+  const devices = useDevices();
+  const rawThreads = useThreads();
+  const projectList = useProjects();
+  const repos = useMemo(
+    () => reposByActivity(projectList, rawThreads, { device: null, agent: null }),
+    [projectList, rawThreads],
+  );
 
   // Default to a REACHABLE device — a stale/dead pairing (e.g. an old IP) can
   // otherwise sit at devices[0] and silently swallow the turn (no response).
@@ -45,7 +43,7 @@ export default function NewTaskScreen() {
   const [agent, setAgent] = useState<AgentId>("claude");
   const [browsing, setBrowsing] = useState(false);
 
-  const reportedCaps = useSelector(() => capsFor(agent));
+  const reportedCaps = useAgentCaps(agent);
   const caps = effectiveCaps(agent, reportedCaps);
 
   const folderLabel = useMemo(() => (cwd ? cwd.split("/").pop() || cwd : null), [cwd]);
@@ -56,7 +54,9 @@ export default function NewTaskScreen() {
   // bridge folds worktrees into their origin repo, repoId no longer equals the
   // cwd basename, so it can't be re-derived from cwd.
   const pickRepo = (rid: string) => {
-    const list = sessionsForRepo(rid);
+    const list = rawThreads
+      .filter((x) => x.repoId === rid)
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
     const s = list.find((x) => x.cwd && !x.worktree) ?? list.find((x) => x.cwd) ?? list[0];
     setSelectedRepoId(rid);
     if (s?.cwd) setCwd(s.cwd);
@@ -81,7 +81,7 @@ export default function NewTaskScreen() {
     const id = `new_${Date.now()}`;
     const nowIso = new Date().toISOString();
     const device = devices.find((d) => d.id === hostId) ?? devices[0];
-    sessions$[id].set({
+    insertThread({
       id,
       repoId: selectedRepoId ?? repoIdForCwd(cwd),
       hostId: device?.id ?? "dev:local",

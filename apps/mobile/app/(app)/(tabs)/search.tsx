@@ -5,14 +5,13 @@ import { LegendList } from "@legendapp/list/react-native";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@litter/shared";
+import { applyFilters, filters$, rankSession } from "@/state/stores";
 import {
-  applyFilters,
-  favThreads$,
-  filters$,
-  rankSession,
-  rawSessions,
-  repositories$,
-} from "@/state/stores";
+  useFavThreadSet,
+  useIgnoredSet,
+  useProjectNames,
+  useThreads,
+} from "@/state/db/hooks";
 import { SessionCard } from "@/components/SessionCard";
 import { FilterButton, FilterSheet } from "@/components/FilterSheet";
 import { COLOR } from "@/ui";
@@ -23,18 +22,19 @@ export default function SearchScreen() {
   const [query, setQuery] = useState("");
   const [showFilters, setShowFilters] = useState(false);
 
-  const raw = useSelector(() => rawSessions());
-  const repos = useSelector(() => repositories$.get());
-  const favOnly = useSelector(() => filters$.favOnly.get());
-  const favMap = useSelector(() => favThreads$.get());
+  const raw = useThreads();
+  const repoNames = useProjectNames();
+  const ignored = useIgnoredSet();
+  const filters = useSelector(() => filters$.get());
+  const favSet = useFavThreadSet();
 
   const results = useMemo<Session[]>(() => {
     const t = query.trim().toLowerCase();
-    let list = applyFilters(raw);
-    if (favOnly) list = list.filter((s) => favMap[s.id]);
+    let list = applyFilters(raw, { filters, ignored, repoName: (id) => repoNames[id] ?? "" });
+    if (filters.favOnly) list = list.filter((s) => favSet.has(s.id));
     if (t) {
       list = list.filter((s) => {
-        const repo = repos[s.repoId]?.name ?? "";
+        const repo = repoNames[s.repoId] ?? "";
         return (
           s.title.toLowerCase().includes(t) ||
           (s.branch ?? "").toLowerCase().includes(t) ||
@@ -45,7 +45,7 @@ export default function SearchScreen() {
       });
     }
     return [...list].sort((a, b) => rankSession(a) - rankSession(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-  }, [raw, repos, query, favOnly, favMap]);
+  }, [raw, repoNames, ignored, query, filters, favSet]);
 
   const showAll = query.trim().length === 0;
 

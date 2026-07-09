@@ -4,7 +4,6 @@ import { KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LegendList } from "@legendapp/list/react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import {
   diffTotals,
@@ -14,7 +13,7 @@ import {
   gitPR,
   type GitChanges,
 } from "@/services/bridge";
-import { sessions$ } from "@/state/stores";
+import { useThread } from "@/state/db/hooks";
 import { cn, COLOR } from "@/ui";
 
 type Kind = "header" | "hunk" | "add" | "del" | "ctx";
@@ -39,7 +38,7 @@ export default function ChangesScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const session = useSelector(() => sessions$[id!].get());
+  const session = useThread(id);
 
   const [changes, setChanges] = useState<GitChanges | null>(null);
   const [loading, setLoading] = useState(true);

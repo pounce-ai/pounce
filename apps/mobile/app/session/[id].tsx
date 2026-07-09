@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActionSheetIOS, Pressable, Text, View } from "react-native";
 import { KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Animated, { FadeIn } from "react-native-reanimated";
+import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
+import { useQuery } from "@tanstack/react-query";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import type { PermissionMode, TimelineEvent } from "@litter/shared";
 import { collapseToolResults, Timeline } from "@/components/Timeline";
@@ -20,21 +21,28 @@ import {
   cachedModels,
   capsFor,
   connection$,
-  isFavThread,
   defaultMarked,
   isMarked,
   markOpened,
-  markers$,
   modelForThread,
   pendingTurns$,
-  sessions$,
+  rekeyThread,
+  saveThreadMessages,
   setThreadModel,
   toggleFavThread,
   toggleMarker,
 } from "@/state/stores";
+import {
+  useAgentCaps,
+  useFavThreadSet,
+  useMessages,
+  useThread,
+  useThreadMarkers,
+  useThreadModel,
+} from "@/state/db/hooks";
 import { fetchMessages, fetchUsage, interruptTurn, streamLiveMessage, type ThreadUsage } from "@/services/bridge";
 import { Ionicons } from "@expo/vector-icons";
-import { ActivityDot, ACTIVITY_LABEL, AgentLogo, cn, COLOR } from "@/ui";
+import { ActivityDot, ACTIVITY_LABEL, AgentLogo, BranchChip, cn, COLOR } from "@/ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "@/ui/agent-meta";
 
 /** Order host-fetched history chronologically. Turns share one timestamp, so a
@@ -66,14 +74,15 @@ export default function SessionScreen() {
   const [sending, setSending] = useState(false);
   const [stopping, setStopping] = useState(false);
 
-  const session = useSelector(() => sessions$[id!].get());
+  const session = useThread(id);
   // "live" = a real bridge is in use (not demo). Gating history on the transient
   // connection *status* meant a flaky/settling reconnect left threads blank even
   // though the host was reachable; fetchMessages already degrades gracefully.
   const live = useSelector(() => !connection$.demo.get());
-  const reportedCaps = useSelector(() => (session ? capsFor(session.agent) : null));
-  const fav = useSelector(() => (session ? isFavThread(session.id) : false));
-  const selectedModel = useSelector(() => (session ? modelForThread(session.id) : undefined));
+  const reportedCaps = useAgentCaps(session?.agent);
+  const favSet = useFavThreadSet();
+  const fav = session ? favSet.has(session.id) : false;
+  const selectedModel = useThreadModel(session?.id);
   const [modelSheet, setModelSheet] = useState(false);
   // Permission mode + reasoning effort live on the status bar now (moved out of
   // the composer). Session-view state; undefined mode = the agent's default.
@@ -92,13 +101,34 @@ export default function SessionScreen() {
 
   const demoTl = useTimeline(id!, undefined, !live);
   const [liveEvents, setLiveEvents] = useState<TimelineEvent[]>([]);
-  const [loading, setLoading] = useState(false);
-  // A live fetch can fail (host asleep, off Wi-Fi, bridge not running). We track
-  // it so an unreachable host shows "couldn't load · retry" instead of masking
-  // as an empty conversation. Bumping `reload` re-runs the fetch.
-  const [failed, setFailed] = useState(false);
-  const [reload, setReload] = useState(0);
-  const retry = useCallback(() => setReload((n) => n + 1), []);
+  // Whether the timeline is pinned to the newest message — drives the floating
+  // "jump to latest" pill that shows when the user has scrolled up.
+  const [atBottom, setAtBottom] = useState(true);
+
+  // Thread history via react-query. `recent` (last 4 turns) paints instantly;
+  // `full` is gated on `recent` settling, then backfills the whole history. This
+  // is the two-query recent-first pattern — react-query dedupes, cancels stale
+  // fetches on navigation, caches per thread, and orders the two, so there's no
+  // manual race. Each stage REPLACES (event ids are seq-based, so merging would
+  // duplicate); an in-flight live turn re-appends its streamed events after.
+  const canFetch = live && !!session?.id;
+  const host = session?.hostId;
+  const agent = session?.agent;
+  const tid = session?.id;
+  const recentQ = useQuery({
+    queryKey: ["messages", host, agent, tid, "recent"],
+    queryFn: () => fetchMessages(host!, agent!, tid!, { limit: 4 }),
+    enabled: canFetch,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
+  const fullQ = useQuery({
+    queryKey: ["messages", host, agent, tid, "full"],
+    queryFn: () => fetchMessages(host!, agent!, tid!),
+    enabled: canFetch && recentQ.isFetched,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
 
   // Token/cost usage for the status bar — best-effort, refreshed on open and
   // after each turn. Skipped for freshly-created (new_*) threads.
@@ -109,19 +139,38 @@ export default function SessionScreen() {
       .then(setUsage)
       .catch(() => {});
   }, [live, session?.hostId, session?.agent, session?.id, session?.cwd]);
-  useEffect(() => { refreshUsage(); }, [refreshUsage, reload]);
+  useEffect(() => { refreshUsage(); }, [refreshUsage]);
 
+  const retry = useCallback(() => {
+    void recentQ.refetch();
+    void fullQ.refetch();
+    refreshUsage();
+  }, [recentQ, fullQ, refreshUsage]);
+
+  // Persisted chat history from the DB — renders instantly (and offline) before
+  // the bridge answers.
+  const persisted = useMessages(tid);
   useEffect(() => {
-    if (!live || !session?.id) return;
-    let cancelled = false;
-    setLoading(true);
-    setFailed(false);
-    fetchMessages(session.hostId, session.agent, session.id)
-      .then((ev) => { if (!cancelled) { setLiveEvents(chrono(ev)); setFailed(false); } })
-      .catch(() => { if (!cancelled) setFailed(true); })
-      .finally(() => !cancelled && setLoading(false));
-    return () => { cancelled = true; };
-  }, [live, session?.id, session?.agent, session?.hostId, reload]);
+    // Seed from persisted history once, only while nothing is shown yet — never
+    // clobber an in-flight turn or freshly-fetched data.
+    if (liveEvents.length === 0 && persisted.length) setLiveEvents(chrono(persisted));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [persisted]);
+
+  // Seed the render list from the best available history (full ▸ recent), and
+  // persist it so the thread opens instantly next time.
+  useEffect(() => {
+    const ev = fullQ.data ?? recentQ.data;
+    if (ev) {
+      setLiveEvents(chrono(ev));
+      if (tid) saveThreadMessages(tid, ev);
+    }
+  }, [recentQ.data, fullQ.data, tid]);
+
+  // Loading only until *something* is renderable; failed only if we have nothing
+  // and the full fetch errored (a failed recent still falls through to full).
+  const loading = canFetch && !recentQ.data && !fullQ.data && (recentQ.isLoading || fullQ.isLoading);
+  const failed = canFetch && fullQ.isError && !recentQ.data && !fullQ.data;
 
   const rawEvents = live ? liveEvents : demoTl.events;
   // Timeline collapses paired tool results into their call's accordion, so
@@ -139,35 +188,39 @@ export default function SessionScreen() {
   );
   const [markerSheet, setMarkerSheet] = useState(false);
   const [envSheet, setEnvSheet] = useState(false);
-  // Derived inside useSelector so each message's override node is tracked —
-  // selecting the parent object breaks on toggles (same reference, no rerender).
-  const markers = useSelector<Marker[]>(() =>
-    events.flatMap((e, index) => {
-      if (e.type !== "user_message" && e.type !== "assistant_message") return [];
-      // Only prose is marker-worthy: a plain message, or a command with an
-      // accompanying message. A bare slash command (/exit, /clear) has no text,
-      // so it's never auto-marked.
-      if (!(markers$[id!][e.id].get() ?? defaultMarked(e, session?.agent))) return [];
-      return [{ id: e.id, index, type: e.type, text: e.text, ts: e.ts }];
-    }),
+  // Marker overrides for this thread, live from the collection so the list
+  // recomputes on every toggle.
+  const markerMap = useThreadMarkers(id);
+  const markers = useMemo<Marker[]>(
+    () =>
+      events.flatMap((e, index) => {
+        if (e.type !== "user_message" && e.type !== "assistant_message") return [];
+        // Only prose is marker-worthy: a plain message, or a command with an
+        // accompanying message. A bare slash command (/exit, /clear) has no text,
+        // so it's never auto-marked.
+        if (!(markerMap.get(e.id) ?? defaultMarked(e, session?.agent))) return [];
+        return [{ id: e.id, index, type: e.type, text: e.text, ts: e.ts }];
+      }),
+    [events, markerMap, session?.agent],
   );
 
   const jumpTo = useCallback((index: number) => {
     listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.1 });
   }, []);
 
+
   const onLongPressEvent = useCallback(
     (ev: TimelineEvent) => {
       // Optimistic ids are replaced on refetch — a toggle here would orphan.
       if (ev.id.startsWith("opt:")) return;
-      const marked = isMarked(id!, ev, session.agent);
+      const marked = isMarked(id!, ev, session?.agent);
       ActionSheetIOS.showActionSheetWithOptions(
         {
           options: [marked ? "Remove marker" : "Add marker", "Cancel"],
           cancelButtonIndex: 1,
         },
         (i) => {
-          if (i === 0) toggleMarker(id!, ev, session.agent);
+          if (i === 0) toggleMarker(id!, ev, session?.agent);
         },
       );
     },
@@ -213,7 +266,11 @@ export default function SessionScreen() {
           model: modelForThread(session.id),
         },
       );
-      if (threadId) setLiveEvents(chrono(await fetchMessages(session.hostId, session.agent, threadId)));
+      if (threadId) {
+        const fetched = await fetchMessages(session.hostId, session.agent, threadId);
+        setLiveEvents(chrono(fetched));
+        saveThreadMessages(threadId, fetched); // one persist per completed turn
+      }
       refreshUsage();
       // A freshly-created task carries a temporary `new_*` id the daemon doesn't
       // know. Once the first turn returns the real thread id, re-key the local
@@ -221,12 +278,8 @@ export default function SessionScreen() {
       // ("Queued" forever, empty on reopen) while sync surfaces the real thread as
       // a separate entry.
       if (threadId && threadId !== session.id && session.id.startsWith("new_")) {
-        const data = sessions$[session.id].get();
-        if (data) {
-          sessions$[threadId].set({ ...data, id: threadId, activity: "idle" });
-          sessions$[session.id].delete();
-          router.replace(`/session/${threadId}`);
-        }
+        rekeyThread(session.id, { ...session, id: threadId, activity: "idle" });
+        router.replace(`/session/${threadId}`);
       }
     } else {
       const { getRuntime } = await import("@/services/runtime");
@@ -358,7 +411,9 @@ export default function SessionScreen() {
             <View className="mt-0.5 flex-row items-center gap-2">
               <ActivityDot status={session.activity} size={7} />
               <Text className="text-[12px] text-fg-muted">{ACTIVITY_LABEL[session.activity]}</Text>
-              {session.branch ? <Text numberOfLines={1} className="shrink font-mono text-[11px] text-fg-faint">⎇ {session.branch}</Text> : null}
+              {session.branch ? (
+                <BranchChip branch={session.branch} worktree={session.worktree} size={10} color={COLOR.fgFaint} className="shrink" />
+              ) : null}
               <ThreadUsageSummary usage={usage} />
             </View>
           </View>
@@ -427,8 +482,31 @@ export default function SessionScreen() {
               listRef={listRef}
               onLongPressEvent={onLongPressEvent}
               onRunCommand={canSteer ? onRunCommand : undefined}
+              onAtBottomChange={setAtBottom}
               footer={running ? <WorkingIndicator agent={session.agent} label={workLabel} /> : undefined}
             />
+            {/* Floating "jump to latest" — appears when scrolled up off the bottom. */}
+            {!atBottom ? (
+              <Animated.View
+                entering={FadeIn.duration(150)}
+                exiting={FadeOut.duration(120)}
+                pointerEvents="box-none"
+                className="absolute bottom-3 self-center"
+                style={{ left: 0, right: 0, alignItems: "center" }}
+              >
+                <Pressable
+                  onPress={() => {
+                    listRef.current?.scrollToEnd({ animated: true });
+                    setAtBottom(true);
+                  }}
+                  className="active:opacity-80 flex-row items-center gap-1.5 rounded-full border border-border bg-bg-elevated px-3.5 py-2"
+                  style={{ shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 4 }}
+                >
+                  <Ionicons name="arrow-down" size={15} color={COLOR.accent} />
+                  <Text className="text-[13px] font-semibold text-accent">Latest</Text>
+                </Pressable>
+              </Animated.View>
+            ) : null}
           </Animated.View>
         )}
       </View>

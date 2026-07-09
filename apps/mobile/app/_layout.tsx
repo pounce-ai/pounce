@@ -1,3 +1,4 @@
+import "@/polyfills"; // crypto.getRandomValues for @tanstack/db — must load first
 import "../global.css";
 import { useEffect } from "react";
 import { Stack } from "expo-router";

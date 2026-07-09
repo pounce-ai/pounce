@@ -4,23 +4,22 @@
  * Rendered by AnimatedTabBar (see (app)/(tabs)/_layout.tsx); actions dispatch
  * against expo-router + the global stores, then call `close()` to dismiss.
  */
+import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import type { IPalette, IPopupRenderContext, TPopupRenderer } from "@/motion-tabs";
 import {
-  allAgentsInUse,
-  allDevices,
+  agentsInScope,
   CLEARED_FILTERS,
   hasActiveFilter,
   connection$,
   deviceEmoji,
   deviceLabel,
-  deviceOverrides$,
   filters$,
-  repositories$,
 } from "@/state/stores";
+import { useDeviceOverrides, useDevices, useThreads } from "@/state/db/hooks";
 import { refreshLive } from "@/services/runtime";
 import { agentLabel } from "@/ui";
 
@@ -115,9 +114,10 @@ function HomePopup({ colors, close }: IPopupRenderContext) {
 /** Search — the app's one filter surface (status · device · agent). */
 function SearchPopup({ colors, close }: IPopupRenderContext) {
   const f = useSelector(() => filters$.get());
-  const agents = useSelector(() => allAgentsInUse());
-  const devices = useSelector(() => allDevices());
-  useSelector(() => deviceOverrides$.get());
+  const rawThreads = useThreads();
+  const agents = useMemo(() => agentsInScope(rawThreads), [rawThreads]);
+  const devices = useDevices();
+  useDeviceOverrides();
   const hasFilter = hasActiveFilter();
 
   return (
@@ -199,7 +199,7 @@ function SearchPopup({ colors, close }: IPopupRenderContext) {
 function SettingsPopup({ colors, close }: IPopupRenderContext) {
   const router = useRouter();
   const status = useSelector(() => connection$.status.get());
-  const devices = useSelector(() => allDevices());
+  const devices = useDevices();
   const connected = status === "connected";
 
   return (
