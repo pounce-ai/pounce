@@ -14,6 +14,7 @@ import {
   deviceLabel,
   deviceOverrides$,
   forgetDevice,
+  reconcileDevices,
   setDeviceOverride,
 } from "@/state/stores";
 import type { Device } from "@litter/shared";
@@ -22,6 +23,7 @@ import {
   type DaemonInfo,
   fetchDaemon,
   fetchPairing,
+  listDeviceConfigs,
   loadBridgeConfig,
   removeDeviceConfig,
   restartDaemon,
@@ -83,6 +85,7 @@ export default function SettingsScreen() {
       // Also capture the host's direct-sync identity so it works off-Wi-Fi later.
       const pairing = await fetchPairing(clean);
       if (pairing?.nodeId) await savePairing(pairing);
+      setManual(false); // collapse the manual-entry form now that it succeeded
       Alert.alert("Synced", "Your devices are connected.");
       router.navigate("/");
     } catch (e) {
@@ -121,17 +124,24 @@ export default function SettingsScreen() {
   };
 
   const forget = (d: Device) => {
-    Alert.alert("Remove device", `Stop syncing ${d.name}? You can pair it again anytime.`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: async () => {
-          await removeDeviceConfig(d.id);
-          forgetDevice(d.id);
+    Alert.alert(
+      "Remove device",
+      `Stop syncing ${d.name}? Its threads and sync history will be removed from this app. You can pair it again anytime.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: async () => {
+            await removeDeviceConfig(d.id);
+            forgetDevice(d.id);
+            // Also sweep any orphans from earlier re-pairs under other URLs, so
+            // deleting the last device truly empties the app.
+            reconcileDevices((await listDeviceConfigs()).map((c) => c.id));
+          },
         },
-      },
-    ]);
+      ],
+    );
   };
 
   // Inline feedback on the Refresh control itself: "Syncing…" with a spinner
@@ -217,9 +227,10 @@ export default function SettingsScreen() {
               <Pressable
                 onPress={() => doSync({ url, token })}
                 disabled={busy || !url.trim() || !token.trim()}
-                className={cn("active:opacity-90 mt-1 h-11 items-center justify-center rounded-xl bg-surface-alt", (busy || !url.trim() || !token.trim()) && "opacity-40")}
+                className={cn("active:opacity-90 mt-1 h-11 flex-row items-center justify-center gap-2 rounded-xl bg-surface-alt", (busy || !url.trim() || !token.trim()) && "opacity-40")}
               >
-                <Text className="text-[14px] font-semibold text-fg">Sync</Text>
+                {busy ? <ActivityIndicator size="small" color={COLOR.fgMuted} /> : null}
+                <Text className="text-[14px] font-semibold text-fg">{busy ? "Connecting…" : "Sync"}</Text>
               </Pressable>
             </View>
           ) : null}

@@ -343,11 +343,100 @@ export function markDevicesOffline(): void {
   devices$.set(next);
 }
 
+/** Narrow a Record-observable in place to the keys that pass `keep`, writing back
+ *  only when something actually changed (avoids needless re-renders/persist). The
+ *  loose signature lets it accept any of our differently-typed record stores;
+ *  set()'s method-style param is checked bivariantly, so this stays type-safe. */
+function pruneRecord(
+  obs: { get(): unknown; set(v: Record<string, unknown>): void },
+  keep: (key: string) => boolean,
+): void {
+  const cur = (obs.get() ?? {}) as Record<string, unknown>;
+  const next: Record<string, unknown> = {};
+  let changed = false;
+  for (const [k, v] of Object.entries(cur)) {
+    if (keep(k)) next[k] = v;
+    else changed = true;
+  }
+  if (changed) obs.set(next);
+}
+
+/** After sessions$ has been narrowed, drop every dependent record that now points
+ *  at a session, repo, host, or agent that no longer exists. This is the cascade
+ *  a relational store would give us for free — one place so every removal path
+ *  (forget a device, sweep orphans) leaves the persisted stores consistent.
+ *  Must be called AFTER sessions$ is set to its final value. */
+function pruneOrphanedState(): void {
+  const sessions = sessions$.get();
+  const liveSessionIds = new Set(Object.keys(sessions));
+  const liveRepoIds = new Set(Object.values(sessions).map((s) => s.repoId));
+  const liveHostIds = new Set(Object.values(sessions).map((s) => s.hostId));
+  const liveAgents = new Set<string>(Object.values(sessions).map((s) => s.agent));
+
+  // Repos with no remaining session.
+  pruneRecord(repositories$, (rid) => liveRepoIds.has(rid));
+
+  // Per-session state: recents, favourites, marker overrides, sticky model, any
+  // queued first-turn. All meaningless once the thread is gone.
+  pruneRecord(recentOpens$, (id) => liveSessionIds.has(id));
+  pruneRecord(favThreads$, (id) => liveSessionIds.has(id));
+  pruneRecord(markers$, (id) => liveSessionIds.has(id));
+  pruneRecord(threadModels$, (id) => liveSessionIds.has(id));
+  pruneRecord(pendingTurns$, (id) => liveSessionIds.has(id));
+
+  // Per-repo state. ignoredRepos$ is deliberately KEPT — hiding a folder is a
+  // user preference that should survive removing and re-pairing its device.
+  pruneRecord(favRepos$, (id) => liveRepoIds.has(id));
+
+  // Per-host / per-agent caches. agentModels$ keys are `${hostId}:${agent}` and
+  // hostId itself contains a colon (dev:…), so split on the LAST colon.
+  pruneRecord(agentModels$, (key) => liveHostIds.has(key.slice(0, key.lastIndexOf(":"))));
+  pruneRecord(agentCaps$, (agent) => liveAgents.has(agent));
+
+  // Sync history: drop vanished repos from each entry, then entries left empty.
+  const log = syncLog$.get();
+  const nextLog = log
+    .map((e) => ({ ...e, repos: e.repos.filter((r) => liveRepoIds.has(r.repoId)) }))
+    .filter((e) => e.repos.length > 0);
+  const before = log.reduce((n, e) => n + e.repos.length, 0);
+  const after = nextLog.reduce((n, e) => n + e.repos.length, 0);
+  if (nextLog.length !== log.length || after !== before) syncLog$.set(nextLog);
+}
+
 /** Drop a device from the live stores (its config is removed separately via
- *  removeDeviceConfig). Clears both the device row and its host entry. */
+ *  removeDeviceConfig). Clears the device row, its host entry, its presentation
+ *  override, and every thread that lived on it — then cascades to all dependent
+ *  state so nothing stale is left behind. */
 export function forgetDevice(id: string): void {
   devices$[id].delete();
   hosts$[id].delete();
+  deviceOverrides$[id].delete();
+  const kept: Record<string, Session> = {};
+  for (const [sid, s] of Object.entries(sessions$.get())) {
+    if (s.hostId !== id) kept[sid] = s; // erase this device's threads
+  }
+  sessions$.set(kept);
+  pruneOrphanedState();
+}
+
+/** Reconcile every persisted store against the real paired-device list. Because
+ *  deviceId() is derived from the bridge URL, re-pairing the same machine under a
+ *  new address (LAN IP → 127.0.0.1, Wi-Fi → Tailscale) mints a NEW device id and
+ *  orphans the threads synced under the old one — with no device row left to
+ *  delete them, they'd haunt "Jump back in" forever. Called at boot (and after a
+ *  delete) with the currently-configured device ids: anything referencing a
+ *  device that's no longer paired is swept, then all dependent state cascades. */
+export function reconcileDevices(validIds: string[]): void {
+  const valid = new Set(validIds);
+  pruneRecord(devices$, (k) => valid.has(k));
+  pruneRecord(hosts$, (k) => valid.has(k));
+  pruneRecord(deviceOverrides$, (k) => valid.has(k));
+  const kept: Record<string, Session> = {};
+  for (const [sid, s] of Object.entries(sessions$.get())) {
+    if (valid.has(s.hostId)) kept[sid] = s;
+  }
+  sessions$.set(kept);
+  pruneOrphanedState();
 }
 
 export function allAgentsInUse(): string[] {

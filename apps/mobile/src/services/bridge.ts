@@ -20,7 +20,7 @@ import type {
   TimelineEvent,
 } from "@litter/shared";
 import { parseUserMessage } from "@litter/transcript";
-import { agentCaps$, cachedModels, connection$, hosts$, recordSync, sessions$, setCachedModels, setWorkspace } from "../state/stores";
+import { agentCaps$, cachedModels, connection$, devices$, hosts$, recordSync, sessions$, setCachedModels, setWorkspace } from "../state/stores";
 import { clearNotify, notifyOnce } from "./notify";
 
 const BRIDGE_KEY = "pounce.bridge";
@@ -113,12 +113,23 @@ export async function clearBridgeConfig(): Promise<void> {
   await SecureStore.deleteItemAsync(DEVICES_KEY);
 }
 
-async function get<T>(cfg: BridgeConfig, path: string): Promise<T> {
-  const res = await fetch(`${cfg.url}${path}`, {
-    headers: { authorization: `Bearer ${cfg.token}` },
-  });
-  if (!res.ok) throw new Error(`bridge ${path} -> ${res.status}`);
-  return (await res.json()) as T;
+async function get<T>(cfg: BridgeConfig, path: string, timeoutMs = 90_000): Promise<T> {
+  // Bare fetch never times out, so an unreachable host (wrong IP, computer asleep)
+  // hangs forever — the pairing/sync spinner then sticks with no error. Abort after
+  // `timeoutMs` so callers get a rejection instead. Default is generous for the
+  // cold thread-list sync; callers that must fail fast (health check) pass less.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${cfg.url}${path}`, {
+      headers: { authorization: `Bearer ${cfg.token}` },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error(`bridge ${path} -> ${res.status}`);
+    return (await res.json()) as T;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Friendly repo display name from the bridge's repo key. */
@@ -169,6 +180,173 @@ function flagDaemonHealth(daemonDown: string[]): void {
     daemonDownStreak = 0;
     clearNotify("daemon-unreachable");
   }
+}
+
+/** Map accumulated per-device threads into the app's repo/session shape. Mirrors
+ *  the batch mapping in syncLiveData; kept separate so streaming can rebuild the
+ *  store incrementally without touching the batch path. */
+function buildWorkspace(
+  threadsByDevice: Record<string, { name: string; threads: BridgeThread[] }>,
+  now: string,
+): { repos: Record<string, Repository>; sessions: Record<string, Session> } {
+  const repos: Record<string, Repository> = {};
+  const sessions: Record<string, Session> = {};
+  for (const [devId, { name: deviceName, threads }] of Object.entries(threadsByDevice)) {
+    for (const t of threads) {
+      const repoId = `repo:${t.repo}`;
+      const createdTs = t.createdAt ?? now;
+      const updatedTs = t.lastActivityAt ?? createdTs;
+      const activity = (t.activity as Session["activity"]) ?? (t.isLive ? "idle" : "completed");
+      const needsAttention = activity === "failed" || activity === "awaiting_input";
+      sessions[t.id] = {
+        id: t.id,
+        repoId,
+        hostId: devId,
+        host: deviceName,
+        agent: t.agent,
+        title: threadTitle(t.name, t.preview, t.agent),
+        branch: t.gitBranch ?? (t.isWorktree ? t.worktree : null),
+        worktree: t.worktree,
+        cwd: t.cwd,
+        isLive: t.isLive,
+        activity,
+        needsAttention,
+        createdAt: createdTs,
+        updatedAt: updatedTs,
+      };
+      const r = repos[repoId];
+      repos[repoId] = r
+        ? {
+            ...r,
+            sessionCount: r.sessionCount + 1,
+            liveCount: r.liveCount + (t.isLive ? 1 : 0),
+            attentionCount: r.attentionCount + (needsAttention ? 1 : 0),
+            lastActivityAt: updatedTs > r.lastActivityAt ? updatedTs : r.lastActivityAt,
+          }
+        : {
+            id: repoId,
+            name: repoName(t.repo),
+            sessionCount: 1,
+            liveCount: t.isLive ? 1 : 0,
+            attentionCount: needsAttention ? 1 : 0,
+            lastActivityAt: updatedTs,
+          };
+    }
+  }
+  return { repos, sessions };
+}
+
+/** Read the bridge's SSE thread stream, invoking `onBatch` per page as it lands. */
+async function streamThreadsFromBridge(
+  cfg: BridgeConfig,
+  onBatch: (threads: BridgeThread[]) => void,
+): Promise<void> {
+  const f = await streamingFetch();
+  const res = await f(`${cfg.url}/v1/threads/stream`, {
+    headers: { authorization: `Bearer ${cfg.token}` },
+  });
+  if (!res.ok || !res.body) throw new Error(`thread stream ${res.status}`);
+  const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buf.indexOf("\n\n")) !== -1) {
+      const frame = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      const line = frame.split("\n").find((l) => l.startsWith("data:"));
+      if (!line) continue;
+      let d: { threads?: BridgeThread[]; done?: boolean; error?: string } | null = null;
+      try {
+        d = JSON.parse(line.slice(5).trim());
+      } catch {
+        continue;
+      }
+      if (d?.threads?.length) onBatch(d.threads);
+      if (d?.error) throw new Error(d.error);
+    }
+  }
+}
+
+/**
+ * Progressive connect-time sync: fetch each device's status/agents, then stream
+ * its threads page-by-page, rebuilding the store after each batch so the list
+ * fills in as pages land instead of blocking on the whole (cold-dial) fetch.
+ * Used only on connect — pull-to-refresh/periodic stay on the atomic batch path
+ * to avoid a shrink-then-grow flicker over already-shown data.
+ */
+export async function syncLiveDataStreaming(): Promise<{ repos: number; sessions: number; devices: number }> {
+  const configs = await listDeviceConfigs();
+  const now = new Date().toISOString();
+  const devices: Record<string, Device> = {};
+  const threadsByDevice: Record<string, { name: string; threads: BridgeThread[] }> = {};
+  const daemonDown: string[] = [];
+
+  // While streaming, MERGE fresh threads over whatever's already shown (persisted
+  // last-known state) instead of replacing — so the list appears instantly and
+  // fills in live, never blanking or shrinking. The authoritative replace (which
+  // drops now-gone sessions) happens once at the end.
+  const merge = () => {
+    const { sessions } = buildWorkspace(threadsByDevice, now);
+    sessions$.set({ ...sessions$.get(), ...sessions });
+    devices$.set({ ...devices$.get(), ...devices });
+  };
+
+  await Promise.all(
+    configs.map(async (cfg) => {
+      threadsByDevice[cfg.id] = { name: cfg.name, threads: [] };
+      let online = true;
+      let deviceName = cfg.name;
+      let agentsReported = 0;
+      let agentsAvail: string[] = [];
+      try {
+        const [{ status }, { agents }] = await Promise.all([
+          get<{ status: BridgeStatus }>(cfg, "/v1/status"),
+          get<{ agents: BridgeAgent[] }>(cfg, "/v1/agents"),
+        ]);
+        deviceName = status?.device || cfg.name;
+        agentsReported = (agents || []).length;
+        agentsAvail = (agents || []).filter((a) => a.available).map((a) => a.id);
+        for (const a of agents || []) if (a.capabilities) agentCaps$[a.id].set(a.capabilities);
+        threadsByDevice[cfg.id].name = deviceName;
+        devices[cfg.id] = {
+          id: cfg.id, name: deviceName, url: cfg.url, online,
+          agents: agentsAvail as Device["agents"], sessionCount: 0, lastSyncAt: now,
+        };
+        hosts$[cfg.id].set({ id: cfg.id, nodeId: cfg.id, name: deviceName, online, lastSeenAt: now } satisfies Host);
+        // Stream threads; rebuild after each page so the list grows live.
+        await streamThreadsFromBridge(cfg, (batch) => {
+          threadsByDevice[cfg.id].threads.push(...batch);
+          devices[cfg.id] = { ...devices[cfg.id], sessionCount: threadsByDevice[cfg.id].threads.length };
+          merge();
+        });
+      } catch {
+        online = false;
+        devices[cfg.id] = {
+          id: cfg.id, name: deviceName, url: cfg.url, online: false,
+          agents: agentsAvail as Device["agents"],
+          sessionCount: threadsByDevice[cfg.id].threads.length, lastSyncAt: now,
+        };
+      }
+      if (online && agentsReported === 0) daemonDown.push(deviceName);
+    }),
+  );
+
+  const { repos, sessions } = buildWorkspace(threadsByDevice, now);
+  recordSync(sessions$.get(), sessions, repos, now);
+  setWorkspace(repos, sessions, devices);
+  flagDaemonHealth(daemonDown);
+  const warmed = new Set<string>();
+  for (const s of Object.values(sessions)) {
+    const key = `${s.hostId}:${s.agent}`;
+    if (warmed.has(key)) continue;
+    warmed.add(key);
+    void warmModels(s.hostId, s.agent);
+  }
+  return { repos: Object.keys(repos).length, sessions: Object.keys(sessions).length, devices: Object.keys(devices).length };
 }
 
 export async function syncLiveData(
@@ -291,12 +469,14 @@ export async function fetchMessages(
   hostId: string,
   agent: string,
   threadId: string,
+  opts?: { limit?: number },
 ): Promise<TimelineEvent[]> {
   const cfg = await deviceForHost(hostId);
   if (!cfg) return [];
+  const limit = opts?.limit ? `&limit=${opts.limit}` : "";
   const { events } = await get<{ events: TimelineEvent[] }>(
     cfg,
-    `/v1/messages?agent=${encodeURIComponent(agent)}&thread=${encodeURIComponent(threadId)}`,
+    `/v1/messages?agent=${encodeURIComponent(agent)}&thread=${encodeURIComponent(threadId)}${limit}`,
   );
   return events;
 }
@@ -692,10 +872,12 @@ export async function connectBridge(cfg: BridgeConfig): Promise<boolean> {
     // Reachability (health) is the sole gate for "connected". Sync is best-effort:
     // a cold daemon returning nothing for a tick must not fail the connection or
     // unpair the device — it just retries on the next sync.
-    await get<{ ok: boolean }>(dev, "/health").catch(() => { throw new Error("bridge unreachable"); });
+    await get<{ ok: boolean }>(dev, "/health", 8_000).catch(() => { throw new Error("bridge unreachable"); });
     connection$.demo.set(false);
     connection$.activeHostId.set(dev.id);
-    await syncLiveData().catch(() => {});
+    // Progressive connect: stream threads so the list fills in as pages land.
+    // Fall back to the batch sync if the stream path errors (older bridge, etc.).
+    await syncLiveDataStreaming().catch(() => syncLiveData().catch(() => {}));
     connection$.status.set("connected");
     return true;
   } catch {

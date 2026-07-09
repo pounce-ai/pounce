@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActionSheetIOS, Pressable, Text, View } from "react-native";
 import { KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Animated, { FadeIn } from "react-native-reanimated";
+import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
+import { useQuery } from "@tanstack/react-query";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import type { PermissionMode, TimelineEvent } from "@litter/shared";
 import { collapseToolResults, Timeline } from "@/components/Timeline";
@@ -92,13 +93,34 @@ export default function SessionScreen() {
 
   const demoTl = useTimeline(id!, undefined, !live);
   const [liveEvents, setLiveEvents] = useState<TimelineEvent[]>([]);
-  const [loading, setLoading] = useState(false);
-  // A live fetch can fail (host asleep, off Wi-Fi, bridge not running). We track
-  // it so an unreachable host shows "couldn't load · retry" instead of masking
-  // as an empty conversation. Bumping `reload` re-runs the fetch.
-  const [failed, setFailed] = useState(false);
-  const [reload, setReload] = useState(0);
-  const retry = useCallback(() => setReload((n) => n + 1), []);
+  // Whether the timeline is pinned to the newest message — drives the floating
+  // "jump to latest" pill that shows when the user has scrolled up.
+  const [atBottom, setAtBottom] = useState(true);
+
+  // Thread history via react-query. `recent` (last 4 turns) paints instantly;
+  // `full` is gated on `recent` settling, then backfills the whole history. This
+  // is the two-query recent-first pattern — react-query dedupes, cancels stale
+  // fetches on navigation, caches per thread, and orders the two, so there's no
+  // manual race. Each stage REPLACES (event ids are seq-based, so merging would
+  // duplicate); an in-flight live turn re-appends its streamed events after.
+  const canFetch = live && !!session?.id;
+  const host = session?.hostId;
+  const agent = session?.agent;
+  const tid = session?.id;
+  const recentQ = useQuery({
+    queryKey: ["messages", host, agent, tid, "recent"],
+    queryFn: () => fetchMessages(host!, agent!, tid!, { limit: 4 }),
+    enabled: canFetch,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
+  const fullQ = useQuery({
+    queryKey: ["messages", host, agent, tid, "full"],
+    queryFn: () => fetchMessages(host!, agent!, tid!),
+    enabled: canFetch && recentQ.isFetched,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
 
   // Token/cost usage for the status bar — best-effort, refreshed on open and
   // after each turn. Skipped for freshly-created (new_*) threads.
@@ -109,19 +131,24 @@ export default function SessionScreen() {
       .then(setUsage)
       .catch(() => {});
   }, [live, session?.hostId, session?.agent, session?.id, session?.cwd]);
-  useEffect(() => { refreshUsage(); }, [refreshUsage, reload]);
+  useEffect(() => { refreshUsage(); }, [refreshUsage]);
 
+  const retry = useCallback(() => {
+    void recentQ.refetch();
+    void fullQ.refetch();
+    refreshUsage();
+  }, [recentQ, fullQ, refreshUsage]);
+
+  // Seed the render list from the best available history (full ▸ recent).
   useEffect(() => {
-    if (!live || !session?.id) return;
-    let cancelled = false;
-    setLoading(true);
-    setFailed(false);
-    fetchMessages(session.hostId, session.agent, session.id)
-      .then((ev) => { if (!cancelled) { setLiveEvents(chrono(ev)); setFailed(false); } })
-      .catch(() => { if (!cancelled) setFailed(true); })
-      .finally(() => !cancelled && setLoading(false));
-    return () => { cancelled = true; };
-  }, [live, session?.id, session?.agent, session?.hostId, reload]);
+    const ev = fullQ.data ?? recentQ.data;
+    if (ev) setLiveEvents(chrono(ev));
+  }, [recentQ.data, fullQ.data]);
+
+  // Loading only until *something* is renderable; failed only if we have nothing
+  // and the full fetch errored (a failed recent still falls through to full).
+  const loading = canFetch && !recentQ.data && !fullQ.data && (recentQ.isLoading || fullQ.isLoading);
+  const failed = canFetch && fullQ.isError && !recentQ.data && !fullQ.data;
 
   const rawEvents = live ? liveEvents : demoTl.events;
   // Timeline collapses paired tool results into their call's accordion, so
@@ -155,6 +182,7 @@ export default function SessionScreen() {
   const jumpTo = useCallback((index: number) => {
     listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.1 });
   }, []);
+
 
   const onLongPressEvent = useCallback(
     (ev: TimelineEvent) => {
@@ -427,8 +455,31 @@ export default function SessionScreen() {
               listRef={listRef}
               onLongPressEvent={onLongPressEvent}
               onRunCommand={canSteer ? onRunCommand : undefined}
+              onAtBottomChange={setAtBottom}
               footer={running ? <WorkingIndicator agent={session.agent} label={workLabel} /> : undefined}
             />
+            {/* Floating "jump to latest" — appears when scrolled up off the bottom. */}
+            {!atBottom ? (
+              <Animated.View
+                entering={FadeIn.duration(150)}
+                exiting={FadeOut.duration(120)}
+                pointerEvents="box-none"
+                className="absolute bottom-3 self-center"
+                style={{ left: 0, right: 0, alignItems: "center" }}
+              >
+                <Pressable
+                  onPress={() => {
+                    listRef.current?.scrollToEnd({ animated: true });
+                    setAtBottom(true);
+                  }}
+                  className="active:opacity-80 flex-row items-center gap-1.5 rounded-full border border-border bg-bg-elevated px-3.5 py-2"
+                  style={{ shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 4 }}
+                >
+                  <Ionicons name="arrow-down" size={15} color={COLOR.accent} />
+                  <Text className="text-[13px] font-semibold text-accent">Latest</Text>
+                </Pressable>
+              </Animated.View>
+            ) : null}
           </Animated.View>
         )}
       </View>

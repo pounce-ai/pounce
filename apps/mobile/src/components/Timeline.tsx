@@ -45,6 +45,7 @@ export const Timeline = memo(function Timeline({
   listRef,
   onLongPressEvent,
   onRunCommand,
+  onAtBottomChange,
 }: {
   events: TimelineEvent[];
   /** Which agent produced these events — selects the body-cleaning rules. */
@@ -58,6 +59,9 @@ export const Timeline = memo(function Timeline({
   /** Queue a shell command into the composer (Run buttons on shell code blocks).
    *  Absent for read-only threads. */
   onRunCommand?: (command: string) => void;
+  /** Fires as the user scrolls, telling the parent whether the list is pinned to
+   *  the bottom — drives the floating "jump to latest" pill. */
+  onAtBottomChange?: (atBottom: boolean) => void;
 }) {
   // Pair each tool result with its call so the call row renders both as one
   // accordion; the paired result rows are dropped from the list data.
@@ -95,6 +99,12 @@ export const Timeline = memo(function Timeline({
       // stay pinned to the end as live turns stream in.
       initialScrollAtEnd
       maintainScrollAtEnd
+      onScroll={(e) => {
+        const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+        const fromEnd = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+        onAtBottomChange?.(fromEnd < 80);
+      }}
+      scrollEventThrottle={64}
       ListFooterComponent={footer}
       contentContainerStyle={{ padding: 12, gap: 8 }}
     />
