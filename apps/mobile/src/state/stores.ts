@@ -485,7 +485,9 @@ export function forgetDevice(id: string): void {
  *  URL-derived, so re-pairing the same machine under a new address mints a new
  *  device id and orphans the threads synced under the old one — with no device
  *  row left to delete them, they'd haunt "Jump back in". Sweep anything whose
- *  host is no longer paired, then cascade. */
+ *  host is no longer paired, then cascade. Connection state follows the paired
+ *  set too, so every removal path (not just Settings) leaves the UI honest:
+ *  clear a now-unpaired active host, and go disconnected when nothing's paired. */
 export function reconcileDevices(validIds: string[]): void {
   const valid = new Set(validIds);
   deleteIds(devices, keyList(devices).filter((id) => !valid.has(id)));
@@ -493,6 +495,10 @@ export function reconcileDevices(validIds: string[]): void {
   deleteIds(deviceOverrides, keyList(deviceOverrides).filter((id) => !valid.has(id)));
   deleteIds(threads, threads.toArray.filter((s) => !valid.has(s.hostId)).map((s) => s.id));
   cascadeCleanup();
+
+  if (valid.size === 0) connection$.status.set("disconnected");
+  const active = connection$.activeHostId.get();
+  if (active && !valid.has(active)) connection$.activeHostId.set(null);
 }
 
 // --- live-sync writers (called from bridge.ts) ---

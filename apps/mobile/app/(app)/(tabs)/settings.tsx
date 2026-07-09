@@ -134,8 +134,10 @@ export default function SettingsScreen() {
           onPress: async () => {
             await removeDeviceConfig(d.id);
             forgetDevice(d.id);
-            // Also sweep any orphans from earlier re-pairs under other URLs, so
-            // deleting the last device truly empties the app.
+            // reconcileDevices sweeps orphans from earlier re-pairs under other
+            // URLs *and* drops the connection state (disconnect / clear active
+            // host) when the removed device was the last or active one — so the
+            // home screen stops reading "connected"/"All caught up".
             reconcileDevices((await listDeviceConfigs()).map((c) => c.id));
           },
         },
