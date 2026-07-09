@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { ActionSheetIOS, Modal, Pressable, RefreshControl, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LegendList } from "@legendapp/list/react-native";
+import { AnimatedLegendList } from "@legendapp/list/reanimated";
+import { LinearTransition } from "react-native-reanimated";
 import { useObservable, useSelector } from "@legendapp/state/react";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -92,8 +93,8 @@ export default function HomeScreen() {
   // Grouped rows, memoized to a STABLE value that only recomputes when the data
   // that feeds it changes. An unrelated re-render (e.g. a connection-status flip)
   // doesn't touch these deps, so the row list keeps the same reference — the
-  // LegendList (and any in-list tour spotlight) never churns. Directories needing
-  // attention float up; newest activity breaks ties.
+  // LegendList (and any in-list tour spotlight) never churns. Most-recently
+  // worked-upon threads/folders float to the top; attention rank breaks ties.
   const { rows, attention: attentionCount } = useMemo(() => {
     const repos = Object.fromEntries(projectList.map((r) => [r.id, r]));
     // applyFilters handles device + agent + selected folders + permanently
@@ -107,8 +108,12 @@ export default function HomeScreen() {
     // Smart default: "needs you" narrows to attention items, but when nothing
     // needs you we show everything rather than an empty screen.
     if (f.needsOnly && attention > 0) list = list.filter(needsYou);
+    // Parse each updatedAt once; the thread sort and the per-folder "latest
+    // activity" key both reuse it instead of re-parsing inside comparators.
+    const tsOf = new Map(list.map((s) => [s.id, Date.parse(s.updatedAt)]));
+    // Most-recently worked-upon first; attention rank only breaks exact-timestamp ties.
     const sorted = [...list].sort(
-      (a, b) => rankSession(a) - rankSession(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+      (a, b) => tsOf.get(b.id)! - tsOf.get(a.id)! || rankSession(a) - rankSession(b),
     );
 
     const rows: Row[] = [];
@@ -127,19 +132,19 @@ export default function HomeScreen() {
       if (arr) arr.push(s);
       else groups.set(s.repoId, [s]);
     }
-    const ordered = [...groups.entries()].sort((a, b) => {
-      // Favourited folders float to the top of the accordion region.
-      const fa = favR.has(a[0]) ? 0 : 1;
-      const fb = favR.has(b[0]) ? 0 : 1;
-      if (fa !== fb) return fa - fb;
-      const ra = Math.min(...a[1].map(rankSession));
-      const rb = Math.min(...b[1].map(rankSession));
-      if (ra !== rb) return ra - rb;
-      const ta = Math.max(...a[1].map((s) => Date.parse(s.updatedAt)));
-      const tb = Math.max(...b[1].map((s) => Date.parse(s.updatedAt)));
-      return tb - ta;
-    });
-    for (const [repoId, glist] of ordered) {
+    // Decorate each folder once, then sort on the precomputed keys: favourites
+    // pinned, then most-recent activity (glist[0] is newest since groups keep
+    // sorted order), then attention rank as the tie-breaker.
+    const ordered = [...groups.entries()]
+      .map(([repoId, glist]) => ({
+        repoId,
+        glist,
+        fav: favR.has(repoId) ? 0 : 1,
+        latest: tsOf.get(glist[0].id)!,
+        minRank: Math.min(...glist.map(rankSession)),
+      }))
+      .sort((a, b) => a.fav - b.fav || b.latest - a.latest || a.minRank - b.minRank);
+    for (const { repoId, glist } of ordered) {
       const isCollapsed = !!collapsedMap[repoId];
       const hostIds = new Set(glist.map((s) => s.hostId));
       const dev = hostIds.size === 1 ? deviceMap[[...hostIds][0]!] : undefined;
@@ -224,9 +229,15 @@ export default function HomeScreen() {
 
       <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
 
-      <LegendList
+      <AnimatedLegendList
         style={{ flex: 1 }}
         data={rows}
+        // Subtle reorder: when a sync bumps a thread/folder's updatedAt and the
+        // order changes, items ease to their new position instead of snapping.
+        // NOTE: recycleItems must stay OFF with itemLayoutAnimation — a recycled
+        // view animates from the previous item's position and can be left
+        // mispositioned, which shows up as overlapping cards.
+        itemLayoutAnimation={LinearTransition.duration(260)}
         keyExtractor={(r) =>
           r.type === "favHeader"
             ? "favh"
@@ -262,7 +273,6 @@ export default function HomeScreen() {
         }
         estimatedItemSize={104}
         getItemType={(r) => r.type}
-        recycleItems
         keyboardDismissMode="on-drag"
         ListHeaderComponent={connected ? <RecentStrip /> : null}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLOR.accent} />}
