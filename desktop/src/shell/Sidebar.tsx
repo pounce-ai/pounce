@@ -7,7 +7,7 @@
 import { useMemo, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { LegendList } from "@legendapp/list/react-native";
-import { useObservable, useSelector } from "@legendapp/state/react";
+import { useSelector } from "@legendapp/state/react";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@litter/shared";
@@ -35,13 +35,16 @@ function rank(s: Session): number {
 export function Sidebar() {
   const router = useRouter();
   const [query, setQuery] = useState("");
-  const collapsed$ = useObservable<Record<string, boolean>>({});
-  const toggleGroup = (repoId: string) => collapsed$[repoId].set((v) => !v);
+  // Plain state, not a Legend observable: selecting a parent object returns
+  // the same mutated reference, so toggles never re-render (the classic
+  // object-selector gotcha) — and this is purely local UI state anyway.
+  const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>({});
+  const toggleGroup = (repoId: string) =>
+    setCollapsedMap((m) => ({ ...m, [repoId]: !m[repoId] }));
 
   const status = useSelector(() => connection$.status.get());
   const selectedId = useSelector(() => nav$.detail.get()?.params.id ?? null);
   const f = useSelector(() => filters$.get());
-  const collapsedMap = useSelector(() => collapsed$.get());
   const deviceList = useDevices();
   const threads = useThreads();
   const projectNames = useProjectNames();

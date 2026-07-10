@@ -421,9 +421,13 @@ export default function SessionScreen() {
       {/* Header */}
       <View style={{ paddingTop: insets.top }} className="border-b border-border bg-bg-elevated">
         <View className="flex-row items-center gap-2 px-3 pb-2.5 pt-1">
-          <Pressable onPress={() => router.back()} className="active:opacity-60 h-9 w-9 items-center justify-center">
-            <Text className="text-[22px] text-fg">‹</Text>
-          </Pressable>
+          {/* Desktop's sidebar is always visible — a back button has nothing
+              to go back to, so it's mobile-only. */}
+          {!DESKTOP ? (
+            <Pressable onPress={() => router.back()} className="active:opacity-60 h-9 w-9 items-center justify-center">
+              <Text className="text-[22px] text-fg">‹</Text>
+            </Pressable>
+          ) : null}
           <AgentLogo agent={session.agent} size={18} />
           <View className="flex-1">
             <Text numberOfLines={1} className="text-[15px] font-semibold text-fg">{session.title}</Text>
@@ -472,9 +476,10 @@ export default function SessionScreen() {
       </View>
 
       <View className="flex-1 items-center">
-        {/* One readable column for every transcript-area state; on phones the
-            cap is wider than the screen, so this is a no-op there. */}
-        <View style={{ width: "100%", maxWidth: 760 }} className="flex-1">
+        {/* One readable column for every transcript-area state. Desktop:
+            proportional (92% of the pane, capped) so the chat adapts to the
+            window; mobile: full width, unchanged. */}
+        <View style={DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }} className="flex-1">
         {loading && events.length === 0 ? (
           <TimelineSkeleton />
         ) : live && failed && events.length === 0 ? (
@@ -584,9 +589,10 @@ export default function SessionScreen() {
         onClose={() => setModelSheet(false)}
       />
 
-      {/* Composer (model·effort, mode, mic and send now live inside its card) */}
+      {/* Composer (model·effort, mode, mic and send now live inside its card) —
+          same adaptive column as the transcript so they stay aligned. */}
       <View style={{ paddingBottom: insets.bottom + 8 }} className="items-center bg-bg-elevated px-3 pt-2">
-        <View style={{ width: "100%", maxWidth: 760 }}>
+        <View style={DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }}>
         {!canSteer ? (
           <Text className="px-1 pb-2 text-[12px] text-fg-faint">
             Archived session — worktree was removed. Read-only.

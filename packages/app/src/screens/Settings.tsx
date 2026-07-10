@@ -30,6 +30,7 @@ import {
   syncLiveData,
 } from "../services/bridge";
 import { savePairing } from "../services/runtime";
+import { DeviceSetupCard } from "../components/DeviceSetupCard";
 import { cn, COLOR, DeviceIcon, fmtDuration } from "../ui";
 
 interface Pairing { url: string; token: string }
@@ -184,58 +185,19 @@ export default function SettingsScreen() {
           </Text>
         </View>
 
-        {/* Pair card */}
-        <View className="gap-3 rounded-2xl border border-border bg-surface p-4">
-          <Text className="text-[17px] font-semibold text-fg">Pair a device</Text>
-          <Text className="text-[13px] leading-[19px] text-fg-muted">
-            On your computer, show its pairing code, then scan it here. Once paired, your sessions sync automatically.
-          </Text>
-          <Pressable
-            onPress={startScan}
-            disabled={busy}
-            className={cn("active:opacity-90 mt-1 h-12 flex-row items-center justify-center gap-2 rounded-xl bg-accent", busy && "opacity-50")}
-          >
-            <Ionicons name="qr-code-outline" size={18} color="#fff" />
-            <Text className="text-[15px] font-semibold text-white">Scan pairing code</Text>
-          </Pressable>
-          <Pressable onPress={() => setManual((m) => !m)} className="active:opacity-60 self-center pt-1">
-            <Text className="text-[13px] text-fg-muted">{manual ? "Hide manual entry" : "Enter code manually"}</Text>
-          </Pressable>
+        {/* Device setup: pairing on mobile, resync/reset on desktop (platform fork). */}
+        <DeviceSetupCard
+          busy={busy}
+          onScan={startScan}
+          manual={manual}
+          setManual={setManual}
+          url={url}
+          setUrl={setUrl}
+          token={token}
+          setToken={setToken}
+          onSync={doSync}
+        />
 
-          {manual ? (
-            <View className="gap-2 border-t border-border pt-3">
-              <Text className="text-[12px] uppercase tracking-wide text-fg-faint">Address</Text>
-              <TextInput
-                value={url}
-                onChangeText={setUrl}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="url"
-                placeholder="http://192.168.1.6:8099"
-                placeholderTextColor={COLOR.fgFaint}
-                className="rounded-xl bg-surface-alt px-3 py-2.5 font-mono text-[13px] text-fg"
-              />
-              <Text className="text-[12px] uppercase tracking-wide text-fg-faint">Code</Text>
-              <TextInput
-                value={token}
-                onChangeText={setToken}
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholder="pairing code"
-                placeholderTextColor={COLOR.fgFaint}
-                className="rounded-xl bg-surface-alt px-3 py-2.5 font-mono text-[13px] text-fg"
-              />
-              <Pressable
-                onPress={() => doSync({ url, token })}
-                disabled={busy || !url.trim() || !token.trim()}
-                className={cn("active:opacity-90 mt-1 h-11 flex-row items-center justify-center gap-2 rounded-xl bg-surface-alt", (busy || !url.trim() || !token.trim()) && "opacity-40")}
-              >
-                {busy ? <ActivityIndicator size="small" color={COLOR.fgMuted} /> : null}
-                <Text className="text-[14px] font-semibold text-fg">{busy ? "Connecting…" : "Sync"}</Text>
-              </Pressable>
-            </View>
-          ) : null}
-        </View>
 
         {/* Paired devices */}
         {devices.length ? (

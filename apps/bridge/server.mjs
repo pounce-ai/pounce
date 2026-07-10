@@ -213,13 +213,28 @@ function extractJsonObjects(text) {
 
 function probe(args, { timeout = 30000 } = {}, _retried = false) {
   return new Promise((resolve) => {
-    const p = klSpawn(["probe", ...args], { stdio: ["ignore", "pipe", "pipe"] });
+    // Own process group (detached): the invocation is often `npx … probe`, and
+    // killing just the npx wrapper on timeout orphans the real probe child —
+    // they pile up (~20MB each) under a steady sync cadence. Killing the group
+    // takes the whole tree down.
+    const p = klSpawn(["probe", ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
+    });
     let out = "";
     p.stdout.on("data", (d) => (out += d));
     p.stderr.on("data", (d) => (out += d));
-    const t = setTimeout(() => p.kill("SIGKILL"), timeout);
+    const killTree = () => {
+      if (process.platform !== "win32" && p.pid) {
+        try { process.kill(-p.pid, "SIGKILL"); return; } catch {}
+      }
+      try { p.kill("SIGKILL"); } catch {}
+    };
+    const t = setTimeout(killTree, timeout);
     p.on("close", () => {
       clearTimeout(t);
+      // Reap any stragglers the probe itself spawned before resolving.
+      killTree();
       resolve(extractJsonObjects(out));
     });
     p.on("error", (e) => {
@@ -232,12 +247,27 @@ function probe(args, { timeout = 30000 } = {}, _retried = false) {
   });
 }
 
+const inflight = new Map(); // key -> Promise (coalesces concurrent cache misses)
+
 async function cached(key, ttl, fn) {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < ttl) return hit.value;
-  const value = await fn();
-  cache.set(key, { at: Date.now(), value });
-  return value;
+  // Coalesce: with a client syncing every ~10s and the warm loop every 15s, a
+  // slow (cold-dial) probe outlives the interval — without this, every tick
+  // spawned ANOTHER probe process and they accumulated unboundedly.
+  const pending = inflight.get(key);
+  if (pending) return pending;
+  const run = (async () => {
+    try {
+      const value = await fn();
+      cache.set(key, { at: Date.now(), value });
+      return value;
+    } finally {
+      inflight.delete(key);
+    }
+  })();
+  inflight.set(key, run);
+  return run;
 }
 
 async function getAgents(fresh = false) {
