@@ -4,14 +4,15 @@
  * than the mobile card list; the selected thread is highlighted and groups
  * needing attention float to the top (same ranking as mobile Home).
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { LegendList } from "@legendapp/list/react-native";
 import { useObservable, useSelector } from "@legendapp/state/react";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@litter/shared";
-import { connection$, devices$, filters$, repositories$, sessions$ } from "@litter/app/state/stores";
+import { connection$, filters$ } from "@litter/app/state/stores";
+import { useDevices, useProjectNames, useThreads } from "@litter/app/state/db/hooks";
 import { SessionListSkeleton } from "@litter/app/components/Skeleton";
 import { ActivityDot, AgentLogo, cn, COLOR, INPUT_TWEAKS, timeAgo } from "@litter/app/ui";
 import { nav$ } from "../shims/router";
@@ -39,20 +40,21 @@ export function Sidebar() {
 
   const status = useSelector(() => connection$.status.get());
   const selectedId = useSelector(() => nav$.detail.get()?.params.id ?? null);
-  const deviceList = useSelector(() => Object.values(devices$.get()));
+  const f = useSelector(() => filters$.get());
+  const collapsedMap = useSelector(() => collapsed$.get());
+  const deviceList = useDevices();
+  const threads = useThreads();
+  const projectNames = useProjectNames();
 
   const connected = status === "connected";
   const loading = status === "connecting" || status === "reconnecting";
 
   const q = query.trim().toLowerCase();
-  const view$ = useObservable(() => {
-    const f = filters$.get();
-    const repos = repositories$.get();
-    const collapsedMap = collapsed$.get();
-    const list = Object.values(sessions$.get()).filter(
+  const { rows: allRows, attention } = useMemo(() => {
+    const list = threads.filter(
       (s) => (!f.device || s.hostId === f.device) && (!f.agent || s.agent === f.agent),
     );
-    const attention = list.filter(needsYou).length;
+    const attentionCount = list.filter(needsYou).length;
     const sorted = [...list].sort(
       (a, b) => rank(a) - rank(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
     );
@@ -77,16 +79,15 @@ export function Sidebar() {
       rows.push({
         type: "header",
         repoId,
-        name: repos[repoId]?.name ?? repoId.replace(/^repo:/, ""),
+        name: projectNames[repoId] ?? repoId.replace(/^repo:/, ""),
         count: glist.length,
         attention: glist.filter(needsYou).length,
         collapsed: isCollapsed,
       });
       if (!isCollapsed) for (const s of glist) rows.push({ type: "session", session: s });
     }
-    return { rows, attention };
-  });
-  const { rows: allRows, attention } = useSelector(view$);
+    return { rows, attention: attentionCount };
+  }, [threads, projectNames, f, collapsedMap]);
 
   return (
     <View className="flex-1 bg-bg-elevated">

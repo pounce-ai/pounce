@@ -50,6 +50,14 @@ describe("parseUserMessage — claude", () => {
     expect(isEmptyUserMessage(p("<system-reminder>Do not do X.</system-reminder>"))).toBe(true);
   });
 
+  it("strips a task-notification envelope (task-id and all)", () => {
+    const raw = "<task-notification>\n<task-id>aeaf6e6072ce89041</task-id>\nDone.\n</task-notification>";
+    expect(isEmptyUserMessage(p(raw))).toBe(true);
+    const r = p(`resume that\n${raw}`);
+    expect(r.text).toBe("resume that");
+    expect(isEmptyUserMessage(r)).toBe(false);
+  });
+
   it("keeps real prose and strips a trailing system-reminder", () => {
     const r = p("where were we ?\n<system-reminder>internal</system-reminder>");
     expect(r.text).toBe("where were we ?");

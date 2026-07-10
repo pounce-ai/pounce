@@ -20,7 +20,8 @@ import http from "node:http";
 import net from "node:net";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createInterface } from "node:readline";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -285,6 +286,93 @@ function exec(cmd, args, cwd, timeoutMs = 0, env = undefined) {
 }
 const git = (cwd, args) => exec("git", ["-C", cwd, ...args]);
 
+// --- Daemon (kittylitter serve) lifecycle -----------------------------------
+// The bridge proxies the daemon but doesn't own its session index: a daemon that
+// has been up for a while stops surfacing sessions created since it indexed, so
+// recent threads silently vanish from the app. Expose its start time and a
+// restart (deterministic kill + respawn of the same binary the daemon runs — not
+// reliant on any auto-start) so a fresh daemon re-indexes everything.
+let activeTurns = 0; // turns this bridge is currently streaming — a restart guard
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function daemonPids() {
+  const { out } = await exec("pgrep", ["-f", "kittylitter serve"]);
+  return out.trim().split(/\s+/).filter(Boolean).map(Number).filter((n) => n && n !== process.pid);
+}
+
+async function daemonInfo() {
+  const pids = await daemonPids();
+  if (!pids.length) return { running: false, pid: null, startedAt: null, uptimeSecs: null, activeTurns };
+  const pid = pids[0];
+  const { out } = await exec("ps", ["-p", String(pid), "-o", "lstart="]);
+  const startedAt = out.trim() ? new Date(out.trim()).toISOString() : null;
+  const uptimeSecs = startedAt ? Math.max(0, Math.round((Date.now() - Date.parse(startedAt)) / 1000)) : null;
+  return { running: true, pid, startedAt, uptimeSecs, activeTurns };
+}
+
+async function restartDaemon() {
+  const pids = await daemonPids();
+  for (const p of pids) { try { process.kill(p, "SIGTERM"); } catch {} }
+  await sleep(800);
+  for (const p of pids) { try { process.kill(p, 0); process.kill(p, "SIGKILL"); } catch {} } // straggler
+  // Respawn the same binary detached so it re-indexes from a clean slate.
+  try {
+    spawn(kittylitterPath(), ["serve"], { cwd: "/", detached: true, stdio: "ignore" }).unref();
+  } catch {}
+  await sleep(1500);
+  cache.clear(); // daemon re-indexed — drop every cached list/probe result
+  return daemonInfo();
+}
+
+// Auto-restart: when a recently-written session on disk isn't in the daemon's
+// thread list, the daemon has fallen behind — restart it (only while idle, rate-
+// limited) so newly-created threads appear without the user lifting a finger.
+const DAEMON_AUTO_RESTART = process.env.DAEMON_AUTO_RESTART !== "0"; // opt out with =0
+const STALE_LOOKBACK_MS = 30 * 60_000;       // only act on sessions touched this recently
+const AUTORESTART_COOLDOWN_MS = 30 * 60_000; // and no more than once per window
+const AUTORESTART_EVERY_MS = 5 * 60_000;     // how often we check
+let lastAutoRestart = 0;
+let lastAutoRestartFor = null; // don't loop on a session a restart can't index
+
+/** The id of the most-recently-written Claude session on disk, if touched within
+ *  the lookback window — the thing the daemon is most likely to be missing. */
+function newestRecentSessionId() {
+  const root = path.join(os.homedir(), ".claude", "projects");
+  let dirs;
+  try { dirs = readdirSync(root); } catch { return null; }
+  let bestDir = null, bestDirMs = 0; // cheapest path: newest project dir, then its newest file
+  for (const d of dirs) {
+    let st; try { st = statSync(path.join(root, d)); } catch { continue; }
+    if (st.isDirectory() && st.mtimeMs > bestDirMs) { bestDirMs = st.mtimeMs; bestDir = d; }
+  }
+  if (!bestDir || Date.now() - bestDirMs > STALE_LOOKBACK_MS) return null;
+  let id = null, ms = 0;
+  let files; try { files = readdirSync(path.join(root, bestDir)); } catch { return null; }
+  for (const f of files) {
+    if (!f.endsWith(".jsonl")) continue;
+    let st; try { st = statSync(path.join(root, bestDir, f)); } catch { continue; }
+    if (st.mtimeMs > ms) { ms = st.mtimeMs; id = f.slice(0, -6); }
+  }
+  return id && Date.now() - ms <= STALE_LOOKBACK_MS ? id : null;
+}
+
+async function maybeAutoRestartDaemon() {
+  if (!DAEMON_AUTO_RESTART) return;
+  if (activeTurns > 0) return;                                  // a turn is streaming through us
+  if (Date.now() - lastAutoRestart < AUTORESTART_COOLDOWN_MS) return;
+  const newId = newestRecentSessionId();
+  if (!newId) return;                                          // nothing fresh to catch up on
+  let threads;
+  try { threads = await getThreads(); } catch { return; }
+  if (threads.some((t) => t.id === newId)) { lastAutoRestartFor = null; return; } // already fresh
+  if (newId === lastAutoRestartFor) return;                    // a restart didn't index it — don't loop
+  if (threads.some((t) => t.activity === "running" || t.activity === "streaming")) return; // busy elsewhere
+  lastAutoRestart = Date.now();
+  lastAutoRestartFor = newId;
+  console.log(`[daemon] stale: session ${newId} on disk but not indexed — auto-restarting (idle)`);
+  try { await restartDaemon(); } catch (e) { console.log(`[daemon] auto-restart failed: ${e?.message || e}`); }
+}
+
 /** Uncommitted changes in `cwd`: branch, per-file status + counts, full diff. */
 async function gitChanges(cwd) {
   const [numstat, status, diff, branch] = await Promise.all([
@@ -415,6 +503,54 @@ function repoInfo(cwd) {
   return { repo: base, isWorktree: false, isLive: live, worktree: null };
 }
 
+// Worktree sessions live under `…/worktrees/<workspace>/<name>`, so repoInfo can
+// only see the opaque workspace id (`ws:<id>`) — the daemon never reports which
+// real repo the worktree was cut from. But every git worktree's .git points back
+// to its origin, so we resolve the true repo name here (bridge runs on the same
+// machine) and fold worktree sessions into that project's folder instead of a
+// generic, collision-prone "Workspace". All worktrees under one workspace share
+// an origin, so resolve once per workspace id and cache the hit permanently.
+const wsRepoCache = new Map(); // workspace id -> real repo name
+
+/** Origin repo name for a worktree cwd, via its git common dir (…/<repo>/.git). */
+async function realRepoForWorktree(cwd) {
+  const { out } = await git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  const commonDir = out.trim().split(/\r?\n/)[0]?.replace(/\\/g, "/");
+  if (!commonDir) return null;
+  const repoDir = commonDir.replace(/\/\.git\/?$/, "").replace(/\/+$/, "");
+  const name = repoDir.split("/").pop();
+  return name && name !== ".git" ? name : null;
+}
+
+/** Rewrite worktree threads' `repo` from `ws:<id>` to their real origin repo,
+ *  so they group with that project. Best-effort: unresolved workspaces keep the
+ *  `ws:` label. Mutates threads in place. */
+async function resolveWorktreeRepos(threads) {
+  const byWs = new Map();
+  for (const t of threads) {
+    if (!t.isWorktree || !t.cwd) continue;
+    const m = t.cwd.replace(/\\/g, "/").match(/\/worktrees\/([^/]+)\//);
+    if (!m) continue;
+    const group = byWs.get(m[1]) || byWs.set(m[1], []).get(m[1]);
+    group.push(t);
+  }
+  await Promise.all(
+    [...byWs.entries()].map(async ([ws, group]) => {
+      let name = wsRepoCache.get(ws);
+      if (!name) {
+        // Only a live worktree dir can run git; skip archived (merged/cleaned) ones.
+        for (const t of group) {
+          if (!t.isLive) continue;
+          name = await realRepoForWorktree(t.cwd).catch(() => null);
+          if (name) break;
+        }
+        if (name) wsRepoCache.set(ws, name); // leave unset on failure so we retry next sync
+      }
+      if (name) for (const t of group) t.repo = name;
+    }),
+  );
+}
+
 /**
  * The daemon's thread `preview` is the raw first user message, which for slash
  * commands carries the agent's wrapper markup (<local-command-caveat>,
@@ -434,14 +570,51 @@ function cleanPreview(raw, agent) {
   return text.trim() || null;
 }
 
-async function listThreads(agent) {
-  const frames = await probe(
-    ["--agent", agent, "--method", "thread/list", "--linger-secs", "1", "--timeout-secs", "25"],
-    { timeout: 30000 },
-  );
-  // the thread/list response is the frame whose result has a `data` array
-  const f = frames.find((x) => x?.result && Array.isArray(x.result.data));
-  return (f?.result?.data || []).map((t) => {
+/**
+ * Walk a paginated daemon list method — frames carry `result.data` +
+ * `result.nextCursor`. Maps each raw item (return null to skip) and dedupes by
+ * the mapped `id`, so a mishandled cursor can't loop. thread/list and model/list
+ * share this convention; this is the single place that implements it.
+ */
+async function probePaginated(agent, method, mapItem, { max = 60, pageSize, onPage } = {}) {
+  const out = [];
+  const seen = new Set();
+  let cursor;
+  for (let i = 0; i < max; i++) {
+    // Ask for a big page when we can: each page is a fresh probe paying a cold
+    // Iroh dial (~seconds), so fetching thousands of threads 25-at-a-time is the
+    // dominant connect-time cost. `pageSize` (honored by the daemon like turns/list's
+    // `limit`) collapses many round-trips into one; cursor-follow stays as fallback.
+    const params = { ...(cursor ? { cursor } : {}), ...(pageSize ? { limit: pageSize } : {}) };
+    const frames = await probe(
+      ["--agent", agent, "--method", method,
+       "--params", JSON.stringify(params),
+       "--linger-secs", "1", "--timeout-secs", "25"],
+      { timeout: 30000 },
+    ).catch(() => []);
+    const f = frames.find((x) => x?.result && Array.isArray(x.result.data));
+    const page = [];
+    for (const raw of f?.result?.data || []) {
+      const item = mapItem(raw);
+      if (!item || seen.has(item.id)) continue;
+      seen.add(item.id);
+      page.push(item);
+    }
+    out.push(...page);
+    // Emit each page as it arrives so callers can stream to the app instead of
+    // waiting for every (cold-dial) page to finish.
+    if (onPage && page.length) await onPage(page);
+    cursor = f?.result?.nextCursor;
+    if (!cursor || page.length === 0) break; // no more pages, or the cursor stopped advancing
+  }
+  return out;
+}
+
+async function listThreads(agent, onPage) {
+  // ~25/page — following the cursor is essential or a machine's older/recent
+  // sessions silently vanish from the app. Guard ~1500 threads (60 pages).
+  return probePaginated(agent, "thread/list", (t) => {
+    if (!t.id) return null;
     const info = repoInfo(t.cwd || "");
     return {
       id: t.id,
@@ -459,7 +632,26 @@ async function listThreads(agent) {
       isWorktree: info.isWorktree,
       isLive: info.isLive,
     };
-  });
+  }, { pageSize: 1000, onPage });
+}
+
+/** Stream threads to `sink` page-by-page as the daemon paginates — same per-thread
+ *  shaping getThreads does (provisional activity + worktree→repo fold), applied
+ *  per page so the app can render progressively instead of blocking on every
+ *  cold-dial page. */
+async function streamThreads(sink) {
+  const agents = await getAgents();
+  const avail = agents.filter((a) => a.available && a.wire === "jsonl" && a.id !== "shell");
+  for (const a of avail) {
+    await listThreads(a.id, async (page) => {
+      for (const t of page) {
+        t.activity = t.isLive ? "idle" : "completed";
+        t.lastActivityAt = t.createdAt;
+      }
+      await resolveWorktreeRepos(page);
+      await sink(page);
+    });
+  }
 }
 
 async function getThreads(fresh = false) {
@@ -472,6 +664,10 @@ async function getThreads(fresh = false) {
     const avail = agents.filter((a) => a.available && a.wire === "jsonl" && a.id !== "shell");
     const lists = await Promise.all(avail.map((a) => listThreads(a.id).catch(() => [])));
     const threads = lists.flat().sort((x, y) => (y.createdAt || "").localeCompare(x.createdAt || ""));
+
+    // Fold worktree sessions into their real origin repo before clients see the
+    // list (cheap: one git call per unresolved workspace, then cached).
+    await resolveWorktreeRepos(threads);
 
     // Provisional activity so the list returns fast — real activity is filled in
     // asynchronously below.
@@ -582,11 +778,23 @@ function itemToEvents(it, conversationId, seq, ts, streaming = false, agent) {
 function normalizeTurns(turns, conversationId, agent) {
   const events = [];
   let seq = 0;
-  for (const turn of turns) {
+  // The daemon may hand back turns newest-first (thread/list is sorted DESC);
+  // render order is turn order, so sort ascending by creation time or a
+  // once-reversed thread shows its latest turn above the older history.
+  const ordered = (turns || [])
+    .map((t, i) => [t, i])
+    .sort(([a, ai], [b, bi]) => tturn(a) - tturn(b) || ai - bi)
+    .map(([t]) => t);
+  for (const turn of ordered) {
     const ts = new Date(turn.completedAt || turn.createdAt || Date.now()).toISOString();
     for (const it of turn.items || []) events.push(...itemToEvents(it, conversationId, ++seq, ts, false, agent));
   }
   return events;
+}
+
+/** A turn's chronological key (createdAt preferred; completedAt as fallback). */
+function tturn(t) {
+  return new Date(t?.createdAt || t?.completedAt || 0).getTime();
 }
 
 /**
@@ -603,7 +811,9 @@ async function runTurn(agent, threadId, text) {
     { timeout: 260000 },
   );
   cache.delete("threads");
-  return getMessages(agent, threadId);
+  // The turn added a user message + agent reply — force a fresh read so the
+  // cached history isn't stale.
+  return getMessages(agent, threadId, true);
 }
 
 /** Stateful extractor: feed it stdout chunks, get back newly-complete objects. */
@@ -700,13 +910,32 @@ function streamTurn(agent, threadId, text, cwd, onEvent, onDone, opts = {}) {
 
     if (m === "thread/started") { realThreadId = p.thread?.id || p.threadId || realThreadId; return; }
 
-    // text deltas: item/agentMessage/delta -> {delta, itemId}
-    if (/^item\/.+\/delta$/.test(m)) {
+    // The daemon warns when the model was rerouted / is deprecated / has config
+    // notes (e.g. switching models re-sends full context). Surface it inline.
+    if (m === "model/rerouted") {
+      const text = p.warning || p.configWarning || p.deprecationNotice;
+      if (text) {
+        const s = ++seq;
+        onEvent({ id: `sysmodel:${s}`, conversationId: threadId, seq: s, ts: now(), type: "system_event", message: String(text), level: "warning" });
+      }
+      return;
+    }
+
+    // Streaming deltas: item/<kind>/delta -> {delta, itemId}. Route reasoning
+    // deltas to a thinking trace (shown like Codex/Grok) and message deltas to a
+    // streaming assistant bubble, so the two don't get conflated.
+    const dm = m.match(/^item\/(.+)\/delta$/);
+    if (dm) {
       const itemId = p.itemId;
       if (!itemId || typeof p.delta !== "string") return;
       const text = (acc.get(itemId) || "") + p.delta;
       acc.set(itemId, text);
-      onEvent({ id: itemId, conversationId: threadId, seq: ++seq, ts: now(), type: "assistant_message", text, streaming: true });
+      const s = ++seq;
+      if (/reason|think/i.test(dm[1])) {
+        onEvent({ id: itemId, conversationId: threadId, seq: s, ts: now(), type: "thinking_finished", text, durationMs: 0 });
+      } else {
+        onEvent({ id: itemId, conversationId: threadId, seq: s, ts: now(), type: "assistant_message", text, streaming: true });
+      }
       return;
     }
     if (m === "item/started" || m === "item/completed") {
@@ -728,10 +957,16 @@ function streamTurn(agent, threadId, text, cwd, onEvent, onDone, opts = {}) {
   return () => p.kill("SIGKILL");
 }
 
-async function fetchTurns(agent, threadId) {
+async function fetchTurns(agent, threadId, limit) {
+  // `limit` (when the daemon honors it) caps how many turns come back — used by
+  // activity enrichment, which only needs the tail. Without it the daemon returns
+  // the FULL history; on multi-million-token threads that is 100s of MB, and the
+  // list-sync enriches many threads at once, so an unbounded fetch here is what
+  // spikes bridge memory on connect. See threadActivity.
+  const params = limit ? { threadId, limit } : { threadId };
   const frames = await probe(
     ["--agent", agent, "--before-method", "thread/resume", "--before-params", JSON.stringify({ threadId }),
-     "--method", "thread/turns/list", "--params", JSON.stringify({ threadId }),
+     "--method", "thread/turns/list", "--params", JSON.stringify(params),
      // turns/list is plain request/response — linger only waits *after* the
      // response, so any value here is a flat delay added to every history load.
      "--linger-secs", "0", "--timeout-secs", "30"],
@@ -741,8 +976,182 @@ async function fetchTurns(agent, threadId) {
   return f?.result?.data || [];
 }
 
-async function getMessages(agent, threadId) {
-  return normalizeTurns(await fetchTurns(agent, threadId), threadId, agent);
+/** Cache key for a thread's normalized history. */
+const msgKey = (agent, threadId) => `msg:${agent}:${threadId}`;
+
+// Opening a thread was ~4s because every /v1/messages spawned a fresh
+// `kittylitter probe`, and each probe pays a full cold Iroh dial (relay
+// handshake + QUIC setup) — ~4s wall-clock even at ~0 CPU. A second request on
+// an already-warm connection costs ~0.3s, so the fix is to never make the user
+// wait on a cold dial: cache history like every sibling endpoint (getThreads /
+// getAgents / status) already do, and pre-warm it in the background so the tap
+// hits a hot cache instead of a cold probe.
+// History is immutable except when a turn completes — and we invalidate the key
+// explicitly then (runTurn / streamTurn). So it can hold longer than the 20s
+// list cache; a longer TTL means the background warm loop re-probes far less
+// often. Pull-to-refresh still forces a fresh read via `fresh=1`.
+const MSG_CACHE_MS = 60_000;
+
+async function getMessages(agent, threadId, fresh = false, limit) {
+  // `limit` returns just the last N turns (honored by the daemon) — used for the
+  // instant first paint of a thread before the full history backfills, so opening
+  // a multi-million-token conversation isn't gated on loading all of it.
+  const key = limit ? `${msgKey(agent, threadId)}:last${limit}` : msgKey(agent, threadId);
+  if (fresh) cache.delete(key);
+  return cached(key, MSG_CACHE_MS, async () =>
+    normalizeTurns(await fetchTurns(agent, threadId, limit), threadId, agent));
+}
+
+// --- Per-thread token usage + cost -----------------------------------------
+// The daemon exposes no usage, but Claude Code records `message.usage` +
+// `message.model` on each assistant line of its own transcript
+// (~/.claude/projects/<escaped-cwd>/<sessionId>.jsonl). We read that directly.
+// Prices are USD per 1M tokens; cache-read ≈ 0.1× input, cache-write(5m) ≈ 1.25× input.
+const MODEL_PRICES = {
+  "claude-opus-4-8": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  "claude-opus-4-7": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  "claude-opus-4-6": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  "claude-opus-4-5": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  "claude-opus-4-1": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  "claude-fable-5": { in: 10, out: 50, cacheRead: 1.0, cacheWrite: 12.5 },
+  "claude-mythos-5": { in: 10, out: 50, cacheRead: 1.0, cacheWrite: 12.5 },
+  "claude-sonnet-5": { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  "claude-sonnet-4-6": { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  "claude-sonnet-4-5": { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  "claude-haiku-4-5": { in: 1, out: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+};
+
+/** Price row for a model id, tolerating date-suffixed ids (…-20251001). */
+function priceFor(model) {
+  if (!model) return null;
+  return MODEL_PRICES[model] || MODEL_PRICES[Object.keys(MODEL_PRICES).find((k) => model.startsWith(k))] || null;
+}
+
+/** USD for one assistant message's usage, weighting cache tokens per the model. */
+function msgCost(model, u) {
+  const p = priceFor(model);
+  if (!p) return null;
+  return (
+    ((u.input_tokens || 0) * p.in +
+      (u.output_tokens || 0) * p.out +
+      (u.cache_read_input_tokens || 0) * p.cacheRead +
+      (u.cache_creation_input_tokens || 0) * p.cacheWrite) /
+    1_000_000
+  );
+}
+
+/** Claude Code escapes a cwd into its projects-dir name by replacing / and . with -. */
+function escapeCwd(cwd) {
+  return cwd.replace(/[/.]/g, "-");
+}
+
+/** Locate a thread's transcript file. The daemon threadId equals the Claude
+ *  Code session id (== the .jsonl filename), so this is a direct lookup — we
+ *  deliberately don't guess a sibling file when it's missing, since showing a
+ *  different thread's cost is worse than showing none. */
+function transcriptPath(thread, cwd) {
+  if (!cwd || !/^[0-9a-f-]{8,}$/i.test(thread)) return null;
+  const file = path.join(os.homedir(), ".claude", "projects", escapeCwd(cwd), `${thread}.jsonl`);
+  return existsSync(file) ? file : null;
+}
+
+/** Sum token usage + cost across a thread's Claude Code transcript. Claude-only;
+ *  other agents keep their transcripts elsewhere in other formats. */
+function getUsage(agent, thread, cwd) {
+  return cached(`usage:${agent}:${thread}`, CACHE_MS, async () => {
+    if (agent !== "claude") return { available: false, reason: "unsupported-agent" };
+    const file = transcriptPath(thread, cwd);
+    if (!file) return { available: false, reason: "no-transcript" };
+    const tokens = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
+    const outByModel = new Map();
+    let cost = 0, costComplete = true, messages = 0;
+    // Stream the transcript line-by-line — reading a multi-million-token thread's
+    // JSONL fully into memory (readFileSync + split) is a large, avoidable spike.
+    let rl;
+    try {
+      rl = createInterface({ input: createReadStream(file, "utf8"), crlfDelay: Infinity });
+    } catch { return { available: false, reason: "no-transcript" }; }
+    for await (const line of rl) {
+      if (!line) continue;
+      let o;
+      try { o = JSON.parse(line); } catch { continue; }
+      if (o.type !== "assistant") continue;
+      const m = o.message;
+      const u = m && m.usage;
+      if (!u) continue;
+      messages++;
+      tokens.input += u.input_tokens || 0;
+      tokens.output += u.output_tokens || 0;
+      tokens.cacheRead += u.cache_read_input_tokens || 0;
+      tokens.cacheCreation += u.cache_creation_input_tokens || 0;
+      const c = msgCost(m.model, u);
+      if (c == null) costComplete = false; else cost += c;
+      if (m.model) outByModel.set(m.model, (outByModel.get(m.model) || 0) + (u.output_tokens || 0));
+    }
+    if (!messages) return { available: false, reason: "no-usage" };
+    const models = [...outByModel.keys()];
+    const model = models.slice().sort((a, b) => outByModel.get(b) - outByModel.get(a))[0] || null;
+    const total = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreation;
+    return { available: true, model, models, tokens: { ...tokens, total }, cost: Math.round(cost * 100) / 100, costComplete, messages };
+  });
+}
+
+// --- Available models per agent (from the daemon's model/list — the same source
+// as the daemon's own /model command). Cached; models rarely change. ----------
+const MODELS_CACHE_MS = 300_000;
+
+function getModels(agent) {
+  return cached(`models:${agent}`, MODELS_CACHE_MS, () =>
+    probePaginated(agent, "model/list", (m) => {
+      if (m?.hidden === true) return null;
+      const id = m.id ?? m.model;
+      if (!id) return null;
+      return { id, name: m.displayName || id, description: m.description || null, isDefault: !!m.isDefault, deprecated: !!m.deprecated };
+    }, { max: 10 }),
+  );
+}
+
+// How many threads to keep hot in the background at once.
+const WARM_THREADS = 6;
+// How long a client's usage-based hint stays authoritative before we revert to
+// the recency fallback (the app refreshes it every sync; this just bounds a
+// stale hint from a phone that went away).
+const WARM_HINT_TTL = 5 * 60_000;
+
+// The app knows which threads this user actually opens; it ranks them (frecency
+// + needs-attention) and posts the ids here via /v1/warm. Empty or expired →
+// we fall back to the most-recently-active threads.
+let warmHints = { at: 0, ids: [] };
+function setWarmHints(ids) {
+  warmHints = { at: Date.now(), ids: Array.isArray(ids) ? ids.slice(0, WARM_THREADS) : [] };
+}
+
+/**
+ * Pre-warm history for the threads most likely to be opened next, so the tap
+ * lands on a hot cache (a LAN round-trip) instead of a cold ~4s Iroh probe.
+ * Prioritizes the app's usage-predicted hints, then fills the budget with the
+ * most-recently-active threads as a fallback. `getMessages` is cached, so
+ * already-warm threads return instantly and only cold ones actually probe —
+ * this is self-limiting. Best-effort; runs only while a phone is connected
+ * (gated by the warm-loop's lastClientSeen check).
+ */
+async function warmMessages(threads) {
+  const live = (threads || []).filter((t) => t.isLive);
+  const byId = new Map(live.map((t) => [t.id, t]));
+  const picked = [];
+  const seen = new Set();
+  const add = (t) => { if (t && !seen.has(t.id)) { seen.add(t.id); picked.push(t); } };
+  // 1) usage-predicted threads first (while the hint is fresh).
+  if (Date.now() - warmHints.at < WARM_HINT_TTL) {
+    for (const id of warmHints.ids) add(byId.get(id));
+  }
+  // 2) fall back to most-recently-active threads to fill the budget.
+  for (const t of live) { if (picked.length >= WARM_THREADS) break; add(t); }
+  // Low concurrency: each cold probe holds an Iroh dial for ~4s; don't stampede
+  // the daemon. Warm threads short-circuit, so this rarely does real work.
+  await mapLimit(picked.slice(0, WARM_THREADS), 2, async (t) => {
+    try { await getMessages(t.agent, t.id); } catch {}
+  });
 }
 
 function tsToIso(n) {
@@ -759,7 +1168,9 @@ function tsToIso(n) {
  */
 function deriveActivity(turns) {
   if (!turns.length) return { activity: "idle", lastActivityAt: null };
-  const last = turns[turns.length - 1];
+  // Most-recent turn by timestamp — don't assume positional order, since the
+  // enrichment fetch (limit:1) and the daemon's own sort may hand back either end.
+  const last = turns.reduce((a, b) => (tturn(b) >= tturn(a) ? b : a));
   const lastActivityAt = tsToIso(last.completedAt) || tsToIso(last.createdAt);
   if (!last.completedAt) return { activity: "running", lastActivityAt };
   const failed =
@@ -770,7 +1181,9 @@ function deriveActivity(turns) {
 function threadActivity(agent, threadId) {
   return cached(`act:${threadId}`, CACHE_MS, async () => {
     try {
-      return deriveActivity(await fetchTurns(agent, threadId));
+      // Only the latest turn's state is needed — fetch just that (limit:1) so
+      // enrichment never loads a huge thread's full history into memory.
+      return deriveActivity(await fetchTurns(agent, threadId, 1));
     } catch {
       return { activity: "idle", lastActivityAt: null };
     }
@@ -909,8 +1322,18 @@ const UI_HTML = `<!DOCTYPE html>
 .status{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600}
 .dot{width:9px;height:9px;border-radius:50%;background:var(--faint)}
 .dot.idle{background:var(--accent);box-shadow:0 0 0 4px rgba(124,58,237,.14)}
-.dot.ok{background:var(--ok);box-shadow:0 0 0 4px rgba(22,163,74,.16)}
+/* Connected: a gentle "breathing" glow so it reads as live, not frozen. */
+.dot.ok{background:var(--ok);animation:breathe 2.4s ease-in-out infinite}
+/* Syncing right now: faster accent pulse. */
+.dot.sync{background:var(--accent);animation:breathe-a .9s ease-in-out infinite}
 .dot.warn{background:var(--warn);box-shadow:0 0 0 4px rgba(217,119,6,.16)}
+@keyframes breathe{0%,100%{box-shadow:0 0 0 3px rgba(22,163,74,.18)}50%{box-shadow:0 0 0 8px rgba(22,163,74,.04)}}
+@keyframes breathe-a{0%,100%{box-shadow:0 0 0 3px rgba(124,58,237,.28)}50%{box-shadow:0 0 0 8px rgba(124,58,237,.06)}}
+/* Indeterminate progress bar — an accent segment sweeps while the phone syncs. */
+.syncbar{width:190px;height:4px;border-radius:3px;background:var(--border);overflow:hidden;opacity:0;transition:opacity .25s;margin-top:-2px}
+.syncbar.on{opacity:1}
+.syncbar>i{display:block;height:100%;width:38%;border-radius:3px;background:linear-gradient(90deg,rgba(124,58,237,.15),var(--accent),rgba(124,58,237,.15));animation:sweep 1.05s cubic-bezier(.5,0,.5,1) infinite}
+@keyframes sweep{0%{transform:translateX(-110%)}100%{transform:translateX(295%)}}
 .hint{margin:0;max-width:300px;text-align:center;font-size:12px;line-height:1.5;color:var(--muted)}
 .foot{margin-top:6px;text-align:center;font-size:11px;line-height:1.6;color:var(--faint)}
 .foot .ver{font-weight:600;color:var(--muted)}
@@ -923,6 +1346,7 @@ const UI_HTML = `<!DOCTYPE html>
 <div class="qrwrap"><img id="qr" class="qr" alt="Pairing QR code"/></div>
 <div class="addr" id="addr">—</div>
 <div class="status"><span class="dot idle" id="dot"></span><span id="statusText">Starting…</span></div>
+<div class="syncbar" id="syncbar"><i></i></div>
 <p class="hint" id="hint">Open Pounce on your phone, go to Sync, and scan this code.</p>
 <footer class="foot">
 <div class="ver" id="ver">Pounce&nbsp;Bridge</div>
@@ -939,20 +1363,29 @@ function tick(){
     if(d.daemon && d.daemon.version) ver += '  ·  agent host v' + d.daemon.version;
     set('ver', ver);
     var dot = document.getElementById('dot');
+    var bar = document.getElementById('syncbar');
     if(d.connected){
       var n = (d.devices && d.devices>0) ? d.devices : 1;
-      dot.className='dot ok'; set('statusText','Connected - '+n+' device'+(n===1?'':'s'));
-      set('hint','Your phone is talking to this computer. You are all set.');
+      if(d.syncing){
+        // Phone is actively talking to us right now — show the progress sweep.
+        dot.className='dot sync'; bar.className='syncbar on';
+        set('statusText','Syncing…');
+        set('hint','Your phone is syncing with this computer…');
+      } else {
+        dot.className='dot ok'; bar.className='syncbar';
+        set('statusText','Connected - '+n+' device'+(n===1?'':'s'));
+        set('hint','Your phone is talking to this computer. You are all set.');
+      }
     } else if(!d.daemonOk){
-      dot.className='dot warn'; set('statusText','Starting your agent host...');
+      dot.className='dot warn'; bar.className='syncbar'; set('statusText','Starting your agent host...');
       set('hint','Waiting for the Pounce agent host to come online.');
     } else {
-      dot.className='dot idle'; set('statusText','Ready to pair');
+      dot.className='dot idle'; bar.className='syncbar'; set('statusText','Ready to pair');
       set('hint','Open Pounce on your phone, go to Sync, and scan this code.');
     }
   }).catch(function(){ set('statusText','Starting...'); });
 }
-tick(); setInterval(tick, 3000);
+tick(); setInterval(tick, 1200);
 </script></body></html>`;
 
 const server = http.createServer(async (req, res) => {
@@ -983,6 +1416,9 @@ const server = http.createServer(async (req, res) => {
       daemon,
       devices: pushTokens.size,
       connected: lastClientSeen > 0 && Date.now() - lastClientSeen < 60_000,
+      // "actively talking" — a request landed in the last few seconds, i.e. the
+      // phone is connecting / syncing right now. Drives the live sync animation.
+      syncing: lastClientSeen > 0 && Date.now() - lastClientSeen < 2500,
       lastSeenMsAgo: lastClientSeen ? Date.now() - lastClientSeen : null,
     });
   }
@@ -994,12 +1430,67 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === "/v1/agents") return send(res, 200, { agents: await getAgents(url.searchParams.get("fresh") === "1") });
     if (url.pathname === "/v1/threads") return send(res, 200, { threads: await getThreads(url.searchParams.get("fresh") === "1") });
+    // SSE variant: emit each page of threads as it arrives so the app's initial
+    // connect renders progressively instead of blocking ~a minute on all the
+    // cold-dial pages. `data: {threads:[...]}` per page, then `data: {done:true}`.
+    if (url.pathname === "/v1/threads/stream") {
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+        "access-control-allow-origin": "*",
+      });
+      const write = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      let closed = false;
+      req.on("close", () => { closed = true; });
+      try {
+        await streamThreads((page) => { if (!closed) write({ threads: page }); });
+        if (!closed) write({ done: true });
+      } catch (e) {
+        if (!closed) write({ error: String(e?.message || e) });
+      }
+      return res.end();
+    }
+    if (url.pathname === "/v1/models") {
+      const agent = url.searchParams.get("agent");
+      if (!agent) return send(res, 400, { error: "agent required" });
+      if (url.searchParams.get("fresh") === "1") cache.delete(`models:${agent}`);
+      return send(res, 200, { models: await getModels(agent) });
+    }
     if (url.pathname === "/v1/status") return send(res, 200, { status: await status() });
+    if (url.pathname === "/v1/daemon" && req.method !== "POST") return send(res, 200, { daemon: await daemonInfo() });
+    if (url.pathname === "/v1/daemon/restart" && req.method === "POST") {
+      const info = await daemonInfo();
+      // Don't kill the daemon out from under a turn unless the client insists.
+      if (info.activeTurns > 0 && url.searchParams.get("force") !== "1")
+        return send(res, 409, { error: "busy", daemon: info });
+      return send(res, 200, { restarted: true, daemon: await restartDaemon() });
+    }
     if (url.pathname === "/v1/messages") {
       const agent = url.searchParams.get("agent");
       const thread = url.searchParams.get("thread");
       if (!agent || !thread) return send(res, 400, { error: "agent and thread required" });
-      return send(res, 200, { events: await getMessages(agent, thread) });
+      const fresh = url.searchParams.get("fresh") === "1";
+      const limit = Number(url.searchParams.get("limit")) || undefined;
+      return send(res, 200, { events: await getMessages(agent, thread, fresh, limit) });
+    }
+    if (url.pathname === "/v1/usage") {
+      const agent = url.searchParams.get("agent");
+      const thread = url.searchParams.get("thread");
+      const cwd = url.searchParams.get("cwd");
+      if (!agent || !thread) return send(res, 400, { error: "agent and thread required" });
+      if (url.searchParams.get("fresh") === "1") cache.delete(`usage:${agent}:${thread}`);
+      return send(res, 200, { usage: await getUsage(agent, thread, cwd) });
+    }
+    if (url.pathname === "/v1/warm" && req.method === "POST") {
+      // The app's ranking of which threads to keep hot (usage-predicted). We
+      // pre-warm them in the background so opening one is instant.
+      const body = await readBody(req);
+      setWarmHints(body?.threads);
+      // Warm immediately off the cached thread list so a just-updated ranking
+      // doesn't wait for the next 15s tick.
+      void getThreads().then(warmMessages).catch(() => {});
+      return send(res, 200, { ok: true });
     }
     if (url.pathname === "/v1/turn" && req.method === "POST") {
       const body = await readBody(req);
@@ -1126,13 +1617,28 @@ const server = http.createServer(async (req, res) => {
         "access-control-allow-origin": "*",
       });
       const write = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      // Mark the bridge busy for the duration so a daemon restart won't cut the
+      // turn off mid-flight (decremented exactly once, whichever end fires first).
+      activeTurns++;
+      let settled = false;
+      const settle = () => { if (!settled) { settled = true; activeTurns = Math.max(0, activeTurns - 1); } };
       const stop = streamTurn(
         agent, threadId, text, cwd,
         (ev) => write({ event: ev }),
-        (realThreadId) => { write({ done: true, threadId: realThreadId }); res.end(); },
+        (realThreadId) => {
+          // The streamed turn changed this thread's history — drop the cache so
+          // the app's post-turn refetch (and the next open) reads it fresh.
+          if (realThreadId) {
+            cache.delete(msgKey(agent, realThreadId));
+            cache.delete(`usage:${agent}:${realThreadId}`); // token totals grew this turn
+          }
+          cache.delete("threads");
+          settle();
+          write({ done: true, threadId: realThreadId }); res.end();
+        },
         { images, permissionMode, reasoningEffort, model },
       );
-      req.on("close", stop);
+      req.on("close", () => { settle(); stop(); });
       return;
     }
     return send(res, 404, { error: "not found" });
@@ -1198,9 +1704,15 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
       // Warm the data cache so the first phone sync is instant (the probe
       // handshakes happen now, before anyone scans), then keep it warm while a
       // phone is actively connected. Idle = no probing.
-      const warm = () => { void getAgents().catch(() => {}); void getThreads().catch(() => {}); };
+      const warm = () => {
+        void getAgents().catch(() => {});
+        void getThreads().then(warmMessages).catch(() => {});
+      };
       warm();
       setInterval(() => { if (Date.now() - lastClientSeen < 90_000) warm(); }, 15_000);
+      // Keep the daemon's index fresh on its own — restart it when it falls behind
+      // and nothing is busy, so recent threads surface without manual action.
+      setInterval(() => { void maybeAutoRestartDaemon().catch(() => {}); }, AUTORESTART_EVERY_MS);
 
       setTimeout(watchTick, WATCH_MS);
       resolve({ server, token: TOKEN, kittylitter: klDisplay(), ...PAIR });

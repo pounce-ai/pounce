@@ -87,15 +87,20 @@ export function TimelineSkeleton() {
     );
   }, [pulse]);
   const style = useAnimatedStyle(() => ({ opacity: pulse.value }));
+  // Real messages are bottom-anchored (the list opens at the newest), so anchor
+  // the bones to the bottom and fill upward — otherwise they cluster at the top
+  // over an empty black chat area.
   return (
-    <Animated.View style={style} className="flex-1 gap-3 px-3 pt-3" pointerEvents="none">
-      <BubbleBone user={false} lines={2} />
+    <Animated.View style={style} className="flex-1 justify-end gap-3 px-3 pb-3 pt-3" pointerEvents="none">
       <BubbleBone user lines={1} />
+      <BubbleBone user={false} lines={2} />
+      <BubbleBone user lines={2} />
       <BubbleBone user={false} lines={3} />
       <BubbleBone user={false} lines={1} />
+      <BubbleBone user lines={1} />
+      <BubbleBone user={false} lines={3} />
       <BubbleBone user lines={2} />
       <BubbleBone user={false} lines={2} />
-      <BubbleBone user lines={1} />
     </Animated.View>
   );
 }

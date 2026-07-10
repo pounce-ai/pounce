@@ -3,11 +3,10 @@ import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 
 import { KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import { runExec } from "../services/bridge";
-import { sessions$ } from "../state/stores";
-import { cn, COLOR, INPUT_TWEAKS } from "../ui";
+import { useThread } from "../state/db/hooks";
+import { cn, COLOR } from "../ui";
 
 interface Entry {
   command: string;
@@ -20,7 +19,7 @@ export default function TerminalScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const session = useSelector(() => sessions$[id!].get());
+  const session = useThread(id);
 
   const [command, setCommand] = useState("");
   const [history, setHistory] = useState<Entry[]>([]);
@@ -96,7 +95,7 @@ export default function TerminalScreen() {
       <View style={{ paddingBottom: insets.bottom + 8 }} className="border-t border-border bg-bg-elevated px-3 pt-2">
         <View className="flex-row items-end gap-2">
           <Text className="pb-2 font-mono text-[14px] text-accent">❯</Text>
-          <TextInput {...INPUT_TWEAKS}
+          <TextInput
             value={command}
             onChangeText={setCommand}
             editable={!running}

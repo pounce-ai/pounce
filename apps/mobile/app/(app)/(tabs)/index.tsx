@@ -1,1 +1,1 @@
-export { default } from "@litter/app/screens/Home";
+export { default } from "@litter/app/screens/Terminal";

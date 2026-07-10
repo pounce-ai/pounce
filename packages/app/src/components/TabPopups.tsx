@@ -4,22 +4,23 @@
  * Rendered by AnimatedTabBar (see (app)/(tabs)/_layout.tsx); actions dispatch
  * against expo-router + the global stores, then call `close()` to dismiss.
  */
-import { Alert, Pressable, Text, View } from "react-native";
+import { useMemo } from "react";
+import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import type { IPalette, IPopupRenderContext, TPopupRenderer } from "../motion-tabs";
 import {
-  allAgentsInUse,
-  allDevices,
+  agentsInScope,
+  CLEARED_FILTERS,
+  hasActiveFilter,
   connection$,
+  deviceEmoji,
+  deviceLabel,
   filters$,
-  rawSessions,
-  repositories$,
 } from "../state/stores";
+import { useDeviceOverrides, useDevices, useThreads } from "../state/db/hooks";
 import { refreshLive } from "../services/runtime";
-import { listenOnce } from "../services/voice";
-import { runVoiceCommand } from "../services/voiceCommands";
 import { agentLabel } from "../ui";
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
@@ -89,32 +90,9 @@ function Chip({
   );
 }
 
-/** Home — start / refresh / talk. */
+/** Home — start / refresh. (Voice moved to the composer as dictation.) */
 function HomePopup({ colors, close }: IPopupRenderContext) {
   const router = useRouter();
-
-  const onVoice = async () => {
-    close();
-    try {
-      const transcript = await listenOnce();
-      const result = runVoiceCommand(transcript, {
-        sessions: rawSessions(),
-        devices: allDevices(),
-        agents: allAgentsInUse(),
-        repos: repositories$.get(),
-        navigate: (p) => router.push(p as never),
-        setFilter: (next) => filters$.set({ ...filters$.get(), ...next }),
-      });
-      if (!result.ok) Alert.alert("Voice", result.say);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "";
-      if (msg === "voice-permission-denied") {
-        Alert.alert("Microphone access needed", "Enable Microphone and Speech Recognition for Pounce in Settings to use voice control.");
-      } else {
-        Alert.alert("Voice unavailable", "Couldn't start voice control. Try again, or update to the latest build.");
-      }
-    }
-  };
 
   return (
     <View style={{ padding: 8, minWidth: 236, gap: 2 }}>
@@ -129,7 +107,6 @@ function HomePopup({ colors, close }: IPopupRenderContext) {
         }}
       />
       <Row colors={colors} icon="refresh" label="Refresh" onPress={() => { close(); void refreshLive(true); }} />
-      <Row colors={colors} icon="mic-outline" label="Voice command" onPress={onVoice} />
     </View>
   );
 }
@@ -137,9 +114,11 @@ function HomePopup({ colors, close }: IPopupRenderContext) {
 /** Search — the app's one filter surface (status · device · agent). */
 function SearchPopup({ colors, close }: IPopupRenderContext) {
   const f = useSelector(() => filters$.get());
-  const agents = useSelector(() => allAgentsInUse());
-  const devices = useSelector(() => allDevices());
-  const hasFilter = !!(f.agent || f.device || f.needsOnly);
+  const rawThreads = useThreads();
+  const agents = useMemo(() => agentsInScope(rawThreads), [rawThreads]);
+  const devices = useDevices();
+  useDeviceOverrides();
+  const hasFilter = hasActiveFilter();
 
   return (
     <View style={{ padding: 10, minWidth: 268, gap: 12 }}>
@@ -149,8 +128,8 @@ function SearchPopup({ colors, close }: IPopupRenderContext) {
           <Chip
             colors={colors}
             label="Everything"
-            active={!f.needsOnly}
-            onPress={() => filters$.needsOnly.set(false)}
+            active={!f.needsOnly && !f.favOnly}
+            onPress={() => filters$.set({ ...filters$.get(), needsOnly: false, favOnly: false })}
           />
           <Chip
             colors={colors}
@@ -158,21 +137,30 @@ function SearchPopup({ colors, close }: IPopupRenderContext) {
             active={f.needsOnly}
             onPress={() => filters$.needsOnly.set(true)}
           />
+          <Chip
+            colors={colors}
+            label="Favourites"
+            active={f.favOnly}
+            onPress={() => filters$.favOnly.set(!f.favOnly)}
+          />
         </View>
       </View>
       {devices.length > 1 ? (
         <View style={{ gap: 6 }}>
           <Text style={{ fontSize: 11, color: colors.muted, paddingHorizontal: 4 }}>Device</Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 4 }}>
-            {devices.map((d) => (
-              <Chip
-                key={d.id}
-                colors={colors}
-                label={d.name}
-                active={f.device === d.id}
-                onPress={() => filters$.device.set(f.device === d.id ? null : d.id)}
-              />
-            ))}
+            {devices.map((d) => {
+              const em = deviceEmoji(d.id);
+              return (
+                <Chip
+                  key={d.id}
+                  colors={colors}
+                  label={em ? `${em} ${deviceLabel(d.id, d.name)}` : deviceLabel(d.id, d.name)}
+                  active={f.device === d.id}
+                  onPress={() => filters$.device.set(f.device === d.id ? null : d.id)}
+                />
+              );
+            })}
           </View>
         </View>
       ) : null}
@@ -198,7 +186,7 @@ function SearchPopup({ colors, close }: IPopupRenderContext) {
           icon="close-circle-outline"
           label="Clear all"
           onPress={() => {
-            filters$.set({ device: null, agent: null, needsOnly: false });
+            filters$.set(CLEARED_FILTERS);
             close();
           }}
         />
@@ -211,7 +199,7 @@ function SearchPopup({ colors, close }: IPopupRenderContext) {
 function SettingsPopup({ colors, close }: IPopupRenderContext) {
   const router = useRouter();
   const status = useSelector(() => connection$.status.get());
-  const devices = useSelector(() => allDevices());
+  const devices = useDevices();
   const connected = status === "connected";
 
   return (

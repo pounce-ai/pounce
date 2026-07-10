@@ -1,3 +1,4 @@
+import "@litter/app/polyfills"; // crypto.getRandomValues for @tanstack/db — must load first
 import "../global.css";
 import { useEffect } from "react";
 import { Stack } from "expo-router";
@@ -6,10 +7,12 @@ import { Providers } from "@litter/app/components/Providers";
 import { UpdateBanner } from "@litter/app/components/UpdateBanner";
 import { bootstrap } from "@litter/app/services/runtime";
 import { attachPushNavigation } from "@litter/app/services/push";
+import { initLocalNotifications } from "@litter/app/services/notify";
 
 export default function RootLayout() {
   useEffect(() => {
     void bootstrap();
+    void initLocalNotifications();
     return attachPushNavigation();
   }, []);
 

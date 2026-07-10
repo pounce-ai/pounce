@@ -1,34 +1,113 @@
 /**
- * Minimal markdown renderer for assistant messages — pure JS/RN, no deps.
+ * MessageMarkdown — desktop implementation.
  *
- * Supports what coding agents actually emit: headings, bold/italic, inline
- * code, fenced code blocks, bullet/numbered lists, blockquotes, and links
- * (styled, non-clickable text for now). Everything else falls through as
- * plain text, so unknown syntax degrades to what mobile shows today.
+ * react-native-enriched-markdown is a native (Nitro-based) component with no
+ * macOS/Windows build, so desktop renders messages with a small pure-JS
+ * markdown renderer instead: headings, bold/italic, inline code, fenced code
+ * blocks, lists, quotes, and styled links. Same exported surface as the
+ * mobile implementation, including shell "Run" cards via runnableBlocks.
  */
-import { Fragment, type ReactNode } from "react";
-import { Text, View } from "react-native";
-import { cn } from "../ui";
+import { Fragment, useMemo, type ReactNode } from "react";
+import { Pressable, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { cn, COLOR } from "../ui";
+import { splitCodeBlocks } from "./runnableBlocks";
 
-/** Inline spans: `code`, **bold**, *italic* / _italic_, [label](url). */
+const BASE: Record<"user" | "assistant", string> = {
+  user: "text-[15px] leading-[21px] text-white",
+  assistant: "text-[15px] leading-[21px] text-fg",
+};
+
+export function MessageMarkdown({
+  text,
+  role,
+  streaming,
+  onRun,
+}: {
+  text: string;
+  role: "user" | "assistant";
+  streaming?: boolean;
+  /** Present only for live assistant turns — enables shell "Run" cards. */
+  onRun?: (command: string) => void;
+}) {
+  const base = BASE[role];
+  // Settled assistant turns get code blocks lifted out (Run cards); streaming
+  // turns render on the single path (incomplete fences would mis-split).
+  const highlight = role === "assistant" && !streaming;
+  const segments = useMemo(() => (highlight ? splitCodeBlocks(text) : null), [highlight, text]);
+
+  if (!highlight || !segments || (segments.length === 1 && segments[0].type === "md")) {
+    return (
+      <View className="gap-2">
+        <Blocks text={text} baseClass={base} />
+        {streaming ? <Text className="text-accent">▋</Text> : null}
+      </View>
+    );
+  }
+  return (
+    <View style={{ gap: 8 }}>
+      {segments.map((seg, i) =>
+        seg.type === "code" ? (
+          <CodeCard
+            key={`c${i}`}
+            lang={seg.lang}
+            code={seg.code}
+            onRun={seg.runnable ? onRun : undefined}
+          />
+        ) : (
+          <Blocks key={`m${i}`} text={seg.text} baseClass={base} />
+        ),
+      )}
+    </View>
+  );
+}
+
+/** A lifted fenced block: mono body, language tag, optional Run affordance. */
+function CodeCard({
+  lang,
+  code,
+  onRun,
+}: {
+  lang: string;
+  code: string;
+  onRun?: (command: string) => void;
+}) {
+  return (
+    <View className="overflow-hidden rounded-lg border border-border bg-bg">
+      <View className="flex-row items-center justify-between px-3 py-1">
+        <Text className="text-[10.5px] uppercase tracking-wide text-fg-faint">{lang || "code"}</Text>
+        {onRun ? (
+          <Pressable
+            onPress={() => onRun(code)}
+            className="active:opacity-70 flex-row items-center gap-1 rounded-md bg-surface-alt px-2 py-0.5"
+          >
+            <Ionicons name="play" size={10} color={COLOR.success} />
+            <Text className="text-[11px] font-medium text-fg">Run</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      <Text selectable className="px-3 pb-2 font-mono text-[12.5px] leading-[18px] text-fg-muted">
+        {code}
+      </Text>
+    </View>
+  );
+}
+
+// --- tiny markdown block renderer (pure JS/RN) ---
+
 function renderInline(text: string, keyBase: string, baseClass: string): ReactNode[] {
   const out: ReactNode[] = [];
-  // Tokenize by inline-code first so markdown inside backticks stays literal.
   const parts = text.split(/(`[^`\n]+`)/g);
   parts.forEach((part, pi) => {
     if (!part) return;
     if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
       out.push(
-        <Text
-          key={`${keyBase}:c${pi}`}
-          className="rounded bg-surface-alt px-1 font-mono text-[13px] text-fg"
-        >
+        <Text key={`${keyBase}:c${pi}`} className="rounded bg-surface-alt px-1 font-mono text-[13px] text-fg">
           {part.slice(1, -1)}
         </Text>,
       );
       return;
     }
-    // Bold / italic / links inside a non-code span.
     const rx = /(\*\*[^*]+\*\*|\*[^*\n]+\*|_[^_\n]+_|\[[^\]]+\]\([^)]+\))/g;
     let last = 0;
     let m: RegExpExecArray | null;
@@ -49,10 +128,9 @@ function renderInline(text: string, keyBase: string, baseClass: string): ReactNo
           </Text>,
         );
       } else if (tok.startsWith("[")) {
-        const label = tok.slice(1, tok.indexOf("]"));
         out.push(
           <Text key={`${keyBase}:l${pi}:${si++}`} className={cn(baseClass, "text-info underline")}>
-            {label}
+            {tok.slice(1, tok.indexOf("]"))}
           </Text>,
         );
       } else {
@@ -93,7 +171,7 @@ function parseBlocks(src: string): Block[] {
       const body: string[] = [];
       i++;
       while (i < lines.length && !/^\s*```/.test(lines[i])) body.push(lines[i++]);
-      i++; // closing fence
+      i++;
       blocks.push({ kind: "code", lang, lines: body });
       continue;
     }
@@ -141,7 +219,7 @@ const HEADING_CLASS: Record<number, string> = {
   4: "text-[15px] font-semibold",
 };
 
-export function Markdown({ text, baseClass }: { text: string; baseClass: string }) {
+function Blocks({ text, baseClass }: { text: string; baseClass: string }) {
   const blocks = parseBlocks(text);
   return (
     <View className="gap-2">
@@ -150,7 +228,7 @@ export function Markdown({ text, baseClass }: { text: string; baseClass: string 
           case "code":
             return (
               <View key={bi} className="rounded-lg bg-bg px-3 py-2">
-                <Text className="font-mono text-[12.5px] leading-[18px] text-fg-muted">
+                <Text selectable className="font-mono text-[12.5px] leading-[18px] text-fg-muted">
                   {b.lines.join("\n")}
                 </Text>
               </View>
@@ -176,8 +254,7 @@ export function Markdown({ text, baseClass }: { text: string; baseClass: string 
                   <View key={ii} className="flex-row gap-2 pl-1">
                     <Text className={cn(baseClass, "text-fg-faint")}>{it.marker}</Text>
                     {/* flexShrink (not flex-1): flex-basis 0 contributes zero
-                        intrinsic width, which collapses the whole bubble to a
-                        skinny column. Shrink keeps natural width + wrapping. */}
+                        intrinsic width, collapsing the bubble to a skinny column. */}
                     <Text style={{ flexShrink: 1 }} className={baseClass}>
                       {renderInline(it.text, `l${bi}:${ii}`, baseClass)}
                     </Text>

@@ -1,11 +1,15 @@
 /**
- * Global state — Legend State, persisted to MMKV. The model is repo → session.
+ * State layer. The relational model (devices → projects → threads → chats, plus
+ * recents/sync-history/favourites) lives in @tanstack/react-db collections
+ * (see ./db/collections). This module holds:
+ *   - the few pure-UI singletons that aren't relational (filters, connection,
+ *     pending turns, user profile), still in Legend State;
+ *   - pure derivation helpers (filtering/ranking) that take data as arguments;
+ *   - every write op over the collections (sync, cascade-delete, favourites, …).
+ * Reactive reads for components live in ./db/hooks (useLiveQuery wrappers).
  */
 import { observable } from "@legendapp/state";
 import type {
-  AgentCapabilities,
-  Device,
-  Host,
   PermissionMode,
   Repository,
   RunImage,
@@ -13,24 +17,38 @@ import type {
   TimelineEvent,
   UserProfile,
 } from "@litter/shared";
+import type { AgentCapabilities } from "@litter/shared";
+import type { Device, Host } from "@litter/shared";
+import { parseUserMessage } from "@litter/transcript";
+import type { ModelInfo } from "../services/bridge";
 import { persist } from "../services/persistence";
+import {
+  agentCaps,
+  agentModels,
+  clearCollection,
+  deleteIds,
+  deviceOverrides,
+  devices,
+  favorites,
+  hosts,
+  ignoredRepos,
+  keyList,
+  markers,
+  messages,
+  projects,
+  recents,
+  replaceAll,
+  syncLog,
+  threadModels,
+  threads,
+  upsertRows,
+} from "./db/collections";
 
-export type ConnectionStatus =
-  | "disconnected"
-  | "connecting"
-  | "connected"
-  | "reconnecting";
+export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting";
 
-export const hosts$ = observable<Record<string, Host>>({});
-export const devices$ = observable<Record<string, Device>>({});
-export const repositories$ = observable<Record<string, Repository>>({});
-export const sessions$ = observable<Record<string, Session>>({});
+// --- Legend State singletons (pure UI / ephemeral — not relational) ---
 
-/** Per-agent capabilities reported by connected devices (agentId → caps). */
-export const agentCaps$ = observable<Record<string, AgentCapabilities>>({});
-
-/** First turn for a freshly-created session, fired once when its screen opens.
- *  Lets the New-task composer hand off to the session view (transient). */
+/** First turn for a freshly-created session, fired once when its screen opens. */
 export interface PendingTurn {
   text: string;
   images: RunImage[];
@@ -43,81 +61,13 @@ export const pendingTurns$ = observable<Record<string, PendingTurn>>({});
 export const filters$ = observable<{
   device: string | null;
   agent: string | null;
+  repos: string[]; // multi-select folders; empty = all
   needsOnly: boolean;
-}>({
-  device: null,
-  agent: null,
-  needsOnly: true, // default view = what needs you
-});
+  favOnly: boolean;
+}>({ device: null, agent: null, repos: [], needsOnly: true, favOnly: false });
 
-/** Count of *narrowing* filters (device/agent) for the bottom bar badge.
- *  needsOnly is the default view, so it doesn't badge. */
-export function activeFilterCount(): number {
-  const f = filters$.get();
-  return (f.device ? 1 : 0) + (f.agent ? 1 : 0);
-}
-
-/** Marker overrides: sessionId → messageId → explicit marked state. Absent =
- *  default (user messages marked, everything else unmarked). Keyed by the
- *  route/session id, not conversationId, which can change across refetches. */
-export const markers$ = observable<Record<string, Record<string, boolean>>>({});
-
-/** Effective marker state for a message — explicit override or the default. */
-export function isMarked(sessionId: string, ev: TimelineEvent): boolean {
-  return markers$[sessionId][ev.id].get() ?? ev.type === "user_message";
-}
-
-export function toggleMarker(sessionId: string, ev: TimelineEvent): void {
-  const next = !isMarked(sessionId, ev);
-  const def = ev.type === "user_message";
-  // Store only deviations from the default so the map stays sparse.
-  if (next === def) markers$[sessionId][ev.id].delete();
-  else markers$[sessionId][ev.id].set(next);
-}
-
-/** One sync event: which repos got new or newly-active sessions, and how many.
- *  Powers the Sync history screen — a per-repo record of when agent activity
- *  actually reached this device. */
-export interface SyncLogEntry {
-  /** ISO timestamp of the sync. */
-  at: string;
-  /** Repos that changed this sync, busiest first. */
-  repos: { repoId: string; name: string; count: number }[];
-}
-export const syncLog$ = observable<SyncLogEntry[]>([]);
-
-const SYNC_LOG_CAP = 100;
-
-/** Diff a fresh sync against the previous session map; if any session is new or
- *  newly-active (its updatedAt advanced), append a timestamped entry grouped by
- *  repo. No-op when nothing changed, so a plain refresh doesn't log noise.
- *  There's no backfill — logging starts from the first sync after install. */
-export function recordSync(
-  prev: Record<string, Session>,
-  next: Record<string, Session>,
-  repos: Record<string, Repository>,
-  at: string,
-): void {
-  const counts = new Map<string, number>();
-  for (const [id, s] of Object.entries(next)) {
-    const before = prev[id];
-    if (!before || before.updatedAt !== s.updatedAt) {
-      counts.set(s.repoId, (counts.get(s.repoId) ?? 0) + 1);
-    }
-  }
-  if (counts.size === 0) return;
-  const entry: SyncLogEntry = {
-    at,
-    repos: [...counts.entries()]
-      .map(([repoId, count]) => ({
-        repoId,
-        name: repos[repoId]?.name ?? repoId.replace(/^repo:/, ""),
-        count,
-      }))
-      .sort((a, b) => b.count - a.count),
-  };
-  syncLog$.set([entry, ...syncLog$.get()].slice(0, SYNC_LOG_CAP));
-}
+/** The zero state for every filter — a single source for "Clear all". */
+export const CLEARED_FILTERS = { device: null, agent: null, repos: [], needsOnly: false, favOnly: false };
 
 export const user$ = observable<UserProfile>({
   id: "local",
@@ -132,133 +82,474 @@ export const connection$ = observable<{
   demo: boolean;
 }>({ status: "disconnected", activeHostId: null, demo: false });
 
-persist(hosts$, "hosts");
-persist(devices$, "devices");
-persist(agentCaps$, "agentCaps");
-persist(repositories$, "repositories");
-persist(sessions$, "sessions");
-persist(syncLog$, "syncLog");
-persist(markers$, "markers");
+persist(filters$, "filters"); // remember the user's last filter selection
 persist(user$, "user");
 
-// --- selectors (respect active device/agent filters) ---
-
-function passesFilter(s: Session): boolean {
+/** Count of *narrowing* filters (device/agent/favourites) for the bottom-bar badge. */
+export function activeFilterCount(): number {
   const f = filters$.get();
-  if (f.device && s.hostId !== f.device) return false;
-  if (f.agent && s.agent !== f.agent) return false;
+  return (f.device ? 1 : 0) + (f.agent ? 1 : 0) + (f.repos.length ? 1 : 0) + (f.favOnly ? 1 : 0);
+}
+
+/** Whether any filter deviates from the default view (drives "Clear all"). */
+export function hasActiveFilter(): boolean {
+  const f = filters$.get();
+  return !!(f.agent || f.device || f.repos.length || f.needsOnly || f.favOnly);
+}
+
+// --- pure helpers (operate on plain data, no store reads) ---
+
+/** Dotfolders (e.g. .deepsec) are treated as hidden — never surfaced anywhere. */
+export const isDotName = (name: string): boolean => name.startsWith(".");
+
+/** A session that wants the user's attention (failed / awaiting input). */
+export const needsYou = (s: Session): boolean =>
+  s.needsAttention || s.activity === "failed" || s.activity === "awaiting_input";
+
+/** Sort rank for a session list: attention → active → live → done. */
+export function rankSession(s: Session): number {
+  if (needsYou(s)) return 0;
+  if (s.activity === "running" || s.activity === "streaming") return 1;
+  if (s.isLive) return 2;
+  return 3;
+}
+
+/** A message is marked by default only if it carries prose. */
+export function defaultMarked(ev: TimelineEvent, agent?: string): boolean {
+  return ev.type === "user_message" && parseUserMessage(ev.text, agent).text.trim().length > 0;
+}
+
+export interface FilterContext {
+  filters: { device: string | null; agent: string | null; repos: string[] };
+  ignored: Set<string>;
+  repoName: (repoId: string) => string;
+}
+
+/** The active-session predicate, made from plain data so a full-list pass doesn't
+ *  re-read any store per session. Ignored/dotfolders never show; device/agent/repo
+ *  filters narrow. */
+export function passesFilter(s: Session, ctx: FilterContext): boolean {
+  if (ctx.ignored.has(s.repoId) || isDotName(ctx.repoName(s.repoId))) return false;
+  if (ctx.filters.device && s.hostId !== ctx.filters.device) return false;
+  if (ctx.filters.agent && s.agent !== ctx.filters.agent) return false;
+  if (ctx.filters.repos.length && !ctx.filters.repos.includes(s.repoId)) return false;
   return true;
 }
 
-export function allSessions(): Session[] {
-  return Object.values(sessions$.get()).filter(passesFilter);
+export function applyFilters(list: Session[], ctx: FilterContext): Session[] {
+  return list.filter((s) => passesFilter(s, ctx));
 }
 
-export function sessionsForRepo(repoId: string): Session[] {
-  return allSessions()
-    .filter((s) => s.repoId === repoId)
-    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-}
-
-export function attentionSessions(): Session[] {
-  return allSessions()
-    .filter((s) => s.needsAttention)
-    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-}
-
-export function allDevices(): Device[] {
-  return Object.values(devices$.get());
-}
-
-/** Mark every known device offline. `online` is live connectivity, not state to
- *  trust across launches — a successful sync flips reachable ones back on. Call
- *  this at boot so a device paired in a past session doesn't show a green
- *  "connected" dot before we've actually reached its host this session. */
-export function markDevicesOffline(): void {
-  const cur = devices$.get();
-  const next: Record<string, Device> = {};
-  for (const [id, d] of Object.entries(cur)) next[id] = { ...d, online: false };
-  devices$.set(next);
-}
-
-/** Drop a device from the live stores (its config is removed separately via
- *  removeDeviceConfig). Clears both the device row and its host entry. */
-export function forgetDevice(id: string): void {
-  devices$[id].delete();
-  hosts$[id].delete();
-}
-
-export function allAgentsInUse(): string[] {
-  return [...new Set(Object.values(sessions$.get()).map((s) => s.agent))].sort();
-}
-
-/** Capabilities reported for an agent (null if unknown — caller falls back). */
-export function capsFor(agent: string): AgentCapabilities | null {
-  return agentCaps$[agent].get() ?? null;
-}
-
-/** All sessions, unfiltered — the basis for computing smart filter options. */
-export function rawSessions(): Session[] {
-  return Object.values(sessions$.get());
-}
-
-/** Apply the active device/agent filters to an arbitrary session list. */
-export function applyFilters(list: Session[]): Session[] {
-  return list.filter(passesFilter);
-}
-
-// --- smart (dependent) filter options ---
-// Options are derived from a `scope` (the sessions visible in the current
-// view/section) and cross-filtered: the agent options respect the selected
-// device and vice-versa, so picking a device narrows the agent list to what
-// actually runs there.
-
-/** Distinct devices that have a session in `scope`, ignoring filters. */
-export function devicesInScope(scope: Session[]): Device[] {
-  const map = devices$.get();
+/** Distinct devices that have a session in `scope`. */
+export function devicesInScope(scope: Session[], byId: Record<string, Device>): Device[] {
   const ids = new Set(scope.map((s) => s.hostId));
-  return [...ids].map((id) => map[id]).filter(Boolean);
+  return [...ids].map((id) => byId[id]).filter(Boolean);
 }
 
-/** Distinct agents present in `scope`, ignoring filters. */
+/** Distinct agents present in `scope`. */
 export function agentsInScope(scope: Session[]): string[] {
   return [...new Set(scope.map((s) => s.agent))].sort();
 }
 
-/** Agents in `scope` available given the selected device (ignores agent filter). */
-export function availableAgents(scope: Session[]): string[] {
-  const dev = filters$.device.get();
+/** Agents in `scope` given the selected device (ignores the agent filter). */
+export function availableAgents(scope: Session[], deviceFilter: string | null): string[] {
   const set = new Set<string>();
-  for (const s of scope) if (!dev || s.hostId === dev) set.add(s.agent);
+  for (const s of scope) if (!deviceFilter || s.hostId === deviceFilter) set.add(s.agent);
   return [...set].sort();
 }
 
-/** Devices in `scope` available given the selected agent (ignores device filter). */
-export function availableDevices(scope: Session[]): Device[] {
-  const ag = filters$.agent.get();
-  const map = devices$.get();
+/** Devices in `scope` given the selected agent (ignores the device filter). */
+export function availableDevices(
+  scope: Session[],
+  agentFilter: string | null,
+  byId: Record<string, Device>,
+): Device[] {
   const ids = new Set<string>();
-  for (const s of scope) if (!ag || s.agent === ag) ids.add(s.hostId);
-  return [...ids].map((id) => map[id]).filter(Boolean);
+  for (const s of scope) if (!agentFilter || s.agent === agentFilter) ids.add(s.hostId);
+  return [...ids].map((id) => byId[id]).filter(Boolean);
 }
 
-export function reposByActivity(): Repository[] {
-  const f = filters$.get();
-  const withSessions = f.device || f.agent
-    ? new Set(allSessions().map((s) => s.repoId))
-    : null;
-  return Object.values(repositories$.get())
-    .filter((r) => !withSessions || withSessions.has(r.id))
+/** Folders ordered by recent activity, scoped by the OTHER active filters. */
+export function reposByActivity(
+  repos: Repository[],
+  sessions: Session[],
+  filters: { device: string | null; agent: string | null },
+): Repository[] {
+  const withSessions =
+    filters.device || filters.agent
+      ? new Set(
+          sessions
+            .filter((s) => (!filters.device || s.hostId === filters.device) && (!filters.agent || s.agent === filters.agent))
+            .map((s) => s.repoId),
+        )
+      : null;
+  return repos
+    .filter((r) => !isDotName(r.name) && (!withSessions || withSessions.has(r.id)))
     .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt));
 }
 
-/** Replace all repos/sessions atomically (used by live sync + demo seed). */
-export function setWorkspace(
-  repos: Record<string, Repository>,
-  sessions: Record<string, Session>,
-  devices?: Record<string, Device>,
+// --- synchronous collection reads (for services / non-reactive callers) ---
+
+export const modelsKey = (hostId: string, agent: string): string => `${hostId}:${agent}`;
+
+export function cachedModels(hostId: string, agent: string): ModelInfo[] | undefined {
+  return agentModels.get(modelsKey(hostId, agent))?.models;
+}
+
+export function capsFor(agent: string): AgentCapabilities | null {
+  return agentCaps.get(agent) ?? null;
+}
+
+export function modelForThread(id: string): string | undefined {
+  return threadModels.get(id)?.model;
+}
+
+export function isFavThread(id: string): boolean {
+  return favorites.has(`thread:${id}`);
+}
+export function isFavRepo(id: string): boolean {
+  return favorites.has(`repo:${id}`);
+}
+export function isRepoIgnored(repoId: string): boolean {
+  return ignoredRepos.has(repoId);
+}
+
+/** Effective marker state for a message — explicit override or the default. */
+export function isMarked(sessionId: string, ev: TimelineEvent, agent?: string): boolean {
+  return markers.get(`${sessionId}|${ev.id}`)?.marked ?? defaultMarked(ev, agent);
+}
+
+/** Display name for a device — user override wins over the synced name. */
+export function deviceLabel(id: string, fallback: string): string {
+  return deviceOverrides.get(id)?.name?.trim() || fallback;
+}
+/** Chosen emoji for a device, if any. */
+export function deviceEmoji(id: string): string | undefined {
+  return deviceOverrides.get(id)?.emoji?.trim() || undefined;
+}
+
+// --- write ops (mutations over collections) ---
+
+const RECENT_OPENS_CAP = 40;
+
+/** Record that the user opened a thread; trims to the most recent N. */
+export function markOpened(id: string, atIso: string): void {
+  if (recents.has(id)) recents.update(id, (d) => void (d.openedAt = atIso));
+  else recents.insert([{ id, openedAt: atIso }]);
+  const all = recents.toArray.sort((a, b) => Date.parse(b.openedAt) - Date.parse(a.openedAt));
+  const overflow = all.slice(RECENT_OPENS_CAP).map((r) => r.id);
+  if (overflow.length) recents.delete(overflow);
+}
+
+export function toggleFavThread(id: string): void {
+  const key = `thread:${id}`;
+  if (favorites.has(key)) favorites.delete(key);
+  else favorites.insert([{ id: key, kind: "thread", ref: id }]);
+}
+export function toggleFavRepo(id: string): void {
+  const key = `repo:${id}`;
+  if (favorites.has(key)) favorites.delete(key);
+  else favorites.insert([{ id: key, kind: "repo", ref: id }]);
+}
+
+export function toggleRepoIgnore(repoId: string): void {
+  if (ignoredRepos.has(repoId)) {
+    ignoredRepos.delete(repoId);
+  } else {
+    ignoredRepos.insert([{ id: repoId }]);
+    // An ignored folder shouldn't linger in the active filter selection.
+    const sel = filters$.repos.get();
+    if (sel.includes(repoId)) filters$.repos.set(sel.filter((id) => id !== repoId));
+  }
+}
+
+export function setThreadModel(id: string, model: string | null): void {
+  if (model) upsertRows(threadModels, [{ id, model }]);
+  else if (threadModels.has(id)) threadModels.delete(id);
+}
+
+export function setCachedModels(hostId: string, agent: string, models: ModelInfo[]): void {
+  upsertRows(agentModels, [{ id: modelsKey(hostId, agent), models }]);
+}
+
+export function setAgentCaps(agentId: string, caps: AgentCapabilities): void {
+  upsertRows(agentCaps, [{ ...caps, id: agentId }]);
+}
+
+export function toggleMarker(sessionId: string, ev: TimelineEvent, agent?: string): void {
+  const key = `${sessionId}|${ev.id}`;
+  const next = !isMarked(sessionId, ev, agent);
+  // Store only deviations from the default so the collection stays sparse.
+  if (next === defaultMarked(ev, agent)) {
+    if (markers.has(key)) markers.delete(key);
+  } else {
+    upsertRows(markers, [{ id: key, marked: next }]);
+  }
+}
+
+/** Merge a rename/emoji patch for a device; empty values clear the override. */
+export function setDeviceOverride(id: string, patch: { name?: string; emoji?: string }): void {
+  const cur = deviceOverrides.get(id) ?? { id };
+  const next: { id: string; name?: string; emoji?: string } = { ...cur, ...patch, id };
+  if (!next.name?.trim()) delete next.name;
+  if (!next.emoji?.trim()) delete next.emoji;
+  if (!next.name && !next.emoji) {
+    if (deviceOverrides.has(id)) deviceOverrides.delete(id);
+  } else {
+    upsertRows(deviceOverrides, [next]);
+  }
+}
+
+/** Mark every known device offline (called at boot before a live sync proves reach). */
+export function markDevicesOffline(): void {
+  for (const id of keyList(devices)) {
+    if (devices.get(id)?.online) devices.update(id, (d) => void (d.online = false));
+  }
+}
+
+// --- sync-history ---
+
+export interface SyncLogEntry {
+  at: string;
+  repos: { repoId: string; name: string; count: number }[];
+}
+
+const SYNC_LOG_CAP = 100;
+
+/** Append a sync-history entry from the diff of previous vs next threads. No-op
+ *  when nothing changed. Trims to the most recent N. */
+function recordSync(
+  prev: Map<string, Session>,
+  next: Session[],
+  reposById: Record<string, Repository>,
+  at: string,
 ): void {
-  repositories$.set(repos);
-  sessions$.set(sessions);
-  if (devices) devices$.set(devices);
+  const counts = new Map<string, number>();
+  for (const s of next) {
+    const before = prev.get(s.id);
+    if (!before || before.updatedAt !== s.updatedAt) {
+      counts.set(s.repoId, (counts.get(s.repoId) ?? 0) + 1);
+    }
+  }
+  if (counts.size === 0) return;
+  const repos = [...counts.entries()]
+    .map(([repoId, count]) => ({ repoId, name: reposById[repoId]?.name ?? repoId.replace(/^repo:/, ""), count }))
+    .sort((a, b) => b.count - a.count);
+  syncLog.insert([{ id: `${at}:${Math.random().toString(36).slice(2, 8)}`, at, repos }]);
+  const overflow = syncLog.toArray
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+    .slice(SYNC_LOG_CAP)
+    .map((e) => e.id);
+  if (overflow.length) syncLog.delete(overflow);
+}
+
+// --- messages (chat history) ---
+
+const MESSAGES_PER_THREAD_CAP = 500;
+
+/** Persist a batch of chat events for a thread (upsert by event id) and trim the
+ *  oldest beyond a per-thread cap so history can't grow unbounded. Called on
+ *  turn completion / after a full re-fetch — never per streamed event, so the
+ *  whole-collection localStorage write fires once per turn, not per token. */
+export function saveThreadMessages(threadId: string, events: TimelineEvent[]): void {
+  if (events.length === 0) return;
+  upsertRows(
+    messages,
+    events.map((e) => ({ id: `${threadId}:${e.id}`, threadId, event: e })),
+  );
+  const mine = messages.toArray
+    .filter((m) => m.threadId === threadId)
+    .sort((a, b) => (a.event.ts ?? "").localeCompare(b.event.ts ?? ""));
+  const overflow = mine.slice(0, Math.max(0, mine.length - MESSAGES_PER_THREAD_CAP)).map((m) => m.id);
+  if (overflow.length) messages.delete(overflow);
+}
+
+/** Delete every chat event belonging to a thread. */
+export function dropThreadMessages(threadId: string): void {
+  const ids = messages.toArray.filter((m) => m.threadId === threadId).map((m) => m.id);
+  deleteIds(messages, ids);
+}
+
+/** Earliest persisted user-message text per thread (by daemon `seq`). Lets a
+ *  thread the daemon gave no preview borrow a title from its first message —
+ *  using only local, already-synced data (no per-thread fetch), recomputed each
+ *  sync so it's deterministic and never fights the sync writer. */
+export function firstUserMessages(): Map<string, { seq: number; text: string }> {
+  const best = new Map<string, { seq: number; text: string }>();
+  for (const m of messages.toArray) {
+    const ev = m.event;
+    if (ev.type !== "user_message" || typeof ev.text !== "string" || !ev.text.trim()) continue;
+    const cur = best.get(m.threadId);
+    if (!cur || ev.seq < cur.seq) best.set(m.threadId, { seq: ev.seq, text: ev.text });
+  }
+  return best;
+}
+
+// --- optimistic thread writes (new-task composer, session re-key) ---
+
+/** Insert a locally-created thread (optimistic, before the first turn lands). */
+export function insertThread(s: Session): void {
+  upsertRows(threads, [s]);
+}
+
+/** Re-key a freshly-created thread to its real id once the daemon assigns one:
+ *  drop the temporary row, insert the real one, and carry over any recents /
+ *  favourite / model / marker state so nothing is lost across the swap. */
+export function rekeyThread(oldId: string, s: Session): void {
+  if (threads.has(oldId)) threads.delete(oldId);
+  upsertRows(threads, [s]);
+  if (recents.has(oldId)) {
+    const openedAt = recents.get(oldId)?.openedAt;
+    recents.delete(oldId);
+    if (openedAt) upsertRows(recents, [{ id: s.id, openedAt }]);
+  }
+  if (favorites.has(`thread:${oldId}`)) {
+    favorites.delete(`thread:${oldId}`);
+    upsertRows(favorites, [{ id: `thread:${s.id}`, kind: "thread", ref: s.id }]);
+  }
+  const model = threadModels.get(oldId)?.model;
+  if (model) {
+    threadModels.delete(oldId);
+    upsertRows(threadModels, [{ id: s.id, model }]);
+  }
+}
+
+/** Delete one thread and its dependent rows. */
+export function deleteThread(id: string): void {
+  if (threads.has(id)) threads.delete(id);
+  dropThreadMessages(id);
+  cascadeCleanup();
+}
+
+// --- referential-integrity cascade ---
+
+/** Drop every dependent row that now points at a thread/repo/host/agent that no
+ *  longer exists. The cascade react-db doesn't enforce for us — but centralized
+ *  and driven off the current threads/projects, so every removal path converges
+ *  to a consistent store. */
+export function cascadeCleanup(): void {
+  const threadList = threads.toArray;
+  const liveThreadIds = new Set(threadList.map((s) => s.id));
+  const liveRepoIds = new Set(threadList.map((s) => s.repoId));
+  const liveHostIds = new Set(threadList.map((s) => s.hostId));
+  const liveAgents = new Set<string>(threadList.map((s) => s.agent));
+
+  // Projects with no remaining thread.
+  deleteIds(projects, projects.toArray.filter((r) => !liveRepoIds.has(r.id)).map((r) => r.id));
+
+  // Per-thread state.
+  deleteIds(recents, recents.toArray.filter((r) => !liveThreadIds.has(r.id)).map((r) => r.id));
+  deleteIds(threadModels, threadModels.toArray.filter((t) => !liveThreadIds.has(t.id)).map((t) => t.id));
+  deleteIds(markers, markers.toArray.filter((m) => !liveThreadIds.has(m.id.split("|")[0])).map((m) => m.id));
+  // favourites: threads must still exist; repo favourites tolerated only if the repo does.
+  deleteIds(
+    favorites,
+    favorites.toArray
+      .filter((f) => (f.kind === "thread" ? !liveThreadIds.has(f.ref) : !liveRepoIds.has(f.ref)))
+      .map((f) => f.id),
+  );
+  // messages for dead threads.
+  deleteIds(messages, messages.toArray.filter((m) => !liveThreadIds.has(m.threadId)).map((m) => m.id));
+
+  // Per-host / per-agent caches. agentModels keys are `${hostId}:${agent}` and
+  // hostId itself contains a colon (dev:…), so split on the LAST colon.
+  deleteIds(
+    agentModels,
+    agentModels.toArray.filter((a) => !liveHostIds.has(a.id.slice(0, a.id.lastIndexOf(":")))).map((a) => a.id),
+  );
+  deleteIds(agentCaps, agentCaps.toArray.filter((a) => !liveAgents.has(a.id)).map((a) => a.id));
+
+  // Sync history: drop vanished repos from each entry, then entries left empty.
+  for (const e of syncLog.toArray) {
+    const keptRepos = e.repos.filter((r) => liveRepoIds.has(r.repoId));
+    if (keptRepos.length === 0) syncLog.delete(e.id);
+    else if (keptRepos.length !== e.repos.length) syncLog.update(e.id, (d) => void (d.repos = keptRepos));
+  }
+  // ignoredRepos$ is deliberately KEPT — hiding a folder is a preference that
+  // should survive removing and re-pairing its device.
+}
+
+// --- device removal ---
+
+/** Drop a device and everything that lived on it: its device/host/override rows,
+ *  every thread synced from it, then the full dependent cascade. */
+export function forgetDevice(id: string): void {
+  if (devices.has(id)) devices.delete(id);
+  if (hosts.has(id)) hosts.delete(id);
+  if (deviceOverrides.has(id)) deviceOverrides.delete(id);
+  deleteIds(threads, threads.toArray.filter((s) => s.hostId === id).map((s) => s.id));
+  cascadeCleanup();
+}
+
+/** Reconcile every store against the real paired-device list. deviceId() is
+ *  URL-derived, so re-pairing the same machine under a new address mints a new
+ *  device id and orphans the threads synced under the old one — with no device
+ *  row left to delete them, they'd haunt "Jump back in". Sweep anything whose
+ *  host is no longer paired, then cascade. Connection state follows the paired
+ *  set too, so every removal path (not just Settings) leaves the UI honest:
+ *  clear a now-unpaired active host, and go disconnected when nothing's paired. */
+export function reconcileDevices(validIds: string[]): void {
+  const valid = new Set(validIds);
+  deleteIds(devices, keyList(devices).filter((id) => !valid.has(id)));
+  deleteIds(hosts, keyList(hosts).filter((id) => !valid.has(id)));
+  deleteIds(deviceOverrides, keyList(deviceOverrides).filter((id) => !valid.has(id)));
+  deleteIds(threads, threads.toArray.filter((s) => !valid.has(s.hostId)).map((s) => s.id));
+  cascadeCleanup();
+
+  if (valid.size === 0) connection$.status.set("disconnected");
+  const active = connection$.activeHostId.get();
+  if (active && !valid.has(active)) connection$.activeHostId.set(null);
+}
+
+// --- live-sync writers (called from bridge.ts) ---
+
+export interface WorkspaceData {
+  repos: Record<string, Repository>;
+  sessions: Record<string, Session>;
+  devices?: Record<string, Device>;
+}
+
+/** Progressive (streaming) upsert used per page — adds/updates rows without
+ *  deleting anything, so the list fills in without blanking. */
+export function mergeWorkspace(data: WorkspaceData): void {
+  upsertRows(projects, Object.values(data.repos));
+  upsertRows(threads, Object.values(data.sessions));
+  if (data.devices) upsertRows(devices, Object.values(data.devices));
+}
+
+/** Authoritative sync: make projects/threads/devices exactly match the incoming
+ *  set (upsert present, delete absent), record the sync-history diff, and cascade
+ *  satellites for anything removed. */
+export function syncWorkspace(data: WorkspaceData): void {
+  const prev = new Map(threads.toArray.map((s) => [s.id, s] as const));
+  const nextSessions = Object.values(data.sessions);
+  replaceAll(projects, Object.values(data.repos));
+  replaceAll(threads, nextSessions);
+  if (data.devices) replaceAll(devices, Object.values(data.devices));
+  recordSync(prev, nextSessions, data.repos, new Date().toISOString());
+  cascadeCleanup();
+}
+
+/** Upsert host records reported during sync. */
+export function upsertHosts(rows: Host[]): void {
+  upsertRows(hosts, rows);
+}
+
+/** Wipe everything (used when leaving demo / hard reset). */
+export function clearWorkspace(): void {
+  [
+    devices,
+    hosts,
+    projects,
+    threads,
+    recents,
+    syncLog,
+    favorites,
+    threadModels,
+    deviceOverrides,
+    markers,
+    agentCaps,
+    agentModels,
+    messages,
+  ].forEach(clearCollection);
 }

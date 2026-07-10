@@ -5,41 +5,36 @@ import { LegendList } from "@legendapp/list/react-native";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@litter/shared";
+import { applyFilters, filters$, rankSession } from "../state/stores";
 import {
-  activeFilterCount,
-  applyFilters,
-  filters$,
-  rawSessions,
-  repositories$,
-} from "../state/stores";
+  useFavThreadSet,
+  useIgnoredSet,
+  useProjectNames,
+  useThreads,
+} from "../state/db/hooks";
 import { SessionCard } from "../components/SessionCard";
-import { COLOR, INPUT_TWEAKS } from "../ui";
-
-const needsYou = (s: Session) =>
-  s.needsAttention || s.activity === "failed" || s.activity === "awaiting_input";
-
-function rank(s: Session): number {
-  if (needsYou(s)) return 0;
-  if (s.activity === "running" || s.activity === "streaming") return 1;
-  if (s.isLive) return 2;
-  return 3;
-}
+import { FilterButton, FilterSheet } from "../components/FilterSheet";
+import { COLOR } from "../ui";
 
 /** Full-screen thread search — matches title, branch, host, agent, repo. */
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
 
-  const raw = useSelector(() => rawSessions());
-  const repos = useSelector(() => repositories$.get());
-  const filterCount = useSelector(() => activeFilterCount());
+  const raw = useThreads();
+  const repoNames = useProjectNames();
+  const ignored = useIgnoredSet();
+  const filters = useSelector(() => filters$.get());
+  const favSet = useFavThreadSet();
 
   const results = useMemo<Session[]>(() => {
     const t = query.trim().toLowerCase();
-    let list = applyFilters(raw);
+    let list = applyFilters(raw, { filters, ignored, repoName: (id) => repoNames[id] ?? "" });
+    if (filters.favOnly) list = list.filter((s) => favSet.has(s.id));
     if (t) {
       list = list.filter((s) => {
-        const repo = repos[s.repoId]?.name ?? "";
+        const repo = repoNames[s.repoId] ?? "";
         return (
           s.title.toLowerCase().includes(t) ||
           (s.branch ?? "").toLowerCase().includes(t) ||
@@ -49,21 +44,22 @@ export default function SearchScreen() {
         );
       });
     }
-    return [...list].sort((a, b) => rank(a) - rank(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-  }, [raw, repos, query]);
+    return [...list].sort((a, b) => rankSession(a) - rankSession(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  }, [raw, repoNames, ignored, query, filters, favSet]);
 
   const showAll = query.trim().length === 0;
 
   return (
     <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>
-      <View className="px-4 pb-2 pt-1">
+      <View className="flex-row items-center justify-between px-4 pb-2 pt-1">
         <Text className="text-[26px] font-bold text-fg">Search</Text>
+        <FilterButton active={showFilters} onPress={() => setShowFilters(true)} />
       </View>
 
       {/* Search field */}
       <View className="mx-4 mb-2 flex-row items-center gap-2 rounded-2xl bg-surface-alt px-3">
         <Ionicons name="search" size={16} color={COLOR.fgFaint} />
-        <TextInput {...INPUT_TWEAKS}
+        <TextInput
           value={query}
           onChangeText={setQuery}
           placeholder="Find a thread…"
@@ -79,21 +75,6 @@ export default function SearchScreen() {
         ) : null}
       </View>
 
-      {/* Filters live in the Search tab's popup (tap the tab again); this pill
-          keeps an active filter visible — and clearable — from the results. */}
-      {filterCount ? (
-        <View className="mx-4 mb-2 flex-row">
-          <Pressable
-            onPress={() => filters$.set({ device: null, agent: null, needsOnly: false })}
-            className="active:opacity-70 flex-row items-center gap-1.5 rounded-full border border-accent/40 bg-accent/15 px-3 py-1.5"
-          >
-            <Ionicons name="funnel" size={11} color={COLOR.accent} />
-            <Text className="text-[12px] font-medium text-accent">
-              {filterCount} filter{filterCount === 1 ? "" : "s"} · Clear
-            </Text>
-          </Pressable>
-        </View>
-      ) : null}
 
       <LegendList
         style={{ flex: 1 }}
@@ -125,6 +106,8 @@ export default function SearchScreen() {
         }
         contentContainerStyle={{ paddingTop: 4, paddingBottom: insets.bottom + 120 }}
       />
+
+      <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
     </View>
   );
 }

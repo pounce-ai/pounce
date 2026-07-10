@@ -76,17 +76,18 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   const origin = context.originModulePath ?? "";
   if (bare && origin.startsWith(workspaceRoot + path.sep) && !origin.startsWith(projectRoot + path.sep)) {
     // Clone via descriptors: a plain spread evaluates/loses getters on the
-    // resolution context, which breaks Expo CLI's wrapped resolver.
-    const anchored = Object.create(
-      Object.getPrototypeOf(context),
-      Object.getOwnPropertyDescriptors(context),
-    );
-    Object.defineProperty(anchored, "originModulePath", {
+    // resolution context, which breaks Expo CLI's wrapped resolver. The
+    // original originModulePath descriptor may be non-configurable, so it is
+    // excluded from the copy and replaced rather than redefined.
+    const descriptors = Object.getOwnPropertyDescriptors(context);
+    delete descriptors.originModulePath;
+    descriptors.originModulePath = {
       value: path.join(projectRoot, "index.ts"),
       configurable: true,
       enumerable: true,
       writable: true,
-    });
+    };
+    const anchored = Object.create(Object.getPrototypeOf(context), descriptors);
     return next(anchored, moduleName, platform);
   }
   return next(context, moduleName, platform);

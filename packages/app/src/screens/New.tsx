@@ -1,18 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
-import { useSelector } from "@legendapp/state/react";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type { AgentId } from "@litter/shared";
-import {
-  allDevices,
-  capsFor,
-  pendingTurns$,
-  reposByActivity,
-  sessions$,
-  sessionsForRepo,
-} from "../state/stores";
+import { insertThread, pendingTurns$, reposByActivity } from "../state/stores";
+import { useAgentCaps, useDevices, useProjects, useThreads } from "../state/db/hooks";
 import { Composer, type ComposerSubmit } from "../components/Composer";
 import { FolderBrowser } from "../components/FolderBrowser";
 import { AgentLogo, agentLabel, cn, COLOR } from "../ui";
@@ -31,34 +24,66 @@ function repoIdForCwd(cwd: string | null): string {
 export default function NewTaskScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const devices = useSelector(() => allDevices());
-  const repos = useSelector(() => reposByActivity());
+  const { repoId } = useLocalSearchParams<{ repoId?: string }>();
+  const devices = useDevices();
+  const rawThreads = useThreads();
+  const projectList = useProjects();
+  const repos = useMemo(
+    () => reposByActivity(projectList, rawThreads, { device: null, agent: null }),
+    [projectList, rawThreads],
+  );
 
-  const [hostId, setHostId] = useState<string | undefined>(devices[0]?.id);
+  // Default to a REACHABLE device — a stale/dead pairing (e.g. an old IP) can
+  // otherwise sit at devices[0] and silently swallow the turn (no response).
+  const [hostId, setHostId] = useState<string | undefined>(
+    (devices.find((d) => d.online) ?? devices[0])?.id,
+  );
   const [cwd, setCwd] = useState<string | null>(null);
+  const [selectedRepoId, setSelectedRepoId] = useState<string | null>(null);
   const [agent, setAgent] = useState<AgentId>("claude");
   const [browsing, setBrowsing] = useState(false);
 
-  const reportedCaps = useSelector(() => capsFor(agent));
+  const reportedCaps = useAgentCaps(agent);
   const caps = effectiveCaps(agent, reportedCaps);
 
   const folderLabel = useMemo(() => (cwd ? cwd.split("/").pop() || cwd : null), [cwd]);
 
-  // Quick-pick an existing repo: adopt its cwd + host so you land in a known dir.
-  const pickRepo = (repoId: string) => {
-    const s = sessionsForRepo(repoId).find((x) => x.cwd) ?? sessionsForRepo(repoId)[0];
+  // Quick-pick an existing repo: adopt its working dir + host so you land in a
+  // known dir. Prefer a non-worktree session so a new task starts in the repo
+  // root rather than some worktree. Remember the folder explicitly — since the
+  // bridge folds worktrees into their origin repo, repoId no longer equals the
+  // cwd basename, so it can't be re-derived from cwd.
+  const pickRepo = (rid: string) => {
+    const list = rawThreads
+      .filter((x) => x.repoId === rid)
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+    const s = list.find((x) => x.cwd && !x.worktree) ?? list.find((x) => x.cwd) ?? list[0];
+    setSelectedRepoId(rid);
     if (s?.cwd) setCwd(s.cwd);
     if (s?.hostId) setHostId(s.hostId);
   };
-  const activeRepoId = repoIdForCwd(cwd);
+  const activeRepoId = selectedRepoId ?? repoIdForCwd(cwd);
+
+  // Backfill the host once devices load (they may be empty on first mount), and
+  // only while nothing is selected yet — never override a user/folder choice.
+  useEffect(() => {
+    if (!hostId && devices.length) setHostId((devices.find((d) => d.online) ?? devices[0])?.id);
+  }, [hostId, devices]);
+
+  // Seeded from a folder's "+" on Home: adopt that repo's cwd + device on mount
+  // so the user lands straight on the composer for that folder.
+  useEffect(() => {
+    if (repoId) pickRepo(repoId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repoId]);
 
   const launch = (s: ComposerSubmit) => {
     const id = `new_${Date.now()}`;
     const nowIso = new Date().toISOString();
     const device = devices.find((d) => d.id === hostId) ?? devices[0];
-    sessions$[id].set({
+    insertThread({
       id,
-      repoId: repoIdForCwd(cwd),
+      repoId: selectedRepoId ?? repoIdForCwd(cwd),
       hostId: device?.id ?? "dev:local",
       host: device?.name ?? "local",
       agent,
@@ -169,6 +194,7 @@ export default function NewTaskScreen() {
         onClose={() => setBrowsing(false)}
         onPick={(p) => {
           setCwd(p);
+          setSelectedRepoId(repoIdForCwd(p));
           setBrowsing(false);
         }}
       />

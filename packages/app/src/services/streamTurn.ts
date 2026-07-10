@@ -17,11 +17,11 @@ async function streamingFetch(): Promise<typeof fetch> {
 
 export async function streamTurn(
   url: string,
-  opts: { headers: Record<string, string>; body: string },
+  opts: { method?: "GET" | "POST"; headers: Record<string, string>; body?: string },
   onChunk: (text: string) => void,
 ): Promise<void> {
   const f = await streamingFetch();
-  const res = await f(url, { method: "POST", headers: opts.headers, body: opts.body });
+  const res = await f(url, { method: opts.method ?? "POST", headers: opts.headers, body: opts.body });
   if (!res.ok || !res.body) throw new Error(`turn failed: ${res.status}`);
   const reader = (res.body as ReadableStream<Uint8Array>).getReader();
   const dec = new TextDecoder();

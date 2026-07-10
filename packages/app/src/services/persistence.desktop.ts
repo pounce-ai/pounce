@@ -13,6 +13,17 @@ import type { Observable } from "@legendapp/state";
 
 const plugin = observablePersistAsyncStorage({ AsyncStorage });
 
+/**
+ * Legacy-migration shim. Mobile exports the raw MMKV instance so the react-db
+ * migration can read old Legend State blobs; desktop never had those, so an
+ * always-empty stand-in makes the migration a clean no-op.
+ */
+export const storage = {
+  getString: (_key: string): string | undefined => undefined,
+  set: (_key: string, _value: string): void => {},
+  delete: (_key: string): void => {},
+};
+
 /** Persist an observable under a stable key. */
 export function persist<T>(obs$: Observable<T>, key: string): void {
   // Cast at the boundary: syncObservable's param type rejects the generic

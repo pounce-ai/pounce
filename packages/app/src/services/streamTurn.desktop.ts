@@ -7,7 +7,7 @@
  */
 export function streamTurn(
   url: string,
-  opts: { headers: Record<string, string>; body: string },
+  opts: { method?: "GET" | "POST"; headers: Record<string, string>; body?: string },
   onChunk: (text: string) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -20,7 +20,7 @@ export function streamTurn(
         seen = text.length;
       }
     };
-    xhr.open("POST", url);
+    xhr.open(opts.method ?? "POST", url);
     for (const [k, v] of Object.entries(opts.headers)) xhr.setRequestHeader(k, v);
     xhr.onprogress = drain;
     xhr.onerror = () => reject(new Error("turn failed: network error"));
@@ -29,6 +29,6 @@ export function streamTurn(
       if (xhr.status >= 200 && xhr.status < 300) resolve();
       else reject(new Error(`turn failed: ${xhr.status}`));
     };
-    xhr.send(opts.body);
+    xhr.send(opts.body ?? null);
   });
 }

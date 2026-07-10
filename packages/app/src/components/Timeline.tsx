@@ -1,7 +1,6 @@
 import { memo, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
-import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import {
   assertNeverEvent,
@@ -9,9 +8,10 @@ import {
   type ToolCallEvent,
   type ToolResultEvent,
 } from "@litter/shared";
-import { isMarked } from "../state/stores";
-import { Markdown } from "./Markdown";
+import { defaultMarked } from "../state/stores";
+import { useThreadMarkers } from "../state/db/hooks";
 import { cn, COLOR } from "../ui";
+import { MessageMarkdown } from "../components/MessageMarkdown";
 import {
   cleanAssistantText,
   isEmptyUserMessage,
@@ -44,6 +44,8 @@ export const Timeline = memo(function Timeline({
   sessionId,
   listRef,
   onLongPressEvent,
+  onRunCommand,
+  onAtBottomChange,
 }: {
   events: TimelineEvent[];
   /** Which agent produced these events — selects the body-cleaning rules. */
@@ -54,6 +56,12 @@ export const Timeline = memo(function Timeline({
   /** Imperative list handle (scrollToIndex for marker jumps). */
   listRef?: React.Ref<LegendListRef>;
   onLongPressEvent?: (ev: TimelineEvent) => void;
+  /** Queue a shell command into the composer (Run buttons on shell code blocks).
+   *  Absent for read-only threads. */
+  onRunCommand?: (command: string) => void;
+  /** Fires as the user scrolls, telling the parent whether the list is pinned to
+   *  the bottom — drives the floating "jump to latest" pill. */
+  onAtBottomChange?: (atBottom: boolean) => void;
 }) {
   // Pair each tool result with its call so the call row renders both as one
   // accordion; the paired result rows are dropped from the list data.
@@ -65,6 +73,9 @@ export const Timeline = memo(function Timeline({
     return m;
   }, [events]);
   const data = useMemo(() => collapseToolResults(events), [events]);
+  // Subscribe to this thread's marker overrides once; each row gets its resolved
+  // marked state as a prop (a per-row live query would be far too heavy).
+  const markerMap = useThreadMarkers(sessionId);
 
   return (
     <LegendList
@@ -75,8 +86,9 @@ export const Timeline = memo(function Timeline({
         <Row
           event={item}
           agent={agent}
-          sessionId={sessionId}
+          marked={markerMap.get(item.id) ?? defaultMarked(item, agent)}
           onLongPressEvent={onLongPressEvent}
+          onRunCommand={onRunCommand}
           pairedResult={
             item.type === "tool_call" ? resultByCallId.get(item.call.id || item.id) : undefined
           }
@@ -90,6 +102,12 @@ export const Timeline = memo(function Timeline({
       // stay pinned to the end as live turns stream in.
       initialScrollAtEnd
       maintainScrollAtEnd
+      onScroll={(e) => {
+        const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+        const fromEnd = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+        onAtBottomChange?.(fromEnd < 80);
+      }}
+      scrollEventThrottle={64}
       ListFooterComponent={footer}
       contentContainerStyle={{ padding: 12, gap: 8 }}
     />
@@ -99,19 +117,20 @@ export const Timeline = memo(function Timeline({
 const Row = memo(function Row({
   event,
   agent,
-  sessionId,
+  marked,
   onLongPressEvent,
+  onRunCommand,
   pairedResult,
 }: {
   event: TimelineEvent;
   agent?: string;
-  sessionId?: string;
+  /** Resolved marker state (override ▸ default), computed by the Timeline root. */
+  marked: boolean;
   onLongPressEvent?: (ev: TimelineEvent) => void;
+  onRunCommand?: (command: string) => void;
   /** For tool_call rows: the matching tool_result, rendered inside the accordion. */
   pairedResult?: ToolResultEvent;
 }) {
-  // Unconditional hook — recycled rows must keep a stable hook order.
-  const marked = useSelector(() => (sessionId ? isMarked(sessionId, event) : false));
   const onLongPress = onLongPressEvent ? () => onLongPressEvent(event) : undefined;
   switch (event.type) {
     case "user_message":
@@ -123,11 +142,12 @@ const Row = memo(function Row({
     case "assistant_message":
       return (
         <Pressable onLongPress={onLongPress} delayLongPress={350}>
-          <Bubble
-            role="assistant"
-            text={cleanAssistantText(event.text, agent)}
+          <AssistantBubble
+            text={event.text}
+            agent={agent}
             streaming={event.streaming}
             marked={marked}
+            onRun={onRunCommand}
           />
         </Pressable>
       );
@@ -162,8 +182,27 @@ const Row = memo(function Row({
  * first, then render whichever pieces survive (command chip, output note, and/or
  * a prose bubble). Empty envelopes (lone caveats/reminders) render nothing.
  */
+/** Assistant turn — memoizes the (regex-heavy) body cleaning so a row re-render
+ *  (recycling / marker toggle) doesn't re-clean unchanged text. */
+function AssistantBubble({
+  text,
+  agent,
+  streaming,
+  marked,
+  onRun,
+}: {
+  text: string;
+  agent?: string;
+  streaming?: boolean;
+  marked?: boolean;
+  onRun?: (command: string) => void;
+}) {
+  const clean = useMemo(() => cleanAssistantText(text, agent), [text, agent]);
+  return <Bubble role="assistant" text={clean} streaming={streaming} marked={marked} onRun={onRun} />;
+}
+
 function UserRow({ text, agent }: { text: string; agent?: string }) {
-  const p = parseUserMessage(text, agent);
+  const p = useMemo(() => parseUserMessage(text, agent), [text, agent]);
   if (isEmptyUserMessage(p)) return null;
   return (
     <View className="gap-1.5">
@@ -216,6 +255,7 @@ function Bubble({
   text,
   streaming,
   marked,
+  onRun,
 }: {
   role: "user" | "assistant";
   text: string;
@@ -223,29 +263,27 @@ function Bubble({
   /** Shows a bookmark beside assistant bubbles the user marked. User bubbles
    *  are marked by default, so decorating them all would be noise. */
   marked?: boolean;
+  /** Enables shell "Run" cards on assistant turns (queues !cmd to composer). */
+  onRun?: (command: string) => void;
 }) {
-  const user = role === "user";
-  return (
-    <View className={cn("flex-row items-center gap-1.5", user ? "justify-end" : "justify-start")}>
-      <View
-        className={cn(
-          "max-w-[86%] rounded-2xl px-3 py-2",
-          user ? "bg-accent" : "border border-border bg-surface",
-        )}
-      >
-        {user ? (
-          <Text className="text-[15px] leading-[21px] text-white">
-            {text}
-            {streaming ? <Text className="text-accent"> ▋</Text> : null}
-          </Text>
-        ) : (
-          <>
-            <Markdown text={text} baseClass="text-[15px] leading-[21px] text-fg" />
-            {streaming ? <Text className="text-accent">▋</Text> : null}
-          </>
-        )}
+  // User turns are compact right-aligned accent bubbles; assistant turns render
+  // full-width (rich markdown/code needs the room), no bubble chrome. Both go
+  // through the native md4c renderer — the user composes markdown too.
+  if (role === "user") {
+    return (
+      <View className="flex-row justify-end">
+        <View className="max-w-[86%] rounded-2xl bg-accent px-3 py-1.5">
+          <MessageMarkdown text={text} role="user" streaming={streaming} />
+        </View>
       </View>
-      {marked && !user ? <Ionicons name="bookmark" size={10} color={COLOR.accent} /> : null}
+    );
+  }
+  return (
+    <View className="flex-row items-start gap-1">
+      <View className="flex-1">
+        <MessageMarkdown text={text} role="assistant" streaming={streaming} onRun={onRun} />
+      </View>
+      {marked ? <Ionicons name="bookmark" size={10} color={COLOR.accent} style={{ marginTop: 3 }} /> : null}
     </View>
   );
 }

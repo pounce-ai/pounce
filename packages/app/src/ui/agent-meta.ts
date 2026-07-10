@@ -24,7 +24,11 @@ export const DEFAULT_CAPS: Record<string, AgentCapabilities> = {
 };
 
 export function effectiveCaps(agent: string, reported: AgentCapabilities | null): AgentCapabilities {
-  return reported ?? DEFAULT_CAPS[agent] ?? NO_CAPS;
+  // Merge, don't replace: devices report a transport-shaped capabilities object
+  // that omits our UI keys (images, thinking, …), so overlay it on the static
+  // defaults — reported values win where present, defaults fill the rest.
+  const base = DEFAULT_CAPS[agent] ?? NO_CAPS;
+  return reported ? { ...base, ...reported } : base;
 }
 
 export interface ModeOption {
