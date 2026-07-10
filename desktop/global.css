@@ -1,0 +1,31 @@
+@import "tailwindcss";
+@import "uniwind";
+
+@source "./App.tsx";
+@source "./src";
+@source "../packages/app/src";
+
+/* Dark-first: default theme is dark; `.light` opts into the light scheme. */
+@theme {
+  --color-bg: #0b0b0f;
+  --color-bg-elevated: #101016;
+  --color-surface: #141419;
+  --color-surface-alt: #1b1b22;
+  --color-surface-hover: #23232c;
+  --color-border: #26262f;
+  --color-border-strong: #33333e;
+  --color-fg: #ececf1;
+  --color-fg-muted: #9a9aa5;
+  --color-fg-faint: #62626d;
+  --color-accent: #7c6ff0;
+  --color-accent-soft: #1e1b33;
+  --color-success: #3fb950;
+  --color-warning: #d29922;
+  --color-danger: #f85149;
+  --color-info: #58a6ff;
+  --color-diff-add-bg: #12361f;
+  --color-diff-del-bg: #3d1418;
+  --color-diff-add-fg: #56d364;
+  --color-diff-del-fg: #f85149;
+  --font-mono: "JetBrainsMono", ui-monospace, monospace;
+}

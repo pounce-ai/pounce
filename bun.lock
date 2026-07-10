@@ -29,6 +29,7 @@
         "@gorhom/bottom-sheet": "^5.2.9",
         "@legendapp/list": "^3.2.0",
         "@legendapp/state": "^3.0.0-beta.47",
+        "@litter/app": "workspace:*",
         "@litter/nitro": "workspace:*",
         "@litter/runtime": "workspace:*",
         "@litter/shared": "workspace:*",
@@ -77,6 +78,14 @@
         "jest": "^29.7.0",
         "jest-expo": "~57.0.0",
         "typescript": "~6.0.3",
+      },
+    },
+    "packages/app": {
+      "name": "@litter/app",
+      "version": "0.1.0",
+      "dependencies": {
+        "@litter/shared": "workspace:*",
+        "@litter/transcript": "workspace:*",
       },
     },
     "packages/nitro": {
@@ -526,6 +535,8 @@
     "@legendapp/list": ["@legendapp/list@3.2.0", "", { "dependencies": { "use-sync-external-store": "^1.5.0" }, "peerDependencies": { "react": "*", "react-dom": "*", "react-native": "*" }, "optionalPeers": ["react-dom", "react-native"] }, "sha512-bN+g/oQYjFz+UAyuBN4cmYJAwdJS1TdNcZZOVlh3+VwCQUWrsg0PH46Mvm76gdZSCYMfoFanPY4dKnILcYEzeg=="],
 
     "@legendapp/state": ["@legendapp/state@3.0.0-beta.47", "", { "dependencies": { "use-sync-external-store": "^1.2.2" }, "peerDependencies": { "expo-sqlite": "^15.0.0" }, "optionalPeers": ["expo-sqlite"] }, "sha512-MPgPacXXSoAazAv7ulW/o0ZAtK4YHk3twvXZ241l2HqAHciHozb7tg5SMbEAc2HKUUfC3JBh+9+DXfMsYokLpQ=="],
+
+    "@litter/app": ["@litter/app@workspace:packages/app"],
 
     "@litter/bridge": ["@litter/bridge@workspace:apps/bridge"],
 

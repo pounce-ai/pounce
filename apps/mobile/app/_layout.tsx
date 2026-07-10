@@ -2,10 +2,10 @@ import "../global.css";
 import { useEffect } from "react";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { Providers } from "@/components/Providers";
-import { UpdateBanner } from "@/components/UpdateBanner";
-import { bootstrap } from "@/services/runtime";
-import { attachPushNavigation } from "@/services/push";
+import { Providers } from "@litter/app/components/Providers";
+import { UpdateBanner } from "@litter/app/components/UpdateBanner";
+import { bootstrap } from "@litter/app/services/runtime";
+import { attachPushNavigation } from "@litter/app/services/push";
 
 export default function RootLayout() {
   useEffect(() => {

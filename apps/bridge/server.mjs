@@ -1163,6 +1163,11 @@ function portInUse(port) {
  */
 export async function startBridge({ port = PORT, quiet = false, appVersion = null } = {}) {
   if (appVersion) APP_VERSION = appVersion;
+  // Idempotent: when this file is bundled into a launcher, the `isMain`
+  // self-start below and the launcher's explicit call both fire — the second
+  // one must not listen() again.
+  if (startBridge._started) return { alreadyRunning: true, port, ...(PAIR || {}) };
+  startBridge._started = true;
   // Never call listen() on a busy port: Bun's node:http shim throws an
   // uncatchable async error on EADDRINUSE (on top of emitting "error"), which
   // would crash the desktop app instead of falling back to the running bridge.

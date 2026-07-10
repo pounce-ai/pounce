@@ -1,0 +1,58 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "jsx": "react-jsx",
+    "moduleResolution": "Bundler",
+    "lib": [
+      "ESNext",
+      "DOM"
+    ],
+    "types": [
+      "react"
+    ],
+    "moduleSuffixes": [
+      ".macos",
+      ""
+    ],
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "expo-router": [
+        "./src/shims/router.tsx"
+      ],
+      "@litter/app/*": [
+        "../packages/app/src/*"
+      ],
+      "@litter/shared": [
+        "../packages/shared/src/index.ts"
+      ],
+      "@litter/runtime": [
+        "../packages/runtime/src/index.ts"
+      ],
+      "@litter/nitro": [
+        "../packages/nitro/src/index.ts"
+      ],
+      "@litter/transcript": [
+        "../packages/transcript/src/index.d.ts"
+      ],
+      "react": [
+        "./node_modules/@types/react"
+      ],
+      "react-native": [
+        "./node_modules/react-native"
+      ],
+      "@react-native-async-storage/async-storage": [
+        "./node_modules/@react-native-async-storage/async-storage"
+      ]
+    }
+  },
+  "include": [
+    "App.tsx",
+    "index.ts",
+    "src",
+    "declarations.d.ts",
+    "uniwind-types.d.ts"
+  ]
+}
