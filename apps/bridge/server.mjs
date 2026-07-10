@@ -386,6 +386,41 @@ function newestRecentSessionId() {
   return id && Date.now() - ms <= STALE_LOOKBACK_MS ? id : null;
 }
 
+// Memory watchdog: the daemon (third-party) leaks under sustained probe load —
+// observed 9+ GB RSS after a few hours, enough to trip macOS's out-of-memory
+// dialog when the app opens. Restart it (idle-only, rate-limited) once it
+// crosses a generous ceiling. Tune with DAEMON_MAX_RSS_MB (0 disables).
+const DAEMON_MAX_RSS_MB = Number(process.env.DAEMON_MAX_RSS_MB || 2048);
+const MEM_RESTART_COOLDOWN_MS = 10 * 60_000;
+let lastMemRestart = 0;
+
+async function daemonRssMb() {
+  try {
+    const st = await status();
+    const pid = Number(st?.pid);
+    if (!pid) return 0;
+    const r = await exec("ps", ["-o", "rss=", "-p", String(pid)], undefined, 5000);
+    return (Number(r.out.trim()) || 0) / 1024;
+  } catch {
+    return 0;
+  }
+}
+
+async function maybeRestartBloatedDaemon() {
+  if (!DAEMON_AUTO_RESTART || DAEMON_MAX_RSS_MB <= 0) return;
+  if (process.platform === "win32") return; // ps-based; skip on Windows
+  if (activeTurns > 0) return;              // a turn is streaming through us
+  if (Date.now() - lastMemRestart < MEM_RESTART_COOLDOWN_MS) return;
+  const rss = await daemonRssMb();
+  if (rss < DAEMON_MAX_RSS_MB) return;
+  let threads = [];
+  try { threads = await getThreads(); } catch { /* restart anyway — likely wedged */ }
+  if (threads.some((t) => t.activity === "running" || t.activity === "streaming")) return;
+  lastMemRestart = Date.now();
+  console.log(`[daemon] rss ${Math.round(rss)}MB over the ${DAEMON_MAX_RSS_MB}MB ceiling — auto-restarting (idle)`);
+  try { await restartDaemon(); } catch (e) { console.log(`[daemon] memory auto-restart failed: ${e?.message || e}`); }
+}
+
 async function maybeAutoRestartDaemon() {
   if (!DAEMON_AUTO_RESTART) return;
   if (activeTurns > 0) return;                                  // a turn is streaming through us
@@ -1743,6 +1778,8 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
       // Keep the daemon's index fresh on its own — restart it when it falls behind
       // and nothing is busy, so recent threads surface without manual action.
       setInterval(() => { void maybeAutoRestartDaemon().catch(() => {}); }, AUTORESTART_EVERY_MS);
+      // …and keep its memory in check (third-party leak under probe load).
+      setInterval(() => { void maybeRestartBloatedDaemon().catch(() => {}); }, AUTORESTART_EVERY_MS);
 
       setTimeout(watchTick, WATCH_MS);
       resolve({ server, token: TOKEN, kittylitter: klDisplay(), ...PAIR });
