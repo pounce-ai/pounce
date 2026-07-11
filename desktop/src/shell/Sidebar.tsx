@@ -103,7 +103,7 @@ export function Sidebar() {
             onChangeText={setQuery}
             placeholder="Search threads"
             placeholderTextColor={COLOR.fgFaint}
-            className="h-8 flex-1 text-[13px] text-fg"
+            className="flex-1 text-[13px] text-fg"
             style={{ paddingVertical: 0 }}
           />
           {query ? (

@@ -3,7 +3,7 @@ import { Linking, Pressable, ScrollView, Text, TextInput, View } from "react-nat
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { cn, COLOR, INPUT_TWEAKS } from "../ui";
+import { cn, COLOR, INPUT_TWEAKS, inputH } from "../ui";
 
 const DOCS_URL = "https://peppyhop.github.io/pounce/how-it-works.html";
 
@@ -91,7 +91,7 @@ export default function HelpScreen() {
       </View>
 
       {/* Search */}
-      <View className="mx-4 mb-2 flex-row items-center gap-2 rounded-2xl bg-surface-alt px-3">
+      <View className="mx-4 mb-2 h-11 flex-row items-center gap-2 rounded-2xl bg-surface-alt px-3">
         <Ionicons name="search" size={16} color={COLOR.fgFaint} />
         <TextInput {...INPUT_TWEAKS}
           value={query}
@@ -100,7 +100,7 @@ export default function HelpScreen() {
           placeholderTextColor={COLOR.fgFaint}
           autoCapitalize="none"
           autoCorrect={false}
-          className="h-11 flex-1 text-[15px] text-fg"
+          className={cn("flex-1 text-[15px] text-fg", inputH("h-11"))}
         />
         {query ? (
           <Pressable onPress={() => setQuery("")} className="active:opacity-60 p-1">

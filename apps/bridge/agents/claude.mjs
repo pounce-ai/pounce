@@ -168,7 +168,23 @@ export class ClaudeAdapter {
           else if (b.type === "tool_use") add(toolCall(base(b.id || id), shellify(b.name, b.input)));
         });
       }
-      // mode / attachment / file-history-snapshot / summary / system: skipped —
+      if (o.type === "system") {
+        // Newer CLIs write slash commands as system/local_command records and
+        // compaction as system/compact_boundary — both visible in Claude
+        // Code's own UI, so mirror them. High-volume subtypes
+        // (stop_hook_summary, turn_duration, away_summary, …) stay hidden.
+        if (o.subtype === "local_command" && typeof o.content === "string") {
+          const text = stripNoise(o.content, "claude");
+          if (text.trim()) add(userMessage(base(o.uuid || `c:${ts}`), text), true);
+        } else if (o.subtype === "compact_boundary") {
+          const m = o.compactMetadata || {};
+          const k = (n) => (typeof n === "number" ? (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n)) : null);
+          const span = k(m.preTokens) && k(m.postTokens) ? ` (${k(m.preTokens)} → ${k(m.postTokens)} tokens)` : "";
+          add(systemEvent(base(o.uuid || `cb:${ts}`), `Conversation compacted${span}`, "info"), true);
+        }
+        continue;
+      }
+      // mode / attachment / file-history-snapshot / summary: skipped —
       // the old daemon path surfaced none of these in history either.
     }
 

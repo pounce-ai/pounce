@@ -14,7 +14,7 @@ import {
 } from "../state/db/hooks";
 import { SessionCard } from "../components/SessionCard";
 import { FilterButton, FilterSheet } from "../components/FilterSheet";
-import { COLOR } from "../ui";
+import { cn, COLOR, inputH } from "../ui";
 
 /** Full-screen thread search — matches title, branch, host, agent, repo. */
 export default function SearchScreen() {
@@ -57,7 +57,7 @@ export default function SearchScreen() {
       </View>
 
       {/* Search field */}
-      <View className="mx-4 mb-2 flex-row items-center gap-2 rounded-2xl bg-surface-alt px-3">
+      <View className="mx-4 mb-2 h-11 flex-row items-center gap-2 rounded-2xl bg-surface-alt px-3">
         <Ionicons name="search" size={16} color={COLOR.fgFaint} />
         <TextInput
           value={query}
@@ -66,7 +66,7 @@ export default function SearchScreen() {
           placeholderTextColor={COLOR.fgFaint}
           autoCapitalize="none"
           autoCorrect={false}
-          className="h-11 flex-1 text-[15px] text-fg"
+          className={cn("flex-1 text-[15px] text-fg", inputH("h-11"))}
         />
         {query ? (
           <Pressable onPress={() => setQuery("")} className="active:opacity-60 p-1">

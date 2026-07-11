@@ -32,7 +32,7 @@ import {
   useProjects,
   useThreads,
 } from "../state/db/hooks";
-import { agentLabel, cn, COLOR, DeviceIcon } from "../ui";
+import { agentLabel, cn, COLOR, DeviceIcon, inputH } from "../ui";
 
 /**
  * The one filter trigger used in every header (Home, Search). Highlights when a
@@ -211,7 +211,7 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
             </View>
             {/* Searchable, multi-select folder list. Tap a row to toggle it in the
                 filter; tap the eye to permanently hide a folder everywhere. */}
-            <View className="flex-row items-center gap-2 rounded-xl bg-surface-alt px-3">
+            <View className="h-9 flex-row items-center gap-2 rounded-xl bg-surface-alt px-3">
               <Ionicons name="search" size={14} color={COLOR.fgFaint} />
               <TextInput
                 value={repoQuery}
@@ -220,7 +220,7 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
                 placeholderTextColor={COLOR.fgFaint}
                 autoCapitalize="none"
                 autoCorrect={false}
-                className="h-9 flex-1 text-[14px] text-fg"
+                className={cn("flex-1 text-[14px] text-fg", inputH("h-9"))}
               />
             </View>
             <ScrollView style={{ maxHeight: folderMax }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>

@@ -14,7 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { warmModels, type ModelInfo } from "../services/bridge";
 import { shortModel } from "../components/ThreadStatusBar";
 import { useAgentModels } from "../state/db/hooks";
-import { cn, COLOR } from "../ui";
+import { cn, COLOR, inputH } from "../ui";
 
 /**
  * Searchable model picker. Renders instantly from the warmed cache
@@ -95,7 +95,7 @@ export function ModelSheet({
         <View className="mb-3 h-1 w-10 self-center rounded-full bg-border" />
         <Text className="mb-2 text-[18px] font-bold text-fg">Model</Text>
 
-        <View className="mb-2 flex-row items-center gap-2 rounded-2xl bg-surface-alt px-3">
+        <View className="mb-2 h-10 flex-row items-center gap-2 rounded-2xl bg-surface-alt px-3">
           <Ionicons name="search" size={15} color={COLOR.fgFaint} />
           <TextInput
             value={query}
@@ -104,7 +104,7 @@ export function ModelSheet({
             placeholderTextColor={COLOR.fgFaint}
             autoCapitalize="none"
             autoCorrect={false}
-            className="h-10 flex-1 text-[15px] text-fg"
+            className={cn("flex-1 text-[15px] text-fg", inputH("h-10"))}
           />
         </View>
 

@@ -23,8 +23,9 @@ server, the shared packages, and the landing page.
 | Path | What |
 |---|---|
 | `apps/mobile` | The Pounce **Expo / React Native** app (iOS & Android) |
-| `apps/bridge` | The **bridge server** (`server.mjs`) — re‑exposes the Iroh‑only agent host over LAN HTTP for the app |
-| `bridge-desktop` | The **desktop Bridge app** for macOS, Windows & Linux ([Electrobun](https://electrobun.dev)) — double‑click, shows a pairing QR, runs the agent host |
+| `apps/bridge` | The **bridge server** (`server.mjs`) — the native agent host + LAN HTTP surface the apps talk to |
+| `desktop` | The **Pounce desktop app** (expo‑desktop → react‑native‑macos / windows) — the full app UI with the bridge embedded |
+| `bridge-desktop` | **Deprecated** — the old standalone desktop Bridge ([Electrobun](https://electrobun.dev)). Superseded by `desktop/`, which embeds the bridge |
 | `packages/nitro` | Native **Iroh** client (Rust + Nitro) for direct device‑to‑device sync |
 | `packages/{shared,runtime,ui}` | Shared types, runtime/transport, and UI primitives |
 | `docs/` | The landing page (served via GitHub Pages) |
@@ -63,8 +64,8 @@ cd apps/mobile && bun run ios     # or: bun run android
 # Bridge server (standalone CLI)
 node apps/bridge/server.mjs
 
-# Desktop Bridge app (isolated — not part of the bun workspace)
-cd bridge-desktop && bun install && bun run dev
+# Desktop app (isolated — not part of the bun workspace; embeds the bridge)
+cd desktop && bun install && bunx expo start --port 8082
 ```
 
 ### Releasing the Bridge

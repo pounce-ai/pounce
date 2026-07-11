@@ -27,6 +27,18 @@ export const INPUT_TWEAKS: Record<string, unknown> =
     ? { enableFocusRing: false }
     : {};
 
+/** True on the desktop platforms (macOS/Windows) — for tiny layout forks. */
+export const IS_DESKTOP = Platform.OS === "macos" || Platform.OS === "windows";
+
+/**
+ * Height classes for a single-line TextInput. react-native-macos top-aligns
+ * text (and placeholders) inside a fixed-height field, so on desktop the input
+ * keeps its intrinsic height — centered by the row's items-center — and the
+ * fixed height belongs on the CONTAINER row instead. Mobile keeps the height
+ * on the input for the full-height tap target.
+ */
+export const inputH = (h: string): string => (IS_DESKTOP ? "py-0" : h);
+
 /** Compact duration bucket: 45s / 12m / 3h / 6d (floored). */
 export function fmtDuration(secs: number): string {
   const s = Math.max(0, Math.floor(secs));

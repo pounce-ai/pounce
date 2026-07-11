@@ -309,6 +309,18 @@ export default function SessionScreen() {
   const queueRef = useRef<ComposerSubmit[]>([]);
   const [queued, setQueued] = useState<ComposerSubmit[]>([]);
 
+  // Mirror externally-driven activity (a terminal Claude Code session working
+  // this thread, a /compact, …): every sync bumps the thread's updatedAt when
+  // its transcript changes on the host, so refetch history then. Skipped while
+  // a local turn streams — it appends its own events and fetches on finish.
+  const remoteTick = session?.updatedAt;
+  useEffect(() => {
+    if (!canFetch || inFlightRef.current) return;
+    void recentQ.refetch();
+    void fullQ.refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remoteTick]);
+
   const onSubmit = useCallback(async (s: ComposerSubmit) => {
     if (inFlightRef.current) {
       queueRef.current = [...queueRef.current, s];

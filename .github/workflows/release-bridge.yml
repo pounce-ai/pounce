@@ -1,11 +1,10 @@
 name: Release Bridge
 
-# Tag `bridge-v*` (e.g. git tag bridge-v1.0.8 && git push --tags) to build the
-# desktop Bridge for macOS (signed + notarized), Windows, and Linux, and attach
-# every installer + auto-update artifact to one GitHub Release.
+# DEPRECATED: the standalone desktop Bridge is superseded by the Pounce desktop
+# app (desktop/), which embeds the bridge. The `bridge-v*` tag trigger has been
+# removed so no new releases ship by accident; workflow_dispatch remains for an
+# emergency patch to existing installs' auto-update channel.
 on:
-  push:
-    tags: ["bridge-v*"]
   workflow_dispatch:
 
 permissions:
