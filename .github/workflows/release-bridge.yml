@@ -75,12 +75,18 @@ jobs:
       # tunnel binary explicitly before packaging.
       - name: Sign pounce-tunnel (hardened runtime)
         if: ${{ matrix.slug == 'macos-arm64' && env.HAS_SIGNING_CERT == 'true' }}
+        env:
+          CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
         run: |
-          # The cert lives in build.keychain (imported above); put it on the
-          # search list and resolve the identity hash from the keychain itself —
-          # signing by name fails with "item could not be found in the keychain".
+          # Keychains auto-lock after 300s; the Rust build above outlasts that,
+          # so re-unlock and disable the timeout (this also protects electrobun's
+          # own signing later in the job). Resolve the identity hash from the
+          # keychain — signing by display name can't see build.keychain.
           security list-keychains -d user -s build.keychain login.keychain
-          ID=$(security find-identity -v -p codesigning build.keychain | awk 'NR==1 {print $2}')
+          security unlock-keychain -p "$CERT_PASSWORD" build.keychain
+          security set-keychain-settings build.keychain
+          security find-identity -v -p codesigning build.keychain
+          ID=$(security find-identity -v -p codesigning build.keychain | awk '/[0-9A-F]{40}/ {print $2; exit}')
           test -n "$ID"
           codesign --force --options runtime --timestamp --keychain build.keychain --sign "$ID" assets/pounce-tunnel
           codesign --verify --strict assets/pounce-tunnel
