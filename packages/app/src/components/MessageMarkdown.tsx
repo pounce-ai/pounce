@@ -47,9 +47,9 @@ const ASSISTANT_STYLE: MarkdownStyle = {
   em: { fontStyle: "italic", color: COLOR.fg },
   strikethrough: { color: COLOR.fgMuted },
   link: { color: COLOR.accent, underline: false },
-  // Subtle chip — the enriched default gives inline code a pink border, so pin
-  // the border to the fill to hide it.
-  code: { fontFamily: MONO, fontSize: 13.5, color: "#e6c07b", backgroundColor: "#23232c", borderColor: "#23232c" },
+  // Purple accent chip so inline code pops out of prose — the enriched default
+  // gives inline code a pink border, so pin the border to the fill to hide it.
+  code: { fontFamily: MONO, fontSize: 13.5, color: "#a99cf5", backgroundColor: "rgba(124,111,240,0.16)", borderColor: "rgba(124,111,240,0.16)" },
   codeBlock: { fontFamily: MONO, fontSize: 13, color: "#cdd0d6", backgroundColor: "#0d0d12", borderColor: "#26262f", borderWidth: 1, borderRadius: 10, padding: 10 },
   blockquote: { color: COLOR.fgMuted, borderColor: "#33333e", borderWidth: 3, gapWidth: 10, backgroundColor: "transparent" },
   // list.color defaults to a light-theme color (invisible on dark) — set it.

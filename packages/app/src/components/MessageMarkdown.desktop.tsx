@@ -101,8 +101,19 @@ function renderInline(text: string, keyBase: string, baseClass: string): ReactNo
   parts.forEach((part, pi) => {
     if (!part) return;
     if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+      // Purple chip so inline code pops out of prose (white-on-white/20 inside
+      // the accent user bubble, where purple-on-purple would vanish).
+      const onUser = baseClass.includes("text-white");
       out.push(
-        <Text key={`${keyBase}:c${pi}`} className="rounded bg-surface-alt px-1 font-mono text-[13px] text-fg">
+        <Text
+          key={`${keyBase}:c${pi}`}
+          className="rounded px-1 font-mono text-[13px]"
+          style={
+            onUser
+              ? { color: "#f4f2ff", backgroundColor: "rgba(255,255,255,0.20)" }
+              : { color: "#a99cf5", backgroundColor: "rgba(124,111,240,0.16)" }
+          }
+        >
           {part.slice(1, -1)}
         </Text>,
       );
