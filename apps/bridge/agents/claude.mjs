@@ -1,7 +1,7 @@
 /**
  * Claude Code adapter — reads sessions straight from ~/.claude/projects and
  * drives turns via `claude -p --output-format stream-json`. Replaces the
- * kittylitter daemon for the claude agent.
+ * legacy daemon path for the claude agent.
  *
  * Transcript layout (~/.claude/projects/<escaped-cwd>/<sessionId>.jsonl), one
  * JSON record per line; every record carries sessionId/cwd/timestamp. Types:

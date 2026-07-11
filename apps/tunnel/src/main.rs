@@ -191,14 +191,25 @@ async fn client(token: &str, node: &str, relay: Option<&str>, listen: &str) -> R
 
 fn default_dir() -> PathBuf {
     std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE")) // Windows
         .map(|h| PathBuf::from(h).join(".pounce"))
         .unwrap_or_else(|_| PathBuf::from(".pounce"))
 }
 
 fn getrandom(buf: &mut [u8]) -> Result<()> {
-    use std::io::Read;
-    std::fs::File::open("/dev/urandom")?.read_exact(buf)?;
-    Ok(())
+    // OS entropy without an extra dependency: /dev/urandom on unix; on other
+    // platforms fall back to iroh's own keygen (rand is already in-tree).
+    #[cfg(unix)]
+    {
+        use std::io::Read;
+        std::fs::File::open("/dev/urandom")?.read_exact(buf)?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        buf.copy_from_slice(&SecretKey::generate(&mut rand::rng()).to_bytes());
+        Ok(())
+    }
 }
 
 fn bytes_to_hex(b: &[u8]) -> String {

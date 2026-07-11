@@ -17,6 +17,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "io-util", "net", "macro
 anyhow = "1"
 serde_json = "1"
 n0-watcher = "0.6"
+rand = "0.9"
 
 [profile.release]
 opt-level = "s"

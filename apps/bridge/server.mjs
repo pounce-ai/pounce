@@ -1,25 +1,23 @@
 #!/usr/bin/env node
 /**
- * Pounce Bridge — runs on the machine hosting the alleycat (kittylitter) daemon.
- *
- * The daemon is Iroh-only (UDP/QUIC, no local HTTP), so a phone can't reach it
- * directly without the native Iroh client. This bridge stands in: it speaks to
- * the daemon via `kittylitter probe` (a real Iroh JSON-RPC client) and re-exposes
- * the data over plain HTTP on the LAN, which the Pounce app can consume today.
+ * Pounce Bridge — LAN HTTP server for the Pounce apps, running on the host
+ * machine. Reads coding-agent sessions straight from disk and drives the
+ * agent CLIs via the native agent host (./agents). For off-LAN access it
+ * spawns pounce-tunnel (apps/tunnel), an iroh p2p byte tunnel the phone
+ * dials by node id — same HTTP API, any network.
  *
  *   node apps/bridge/server.mjs
  *
  * Env:
  *   BRIDGE_PORT   (default 8099)
  *   BRIDGE_TOKEN  (default: derived; printed at startup) — required by clients
- *   KITTYLITTER   (path to the kittylitter binary; auto-detected otherwise)
+ *   POUNCE_TUNNEL_BIN (path to pounce-tunnel; default ~/.pounce/bin/pounce-tunnel)
  *
  * Auth: clients send `Authorization: Bearer <BRIDGE_TOKEN>` or `?token=`.
  */
 import http from "node:http";
 import net from "node:net";
 import { spawn } from "node:child_process";
-import { EventEmitter } from "node:events";
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import os from "node:os";
@@ -27,17 +25,13 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
-import { parseUserMessage, stripNoise } from "@litter/transcript";
 import { createHost } from "./agents/host.mjs";
 
 const IS_WIN = process.platform === "win32";
 
-// Native agent host: read sessions from disk and drive agent CLIs directly
-// instead of probing the (memory-leaking) kittylitter daemon. Default-on;
-// BRIDGE_NATIVE_AGENTS=0 falls back to the daemon path (rollback lever until
-// the kittylitter code is deleted for good).
-const NATIVE = process.env.BRIDGE_NATIVE_AGENTS !== "0";
-
+// The bridge reads agent sessions from disk and drives agent CLIs directly
+// via the native agent host (./agents). Off-LAN access rides pounce-tunnel
+// (apps/tunnel), an iroh p2p byte tunnel the phone dials by node id.
 const PORT = Number(process.env.BRIDGE_PORT || 8099);
 // How often the background watcher polls for state transitions to push.
 const WATCH_MS = Number(process.env.PUSH_WATCH_MS || 25_000);
@@ -46,149 +40,12 @@ const TOKEN = process.env.BRIDGE_TOKEN || "pounce-bridge-local";
 // desktop shell passes it to startBridge() from its package.json; env is the
 // fallback for standalone `node server.mjs` runs.
 let APP_VERSION = process.env.BRIDGE_APP_VERSION || null;
-const host = NATIVE ? createHost({ version: () => APP_VERSION }) : null;
-// Kittylitter invocation resolver. A GUI-launched app inherits a minimal PATH
-// and the npx cache hash rotates whenever the cache is cleared/re-fetched, so we
-// must NOT freeze a path at import. (That was the bug: resolve once → the daemon
-// later starts via npx → the bridge keeps spawning a now-absent binary → every
-// probe/status ENOENTs → "Starting your agent host…" forever, zero threads.)
-// Instead: resolve lazily, allow re-resolution, and fall back to
-// `npx -y kittylitter@latest`, which always works when node is present and drives
-// the same cache the daemon was installed into.
-function findKlBinary() {
-  if (process.env.KITTYLITTER) return process.env.KITTYLITTER;
-  if (IS_WIN) return null; // Windows resolves the JS entry instead (findKlJsEntry)
-  const npxRoot = `${os.homedir()}/.npm/_npx`;
-  try {
-    for (const hash of readdirSync(npxRoot)) {
-      const p = `${npxRoot}/${hash}/node_modules/kittylitter/node_modules/.bin_real/kittylitter`;
-      if (existsSync(p)) return p;
-    }
-  } catch {}
-  return null;
+const host = createHost({ version: () => APP_VERSION });
+const BRIDGE_STARTED_AT = new Date().toISOString();
+/** /v1/daemon payload — kept shape-compatible with the old daemon report. */
+function hostInfo() {
+  return { running: true, pid: process.pid, startedAt: BRIDGE_STARTED_AT, uptimeSecs: Math.round(process.uptime()), activeTurns };
 }
-
-/** Read a kittylitter package dir's bin entry and resolve it to an absolute JS path. */
-function klJsFromPackage(pkgDir) {
-  try {
-    const pkg = JSON.parse(readFileSync(path.join(pkgDir, "package.json"), "utf8"));
-    const bin = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.kittylitter;
-    if (!bin) return null;
-    const entry = path.join(pkgDir, bin);
-    return existsSync(entry) ? entry : null;
-  } catch { return null; }
-}
-
-/**
- * Windows: find kittylitter's JS entrypoint so we can run `node <entry> …`
- * directly. The npm shims (.cmd/.ps1) can't be spawned without a shell — and a
- * shell would let user text passed as probe params escape into cmd.exe — so the
- * only safe invocation is node + the real script. Checks the npm global root
- * first, then the npx cache the daemon bootstrap installs into.
- */
-function findKlJsEntry() {
-  const candidates = [];
-  if (process.env.APPDATA) candidates.push(path.join(process.env.APPDATA, "npm", "node_modules", "kittylitter"));
-  const npxCaches = [
-    process.env.npm_config_cache,
-    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "npm-cache"),
-  ].filter(Boolean).map((c) => path.join(c, "_npx"));
-  for (const root of npxCaches) {
-    try {
-      for (const hash of readdirSync(root)) candidates.push(path.join(root, hash, "node_modules", "kittylitter"));
-    } catch {}
-  }
-  for (const dir of candidates) {
-    const entry = klJsFromPackage(dir);
-    if (entry) return entry;
-  }
-  return null;
-}
-
-// GUI apps launched from Finder/Dock get a bare PATH (no Homebrew, no node
-// version-manager shims), so `npx`/`node` and the binary's `env node` shebang can
-// fail to resolve. Prepend the usual install locations for every kittylitter call.
-function augmentedPath() {
-  const home = os.homedir();
-  const extra = IS_WIN
-    ? [
-        process.env.ProgramFiles && path.join(process.env.ProgramFiles, "nodejs"),
-        process.env.APPDATA && path.join(process.env.APPDATA, "npm"),
-        path.join(home, ".bun", "bin"),
-        process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Volta", "bin"),
-      ]
-    : [
-        "/opt/homebrew/bin", "/usr/local/bin", `${home}/.local/bin`,
-        `${home}/.volta/bin`, `${home}/.bun/bin`,
-        `${home}/.nvm/current/bin`, `${home}/.fnm/aliases/default/bin`,
-      ];
-  return [...extra.filter(Boolean), process.env.PATH || ""].filter(Boolean).join(path.delimiter);
-}
-const KL_ENV = { ...process.env, PATH: augmentedPath() };
-
-let _kl = null; // cached { cmd, prefix, viaCmdShell? }
-/**
- * How to invoke kittylitter: the cached binary if present, else via npx.
- * Windows: `node <js-entry>` when the package is findable (the npm .cmd shims
- * can't be spawned shell-less), else npx through cmd.exe — but that fallback is
- * restricted to static-argument commands (see klSpawn) because cmd.exe would
- * reinterpret metacharacters in dynamic args like probe's JSON params.
- */
-function klInvocation() {
-  if (_kl) return _kl;
-  const bin = findKlBinary();
-  if (bin) _kl = { cmd: bin, prefix: [] };
-  else if (!IS_WIN) _kl = { cmd: "npx", prefix: ["-y", "kittylitter@latest"] };
-  else {
-    const entry = findKlJsEntry();
-    _kl = entry
-      ? { cmd: "node", prefix: [entry] }
-      : { cmd: process.env.ComSpec || "cmd.exe", prefix: ["/d", "/s", "/c", "npx", "-y", "kittylitter@latest"], viaCmdShell: true };
-  }
-  return _kl;
-}
-
-// Only plain option/identifier-looking args may travel through the cmd.exe npx
-// fallback — cmd expands %VAR% and treats &|<>^" specially even inside a spawn
-// argv, so anything else (JSON params, free text) is refused outright.
-const CMD_SAFE_ARG = /^[A-Za-z0-9@._/:=,-]*$/;
-
-/** A stillborn child that only emits an error — for refused cmd.exe spawns. */
-function blockedChild(reason) {
-  const c = new EventEmitter();
-  c.stdout = new EventEmitter();
-  c.stderr = new EventEmitter();
-  c.kill = () => {};
-  queueMicrotask(() => c.emit("error", Object.assign(new Error(reason), { code: "EBLOCKED" })));
-  return c;
-}
-/** Forget the cached invocation so the next call re-scans the npx cache. Call
- *  this once the daemon is (re)installed so a fresh binary path is picked up
- *  instead of the slower npx path. */
-export function refreshKittylitter() { _kl = null; return klInvocation(); }
-
-/** Spawn kittylitter with the resolved invocation and an augmented PATH. */
-function klSpawn(args, opts = {}) {
-  const inv = klInvocation();
-  if (inv.viaCmdShell && !args.every((a) => CMD_SAFE_ARG.test(a))) {
-    return blockedChild("kittylitter not installed yet — refusing dynamic args via cmd.exe npx fallback");
-  }
-  return spawn(inv.cmd, [...inv.prefix, ...args], { env: KL_ENV, windowsHide: true, ...opts });
-}
-
-/** A human-readable form of the current invocation, e.g. for logs. */
-function klDisplay() {
-  const inv = klInvocation();
-  return [inv.cmd, ...inv.prefix].join(" ");
-}
-
-/** The binary path for the daemon bootstrap (ensureDaemon), or the bare package
- *  name so its own npx logic takes over. Never returns "npx" — that path is the
- *  bridge's concern, not the bootstrap's. Re-resolves on each call. */
-export function kittylitterPath() {
-  return findKlBinary() || "kittylitter";
-}
-
 const CACHE_MS = 20_000;
 const cache = new Map(); // key -> { at, value }
 // Expired entries linger forever otherwise (per-thread act:/usage: keys add up
@@ -197,69 +54,6 @@ setInterval(() => {
   const cutoff = Date.now() - 15 * 60_000;
   for (const [k, v] of cache) if (v.at < cutoff) cache.delete(k);
 }, 10 * 60_000).unref();
-
-/** Extract every balanced-brace JSON object from probe's verbose stdout. */
-function extractJsonObjects(text) {
-  const out = [];
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] !== "{") continue;
-    let depth = 0, inStr = false, esc = false;
-    for (let j = i; j < text.length; j++) {
-      const c = text[j];
-      if (inStr) {
-        if (esc) esc = false;
-        else if (c === "\\") esc = true;
-        else if (c === '"') inStr = false;
-      } else if (c === '"') inStr = true;
-      else if (c === "{") depth++;
-      else if (c === "}") {
-        depth--;
-        if (depth === 0) {
-          try { out.push(JSON.parse(text.slice(i, j + 1))); } catch {}
-          i = j;
-          break;
-        }
-      }
-    }
-  }
-  return out;
-}
-
-function probe(args, { timeout = 30000 } = {}, _retried = false) {
-  return new Promise((resolve) => {
-    // Own process group (detached): the invocation is often `npx … probe`, and
-    // killing just the npx wrapper on timeout orphans the real probe child —
-    // they pile up (~20MB each) under a steady sync cadence. Killing the group
-    // takes the whole tree down.
-    const p = klSpawn(["probe", ...args], {
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: process.platform !== "win32",
-    });
-    let out = "";
-    p.stdout.on("data", (d) => (out += d));
-    p.stderr.on("data", (d) => (out += d));
-    const killTree = () => {
-      if (process.platform !== "win32" && p.pid) {
-        try { process.kill(-p.pid, "SIGKILL"); return; } catch {}
-      }
-      try { p.kill("SIGKILL"); } catch {}
-    };
-    const t = setTimeout(killTree, timeout);
-    p.on("close", () => {
-      clearTimeout(t);
-      // Reap any stragglers the probe itself spawned before resolving.
-      killTree();
-      resolve(extractJsonObjects(out));
-    });
-    p.on("error", (e) => {
-      clearTimeout(t);
-      // Binary path went stale (npx cache rotated / not yet installed) —
-      // re-resolve once and retry, which falls back to npx if needed.
-      if (!_retried && e?.code === "ENOENT") resolve(probe(args, { timeout }, !!refreshKittylitter()));
-      else resolve([]);
-    });
-  });
-}
 
 const inflight = new Map(); // key -> Promise (coalesces concurrent cache misses)
 
@@ -286,21 +80,7 @@ async function cached(key, ttl, fn) {
 
 async function getAgents(fresh = false) {
   if (fresh) cache.delete("agents");
-  return cached("agents", CACHE_MS, async () => {
-    if (NATIVE) return host.getAgents();
-    const frames = await probe(["--linger-secs", "1", "--timeout-secs", "20"]);
-    const f = frames.find((x) => Array.isArray(x.agents));
-    return (f?.agents || []).map((a) => ({
-      id: a.name,
-      displayName: a.display_name,
-      available: !!a.available,
-      wire: a.wire,
-      description: a.presentation?.description ?? "",
-      // Per-agent capabilities (AgentInfo.capabilities) so the mobile composer
-      // can show only the inputs an agent actually supports.
-      capabilities: a.capabilities ?? null,
-    }));
-  });
+  return cached("agents", CACHE_MS, () => host.getAgents());
 }
 
 /** Run `git -C cwd <args>` and resolve stdout lines (empty on any error). */
@@ -331,127 +111,9 @@ function exec(cmd, args, cwd, timeoutMs = 0, env = undefined) {
 }
 const git = (cwd, args) => exec("git", ["-C", cwd, ...args]);
 
-// --- Daemon (kittylitter serve) lifecycle -----------------------------------
-// The bridge proxies the daemon but doesn't own its session index: a daemon that
-// has been up for a while stops surfacing sessions created since it indexed, so
-// recent threads silently vanish from the app. Expose its start time and a
-// restart (deterministic kill + respawn of the same binary the daemon runs — not
-// reliant on any auto-start) so a fresh daemon re-indexes everything.
-let activeTurns = 0; // turns this bridge is currently streaming — a restart guard
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function daemonPids() {
-  const { out } = await exec("pgrep", ["-f", "kittylitter serve"]);
-  return out.trim().split(/\s+/).filter(Boolean).map(Number).filter((n) => n && n !== process.pid);
-}
-
-async function daemonInfo() {
-  const pids = await daemonPids();
-  if (!pids.length) return { running: false, pid: null, startedAt: null, uptimeSecs: null, activeTurns };
-  const pid = pids[0];
-  const { out } = await exec("ps", ["-p", String(pid), "-o", "lstart="]);
-  const startedAt = out.trim() ? new Date(out.trim()).toISOString() : null;
-  const uptimeSecs = startedAt ? Math.max(0, Math.round((Date.now() - Date.parse(startedAt)) / 1000)) : null;
-  return { running: true, pid, startedAt, uptimeSecs, activeTurns };
-}
-
-async function restartDaemon() {
-  const pids = await daemonPids();
-  for (const p of pids) { try { process.kill(p, "SIGTERM"); } catch {} }
-  await sleep(800);
-  for (const p of pids) { try { process.kill(p, 0); process.kill(p, "SIGKILL"); } catch {} } // straggler
-  // Respawn the same binary detached so it re-indexes from a clean slate.
-  try {
-    spawn(kittylitterPath(), ["serve"], { cwd: "/", detached: true, stdio: "ignore" }).unref();
-  } catch {}
-  await sleep(1500);
-  cache.clear(); // daemon re-indexed — drop every cached list/probe result
-  return daemonInfo();
-}
-
-// Auto-restart: when a recently-written session on disk isn't in the daemon's
-// thread list, the daemon has fallen behind — restart it (only while idle, rate-
-// limited) so newly-created threads appear without the user lifting a finger.
-const DAEMON_AUTO_RESTART = process.env.DAEMON_AUTO_RESTART !== "0"; // opt out with =0
-const STALE_LOOKBACK_MS = 30 * 60_000;       // only act on sessions touched this recently
-const AUTORESTART_COOLDOWN_MS = 30 * 60_000; // and no more than once per window
-const AUTORESTART_EVERY_MS = 5 * 60_000;     // how often we check
-let lastAutoRestart = 0;
-let lastAutoRestartFor = null; // don't loop on a session a restart can't index
-
-/** The id of the most-recently-written Claude session on disk, if touched within
- *  the lookback window — the thing the daemon is most likely to be missing. */
-function newestRecentSessionId() {
-  const root = path.join(os.homedir(), ".claude", "projects");
-  let dirs;
-  try { dirs = readdirSync(root); } catch { return null; }
-  let bestDir = null, bestDirMs = 0; // cheapest path: newest project dir, then its newest file
-  for (const d of dirs) {
-    let st; try { st = statSync(path.join(root, d)); } catch { continue; }
-    if (st.isDirectory() && st.mtimeMs > bestDirMs) { bestDirMs = st.mtimeMs; bestDir = d; }
-  }
-  if (!bestDir || Date.now() - bestDirMs > STALE_LOOKBACK_MS) return null;
-  let id = null, ms = 0;
-  let files; try { files = readdirSync(path.join(root, bestDir)); } catch { return null; }
-  for (const f of files) {
-    if (!f.endsWith(".jsonl")) continue;
-    let st; try { st = statSync(path.join(root, bestDir, f)); } catch { continue; }
-    if (st.mtimeMs > ms) { ms = st.mtimeMs; id = f.slice(0, -6); }
-  }
-  return id && Date.now() - ms <= STALE_LOOKBACK_MS ? id : null;
-}
-
-// Memory watchdog: the daemon (third-party) leaks under sustained probe load —
-// observed 9+ GB RSS after a few hours, enough to trip macOS's out-of-memory
-// dialog when the app opens. Restart it (idle-only, rate-limited) once it
-// crosses a generous ceiling. Tune with DAEMON_MAX_RSS_MB (0 disables).
-const DAEMON_MAX_RSS_MB = Number(process.env.DAEMON_MAX_RSS_MB || 2048);
-const MEM_RESTART_COOLDOWN_MS = 10 * 60_000;
-let lastMemRestart = 0;
-
-async function daemonRssMb() {
-  try {
-    const st = await status();
-    const pid = Number(st?.pid);
-    if (!pid) return 0;
-    const r = await exec("ps", ["-o", "rss=", "-p", String(pid)], undefined, 5000);
-    return (Number(r.out.trim()) || 0) / 1024;
-  } catch {
-    return 0;
-  }
-}
-
-async function maybeRestartBloatedDaemon() {
-  if (!DAEMON_AUTO_RESTART || DAEMON_MAX_RSS_MB <= 0) return;
-  if (process.platform === "win32") return; // ps-based; skip on Windows
-  if (activeTurns > 0) return;              // a turn is streaming through us
-  if (Date.now() - lastMemRestart < MEM_RESTART_COOLDOWN_MS) return;
-  const rss = await daemonRssMb();
-  if (rss < DAEMON_MAX_RSS_MB) return;
-  let threads = [];
-  try { threads = await getThreads(); } catch { /* restart anyway — likely wedged */ }
-  if (threads.some((t) => t.activity === "running" || t.activity === "streaming")) return;
-  lastMemRestart = Date.now();
-  console.log(`[daemon] rss ${Math.round(rss)}MB over the ${DAEMON_MAX_RSS_MB}MB ceiling — auto-restarting (idle)`);
-  try { await restartDaemon(); } catch (e) { console.log(`[daemon] memory auto-restart failed: ${e?.message || e}`); }
-}
-
-async function maybeAutoRestartDaemon() {
-  if (!DAEMON_AUTO_RESTART) return;
-  if (activeTurns > 0) return;                                  // a turn is streaming through us
-  if (Date.now() - lastAutoRestart < AUTORESTART_COOLDOWN_MS) return;
-  const newId = newestRecentSessionId();
-  if (!newId) return;                                          // nothing fresh to catch up on
-  let threads;
-  try { threads = await getThreads(); } catch { return; }
-  if (threads.some((t) => t.id === newId)) { lastAutoRestartFor = null; return; } // already fresh
-  if (newId === lastAutoRestartFor) return;                    // a restart didn't index it — don't loop
-  if (threads.some((t) => t.activity === "running" || t.activity === "streaming")) return; // busy elsewhere
-  lastAutoRestart = Date.now();
-  lastAutoRestartFor = newId;
-  console.log(`[daemon] stale: session ${newId} on disk but not indexed — auto-restarting (idle)`);
-  try { await restartDaemon(); } catch (e) { console.log(`[daemon] auto-restart failed: ${e?.message || e}`); }
-}
+// Turns currently streaming through this bridge — reported by /v1/daemon and
+// used for busy checks before restart-ish operations.
+let activeTurns = 0;
 
 /** Uncommitted changes in `cwd`: branch, per-file status + counts, full diff. */
 async function gitChanges(cwd) {
@@ -631,114 +293,31 @@ async function resolveWorktreeRepos(threads) {
   );
 }
 
-/**
- * The daemon's thread `preview` is the raw first user message, which for slash
- * commands carries the agent's wrapper markup (<local-command-caveat>,
- * <command-message>, <command-name>…). Normalize it here — at ingest, like the
- * message bodies — so every client gets a clean title/preview and none has to
- * re-strip it. Returns clean prose, a "/command args" chip for command-only
- * turns, or null when nothing readable survives.
- */
-function cleanPreview(raw, agent) {
-  if (!raw) return null;
-  const p = parseUserMessage(raw, agent);
-  const text =
-    p.text ||
-    (p.command ? `${p.command.name}${p.command.args ? ` ${p.command.args}` : ""}` : "") ||
-    p.output?.text ||
-    "";
-  return text.trim() || null;
-}
-
-/**
- * Walk a paginated daemon list method — frames carry `result.data` +
- * `result.nextCursor`. Maps each raw item (return null to skip) and dedupes by
- * the mapped `id`, so a mishandled cursor can't loop. thread/list and model/list
- * share this convention; this is the single place that implements it.
- */
-async function probePaginated(agent, method, mapItem, { max = 60, pageSize, onPage } = {}) {
-  const out = [];
-  const seen = new Set();
-  let cursor;
-  for (let i = 0; i < max; i++) {
-    // Ask for a big page when we can: each page is a fresh probe paying a cold
-    // Iroh dial (~seconds), so fetching thousands of threads 25-at-a-time is the
-    // dominant connect-time cost. `pageSize` (honored by the daemon like turns/list's
-    // `limit`) collapses many round-trips into one; cursor-follow stays as fallback.
-    const params = { ...(cursor ? { cursor } : {}), ...(pageSize ? { limit: pageSize } : {}) };
-    const frames = await probe(
-      ["--agent", agent, "--method", method,
-       "--params", JSON.stringify(params),
-       "--linger-secs", "1", "--timeout-secs", "25"],
-      { timeout: 30000 },
-    ).catch(() => []);
-    const f = frames.find((x) => x?.result && Array.isArray(x.result.data));
-    const page = [];
-    for (const raw of f?.result?.data || []) {
-      const item = mapItem(raw);
-      if (!item || seen.has(item.id)) continue;
-      seen.add(item.id);
-      page.push(item);
-    }
-    out.push(...page);
-    // Emit each page as it arrives so callers can stream to the app instead of
-    // waiting for every (cold-dial) page to finish.
-    if (onPage && page.length) await onPage(page);
-    cursor = f?.result?.nextCursor;
-    if (!cursor || page.length === 0) break; // no more pages, or the cursor stopped advancing
-  }
-  return out;
-}
-
 async function listThreads(agent, onPage) {
-  if (NATIVE) {
-    // Adapter metas carry preview already cleaned; shape + repo-fold here so the
-    // thread objects are byte-compatible with the probe path's.
-    const metas = await host.listThreads(agent).catch(() => []);
-    const out = metas.map((m) => {
-      const info = repoInfo(m.cwd || "");
-      return {
-        id: m.id,
-        agent,
-        cwd: m.cwd || null,
-        name: m.name || null,
-        preview: m.preview ?? null,
-        createdAt: m.createdAt || null,
-        gitBranch: m.gitBranch || null,
-        modelProvider: m.modelProvider || null,
-        repo: info.repo,
-        worktree: info.worktree,
-        isWorktree: info.isWorktree,
-        isLive: info.isLive,
-      };
-    });
-    if (onPage) {
-      for (let i = 0; i < out.length; i += 100) await onPage(out.slice(i, i + 100));
-    }
-    return out;
-  }
-  // ~25/page — following the cursor is essential or a machine's older/recent
-  // sessions silently vanish from the app. Guard ~1500 threads (60 pages).
-  return probePaginated(agent, "thread/list", (t) => {
-    if (!t.id) return null;
-    const info = repoInfo(t.cwd || "");
+  // Adapter metas carry preview already cleaned; shape + repo-fold here so the
+  // thread objects keep their long-standing wire shape.
+  const metas = await host.listThreads(agent).catch(() => []);
+  const out = metas.map((m) => {
+    const info = repoInfo(m.cwd || "");
     return {
-      id: t.id,
+      id: m.id,
       agent,
-      cwd: t.cwd || null,
-      name: t.name || null,
-      preview: cleanPreview(t.preview, agent),
-      createdAt: typeof t.createdAt === "number"
-        ? new Date(t.createdAt > 1e12 ? t.createdAt : t.createdAt * 1000).toISOString()
-        : null,
-      gitBranch: t.gitInfo?.branch || null,
-      modelProvider: t.modelProvider || null,
+      cwd: m.cwd || null,
+      name: m.name || null,
+      preview: m.preview ?? null,
+      createdAt: m.createdAt || null,
+      gitBranch: m.gitBranch || null,
+      modelProvider: m.modelProvider || null,
       repo: info.repo,
       worktree: info.worktree,
       isWorktree: info.isWorktree,
       isLive: info.isLive,
     };
-  }, { pageSize: 1000, onPage });
+  });
+  if (onPage) {
+    for (let i = 0; i < out.length; i += 100) await onPage(out.slice(i, i + 100));
+  }
+  return out;
 }
 
 /** Stream threads to `sink` page-by-page as the daemon paginates — same per-thread
@@ -807,100 +386,7 @@ function enrichThreadActivity(threads) {
 }
 
 function status() {
-  return cached("status", CACHE_MS, () => (NATIVE ? host.status() : runStatus(false)));
-}
-function runStatus(_retried) {
-  return new Promise((resolve) => {
-    const p = klSpawn(["status"], { stdio: ["ignore", "pipe", "ignore"] });
-    let out = "";
-    p.stdout.on("data", (d) => (out += d));
-    p.on("close", () => {
-      const get = (k) => (out.match(new RegExp(`${k}:\\s*(.+)`)) || [])[1]?.trim() || null;
-      resolve({
-        pid: get("pid"),
-        version: get("version"),
-        nodeId: get("node id"),
-        relay: get("relay"),
-        uptimeSecs: Number(get("uptime \\(s\\)")) || null,
-        device: os.hostname().replace(/\.local$/, ""),
-      });
-    });
-    p.on("error", (e) => {
-      // Stale/absent binary — re-resolve once (falls back to npx) and retry.
-      if (!_retried && e?.code === "ENOENT") { refreshKittylitter(); resolve(runStatus(true)); }
-      else resolve(null);
-    });
-  });
-}
-
-function textOf(it) {
-  const c = it.content;
-  if (typeof c === "string") return c;
-  if (Array.isArray(c)) return c.map((x) => (typeof x === "string" ? x : x?.text || "")).join("");
-  return it.text || "";
-}
-
-/**
- * Map one daemon item -> timeline event(s). Used for both history (turns) and
- * live streaming (item/started|updated|completed notifications). `streaming`
- * marks an in-flight agentMessage so the app renders it with a caret in place.
- */
-function itemToEvents(it, conversationId, seq, ts, streaming = false, agent) {
-  const id = it.id || `${conversationId}:${seq}`;
-  const base = { id, conversationId, seq, ts };
-  switch (it.type) {
-    case "userMessage":
-      // Strip zero-value plumbing (system reminders, Codex's injected AGENTS.md,
-      // caveats) server-side so every client gets clean text. Presentation tags
-      // (slash-commands, captured output) are preserved for the app to render.
-      return [{ ...base, type: "user_message", text: stripNoise(textOf(it), agent) }];
-    case "reasoning": {
-      const t = textOf(it);
-      return t.trim() ? [{ ...base, type: "thinking_finished", text: t, durationMs: 0 }] : [];
-    }
-    case "agentMessage":
-      return [{ ...base, type: "assistant_message", text: it.text || textOf(it), streaming }];
-    case "commandExecution": {
-      const out = [{ ...base, type: "tool_call", call: { id, name: "shell", input: { command: it.command }, status: it.status === "completed" ? "success" : "running", startedAt: ts } }];
-      if (it.aggregatedOutput)
-        out.push({ ...base, id: id + ":o", seq: seq + 0.5, type: "tool_result", result: { toolCallId: id, content: { kind: "text", text: it.aggregatedOutput }, isError: it.status === "failed", durationMs: null } });
-      return out;
-    }
-    case "fileChange": {
-      const patch = (it.changes || []).map((c) => c.diff).join("\n");
-      return [{ ...base, type: "tool_result", result: { toolCallId: id, content: { kind: "diff", path: it.changes?.[0]?.path || "", patch }, isError: false, durationMs: null } }];
-    }
-    case "dynamicToolCall":
-    case "mcpToolCall":
-      return [{ ...base, type: "tool_call", call: { id, name: it.tool || "tool", input: it.arguments, status: it.success === false ? "error" : "success", startedAt: ts } }];
-    case "webSearch":
-      return [{ ...base, type: "tool_call", call: { id, name: "web_search", input: { query: it.query }, status: "success", startedAt: ts } }];
-    default:
-      return [];
-  }
-}
-
-/** Map daemon turns/items -> the app's timeline event shape (history). */
-function normalizeTurns(turns, conversationId, agent) {
-  const events = [];
-  let seq = 0;
-  // The daemon may hand back turns newest-first (thread/list is sorted DESC);
-  // render order is turn order, so sort ascending by creation time or a
-  // once-reversed thread shows its latest turn above the older history.
-  const ordered = (turns || [])
-    .map((t, i) => [t, i])
-    .sort(([a, ai], [b, bi]) => tturn(a) - tturn(b) || ai - bi)
-    .map(([t]) => t);
-  for (const turn of ordered) {
-    const ts = new Date(turn.completedAt || turn.createdAt || Date.now()).toISOString();
-    for (const it of turn.items || []) events.push(...itemToEvents(it, conversationId, ++seq, ts, false, agent));
-  }
-  return events;
-}
-
-/** A turn's chronological key (createdAt preferred; completedAt as fallback). */
-function tturn(t) {
-  return new Date(t?.createdAt || t?.completedAt || 0).getTime();
+  return cached("status", CACHE_MS, () => host.status());
 }
 
 /**
@@ -909,218 +395,27 @@ function tturn(t) {
  * Re-reading is more robust than parsing the streaming notifications.
  */
 async function runTurn(agent, threadId, text) {
-  if (NATIVE) {
-    const realId = await host.startTurn(agent, { threadId, text }).done;
-    cache.delete("threads");
-    return getMessages(agent, realId || threadId, true);
-  }
-  await probe(
-    ["--agent", agent,
-     "--before-method", "thread/resume", "--before-params", JSON.stringify({ threadId }),
-     "--method", "turn/start", "--params", JSON.stringify({ threadId, input: [{ type: "text", text }] }),
-     "--until-method", "turn/completed", "--linger-secs", "180", "--timeout-secs", "240"],
-    { timeout: 260000 },
-  );
+  const realId = await host.startTurn(agent, { threadId, text }).done;
   cache.delete("threads");
-  // The turn added a user message + agent reply — force a fresh read so the
-  // cached history isn't stale.
-  return getMessages(agent, threadId, true);
+  return getMessages(agent, realId || threadId, true);
 }
 
-/** Stateful extractor: feed it stdout chunks, get back newly-complete objects. */
-function makeObjectStream() {
-  let buf = "";
-  return (chunk) => {
-    buf += chunk;
-    const out = [];
-    let i = 0;
-    while (i < buf.length) {
-      if (buf[i] !== "{") { i++; continue; }
-      let depth = 0, inStr = false, esc = false, end = -1;
-      for (let j = i; j < buf.length; j++) {
-        const c = buf[j];
-        if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; }
-        else if (c === '"') inStr = true;
-        else if (c === "{") depth++;
-        else if (c === "}") { depth--; if (depth === 0) { end = j; break; } }
-      }
-      if (end === -1) break; // incomplete object; wait for more data
-      try { out.push(JSON.parse(buf.slice(i, end + 1))); } catch {}
-      i = end + 1;
-    }
-    buf = buf.slice(i);
-    return out;
-  };
-}
-
-/**
- * Run a turn and stream its item notifications as they arrive. `onEvent` gets a
- * normalized timeline event per item update; `onDone` fires once at completion.
- * Returns a stop() to abort.
- */
-/**
- * Halt an in-flight turn for `threadId`. Fire-and-forget over a fresh probe;
- * the daemon routes the interrupt to the active turn. NOTE: method name is
- * best-effort (`turn/interrupt`) — adjust if the daemon names it differently.
- */
 function interruptTurn(agent, threadId) {
-  if (NATIVE) return Promise.resolve(host.interrupt(agent, threadId));
-  return new Promise((resolve) => {
-    const p = klSpawn(
-      ["probe", "--agent", agent, "--method", "turn/interrupt",
-       "--params", JSON.stringify({ threadId }), "--timeout-secs", "10", "--linger-secs", "1"],
-      { stdio: ["ignore", "ignore", "ignore"] },
-    );
-    p.on("close", (code) => resolve(code === 0));
-    p.on("error", () => resolve(false));
-  });
+  return Promise.resolve(host.interrupt(agent, threadId));
 }
 
+/** Run a turn, streaming its timeline events to `onEvent`; `onDone` fires
+ *  exactly once with the real thread id. Returns a stop() to abort. */
 function streamTurn(agent, threadId, text, cwd, onEvent, onDone, opts = {}) {
-  if (NATIVE) {
-    const t = host.startTurn(agent, { threadId, text, cwd, ...opts }, onEvent);
-    // host.startTurn's done never rejects and resolves exactly once.
-    void t.done.then((realId) => onDone(realId || threadId));
-    return () => t.stop();
-  }
-  // Fresh thread (new conversation) when no resumable threadId: start in `cwd`.
-  // Otherwise resume the existing daemon thread.
-  const fresh = !threadId || !/^[0-9a-f]{8}-/i.test(threadId);
-
-  // Build the content-block input array. Text first, then any images.
-  // NOTE: the image block shape ({type:"image", data, mediaType}) mirrors the
-  // text block and the HTTP RunImage type; validate against the live daemon if
-  // images don't land — the daemon accepts png/jpeg/gif/webp/bmp base64.
-  const input = [{ type: "text", text }];
-  for (const img of opts.images || []) {
-    if (img?.data) input.push({ type: "image", data: img.data, mediaType: img.mediaType || "image/png" });
-  }
-
-  // Extra turn params (TurnStartParams subset). Unknown fields are ignored
-  // host-side, so it's safe to include only what the caller set.
-  const extra = {};
-  if (opts.permissionMode) extra.permissionMode = opts.permissionMode;
-  if (opts.reasoningEffort) extra.reasoningEffort = opts.reasoningEffort;
-  if (opts.model) extra.model = opts.model;
-
-  const args = fresh
-    ? ["probe", "--agent", agent,
-       "--start-thread-params", JSON.stringify({ cwd: cwd || os.homedir() }),
-       "--method", "turn/start", "--params", JSON.stringify({ input, ...extra })]
-    : ["probe", "--agent", agent,
-       "--before-method", "thread/resume", "--before-params", JSON.stringify({ threadId }),
-       "--method", "turn/start", "--params", JSON.stringify({ threadId, input, ...extra })];
-  const p = klSpawn([...args, "--until-method", "turn/completed", "--linger-secs", "240", "--timeout-secs", "300"],
-    { stdio: ["ignore", "pipe", "pipe"] });
-
-  const feed = makeObjectStream();
-  let seq = 0;
-  let finished = false;
-  let realThreadId = threadId;
-  const acc = new Map(); // itemId -> accumulated streamed text
-  const finish = () => { if (finished) return; finished = true; onDone(realThreadId); };
-  const now = () => new Date().toISOString();
-
-  const handle = (o) => {
-    const m = o.method;
-    if (!m || o.id) return; // responses, not notifications
-    const p = o.params || {};
-
-    if (m === "thread/started") { realThreadId = p.thread?.id || p.threadId || realThreadId; return; }
-
-    // The daemon warns when the model was rerouted / is deprecated / has config
-    // notes (e.g. switching models re-sends full context). Surface it inline.
-    if (m === "model/rerouted") {
-      const text = p.warning || p.configWarning || p.deprecationNotice;
-      if (text) {
-        const s = ++seq;
-        onEvent({ id: `sysmodel:${s}`, conversationId: threadId, seq: s, ts: now(), type: "system_event", message: String(text), level: "warning" });
-      }
-      return;
-    }
-
-    // Streaming deltas: item/<kind>/delta -> {delta, itemId}. Route reasoning
-    // deltas to a thinking trace (shown like Codex/Grok) and message deltas to a
-    // streaming assistant bubble, so the two don't get conflated.
-    const dm = m.match(/^item\/(.+)\/delta$/);
-    if (dm) {
-      const itemId = p.itemId;
-      if (!itemId || typeof p.delta !== "string") return;
-      const text = (acc.get(itemId) || "") + p.delta;
-      acc.set(itemId, text);
-      const s = ++seq;
-      if (/reason|think/i.test(dm[1])) {
-        onEvent({ id: itemId, conversationId: threadId, seq: s, ts: now(), type: "thinking_finished", text, durationMs: 0 });
-      } else {
-        onEvent({ id: itemId, conversationId: threadId, seq: s, ts: now(), type: "assistant_message", text, streaming: true });
-      }
-      return;
-    }
-    if (m === "item/started" || m === "item/completed") {
-      const item = p.item || p;
-      const streaming = m !== "item/completed";
-      for (const ev of itemToEvents(item, threadId, ++seq, now(), streaming, agent)) onEvent(ev);
-      if (m === "item/completed") acc.delete(item.id);
-      return;
-    }
-    if (m === "turn/completed") finish();
-  };
-
-  const onData = (d) => { for (const o of feed(d.toString())) handle(o); };
-  p.stdout.on("data", onData);
-  p.stderr.on("data", onData);
-  const t = setTimeout(() => p.kill("SIGKILL"), 300000);
-  p.on("close", () => { clearTimeout(t); finish(); });
-  p.on("error", () => finish());
-  return () => p.kill("SIGKILL");
+  const t = host.startTurn(agent, { threadId, text, cwd, ...opts }, onEvent);
+  void t.done.then((realId) => onDone(realId || threadId));
+  return () => t.stop();
 }
-
-async function fetchTurns(agent, threadId, limit) {
-  // `limit` (when the daemon honors it) caps how many turns come back — used by
-  // activity enrichment, which only needs the tail. Without it the daemon returns
-  // the FULL history; on multi-million-token threads that is 100s of MB, and the
-  // list-sync enriches many threads at once, so an unbounded fetch here is what
-  // spikes bridge memory on connect. See threadActivity.
-  const params = limit ? { threadId, limit } : { threadId };
-  const frames = await probe(
-    ["--agent", agent, "--before-method", "thread/resume", "--before-params", JSON.stringify({ threadId }),
-     "--method", "thread/turns/list", "--params", JSON.stringify(params),
-     // turns/list is plain request/response — linger only waits *after* the
-     // response, so any value here is a flat delay added to every history load.
-     "--linger-secs", "0", "--timeout-secs", "30"],
-    { timeout: 40000 },
-  );
-  const f = frames.find((x) => x?.result && Array.isArray(x.result.data) && x.id === 2);
-  return f?.result?.data || [];
-}
-
-/** Cache key for a thread's normalized history. */
-const msgKey = (agent, threadId) => `msg:${agent}:${threadId}`;
-
-// Opening a thread was ~4s because every /v1/messages spawned a fresh
-// `kittylitter probe`, and each probe pays a full cold Iroh dial (relay
-// handshake + QUIC setup) — ~4s wall-clock even at ~0 CPU. A second request on
-// an already-warm connection costs ~0.3s, so the fix is to never make the user
-// wait on a cold dial: cache history like every sibling endpoint (getThreads /
-// getAgents / status) already do, and pre-warm it in the background so the tap
-// hits a hot cache instead of a cold probe.
-// History is immutable except when a turn completes — and we invalidate the key
-// explicitly then (runTurn / streamTurn). So it can hold longer than the 20s
-// list cache; a longer TTL means the background warm loop re-probes far less
-// often. Pull-to-refresh still forces a fresh read via `fresh=1`.
-const MSG_CACHE_MS = 60_000;
 
 async function getMessages(agent, threadId, fresh = false, limit) {
-  // Native: the host keeps parsed histories in a hard-capped LRU that the fs
-  // watcher invalidates the moment a transcript changes — no TTL map entries.
-  if (NATIVE) return host.getEvents(agent, threadId, { limit, fresh });
-  // `limit` returns just the last N turns (honored by the daemon) — used for the
-  // instant first paint of a thread before the full history backfills, so opening
-  // a multi-million-token conversation isn't gated on loading all of it.
-  const key = limit ? `${msgKey(agent, threadId)}:last${limit}` : msgKey(agent, threadId);
-  if (fresh) cache.delete(key);
-  return cached(key, MSG_CACHE_MS, async () =>
-    normalizeTurns(await fetchTurns(agent, threadId, limit), threadId, agent));
+  // The host keeps parsed histories in a hard-capped LRU that its fs watcher
+  // invalidates the moment a transcript changes.
+  return host.getEvents(agent, threadId, { limit, fresh });
 }
 
 // --- Per-thread token usage + cost -----------------------------------------
@@ -1222,15 +517,7 @@ function getUsage(agent, thread, cwd) {
 const MODELS_CACHE_MS = 300_000;
 
 function getModels(agent) {
-  if (NATIVE) return cached(`models:${agent}`, MODELS_CACHE_MS, () => host.listModels(agent));
-  return cached(`models:${agent}`, MODELS_CACHE_MS, () =>
-    probePaginated(agent, "model/list", (m) => {
-      if (m?.hidden === true) return null;
-      const id = m.id ?? m.model;
-      if (!id) return null;
-      return { id, name: m.displayName || id, description: m.description || null, isDefault: !!m.isDefault, deprecated: !!m.deprecated };
-    }, { max: 10 }),
-  );
+  return cached(`models:${agent}`, MODELS_CACHE_MS, () => host.listModels(agent));
 }
 
 // How many threads to keep hot in the background at once.
@@ -1276,42 +563,8 @@ async function warmMessages(threads) {
   });
 }
 
-function tsToIso(n) {
-  if (typeof n !== "number") return null;
-  return new Date(n > 1e12 ? n : n * 1000).toISOString();
-}
-
-/**
- * Derive an agent's real state from its turn history:
- *   - latest turn not completed  -> "running"
- *   - completed with a failed item/error -> "failed"
- *   - completed cleanly -> "completed" (agent finished; waiting on you)
- * Precise "awaiting input" needs a daemon stop-reason we don't have yet.
- */
-function deriveActivity(turns) {
-  if (!turns.length) return { activity: "idle", lastActivityAt: null };
-  // Most-recent turn by timestamp — don't assume positional order, since the
-  // enrichment fetch (limit:1) and the daemon's own sort may hand back either end.
-  const last = turns.reduce((a, b) => (tturn(b) >= tturn(a) ? b : a));
-  const lastActivityAt = tsToIso(last.completedAt) || tsToIso(last.createdAt);
-  if (!last.completedAt) return { activity: "running", lastActivityAt };
-  const failed =
-    !!last.error || (last.items || []).some((it) => it.status === "failed" || it.success === false);
-  return { activity: failed ? "failed" : "completed", lastActivityAt };
-}
-
 function threadActivity(agent, threadId) {
-  return cached(`act:${threadId}`, CACHE_MS, async () => {
-    try {
-      // Native: a live-child check plus one 64KB tail read — near-free.
-      if (NATIVE) return await host.getActivity(agent, threadId);
-      // Only the latest turn's state is needed — fetch just that (limit:1) so
-      // enrichment never loads a huge thread's full history into memory.
-      return deriveActivity(await fetchTurns(agent, threadId, 1));
-    } catch {
-      return { activity: "idle", lastActivityAt: null };
-    }
-  });
+  return cached(`act:${threadId}`, CACHE_MS, () => host.getActivity(agent, threadId));
 }
 
 /** Run `fn` over `items` with at most `limit` in flight. */
@@ -1474,8 +727,8 @@ const UI_HTML = `<!DOCTYPE html>
 <p class="hint" id="hint">Open Pounce on your phone, go to Sync, and scan this code.</p>
 <footer class="foot">
 <div class="ver" id="ver">Pounce&nbsp;Bridge</div>
-<div class="os">Runs your agents via <b>kittylitter</b>, an open-source agent host · GPL-3.0</div>
-<div class="url">github.com/dnakov/litter</div>
+<div class="os">Agents run natively · off-LAN sync via <b>iroh</b> p2p</div>
+<div class="url">github.com/n0-computer/iroh</div>
 </footer>
 </main><script>
 document.getElementById('qr').src = '/qr.svg?t=' + Date.now();
@@ -1583,13 +836,14 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { models: await getModels(agent) });
     }
     if (url.pathname === "/v1/status") return send(res, 200, { status: await status() });
-    if (url.pathname === "/v1/daemon" && req.method !== "POST") return send(res, 200, { daemon: await daemonInfo() });
+    if (url.pathname === "/v1/daemon" && req.method !== "POST") {
+      return send(res, 200, { daemon: hostInfo() });
+    }
     if (url.pathname === "/v1/daemon/restart" && req.method === "POST") {
-      const info = await daemonInfo();
-      // Don't kill the daemon out from under a turn unless the client insists.
-      if (info.activeTurns > 0 && url.searchParams.get("force") !== "1")
-        return send(res, 409, { error: "busy", daemon: info });
-      return send(res, 200, { restarted: true, daemon: await restartDaemon() });
+      // Nothing external to restart anymore — the host reads straight from disk.
+      // Honor the app's Restart action by dropping every cache instead.
+      cache.clear();
+      return send(res, 200, { restarted: true, daemon: hostInfo() });
     }
     if (url.pathname === "/v1/messages") {
       const agent = url.searchParams.get("agent");
@@ -1656,38 +910,18 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { code: r.code, output });
     }
     if (url.pathname === "/v1/pair") {
-      // PairPayload (nodeId/relay/token) for off-LAN access. Native mode:
-      // pounce-tunnel's identity (written to ~/.pounce/tunnel.json at its
-      // startup) + this bridge's own token — the phone dials the tunnel over
-      // Iroh and speaks the same HTTP API through it. Legacy mode: the
-      // kittylitter daemon's pairing for the litter app.
-      if (NATIVE) {
-        try {
-          const info = JSON.parse(readFileSync(path.join(os.homedir(), ".pounce", "tunnel.json"), "utf8"));
-          return send(res, 200, {
-            pairing: info?.nodeId
-              ? { nodeId: info.nodeId, token: TOKEN, hostName: os.hostname().replace(/\.local$/, ""), relay: info.relay || null }
-              : null,
-          });
-        } catch {
-          return send(res, 200, { pairing: null, error: "tunnel not running" });
-        }
-      }
-      const inv = klInvocation();
-      const r = await exec(inv.cmd, [...inv.prefix, "pair"], undefined, 15_000, KL_ENV);
-      const line = (r.out || "").split("\n").find((l) => l.trim().startsWith("{"));
+      // PairPayload for off-LAN access: pounce-tunnel's Iroh identity (written
+      // to ~/.pounce/tunnel.json at its startup) + this bridge's token. The
+      // phone dials the tunnel by node id and speaks this same HTTP API.
       try {
-        const raw = line ? JSON.parse(line) : null;
-        // Daemon emits snake_case; the app/native client expect camelCase.
-        const pairing = raw && {
-          nodeId: raw.node_id ?? raw.nodeId,
-          token: raw.token,
-          hostName: raw.host_name ?? raw.hostName ?? null,
-          relay: raw.relay ?? null,
-        };
-        return send(res, 200, { pairing });
+        const info = JSON.parse(readFileSync(path.join(os.homedir(), ".pounce", "tunnel.json"), "utf8"));
+        return send(res, 200, {
+          pairing: info?.nodeId
+            ? { nodeId: info.nodeId, token: TOKEN, hostName: os.hostname().replace(/\.local$/, ""), relay: info.relay || null }
+            : null,
+        });
       } catch {
-        return send(res, 200, { pairing: null, error: r.err || "pair failed" });
+        return send(res, 200, { pairing: null, error: "tunnel not running" });
       }
     }
     if (url.pathname === "/v1/git/changes") {
@@ -1769,7 +1003,6 @@ const server = http.createServer(async (req, res) => {
           // The streamed turn changed this thread's history — drop the cache so
           // the app's post-turn refetch (and the next open) reads it fresh.
           if (realThreadId) {
-            cache.delete(msgKey(agent, realThreadId));
             cache.delete(`usage:${agent}:${realThreadId}`); // token totals grew this turn
           }
           cache.delete("threads");
@@ -1836,7 +1069,7 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
       if (!quiet) {
         console.log(`Pounce Bridge listening on ${pairUrl}`);
         console.log(`  token: ${TOKEN}`);
-        console.log(NATIVE ? "  agents: native host (BRIDGE_NATIVE_AGENTS=1)" : `  kittylitter: ${klDisplay()}`);
+        console.log("  agents: native host");
         console.log("\n  📲 Scan with your iPhone Camera to pair Pounce:\n");
         qrcode.generate(deepLink, { small: true });
         console.log(`\n  …or open this link on the device:\n  ${deepLink}\n`);
@@ -1850,20 +1083,9 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
       };
       warm();
       setInterval(() => { if (Date.now() - lastClientSeen < 90_000) warm(); }, 15_000);
-      // Daemon babysitting is only needed while the bridge still depends on it.
-      // Native mode never probes the daemon: its index can't fall behind (fs.watch)
-      // and its memory leak isn't fed, so both watchdogs stand down.
-      if (!NATIVE) {
-        // Keep the daemon's index fresh on its own — restart it when it falls behind
-        // and nothing is busy, so recent threads surface without manual action.
-        setInterval(() => { void maybeAutoRestartDaemon().catch(() => {}); }, AUTORESTART_EVERY_MS);
-        // …and keep its memory in check (third-party leak under probe load).
-        setInterval(() => { void maybeRestartBloatedDaemon().catch(() => {}); }, AUTORESTART_EVERY_MS);
-      }
-
       setTimeout(watchTick, WATCH_MS);
-      if (NATIVE) ensureTunnel();
-      resolve({ server, token: TOKEN, kittylitter: klDisplay(), ...PAIR });
+      ensureTunnel();
+      resolve({ server, token: TOKEN, ...PAIR });
     });
   });
 }
@@ -1876,7 +1098,7 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
 function tunnelBinary() {
   const candidates = [
     process.env.POUNCE_TUNNEL_BIN,
-    path.join(os.homedir(), ".pounce", "bin", "pounce-tunnel"),
+    path.join(os.homedir(), ".pounce", "bin", IS_WIN ? "pounce-tunnel.exe" : "pounce-tunnel"),
   ].filter(Boolean);
   return candidates.find((p) => existsSync(p)) || null;
 }

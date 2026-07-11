@@ -1,7 +1,7 @@
 /**
- * AgentHost — the native replacement for the kittylitter daemon. A registry of
+ * AgentHost — the bridge's native agent backend. A registry of
  * per-agent adapters (session reading + turn execution) behind one facade with
- * the same semantics server.mjs used to get from `kittylitter probe`.
+ * the semantics server.mjs has always exposed over HTTP.
  *
  * Memory model: adapters keep metadata-only session indexes; parsed histories
  * live in one shared bounded LRU, invalidated by each adapter's fs watcher the
@@ -45,8 +45,8 @@ export function createHost({ version = () => null } = {}) {
       })));
     },
 
-    /** Host status, keyed like the old `kittylitter status` parse. No Iroh —
-     *  nodeId/relay are null (the app treats missing pairing gracefully). */
+    /** Host status, shape-stable for the app's device card. nodeId/relay are
+     *  null here — off-LAN identity is served by /v1/pair from the tunnel. */
     status() {
       return {
         pid: process.pid,

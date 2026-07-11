@@ -1,10 +1,11 @@
 /**
  * Live data via the Pounce Bridge (apps/bridge/server.mjs running on the host).
  *
- * The alleycat daemon is Iroh-only, so the app can't reach it directly yet (that
- * needs the native Iroh client). The bridge re-exposes the daemon's real data
- * over LAN HTTP; here we fetch it and map the daemon's threads onto the app's
- * Project/Conversation model, replacing demo data.
+ * The bridge reads coding-agent sessions from the host's disk and exposes them
+ * over HTTP; here we fetch that data and map the threads onto the app's
+ * Project/Conversation model. On the LAN we hit the bridge's address directly;
+ * off-LAN, bridgeBase() swaps in a loopback proxy that carries the same HTTP
+ * over an iroh p2p tunnel (github.com/n0-computer/iroh) to the paired machine.
  */
 import * as SecureStore from "./secureStore";
 import type {
@@ -743,7 +744,7 @@ export async function registerPushToken(token: string): Promise<void> {
 }
 
 /** Halt a running agent turn on its host. Returns whether the daemon accepted. */
-/** Status of the host's agent daemon (kittylitter serve). */
+/** Status of the host's agent runtime (the bridge's native agent host). */
 export interface DaemonInfo {
   running: boolean;
   pid: number | null;

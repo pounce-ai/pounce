@@ -56,6 +56,20 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: bun install
 
+      # pounce-tunnel (apps/tunnel): iroh p2p tunnel for off-LAN access. Built
+      # per-platform and bundled with the app; on first run the shell installs
+      # it to ~/.pounce/bin where the bridge auto-spawns it.
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build pounce-tunnel
+        working-directory: ${{ github.workspace }}/apps/tunnel
+        run: |
+          cargo build --release
+          mkdir -p "${{ github.workspace }}/bridge-desktop/assets"
+          BIN=target/release/pounce-tunnel
+          [ "${{ matrix.slug }}" = "win-x64" ] && BIN=target/release/pounce-tunnel.exe
+          cp "$BIN" "${{ github.workspace }}/bridge-desktop/assets/pounce-tunnel"
+
       - name: Import signing certificate
         if: ${{ matrix.slug == 'macos-arm64' && env.HAS_SIGNING_CERT == 'true' }}
         env:

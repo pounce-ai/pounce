@@ -1,23 +1,38 @@
 import { BrowserWindow, Tray, Updater } from "electrobun/bun";
 // The bridge lives in the repo; the desktop app just runs it in-process and
-// renders the pairing QR. quiet:true suppresses the CLI console output.
+// renders the pairing QR. quiet:true suppresses the CLI console output. The
+// bridge runs the native agent host and spawns pounce-tunnel (off-LAN iroh
+// access) itself — nothing else needs bootstrapping.
 // @ts-expect-error — plain .mjs, no types
-import { startBridge, kittylitterPath, refreshKittylitter } from "../../server/server.mjs";
-import { ensureDaemon } from "./daemon";
+import { startBridge } from "../../server/server.mjs";
 // The app version, shown in the pairing window's footer (kept in sync with the
 // release tag via package.json / electrobun.config.ts).
 import pkg from "../../package.json";
 
 const PORT = Number(process.env.BRIDGE_PORT || 8099);
 
-// Bootstrap the agent host in the background so the user needs nothing else.
-// The window shows "Starting your agent host…" until the daemon answers.
-// `ensureDaemon` may install the daemon via npx (populating the npx cache), so
-// once it finishes we re-resolve the bridge's kittylitter invocation to pick up
-// the freshly-installed binary instead of the slower npx fallback.
-void ensureDaemon(kittylitterPath() as string)
-  .then((msg) => { (refreshKittylitter as () => void)(); console.log(`[daemon] ${msg}`); })
-  .catch((e) => console.error("[daemon] bootstrap failed:", e));
+// Install the bundled pounce-tunnel to ~/.pounce/bin (where the bridge
+// auto-spawns it) before the bridge starts. Copy only when missing or changed
+// so we never rewrite a binary a previous session might still be running.
+try {
+  const { chmodSync, copyFileSync, mkdirSync, rmSync, statSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { homedir } = await import("node:os");
+  const { join } = await import("node:path");
+  const bundled = fileURLToPath(new URL("../views/pounce-tunnel", import.meta.url));
+  const dir = join(homedir(), ".pounce", "bin");
+  const dest = join(dir, process.platform === "win32" ? "pounce-tunnel.exe" : "pounce-tunnel");
+  const size = (p: string) => { try { return statSync(p).size; } catch { return -1; } };
+  if (size(bundled) > 0 && size(bundled) !== size(dest)) {
+    mkdirSync(dir, { recursive: true });
+    rmSync(dest, { force: true });
+    copyFileSync(bundled, dest);
+    chmodSync(dest, 0o755);
+    console.log(`[tunnel] installed ${dest}`);
+  }
+} catch (e) {
+  console.error("[tunnel] install skipped:", e);
+}
 
 const info = await startBridge({ port: PORT, quiet: true, appVersion: (pkg as { version?: string }).version });
 if (info?.error && !info.alreadyRunning) {
@@ -96,8 +111,6 @@ async function pollStatus() {
     if (d.connected) {
       const n = d.devices && d.devices > 0 ? d.devices : 1;
       label = `● Connected · ${n} device${n === 1 ? "" : "s"}`;
-    } else if (!d.daemonOk) {
-      label = "◌ Starting agent host…";
     }
   } catch {
     label = "◌ Starting…";

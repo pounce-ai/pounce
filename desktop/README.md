@@ -64,7 +64,7 @@ If port 8081 is taken, run Metro elsewhere and point the app at it once:
 (`RCT_METRO_PORT` is compile-time in RN, not a runtime env var).
 
 The app is **unsandboxed on purpose** (see `PounceDesktop.entitlements`): the
-embedded bridge spawns node/kittylitter, reads agent transcripts and runs git.
+embedded bridge reads agent transcripts, drives agent CLIs, and runs git natively; off-LAN access rides the pounce-tunnel iroh p2p tunnel (apps/tunnel).
 Distribute via Developer ID, not the Mac App Store.
 
 ## Windows

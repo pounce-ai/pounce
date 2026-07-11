@@ -22,7 +22,7 @@
       "buildNumber": "17",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSLocalNetworkUsageDescription": "Pounce connects to the alleycat host running on your local network to load your projects and conversations.",
+        "NSLocalNetworkUsageDescription": "Pounce connects to the Pounce Bridge running on your local network to load your projects and conversations.",
         "NSPhotoLibraryUsageDescription": "Attach screenshots or images from your library to a message for the agent.",
         "NSCameraUsageDescription": "Scan the pairing code shown on your computer to sync your devices.",
         "NSAppTransportSecurity": {
