@@ -36,6 +36,64 @@ export function collapseToolResults(events: TimelineEvent[]): TimelineEvent[] {
   );
 }
 
+/** One human phrase for `n` calls of one tool, Claude Code's TUI wording. */
+function batchPhrase(name: string, n: number): string {
+  const s = n === 1 ? "" : "s";
+  switch (name) {
+    case "Grep":
+    case "Glob":
+      return `searching for ${n} pattern${s}`;
+    case "Read":
+      return `reading ${n} file${s}`;
+    case "LS":
+      return `listing ${n} director${n === 1 ? "y" : "ies"}`;
+    case "shell":
+    case "Bash":
+      return `running ${n} shell command${s}`;
+    case "Edit":
+    case "Write":
+    case "MultiEdit":
+    case "NotebookEdit":
+      return `editing ${n} file${s}`;
+    case "WebFetch":
+      return `fetching ${n} page${s}`;
+    case "WebSearch":
+      return `running ${n} web search${n === 1 ? "" : "es"}`;
+    case "Task":
+    case "Agent":
+      return `launching ${n} agent${s}`;
+    default:
+      return n === 1 ? `calling ${name}` : `calling ${name} ×${n}`;
+  }
+}
+
+/**
+ * Claude Code prefixes a parallel tool batch with a synthesized summary line
+ * ("Searching for 2 patterns, reading 1 file, …") — that line is TUI-generated,
+ * never in the transcript, so mirror it here: map the FIRST tool_call of every
+ * run of ≥2 consecutive calls to its summary.
+ */
+function batchHeaders(data: TimelineEvent[]): Map<string, string> {
+  const m = new Map<string, string>();
+  let i = 0;
+  while (i < data.length) {
+    if (data[i].type !== "tool_call") { i++; continue; }
+    let j = i;
+    while (j < data.length && data[j].type === "tool_call") j++;
+    if (j - i >= 2) {
+      const counts = new Map<string, number>();
+      for (let k = i; k < j; k++) {
+        const name = (data[k] as ToolCallEvent).call.name;
+        counts.set(name, (counts.get(name) ?? 0) + 1);
+      }
+      const text = [...counts.entries()].map(([name, n]) => batchPhrase(name, n)).join(", ") + "…";
+      m.set(data[i].id, text.charAt(0).toUpperCase() + text.slice(1));
+    }
+    i = j;
+  }
+  return m;
+}
+
 /** One virtualized timeline for a session — every event type, recycled rows. */
 export const Timeline = memo(function Timeline({
   events,
@@ -73,6 +131,7 @@ export const Timeline = memo(function Timeline({
     return m;
   }, [events]);
   const data = useMemo(() => collapseToolResults(events), [events]);
+  const headers = useMemo(() => batchHeaders(data), [data]);
   // Subscribe to this thread's marker overrides once; each row gets its resolved
   // marked state as a prop (a per-row live query would be far too heavy).
   const markerMap = useThreadMarkers(sessionId);
@@ -92,6 +151,7 @@ export const Timeline = memo(function Timeline({
           pairedResult={
             item.type === "tool_call" ? resultByCallId.get(item.call.id || item.id) : undefined
           }
+          batchHeader={headers.get(item.id)}
         />
       )}
       estimatedItemSize={72}
@@ -121,6 +181,7 @@ const Row = memo(function Row({
   onLongPressEvent,
   onRunCommand,
   pairedResult,
+  batchHeader,
 }: {
   event: TimelineEvent;
   agent?: string;
@@ -130,6 +191,8 @@ const Row = memo(function Row({
   onRunCommand?: (command: string) => void;
   /** For tool_call rows: the matching tool_result, rendered inside the accordion. */
   pairedResult?: ToolResultEvent;
+  /** For the first call of a parallel batch: the synthesized summary line. */
+  batchHeader?: string;
 }) {
   const onLongPress = onLongPressEvent ? () => onLongPressEvent(event) : undefined;
   switch (event.type) {
@@ -156,7 +219,13 @@ const Row = memo(function Row({
     case "thinking_finished":
       return <Meta text={event.text ? `💭 ${event.text}` : "Thought"} />;
     case "tool_call":
-      return <ToolAccordion event={event} result={pairedResult} />;
+      if (!batchHeader) return <ToolAccordion event={event} result={pairedResult} />;
+      return (
+        <View className="gap-2">
+          <Text className="pl-1 text-[12px] text-fg-muted">{batchHeader}</Text>
+          <ToolAccordion event={event} result={pairedResult} />
+        </View>
+      );
     case "tool_result":
       return <ToolResult content={event.result.content} isError={event.result.isError} />;
     case "task_created":

@@ -390,6 +390,11 @@ export default function SessionScreen() {
   const tail = rawEvents[rawEvents.length - 1];
   const workLabel =
     tail?.type === "assistant_message" && tail.streaming ? "Responding…" : "Thinking…";
+  // Turn start = the newest user message; feeds the indicator's elapsed timer.
+  let turnStartTs: string | undefined;
+  for (let i = rawEvents.length - 1; i >= 0; i--) {
+    if (rawEvents[i].type === "user_message") { turnStartTs = rawEvents[i].ts; break; }
+  }
 
   // Permission-mode + reasoning-effort controls (shown on the status bar).
   const modes = modesFor(session.agent);
@@ -522,7 +527,7 @@ export default function SessionScreen() {
               onLongPressEvent={onLongPressEvent}
               onRunCommand={canSteer ? onRunCommand : undefined}
               onAtBottomChange={setAtBottom}
-              footer={running ? <WorkingIndicator agent={session.agent} label={workLabel} /> : undefined}
+              footer={running ? <WorkingIndicator agent={session.agent} label={workLabel} since={turnStartTs} /> : undefined}
             />
             {/* Floating "jump to latest" — appears when scrolled up off the bottom. */}
             {!atBottom ? (
