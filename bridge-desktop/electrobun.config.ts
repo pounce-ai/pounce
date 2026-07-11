@@ -1,10 +1,11 @@
+import { existsSync } from "node:fs";
 import type { ElectrobunConfig } from "electrobun";
 
 export default {
   app: {
     name: "Pounce",
     identifier: "app.pounce.bridge",
-    version: "1.0.12",
+    version: "1.0.20",
   },
   // Auto-update: the app checks this URL on launch and self-updates (tiny BSDIFF
   // deltas, full bundle fallback). GitHub's /releases/latest/download always
@@ -22,6 +23,9 @@ export default {
       mainview: { entrypoint: "src/mainview/index.ts" },
     },
     copy: {
+      // pounce-tunnel (iroh p2p, off-LAN access) — built per-platform by CI
+      // into assets/; absent in plain local dev builds, hence the guard.
+      ...(existsSync("assets/pounce-tunnel") ? { "assets/pounce-tunnel": "views/pounce-tunnel" } : {}),
       "src/mainview/index.html": "views/mainview/index.html",
       "src/mainview/index.css": "views/mainview/index.css",
       "assets/tray.png": "views/tray.png",

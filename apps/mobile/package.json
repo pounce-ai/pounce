@@ -68,7 +68,8 @@
     "tailwind-merge": "^3.6.0",
     "tailwind-variants": "^3.2.2",
     "tailwindcss": "^4.3.1",
-    "uniwind": "^1.9.0"
+    "uniwind": "^1.9.0",
+    "@litter/app": "workspace:*"
   },
   "devDependencies": {
     "@types/jest": "29.5.14",

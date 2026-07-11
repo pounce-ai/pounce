@@ -1,3 +1,8 @@
+> **SUPERSEDED (2026-07-11):** off-LAN access shipped via **pounce-tunnel**
+> (apps/tunnel — iroh p2p byte tunnel + the PounceTunnel Expo module in
+> apps/mobile/modules/pounce-tunnel). This package's direct-dial design below
+> is historical reference only and targets a daemon Pounce no longer uses.
+
 # NitroLitter — native Iroh client (full remote reach)
 
 Goal: let the app talk **directly** to the alleycat daemon over Iroh (P2P, NAT

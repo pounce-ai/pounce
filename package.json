@@ -18,6 +18,8 @@
     "lint": "bun run --filter '*' lint",
     "test": "bun run --filter '*' test",
     "mobile": "bun run --filter @litter/mobile start",
+    "desktop": "cd desktop && bun run start",
+    "desktop:macos": "cd desktop && bun run macos",
     "nitro": "bun run --filter @litter/nitro codegen",
     "bridge": "node apps/bridge/server.mjs",
     "bridge:restart": "pkill -f 'apps/bridge/server.mjs' 2>/dev/null; sleep 1; node apps/bridge/server.mjs",

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "LAN HTTP bridge that proxies the Pounce app to the Iroh-only alleycat daemon via `kittylitter probe`.",
+  "description": "HTTP bridge for the Pounce apps: native agent host (reads sessions from disk, drives agent CLIs) with off-LAN access via the pounce-tunnel iroh p2p tunnel.",
   "bin": {
     "pounce-bridge": "./server.mjs"
   },

@@ -1,0 +1,85 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "jsx": "react-jsx",
+    "moduleResolution": "Bundler",
+    "lib": [
+      "ESNext",
+      "DOM"
+    ],
+    "types": [
+      "react"
+    ],
+    "moduleSuffixes": [
+      ".macos",
+      ""
+    ],
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "expo-router": [
+        "./src/shims/router.tsx"
+      ],
+      "@litter/app/*": [
+        "../packages/app/src/*"
+      ],
+      "@litter/shared": [
+        "../packages/shared/src/index.ts"
+      ],
+      "@litter/runtime": [
+        "../packages/runtime/src/index.ts"
+      ],
+      "@litter/nitro": [
+        "../packages/nitro/src/index.ts"
+      ],
+      "@litter/transcript": [
+        "../packages/transcript/src/index.d.ts"
+      ],
+      "react": [
+        "./node_modules/@types/react"
+      ],
+      "react-native": [
+        "./node_modules/react-native"
+      ],
+      "@react-native-async-storage/async-storage": [
+        "./node_modules/@react-native-async-storage/async-storage"
+      ],
+      "cnfast": [
+        "./node_modules/cnfast"
+      ],
+      "@tanstack/db": [
+        "./node_modules/@tanstack/db"
+      ],
+      "@tanstack/react-db": [
+        "./node_modules/@tanstack/react-db"
+      ],
+      "remend": [
+        "./node_modules/remend"
+      ],
+      "@tanstack/react-query": [
+        "./node_modules/@tanstack/react-query"
+      ],
+      "@legendapp/state": [
+        "./node_modules/@legendapp/state"
+      ],
+      "@legendapp/state/*": [
+        "./node_modules/@legendapp/state/*"
+      ],
+      "@expo/vector-icons": [
+        "./node_modules/@expo/vector-icons"
+      ],
+      "expo-file-system": [
+        "./node_modules/expo-file-system"
+      ]
+    }
+  },
+  "include": [
+    "App.tsx",
+    "index.ts",
+    "src",
+    "declarations.d.ts",
+    "uniwind-types.d.ts"
+  ]
+}

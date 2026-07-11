@@ -2,8 +2,8 @@ import { Tabs } from "expo-router";
 import { Platform, type ColorValue } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
-import { AnimatedTabBar } from "@/motion-tabs";
-import { PouncePopups } from "@/components/TabPopups";
+import { AnimatedTabBar } from "@litter/app/motion-tabs";
+import { PouncePopups } from "@litter/app/components/TabPopups";
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
 const icon =

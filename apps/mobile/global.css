@@ -5,7 +5,7 @@
 /* Let Uniwind compile the Tailwind classes used inside HeroUI Native. */
 @source "../../node_modules/heroui-native/lib";
 @source "./app";
-@source "./src";
+@source "../../packages/app/src";
 
 /* Dark-first: default theme is dark; `.light` opts into the light scheme. */
 @theme {

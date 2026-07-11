@@ -56,6 +56,23 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: bun install
 
+      # pounce-tunnel (apps/tunnel): iroh p2p tunnel for off-LAN access. Built
+      # per-platform and bundled with the app; on first run the shell installs
+      # it to ~/.pounce/bin where the bridge auto-spawns it.
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build pounce-tunnel
+        working-directory: ${{ github.workspace }}/apps/tunnel
+        run: |
+          cargo build --release
+          mkdir -p "${{ github.workspace }}/bridge-desktop/assets"
+          BIN=target/release/pounce-tunnel
+          [ "${{ matrix.slug }}" = "win-x64" ] && BIN=target/release/pounce-tunnel.exe
+          cp "$BIN" "${{ github.workspace }}/bridge-desktop/assets/pounce-tunnel"
+
+      # Notarization rejects any bundled executable without the hardened
+      # runtime, and electrobun only deep-signs what it knows about — sign the
+      # tunnel binary explicitly (below, after the cert import) before packaging.
       - name: Import signing certificate
         if: ${{ matrix.slug == 'macos-arm64' && env.HAS_SIGNING_CERT == 'true' }}
         env:
@@ -78,6 +95,22 @@ jobs:
           if [ -n "$APPLEAPIKEY_P8" ]; then
             echo "$APPLEAPIKEY_P8" | base64 --decode > /tmp/asc_key.p8
           fi
+
+      # Notarization rejects bundled executables without the hardened runtime;
+      # sign the tunnel binary from build.keychain (created above) and pin the
+      # keychain open — it auto-locks after 300s and electrobun signs later too.
+      - name: Sign pounce-tunnel (hardened runtime)
+        if: ${{ matrix.slug == 'macos-arm64' && env.HAS_SIGNING_CERT == 'true' }}
+        env:
+          CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          security unlock-keychain -p "$CERT_PASSWORD" build.keychain
+          security set-keychain-settings build.keychain
+          security find-identity -v -p codesigning build.keychain
+          ID=$(security find-identity -v -p codesigning build.keychain | awk '/[0-9A-F]{40}/ {print $2; exit}')
+          test -n "$ID"
+          codesign --force --options runtime --timestamp --keychain build.keychain --sign "$ID" assets/pounce-tunnel
+          codesign --verify --strict assets/pounce-tunnel
 
       # The signing/notarization env vars are only set on the macOS job; the
       # electrobun config keys code signing off their presence, so Windows and

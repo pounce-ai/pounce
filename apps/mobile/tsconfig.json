@@ -3,17 +3,48 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "moduleResolution": "Bundler",
-    "lib": ["ESNext", "DOM"],
+    "lib": [
+      "ESNext",
+      "DOM"
+    ],
     "composite": false,
-    "types": ["react", "jest"],
+    "types": [
+      "react",
+      "jest"
+    ],
     "paths": {
-      "@/*": ["./src/*"],
-      "@litter/shared": ["../../packages/shared/src/index.ts"],
-      "@litter/runtime": ["../../packages/runtime/src/index.ts"],
-      "@litter/nitro": ["../../packages/nitro/src/index.ts"],
-      "@litter/ui": ["../../packages/ui/src/index.ts"],
-      "@litter/transcript": ["../../packages/transcript/src/index.d.ts"]
+      "@litter/shared": [
+        "../../packages/shared/src/index.ts"
+      ],
+      "@litter/runtime": [
+        "../../packages/runtime/src/index.ts"
+      ],
+      "@litter/nitro": [
+        "../../packages/nitro/src/index.ts"
+      ],
+      "@litter/ui": [
+        "../../packages/ui/src/index.ts"
+      ],
+      "@litter/transcript": [
+        "../../packages/transcript/src/index.d.ts"
+      ],
+      "@litter/app/*": [
+        "../../packages/app/src/*"
+      ]
     }
   },
-  "include": ["app", "src", ".expo/types/**/*.ts", "expo-env.d.ts", "uniwind-types.d.ts"]
+  "include": [
+    "declarations.d.ts",
+    "app",
+    "../../packages/app/src/**/*.ts",
+    "../../packages/app/src/**/*.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts",
+    "uniwind-types.d.ts"
+  ],
+  "exclude": [
+    "../../packages/app/src/**/*.desktop.*",
+    "../../packages/app/src/**/*.macos.*",
+    "../../packages/app/src/**/*.windows.*"
+  ]
 }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- Unsandboxed on purpose: the embedded bridge spawns node/kittylitter,
+         reads agent transcripts (~/.claude), and runs git in user repos. Same
+         posture as the Electrobun tray app; distribute via Developer ID, not
+         the Mac App Store. -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+  </dict>
+</plist>
