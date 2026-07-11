@@ -1,0 +1,6 @@
+{
+  "name": "pounce-tunnel",
+  "version": "0.1.0",
+  "description": "In-app Iroh QUIC loopback proxy to the Pounce bridge (local Expo module; Rust core in apps/tunnel)",
+  "main": "index.ts"
+}

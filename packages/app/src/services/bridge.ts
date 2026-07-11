@@ -100,6 +100,64 @@ async function deviceForHost(hostId: string): Promise<DeviceConfig | null> {
   return (await listDeviceConfigs()).find((d) => d.id === hostId) ?? null;
 }
 
+// --- off-LAN fallback via the in-app Iroh tunnel ------------------------------
+// When the LAN address is unreachable (gym, cellular), the app starts a local
+// loopback proxy that carries HTTP over Iroh QUIC to the paired Mac's
+// pounce-tunnel and swaps the base URL to it. Everything downstream — fetch,
+// SSE, turn streaming — is transport-agnostic once the base is resolved.
+
+// Same key runtime.ts uses for savePairing/loadPairing (duplicated here rather
+// than imported — runtime.ts imports this module, so importing back would cycle).
+const PAIRING_KEY = "litter.pairing";
+
+const effectiveBase = new Map<string, { base: string; until: number }>(); // cfg.url -> resolution
+
+async function probeHealth(base: string, timeoutMs: number): Promise<boolean> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${base}/health`, { signal: ctrl.signal });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The base URL requests should actually use for `cfg`: the LAN address when
+ *  reachable, else the Iroh loopback proxy when a pairing is saved and the
+ *  native tunnel is in this build. Cached briefly so every request doesn't
+ *  re-probe; a failed LAN probe re-checks sooner than a healthy one. */
+export async function bridgeBase(cfg: BridgeConfig): Promise<string> {
+  const hit = effectiveBase.get(cfg.url);
+  if (hit && Date.now() < hit.until) return hit.base;
+  if (await probeHealth(cfg.url, 2500)) {
+    effectiveBase.set(cfg.url, { base: cfg.url, until: Date.now() + 30_000 });
+    return cfg.url;
+  }
+  try {
+    const raw = await SecureStore.getItemAsync(PAIRING_KEY);
+    const pairing = raw ? (JSON.parse(raw) as PairPayload) : null;
+    if (pairing?.nodeId) {
+      const { tunnelAvailable, startTunnel } = await import("./tunnel");
+      if (tunnelAvailable()) {
+        const port = await startTunnel(pairing.nodeId, pairing.relay ?? null, cfg.token);
+        const base = `http://127.0.0.1:${port}`;
+        // Confirm end-to-end (QUIC dial happens on this first request).
+        if (await probeHealth(base, 20_000)) {
+          effectiveBase.set(cfg.url, { base, until: Date.now() + 60_000 });
+          return base;
+        }
+      }
+    }
+  } catch {
+    // fall through to the LAN URL — callers surface their own errors
+  }
+  effectiveBase.set(cfg.url, { base: cfg.url, until: Date.now() + 10_000 });
+  return cfg.url;
+}
+
 // Back-compat single-config helpers (used by older call sites / Settings).
 export async function saveBridgeConfig(cfg: BridgeConfig): Promise<void> {
   await SecureStore.setItemAsync(BRIDGE_KEY, JSON.stringify(cfg));
@@ -119,10 +177,11 @@ async function get<T>(cfg: BridgeConfig, path: string, timeoutMs = 90_000): Prom
   // hangs forever — the pairing/sync spinner then sticks with no error. Abort after
   // `timeoutMs` so callers get a rejection instead. Default is generous for the
   // cold thread-list sync; callers that must fail fast (health check) pass less.
+  const base = await bridgeBase(cfg);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${cfg.url}${path}`, {
+    const res = await fetch(`${base}${path}`, {
       headers: { authorization: `Bearer ${cfg.token}` },
       signal: ctrl.signal,
     });
@@ -264,8 +323,9 @@ async function streamThreadsFromBridge(
   let buf = "";
   let streamError: string | null = null;
   let finished = false;
+  const base = await bridgeBase(cfg);
   await streamTurn(
-    `${cfg.url}/v1/threads/stream`,
+    `${base}/v1/threads/stream`,
     { method: "GET", headers: { authorization: `Bearer ${cfg.token}` } },
     (chunk) => {
       buf += chunk;
@@ -586,7 +646,7 @@ export async function runExec(
   const cfg = await deviceForHost(hostId);
   if (!cfg) return { code: -1, output: "device not found" };
   try {
-    const res = await fetch(`${cfg.url}/v1/exec`, {
+    const res = await fetch(`${await bridgeBase(cfg)}/v1/exec`, {
       method: "POST",
       headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
       body: JSON.stringify({ cwd, command }),
@@ -632,7 +692,7 @@ async function gitPost<T>(hostId: string, path: string, body: object): Promise<T
   const cfg = await deviceForHost(hostId);
   if (!cfg) return null;
   try {
-    const res = await fetch(`${cfg.url}${path}`, {
+    const res = await fetch(`${await bridgeBase(cfg)}${path}`, {
       method: "POST",
       headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -670,7 +730,7 @@ export async function registerPushToken(token: string): Promise<void> {
   await Promise.all(
     configs.map(async (cfg) => {
       try {
-        await fetch(`${cfg.url}/v1/push/register`, {
+        await fetch(`${await bridgeBase(cfg)}/v1/push/register`, {
           method: "POST",
           headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
           body: JSON.stringify({ token }),
@@ -717,7 +777,7 @@ export async function restartDaemon(
   const cfg = await deviceForHost(hostId);
   if (!cfg) return { ok: false };
   try {
-    const res = await fetch(`${cfg.url}/v1/daemon/restart${force ? "?force=1" : ""}`, {
+    const res = await fetch(`${await bridgeBase(cfg)}/v1/daemon/restart${force ? "?force=1" : ""}`, {
       method: "POST",
       headers: { authorization: `Bearer ${cfg.token}` },
     });
@@ -737,7 +797,7 @@ export async function interruptTurn(
   const cfg = await deviceForHost(hostId);
   if (!cfg) return false;
   try {
-    const res = await fetch(`${cfg.url}/v1/turn/interrupt`, {
+    const res = await fetch(`${await bridgeBase(cfg)}/v1/turn/interrupt`, {
       method: "POST",
       headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
       body: JSON.stringify({ agent, threadId }),
@@ -857,7 +917,7 @@ export async function streamLiveMessage(
     return finished;
   };
   await streamTurn(
-    `${cfg.url}/v1/turn/stream`,
+    `${await bridgeBase(cfg)}/v1/turn/stream`,
     {
       headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
       body: JSON.stringify({
@@ -892,6 +952,12 @@ export async function connectBridge(cfg: BridgeConfig): Promise<boolean> {
     await get<{ ok: boolean }>(dev, "/health", 8_000).catch(() => { throw new Error("bridge unreachable"); });
     connection$.demo.set(false);
     connection$.activeHostId.set(dev.id);
+    // Capture the host's off-LAN identity (tunnel nodeId/relay) while we CAN
+    // reach it — bridgeBase needs it later at the gym, when the LAN URL is dead
+    // and /v1/pair is unreachable. Best-effort and non-blocking.
+    void fetchPairing(dev).then(async (p) => {
+      if (p?.nodeId) await SecureStore.setItemAsync(PAIRING_KEY, JSON.stringify(p));
+    }).catch(() => {});
     // Progressive connect: stream threads so the list fills in as pages land.
     // Fall back to the batch sync if the stream path errors (older bridge, etc.).
     await syncLiveDataStreaming().catch(() => syncLiveData().catch(() => {}));

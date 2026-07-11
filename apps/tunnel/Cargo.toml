@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 description = "Iroh p2p tunnel for the Pounce bridge: `serve` accepts authed QUIC streams on the Mac and proxies them to the bridge's HTTP port; `client` exposes a local TCP port that dials the serve side — the same logic the phone embeds via FFI."
 
+[lib]
+name = "pounce_tunnel"
+# staticlib for iOS linking; rlib for the CLI binary and host builds.
+crate-type = ["staticlib", "rlib"]
+
 [dependencies]
 # Same iroh the litter ecosystem runs (see packages/nitro/rust) — proven to
 # hole-punch from the user's real networks.

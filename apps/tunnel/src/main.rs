@@ -15,14 +15,11 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use iroh::endpoint::presets::N0;
-use iroh::{Endpoint, EndpointAddr, EndpointId, RelayUrl, SecretKey};
+use iroh::{Endpoint, SecretKey};
+use pounce_tunnel::{client_listener, ALPN, HELLO_PREFIX};
 use std::path::PathBuf;
-use std::str::FromStr;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
-
-pub const ALPN: &[u8] = b"pounce/tunnel/1";
-const HELLO_PREFIX: &str = "POUNCE1 ";
 
 fn usage() -> ! {
     eprintln!(
@@ -185,70 +182,9 @@ async fn handle_stream(
 // --- client --------------------------------------------------------------------
 
 async fn client(token: &str, node: &str, relay: Option<&str>, listen: &str) -> Result<()> {
-    let endpoint_id = EndpointId::from_str(node).map_err(|e| anyhow!("bad node id: {e}"))?;
-    let endpoint = Endpoint::builder(N0).alpns(vec![ALPN.to_vec()]).bind().await?;
-    let mut addr = EndpointAddr::new(endpoint_id);
-    if let Some(relay) = relay {
-        addr = addr.with_relay_url(RelayUrl::from_str(relay).map_err(|e| anyhow!("bad relay: {e}"))?);
-    }
-
     let listener = TcpListener::bind(listen).await.context("binding local port")?;
     eprintln!("[tunnel] client on {listen} → {node}");
-
-    // One QUIC connection shared by all local sockets; re-dialed on failure.
-    let conn = tokio::sync::Mutex::new(None::<iroh::endpoint::Connection>);
-
-    loop {
-        let (tcp, _) = listener.accept().await?;
-        let stream = {
-            let mut guard = conn.lock().await;
-            let mut attempt = 0;
-            loop {
-                if guard.is_none() {
-                    match endpoint.connect(addr.clone(), ALPN).await {
-                        Ok(c) => *guard = Some(c),
-                        Err(e) => {
-                            attempt += 1;
-                            if attempt >= 3 {
-                                eprintln!("[tunnel] dial failed: {e}");
-                                break None;
-                            }
-                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                            continue;
-                        }
-                    }
-                }
-                match guard.as_ref().unwrap().open_bi().await {
-                    Ok(s) => break Some(s),
-                    Err(_) => *guard = None, // stale connection — re-dial once
-                }
-            }
-        };
-        let Some((mut send, recv)) = stream else { continue };
-        let token = token.to_string();
-        tokio::spawn(async move {
-            let hello = format!("{HELLO_PREFIX}{token}\n");
-            if send.write_all(hello.as_bytes()).await.is_err() {
-                return;
-            }
-            let mut recv = BufReader::new(recv);
-            let mut ack = String::new();
-            if recv.read_line(&mut ack).await.is_err() || ack.trim() != "OK" {
-                eprintln!("[tunnel] auth rejected: {}", ack.trim());
-                return;
-            }
-            let (mut tcp_read, mut tcp_write) = tcp.into_split();
-            let up = async move {
-                tokio::io::copy(&mut tcp_read, &mut send).await.ok();
-                send.finish().ok();
-            };
-            let down = async move {
-                tokio::io::copy(&mut recv, &mut tcp_write).await.ok();
-                tcp_write.shutdown().await.ok();
-            };
-            tokio::join!(up, down);
-        });
-    }
+    client_listener(listener, node, relay, token).await
 }
 
 // --- small helpers (no extra deps) --------------------------------------------

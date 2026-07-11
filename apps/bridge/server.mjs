@@ -1656,8 +1656,23 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { code: r.code, output });
     }
     if (url.pathname === "/v1/pair") {
-      // The daemon's PairPayload (nodeId/relay/token) — lets the app sync
-      // directly (off-LAN) instead of through this bridge.
+      // PairPayload (nodeId/relay/token) for off-LAN access. Native mode:
+      // pounce-tunnel's identity (written to ~/.pounce/tunnel.json at its
+      // startup) + this bridge's own token — the phone dials the tunnel over
+      // Iroh and speaks the same HTTP API through it. Legacy mode: the
+      // kittylitter daemon's pairing for the litter app.
+      if (NATIVE) {
+        try {
+          const info = JSON.parse(readFileSync(path.join(os.homedir(), ".pounce", "tunnel.json"), "utf8"));
+          return send(res, 200, {
+            pairing: info?.nodeId
+              ? { nodeId: info.nodeId, token: TOKEN, hostName: os.hostname().replace(/\.local$/, ""), relay: info.relay || null }
+              : null,
+          });
+        } catch {
+          return send(res, 200, { pairing: null, error: "tunnel not running" });
+        }
+      }
       const inv = klInvocation();
       const r = await exec(inv.cmd, [...inv.prefix, "pair"], undefined, 15_000, KL_ENV);
       const line = (r.out || "").split("\n").find((l) => l.trim().startsWith("{"));
