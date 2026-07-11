@@ -75,9 +75,15 @@ jobs:
       # tunnel binary explicitly before packaging.
       - name: Sign pounce-tunnel (hardened runtime)
         if: ${{ matrix.slug == 'macos-arm64' && env.HAS_SIGNING_CERT == 'true' }}
-        env:
-          IDENTITY: ${{ secrets.ELECTROBUN_DEVELOPER_ID }}
-        run: codesign --force --options runtime --timestamp --sign "$IDENTITY" assets/pounce-tunnel
+        run: |
+          # The cert lives in build.keychain (imported above); put it on the
+          # search list and resolve the identity hash from the keychain itself —
+          # signing by name fails with "item could not be found in the keychain".
+          security list-keychains -d user -s build.keychain login.keychain
+          ID=$(security find-identity -v -p codesigning build.keychain | awk 'NR==1 {print $2}')
+          test -n "$ID"
+          codesign --force --options runtime --timestamp --keychain build.keychain --sign "$ID" assets/pounce-tunnel
+          codesign --verify --strict assets/pounce-tunnel
 
       - name: Import signing certificate
         if: ${{ matrix.slug == 'macos-arm64' && env.HAS_SIGNING_CERT == 'true' }}
