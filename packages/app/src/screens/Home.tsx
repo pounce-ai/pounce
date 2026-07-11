@@ -80,7 +80,17 @@ export default function HomeScreen() {
   const loading = status === "connecting" || status === "reconnecting";
 
   // Reactive inputs from the react-db collections + the Legend filter singleton.
-  const f = useSelector(() => filters$.get());
+  // Derive a FRESH object inside the selector — `filters$.get()` returns the
+  // same mutated reference on every change, so the rows useMemo below never
+  // saw its `f` dependency change and the list silently stopped filtering
+  // (see memory: legend-state object-selector gotcha).
+  const f = useSelector(() => ({
+    device: filters$.device.get(),
+    agent: filters$.agent.get(),
+    repos: filters$.repos.get(),
+    needsOnly: filters$.needsOnly.get(),
+    favOnly: filters$.favOnly.get(),
+  }));
   const rawThreads = useThreads();
   const projectList = useProjects();
   const deviceMap = useDevicesById();
@@ -88,7 +98,9 @@ export default function HomeScreen() {
   const favR = useFavRepoSet();
   const ignored = useIgnoredSet();
   useDeviceOverrides(); // subscribe so header glyphs refresh on rename/emoji
-  const collapsedMap = useSelector(() => collapsed$.get());
+  // Same identity gotcha as `f` above: spread to a fresh object so the rows
+  // memo re-runs when a folder is collapsed/expanded.
+  const collapsedMap = useSelector(() => ({ ...collapsed$.get() }));
 
   // Grouped rows, memoized to a STABLE value that only recomputes when the data
   // that feeds it changes. An unrelated re-render (e.g. a connection-status flip)
