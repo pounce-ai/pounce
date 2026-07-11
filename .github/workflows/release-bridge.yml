@@ -70,6 +70,15 @@ jobs:
           [ "${{ matrix.slug }}" = "win-x64" ] && BIN=target/release/pounce-tunnel.exe
           cp "$BIN" "${{ github.workspace }}/bridge-desktop/assets/pounce-tunnel"
 
+      # Notarization rejects any bundled executable without the hardened
+      # runtime, and electrobun only deep-signs what it knows about — sign the
+      # tunnel binary explicitly before packaging.
+      - name: Sign pounce-tunnel (hardened runtime)
+        if: ${{ matrix.slug == 'macos-arm64' && env.HAS_SIGNING_CERT == 'true' }}
+        env:
+          IDENTITY: ${{ secrets.ELECTROBUN_DEVELOPER_ID }}
+        run: codesign --force --options runtime --timestamp --sign "$IDENTITY" assets/pounce-tunnel
+
       - name: Import signing certificate
         if: ${{ matrix.slug == 'macos-arm64' && env.HAS_SIGNING_CERT == 'true' }}
         env:

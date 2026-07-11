@@ -6,10 +6,11 @@
 **/node_modules
 **/.expo
 apps/tunnel/target
-apps/mobile/ios/Pods
-apps/mobile/ios/build
-apps/mobile/android/build
-apps/mobile/android/.gradle
+# Exclude the local prebuild output entirely: with ios/ present EAS treats the
+# project as bare workflow (rejecting runtimeVersion policies) — cloud prebuild
+# regenerates it and autolinks modules/pounce-tunnel like builds 1-16 did.
+apps/mobile/ios
+apps/mobile/android
 bridge-desktop/build
 bridge-desktop/server
 desktop/macos/build

@@ -207,7 +207,8 @@ fn getrandom(buf: &mut [u8]) -> Result<()> {
     }
     #[cfg(not(unix))]
     {
-        buf.copy_from_slice(&SecretKey::generate(&mut rand::rng()).to_bytes());
+        use rand::RngCore;
+        rand::rng().fill_bytes(buf);
         Ok(())
     }
 }
