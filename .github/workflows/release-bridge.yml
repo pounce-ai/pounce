@@ -72,25 +72,7 @@ jobs:
 
       # Notarization rejects any bundled executable without the hardened
       # runtime, and electrobun only deep-signs what it knows about — sign the
-      # tunnel binary explicitly before packaging.
-      - name: Sign pounce-tunnel (hardened runtime)
-        if: ${{ matrix.slug == 'macos-arm64' && env.HAS_SIGNING_CERT == 'true' }}
-        env:
-          CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
-        run: |
-          # Keychains auto-lock after 300s; the Rust build above outlasts that,
-          # so re-unlock and disable the timeout (this also protects electrobun's
-          # own signing later in the job). Resolve the identity hash from the
-          # keychain — signing by display name can't see build.keychain.
-          security list-keychains -d user -s build.keychain login.keychain
-          security unlock-keychain -p "$CERT_PASSWORD" build.keychain
-          security set-keychain-settings build.keychain
-          security find-identity -v -p codesigning build.keychain
-          ID=$(security find-identity -v -p codesigning build.keychain | awk '/[0-9A-F]{40}/ {print $2; exit}')
-          test -n "$ID"
-          codesign --force --options runtime --timestamp --keychain build.keychain --sign "$ID" assets/pounce-tunnel
-          codesign --verify --strict assets/pounce-tunnel
-
+      # tunnel binary explicitly (below, after the cert import) before packaging.
       - name: Import signing certificate
         if: ${{ matrix.slug == 'macos-arm64' && env.HAS_SIGNING_CERT == 'true' }}
         env:
@@ -113,6 +95,22 @@ jobs:
           if [ -n "$APPLEAPIKEY_P8" ]; then
             echo "$APPLEAPIKEY_P8" | base64 --decode > /tmp/asc_key.p8
           fi
+
+      # Notarization rejects bundled executables without the hardened runtime;
+      # sign the tunnel binary from build.keychain (created above) and pin the
+      # keychain open — it auto-locks after 300s and electrobun signs later too.
+      - name: Sign pounce-tunnel (hardened runtime)
+        if: ${{ matrix.slug == 'macos-arm64' && env.HAS_SIGNING_CERT == 'true' }}
+        env:
+          CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          security unlock-keychain -p "$CERT_PASSWORD" build.keychain
+          security set-keychain-settings build.keychain
+          security find-identity -v -p codesigning build.keychain
+          ID=$(security find-identity -v -p codesigning build.keychain | awk '/[0-9A-F]{40}/ {print $2; exit}')
+          test -n "$ID"
+          codesign --force --options runtime --timestamp --keychain build.keychain --sign "$ID" assets/pounce-tunnel
+          codesign --verify --strict assets/pounce-tunnel
 
       # The signing/notarization env vars are only set on the macOS job; the
       # electrobun config keys code signing off their presence, so Windows and
