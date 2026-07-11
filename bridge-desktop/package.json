@@ -1,7 +1,7 @@
 {
   "name": "pounce-bridge-app",
   "private": true,
-  "version": "1.0.13",
+  "version": "1.0.14",
   "type": "module",
   "description": "Pounce — a tiny double-click desktop app that runs the bridge and shows a pairing QR.",
   "scripts": {
