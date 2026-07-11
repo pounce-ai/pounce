@@ -18,7 +18,7 @@ async function streamingFetch(): Promise<typeof fetch> {
 export async function streamTurn(
   url: string,
   opts: { method?: "GET" | "POST"; headers: Record<string, string>; body?: string },
-  onChunk: (text: string) => void,
+  onChunk: (text: string) => boolean | void,
 ): Promise<void> {
   const f = await streamingFetch();
   const res = await f(url, { method: opts.method ?? "POST", headers: opts.headers, body: opts.body });
@@ -28,6 +28,13 @@ export async function streamTurn(
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    onChunk(dec.decode(value, { stream: true }));
+    // A truthy return means the caller saw its terminal SSE frame — stop
+    // reading NOW. When the server already closed (the native bridge answers
+    // in one burst), nitro-fetch may never signal `done`, so waiting for it
+    // hangs the await forever (seen: pairing spinner stuck on connect).
+    if (onChunk(dec.decode(value, { stream: true }))) {
+      await reader.cancel().catch(() => {});
+      break;
+    }
   }
 }

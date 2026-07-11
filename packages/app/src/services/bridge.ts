@@ -263,6 +263,7 @@ async function streamThreadsFromBridge(
 ): Promise<void> {
   let buf = "";
   let streamError: string | null = null;
+  let finished = false;
   await streamTurn(
     `${cfg.url}/v1/threads/stream`,
     { method: "GET", headers: { authorization: `Bearer ${cfg.token}` } },
@@ -282,7 +283,11 @@ async function streamThreadsFromBridge(
         }
         if (d?.threads?.length) onBatch(d.threads);
         if (d?.error) streamError = d.error;
+        if (d?.done || d?.error) finished = true;
       }
+      // Terminal frame seen → tell the seam to stop reading; a fast bridge
+      // closes before the reader ever reports `done`, which hung connect.
+      return finished;
     },
   );
   if (streamError) throw new Error(streamError);
@@ -826,6 +831,7 @@ export async function streamLiveMessage(
   if (!cfg) throw new Error("device not found");
   let buf = "";
   let realThreadId: string | null = threadId;
+  let finished = false;
   const parseFrames = (chunk: string) => {
     buf += chunk;
     let idx: number;
@@ -841,9 +847,14 @@ export async function streamLiveMessage(
           threadId?: string;
         };
         if (data.event) onEvent(data.event);
-        if (data.done && data.threadId) realThreadId = data.threadId;
+        if (data.done) {
+          if (data.threadId) realThreadId = data.threadId;
+          finished = true;
+        }
       } catch {}
     }
+    // Stop the seam once the turn's terminal frame lands (see streamTurn).
+    return finished;
   };
   await streamTurn(
     `${cfg.url}/v1/turn/stream`,

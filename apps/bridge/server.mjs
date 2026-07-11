@@ -28,8 +28,15 @@ import { pathToFileURL } from "node:url";
 import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import { parseUserMessage, stripNoise } from "@litter/transcript";
+import { createHost } from "./agents/host.mjs";
 
 const IS_WIN = process.platform === "win32";
+
+// Native agent host: read sessions from disk and drive agent CLIs directly
+// instead of probing the (memory-leaking) kittylitter daemon. Default-on;
+// BRIDGE_NATIVE_AGENTS=0 falls back to the daemon path (rollback lever until
+// the kittylitter code is deleted for good).
+const NATIVE = process.env.BRIDGE_NATIVE_AGENTS !== "0";
 
 const PORT = Number(process.env.BRIDGE_PORT || 8099);
 // How often the background watcher polls for state transitions to push.
@@ -39,6 +46,7 @@ const TOKEN = process.env.BRIDGE_TOKEN || "pounce-bridge-local";
 // desktop shell passes it to startBridge() from its package.json; env is the
 // fallback for standalone `node server.mjs` runs.
 let APP_VERSION = process.env.BRIDGE_APP_VERSION || null;
+const host = NATIVE ? createHost({ version: () => APP_VERSION }) : null;
 // Kittylitter invocation resolver. A GUI-launched app inherits a minimal PATH
 // and the npx cache hash rotates whenever the cache is cleared/re-fetched, so we
 // must NOT freeze a path at import. (That was the bug: resolve once → the daemon
@@ -183,6 +191,12 @@ export function kittylitterPath() {
 
 const CACHE_MS = 20_000;
 const cache = new Map(); // key -> { at, value }
+// Expired entries linger forever otherwise (per-thread act:/usage: keys add up
+// over weeks of uptime). Every TTL in this file is ≤5min, so 15min is safely dead.
+setInterval(() => {
+  const cutoff = Date.now() - 15 * 60_000;
+  for (const [k, v] of cache) if (v.at < cutoff) cache.delete(k);
+}, 10 * 60_000).unref();
 
 /** Extract every balanced-brace JSON object from probe's verbose stdout. */
 function extractJsonObjects(text) {
@@ -273,6 +287,7 @@ async function cached(key, ttl, fn) {
 async function getAgents(fresh = false) {
   if (fresh) cache.delete("agents");
   return cached("agents", CACHE_MS, async () => {
+    if (NATIVE) return host.getAgents();
     const frames = await probe(["--linger-secs", "1", "--timeout-secs", "20"]);
     const f = frames.find((x) => Array.isArray(x.agents));
     return (f?.agents || []).map((a) => ({
@@ -676,6 +691,32 @@ async function probePaginated(agent, method, mapItem, { max = 60, pageSize, onPa
 }
 
 async function listThreads(agent, onPage) {
+  if (NATIVE) {
+    // Adapter metas carry preview already cleaned; shape + repo-fold here so the
+    // thread objects are byte-compatible with the probe path's.
+    const metas = await host.listThreads(agent).catch(() => []);
+    const out = metas.map((m) => {
+      const info = repoInfo(m.cwd || "");
+      return {
+        id: m.id,
+        agent,
+        cwd: m.cwd || null,
+        name: m.name || null,
+        preview: m.preview ?? null,
+        createdAt: m.createdAt || null,
+        gitBranch: m.gitBranch || null,
+        modelProvider: m.modelProvider || null,
+        repo: info.repo,
+        worktree: info.worktree,
+        isWorktree: info.isWorktree,
+        isLive: info.isLive,
+      };
+    });
+    if (onPage) {
+      for (let i = 0; i < out.length; i += 100) await onPage(out.slice(i, i + 100));
+    }
+    return out;
+  }
   // ~25/page — following the cursor is essential or a machine's older/recent
   // sessions silently vanish from the app. Guard ~1500 threads (60 pages).
   return probePaginated(agent, "thread/list", (t) => {
@@ -766,7 +807,7 @@ function enrichThreadActivity(threads) {
 }
 
 function status() {
-  return cached("status", CACHE_MS, () => runStatus(false));
+  return cached("status", CACHE_MS, () => (NATIVE ? host.status() : runStatus(false)));
 }
 function runStatus(_retried) {
   return new Promise((resolve) => {
@@ -868,6 +909,11 @@ function tturn(t) {
  * Re-reading is more robust than parsing the streaming notifications.
  */
 async function runTurn(agent, threadId, text) {
+  if (NATIVE) {
+    const realId = await host.startTurn(agent, { threadId, text }).done;
+    cache.delete("threads");
+    return getMessages(agent, realId || threadId, true);
+  }
   await probe(
     ["--agent", agent,
      "--before-method", "thread/resume", "--before-params", JSON.stringify({ threadId }),
@@ -918,6 +964,7 @@ function makeObjectStream() {
  * best-effort (`turn/interrupt`) — adjust if the daemon names it differently.
  */
 function interruptTurn(agent, threadId) {
+  if (NATIVE) return Promise.resolve(host.interrupt(agent, threadId));
   return new Promise((resolve) => {
     const p = klSpawn(
       ["probe", "--agent", agent, "--method", "turn/interrupt",
@@ -930,6 +977,12 @@ function interruptTurn(agent, threadId) {
 }
 
 function streamTurn(agent, threadId, text, cwd, onEvent, onDone, opts = {}) {
+  if (NATIVE) {
+    const t = host.startTurn(agent, { threadId, text, cwd, ...opts }, onEvent);
+    // host.startTurn's done never rejects and resolves exactly once.
+    void t.done.then((realId) => onDone(realId || threadId));
+    return () => t.stop();
+  }
   // Fresh thread (new conversation) when no resumable threadId: start in `cwd`.
   // Otherwise resume the existing daemon thread.
   const fresh = !threadId || !/^[0-9a-f]{8}-/i.test(threadId);
@@ -1058,6 +1111,9 @@ const msgKey = (agent, threadId) => `msg:${agent}:${threadId}`;
 const MSG_CACHE_MS = 60_000;
 
 async function getMessages(agent, threadId, fresh = false, limit) {
+  // Native: the host keeps parsed histories in a hard-capped LRU that the fs
+  // watcher invalidates the moment a transcript changes — no TTL map entries.
+  if (NATIVE) return host.getEvents(agent, threadId, { limit, fresh });
   // `limit` returns just the last N turns (honored by the daemon) — used for the
   // instant first paint of a thread before the full history backfills, so opening
   // a multi-million-token conversation isn't gated on loading all of it.
@@ -1166,6 +1222,7 @@ function getUsage(agent, thread, cwd) {
 const MODELS_CACHE_MS = 300_000;
 
 function getModels(agent) {
+  if (NATIVE) return cached(`models:${agent}`, MODELS_CACHE_MS, () => host.listModels(agent));
   return cached(`models:${agent}`, MODELS_CACHE_MS, () =>
     probePaginated(agent, "model/list", (m) => {
       if (m?.hidden === true) return null;
@@ -1246,6 +1303,8 @@ function deriveActivity(turns) {
 function threadActivity(agent, threadId) {
   return cached(`act:${threadId}`, CACHE_MS, async () => {
     try {
+      // Native: a live-child check plus one 64KB tail read — near-free.
+      if (NATIVE) return await host.getActivity(agent, threadId);
       // Only the latest turn's state is needed — fetch just that (limit:1) so
       // enrichment never loads a huge thread's full history into memory.
       return deriveActivity(await fetchTurns(agent, threadId, 1));
@@ -1491,6 +1550,7 @@ const server = http.createServer(async (req, res) => {
   const auth = req.headers.authorization?.replace(/^Bearer\s+/i, "") || url.searchParams.get("token");
   if (auth !== TOKEN) return send(res, 401, { error: "unauthorized" });
   lastClientSeen = Date.now();
+  if (process.env.BRIDGE_DEBUG) console.log(`[req] ${req.method} ${url.pathname}${url.search}`);
 
   try {
     if (url.pathname === "/v1/agents") return send(res, 200, { agents: await getAgents(url.searchParams.get("fresh") === "1") });
@@ -1761,7 +1821,7 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
       if (!quiet) {
         console.log(`Pounce Bridge listening on ${pairUrl}`);
         console.log(`  token: ${TOKEN}`);
-        console.log(`  kittylitter: ${klDisplay()}`);
+        console.log(NATIVE ? "  agents: native host (BRIDGE_NATIVE_AGENTS=1)" : `  kittylitter: ${klDisplay()}`);
         console.log("\n  📲 Scan with your iPhone Camera to pair Pounce:\n");
         qrcode.generate(deepLink, { small: true });
         console.log(`\n  …or open this link on the device:\n  ${deepLink}\n`);
@@ -1775,11 +1835,16 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
       };
       warm();
       setInterval(() => { if (Date.now() - lastClientSeen < 90_000) warm(); }, 15_000);
-      // Keep the daemon's index fresh on its own — restart it when it falls behind
-      // and nothing is busy, so recent threads surface without manual action.
-      setInterval(() => { void maybeAutoRestartDaemon().catch(() => {}); }, AUTORESTART_EVERY_MS);
-      // …and keep its memory in check (third-party leak under probe load).
-      setInterval(() => { void maybeRestartBloatedDaemon().catch(() => {}); }, AUTORESTART_EVERY_MS);
+      // Daemon babysitting is only needed while the bridge still depends on it.
+      // Native mode never probes the daemon: its index can't fall behind (fs.watch)
+      // and its memory leak isn't fed, so both watchdogs stand down.
+      if (!NATIVE) {
+        // Keep the daemon's index fresh on its own — restart it when it falls behind
+        // and nothing is busy, so recent threads surface without manual action.
+        setInterval(() => { void maybeAutoRestartDaemon().catch(() => {}); }, AUTORESTART_EVERY_MS);
+        // …and keep its memory in check (third-party leak under probe load).
+        setInterval(() => { void maybeRestartBloatedDaemon().catch(() => {}); }, AUTORESTART_EVERY_MS);
+      }
 
       setTimeout(watchTick, WATCH_MS);
       resolve({ server, token: TOKEN, kittylitter: klDisplay(), ...PAIR });

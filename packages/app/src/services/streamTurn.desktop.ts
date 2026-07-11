@@ -8,7 +8,7 @@
 export function streamTurn(
   url: string,
   opts: { method?: "GET" | "POST"; headers: Record<string, string>; body?: string },
-  onChunk: (text: string) => void,
+  onChunk: (text: string) => boolean | void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -16,8 +16,14 @@ export function streamTurn(
     const drain = () => {
       const text = xhr.responseText ?? "";
       if (text.length > seen) {
-        onChunk(text.slice(seen));
+        // Truthy return = caller saw its terminal frame; settle now instead of
+        // waiting for onload (mirrors the mobile seam's early-stop contract).
+        const stop = onChunk(text.slice(seen));
         seen = text.length;
+        if (stop) {
+          resolve();
+          try { xhr.abort(); } catch { /* already settled */ }
+        }
       }
     };
     xhr.open(opts.method ?? "POST", url);
