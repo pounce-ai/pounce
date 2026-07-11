@@ -19,7 +19,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.pounce.app",
-      "buildNumber": "16",
+      "buildNumber": "17",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSLocalNetworkUsageDescription": "Pounce connects to the alleycat host running on your local network to load your projects and conversations.",
