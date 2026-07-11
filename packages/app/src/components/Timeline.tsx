@@ -220,7 +220,9 @@ function CommandChip({ name, args }: { name: string; args?: string }) {
       <View className="max-w-[86%] flex-row items-center gap-1.5 rounded-full border border-accent/40 bg-accent/15 px-3 py-1.5">
         <Text className="font-mono text-[13px] font-semibold text-accent">{name}</Text>
         {args ? (
-          <Text numberOfLines={1} className="font-mono text-[12px] text-fg-muted">
+          // flexShrink so long args truncate INSIDE the pill instead of pushing
+          // the row past its max-width (text was bleeding out of the bubble).
+          <Text numberOfLines={1} style={{ flexShrink: 1 }} className="font-mono text-[12px] text-fg-muted">
             {args}
           </Text>
         ) : null}

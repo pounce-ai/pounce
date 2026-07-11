@@ -1,4 +1,5 @@
-import { Modal, Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
+import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
+import { Modal } from "./AppModal";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { cleanAssistantText, parseUserMessage } from "@litter/transcript";

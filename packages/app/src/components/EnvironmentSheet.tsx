@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useState } from "react";
-import { Modal, Pressable, Text, View } from "react-native";
+import { Modal } from "./AppModal";
+import { Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@litter/shared";

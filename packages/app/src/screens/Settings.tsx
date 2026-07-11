@@ -1,6 +1,7 @@
 import type { ComponentType, ReactNode } from "react";
+import { Modal } from "../components/AppModal";
 import { Component, useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";

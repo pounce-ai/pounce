@@ -1,7 +1,7 @@
 import { type ReactNode, useMemo, useState } from "react";
+import { Modal } from "./AppModal";
 import {
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,

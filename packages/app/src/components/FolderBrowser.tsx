@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { Modal } from "./AppModal";
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { browseDirs, type DirEntry, type DirListing } from "../services/bridge";

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { Modal } from "./AppModal";
 import {
   ActivityIndicator,
-  Modal,
   Pressable,
   ScrollView,
   Text,
