@@ -2,7 +2,7 @@
 # Cross-compile pounce-tunnel's staticlib and package it as a static-framework
 # xcframework (CocoaPods links framework xcframeworks reliably; bare static-lib
 # ones it silently skips — same lesson as packages/nitro/rust/build-ios.sh).
-# Output: ../mobile/modules/pounce-tunnel/ios/PounceTunnel.xcframework
+# Output: ../mobile/modules/pounce-tunnel/ios/PounceTunnelCore.xcframework
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -11,7 +11,7 @@ cd "$(dirname "$0")"
 export PATH="$HOME/.cargo/bin:$PATH"
 
 LIBNAME=libpounce_tunnel.a
-OUT=../mobile/modules/pounce-tunnel/ios/PounceTunnel.xcframework
+OUT=../mobile/modules/pounce-tunnel/ios/PounceTunnelCore.xcframework
 TMP=$(mktemp -d)
 
 for t in aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios; do
@@ -27,18 +27,18 @@ lipo -create \
 
 wrap_framework() { # $1 = static lib, $2 = dest dir
   local lib="$1" dir="$2"
-  local fw="$dir/PounceTunnel.framework"
+  local fw="$dir/PounceTunnelCore.framework"
   mkdir -p "$fw/Headers" "$fw/Modules"
-  cp "$lib" "$fw/PounceTunnel"
+  cp "$lib" "$fw/PounceTunnelCore"
   cp include/pounce_tunnel.h "$fw/Headers/"
-  printf 'framework module PounceTunnel {\n  umbrella header "pounce_tunnel.h"\n  export *\n}\n' > "$fw/Modules/module.modulemap"
+  printf 'framework module PounceTunnelCore {\n  umbrella header "pounce_tunnel.h"\n  export *\n}\n' > "$fw/Modules/module.modulemap"
   cat > "$fw/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleIdentifier</key><string>com.pounce.PounceTunnel</string>
-<key>CFBundleName</key><string>PounceTunnel</string>
-<key>CFBundleExecutable</key><string>PounceTunnel</string>
+<key>CFBundleIdentifier</key><string>com.pounce.PounceTunnelCore</string>
+<key>CFBundleName</key><string>PounceTunnelCore</string>
+<key>CFBundleExecutable</key><string>PounceTunnelCore</string>
 <key>CFBundlePackageType</key><string>FMWK</string>
 <key>MinimumOSVersion</key><string>16.0</string>
 <key>CFBundleVersion</key><string>1</string>
@@ -53,8 +53,8 @@ wrap_framework target/sim-universal/$LIBNAME "$TMP/sim"
 rm -rf "$OUT"
 mkdir -p "$(dirname "$OUT")"
 xcodebuild -create-xcframework \
-  -framework "$TMP/device/PounceTunnel.framework" \
-  -framework "$TMP/sim/PounceTunnel.framework" \
+  -framework "$TMP/device/PounceTunnelCore.framework" \
+  -framework "$TMP/sim/PounceTunnelCore.framework" \
   -output "$OUT"
 rm -rf "$TMP"
 

@@ -1862,10 +1862,46 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
       }
 
       setTimeout(watchTick, WATCH_MS);
+      if (NATIVE) ensureTunnel();
       resolve({ server, token: TOKEN, kittylitter: klDisplay(), ...PAIR });
     });
   });
 }
+
+// --- pounce-tunnel (off-LAN access) -------------------------------------------
+// The Rust tunnel (apps/tunnel) accepts Iroh QUIC streams from the phone and
+// proxies them to this bridge, so the app works from anywhere. Its identity
+// lands in ~/.pounce/tunnel.json, which /v1/pair serves. Best-effort: no
+// binary → LAN-only, exactly as before.
+function tunnelBinary() {
+  const candidates = [
+    process.env.POUNCE_TUNNEL_BIN,
+    path.join(os.homedir(), ".pounce", "bin", "pounce-tunnel"),
+  ].filter(Boolean);
+  return candidates.find((p) => existsSync(p)) || null;
+}
+
+let tunnelChild = null;
+let tunnelBackoffMs = 1000;
+function ensureTunnel() {
+  if (tunnelChild) return;
+  const bin = tunnelBinary();
+  if (!bin) return; // no tunnel installed — LAN-only
+  try {
+    tunnelChild = spawn(bin, ["serve", "--token", TOKEN, "--target", `127.0.0.1:${PORT}`],
+      { stdio: ["ignore", "ignore", "ignore"], windowsHide: true });
+    tunnelChild.on("close", () => {
+      tunnelChild = null;
+      // Respawn with backoff — a crashing tunnel must not loop hot.
+      setTimeout(ensureTunnel, Math.min(tunnelBackoffMs *= 2, 60_000)).unref();
+    });
+    tunnelChild.on("spawn", () => { tunnelBackoffMs = 1000; });
+    console.log(`[tunnel] started ${bin}`);
+  } catch {
+    tunnelChild = null;
+  }
+}
+process.on("exit", () => { try { tunnelChild?.kill("SIGTERM"); } catch {} });
 
 // When run directly (node server.mjs / the pounce-bridge bin), start immediately
 // with the console QR. When imported (desktop app), the caller starts it.

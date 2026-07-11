@@ -1,5 +1,7 @@
 import ExpoModulesCore
-import PounceTunnel
+// The Rust core framework — named distinctly from this pod's own Swift module
+// (both "PounceTunnel" would shadow the C symbols).
+import PounceTunnelCore
 
 public class PounceTunnelModule: Module {
   public func definition() -> ModuleDefinition {

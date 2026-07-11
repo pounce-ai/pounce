@@ -15,6 +15,6 @@ Pod::Spec.new do |s|
   s.source_files   = '*.swift'
   # Rust staticlib (apps/tunnel) wrapped as a static-framework xcframework —
   # rebuild with apps/tunnel/build-ios.sh after Rust changes.
-  s.vendored_frameworks = 'PounceTunnel.xcframework'
+  s.vendored_frameworks = 'PounceTunnelCore.xcframework'
   s.dependency 'ExpoModulesCore'
 end
