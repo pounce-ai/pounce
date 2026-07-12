@@ -71,6 +71,19 @@ static void PounceStartBridge(void)
 // @generated begin expo-desktop-window-title - expo prebuild (DO NOT MODIFY) sync-9fba3e468db8e9a5641169b506a34de62335cbd3
   self.window.title = @"Pounce";
 // @generated end expo-desktop-window-title
+
+  // Pounce is a dark-themed app (#0B0B0F). Until the React root mounts — which
+  // in Debug means downloading the ~10MB dev bundle from Metro — the window
+  // shows react-native-macos's default LIGHT-grey loading view ("Loading from
+  // Metro…"), which looks off-brand. Force the window into dark appearance and
+  // paint its background/content in the app's background color so the pre-mount
+  // state matches the app. (Release loads the embedded bundle near-instantly,
+  // but this keeps the dev window consistent too.)
+  NSColor *bg = [NSColor colorWithSRGBRed:0x0B / 255.0 green:0x0B / 255.0 blue:0x0F / 255.0 alpha:1.0];
+  self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+  self.window.backgroundColor = bg;
+  self.window.contentView.wantsLayer = YES;
+  self.window.contentView.layer.backgroundColor = bg.CGColor;
 }
 
 - (NSURL *)sourceURLForBridge:(RCTBridge *)bridge
