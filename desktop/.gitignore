@@ -42,3 +42,8 @@ yarn-error.*
 
 # expo-desktop child process debug logs
 expo-desktop-spawn-debug*.log
+
+# local release artifacts (built on demand, never committed)
+macos/Pounce.dmg
+macos/build-release/
+macos/dmg-stage/
