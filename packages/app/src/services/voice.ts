@@ -24,6 +24,20 @@ export interface Dictation {
 export type VoiceErrorKind = "permission" | "unavailable" | "error";
 
 /**
+ * Whether dictation can run at all — the UI hides the mic when it can't (an
+ * old build / Expo Go without the native module). Side-effect-free: it never
+ * prompts for permission (that happens at {@link startDictation} time), just
+ * checks the native module is linked and callable.
+ */
+export async function isVoiceAvailable(): Promise<boolean> {
+  try {
+    return typeof ExpoSpeechRecognitionModule?.start === "function";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Continuous dictation for text input: streams the growing transcript through
  * `onPartial` so the field fills as you speak, keeps listening until you stop
  * (or the engine ends on a long silence), then delivers `onFinal`. Returns a

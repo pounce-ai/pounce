@@ -19,7 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import type { AgentCapabilities, RunImage } from "@litter/shared";
 import { SLASH_COMMANDS } from "../ui/agent-meta";
 import { fetchFiles, type RepoEntry } from "../services/bridge";
-import { startDictation, type Dictation } from "../services/voice";
+import { isVoiceAvailable, startDictation, type Dictation } from "../services/voice";
 import { AgentLogo, cn, COLOR } from "../ui";
 
 const MENTION_RE = /((?:^|\s))@([^\s@]*)$/;
@@ -140,6 +140,16 @@ export function Composer({
   // the user controls (tap to start, tap to stop). Base text is preserved so
   // dictation appends to whatever is already typed.
   const [listening, setListening] = useState(false);
+  // Hide the mic entirely where dictation can't run (desktop: no
+  // expo-speech-recognition macOS/Windows build) instead of showing a button
+  // that only ever errors. Assume available until the async probe says otherwise
+  // so mobile's mic never flickers in.
+  const [voiceAvailable, setVoiceAvailable] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    isVoiceAvailable().then((ok) => alive && setVoiceAvailable(ok)).catch(() => alive && setVoiceAvailable(false));
+    return () => { alive = false; };
+  }, []);
   const dictationRef = useRef<Dictation | null>(null);
   const voiceBaseRef = useRef("");
   const toggleVoice = async () => {
@@ -442,7 +452,7 @@ export function Composer({
 
           <View className="flex-1" />
 
-          {!disabled ? <MicButton listening={listening} onPress={toggleVoice} /> : null}
+          {!disabled && voiceAvailable ? <MicButton listening={listening} onPress={toggleVoice} /> : null}
           {showStop ? (
             <Pressable
               onPress={onStop}
