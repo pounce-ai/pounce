@@ -21,7 +21,7 @@ import {
   userMessage, thinking, assistantMessage, toolCall, toolResult, systemEvent,
   readTailLines, patchFromStructured, contentText,
 } from "./events.mjs";
-import { agentEnv, binVersion } from "./env.mjs";
+import { agentEnv, binVersion, binPath } from "./env.mjs";
 
 const ROOT = path.join(os.homedir(), ".claude", "projects");
 // Claude Code's permission-mode names → the app's canonical PermissionMode.
@@ -330,7 +330,7 @@ export class ClaudeAdapter {
     if (!dir) dir = os.homedir();
     let child;
     try {
-      child = spawn("claude", args, { cwd: dir, env: agentEnv(), stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+      child = spawn(binPath("claude"), args, { cwd: dir, env: agentEnv(), stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     } catch (e) {
       return failedTurn(sessionId, String(e?.message || e), onEvent);
     }

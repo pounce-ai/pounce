@@ -11,15 +11,13 @@ import { useSelector } from "@legendapp/state/react";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@litter/shared";
-import { connection$, filters$ } from "@litter/app/state/stores";
-import { useDevices, useProjectNames, useThreads } from "@litter/app/state/db/hooks";
+import { applyFilters, connection$, filters$, needsYou } from "@litter/app/state/stores";
+import { useDevices, useIgnoredSet, useProjectNames, useThreads } from "@litter/app/state/db/hooks";
 import { SessionListSkeleton } from "@litter/app/components/Skeleton";
 import { RecentStrip } from "@litter/app/components/RecentStrip";
+import { FilterButton, FilterSheet } from "@litter/app/components/FilterSheet";
 import { ActivityDot, AgentLogo, cn, COLOR, INPUT_TWEAKS, timeAgo } from "@litter/app/ui";
 import { nav$ } from "../shims/router";
-
-const needsYou = (s: Session) =>
-  s.needsAttention || s.activity === "failed" || s.activity === "awaiting_input";
 
 type Row =
   | { type: "header"; repoId: string; name: string; count: number; attention: number; collapsed: boolean }
@@ -36,6 +34,7 @@ function rank(s: Session): number {
 export function Sidebar() {
   const router = useRouter();
   const [query, setQuery] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
   // Plain state, not a Legend observable: selecting a parent object returns
   // the same mutated reference, so toggles never re-render (the classic
   // object-selector gotcha) — and this is purely local UI state anyway.
@@ -45,20 +44,36 @@ export function Sidebar() {
 
   const status = useSelector(() => connection$.status.get());
   const selectedId = useSelector(() => nav$.detail.get()?.params.id ?? null);
-  const f = useSelector(() => filters$.get());
+  // Derive a FRESH object reading each leaf — selecting the parent `filters$`
+  // object returns the same mutated ref on a child change, so device/agent/repo
+  // toggles wouldn't re-render (the Legend object-selector gotcha, same as Home).
+  const f = useSelector(() => ({
+    device: filters$.device.get(),
+    agent: filters$.agent.get(),
+    repos: filters$.repos.get(),
+    needsOnly: filters$.needsOnly.get(),
+    favOnly: filters$.favOnly.get(),
+  }));
   const deviceList = useDevices();
   const threads = useThreads();
   const projectNames = useProjectNames();
+  const ignored = useIgnoredSet();
 
   const connected = status === "connected";
   const loading = status === "connecting" || status === "reconnecting";
 
   const q = query.trim().toLowerCase();
   const { rows: allRows, attention } = useMemo(() => {
-    const list = threads.filter(
-      (s) => (!f.device || s.hostId === f.device) && (!f.agent || s.agent === f.agent),
-    );
+    // Identical filtering to mobile Home: device · agent · project (+ ignored/
+    // dotfolder hiding) via the shared predicate, then the smart "needs you"
+    // narrowing (only hides non-attention threads when something needs you).
+    let list = applyFilters(threads, {
+      filters: { device: f.device, agent: f.agent, repos: f.repos },
+      ignored,
+      repoName: (id) => projectNames[id] ?? id,
+    });
     const attentionCount = list.filter(needsYou).length;
+    if (f.needsOnly && attentionCount > 0) list = list.filter(needsYou);
     const sorted = [...list].sort(
       (a, b) => rank(a) - rank(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
     );
@@ -91,7 +106,7 @@ export function Sidebar() {
       if (!isCollapsed) for (const s of glist) rows.push({ type: "session", session: s });
     }
     return { rows, attention: attentionCount };
-  }, [threads, projectNames, f, collapsedMap]);
+  }, [threads, projectNames, ignored, f, collapsedMap]);
 
   return (
     <View className="flex-1 bg-bg-elevated">
@@ -113,6 +128,7 @@ export function Sidebar() {
             </Pressable>
           ) : null}
         </View>
+        <FilterButton active={showFilters} onPress={() => setShowFilters(true)} />
         <Pressable
           onPress={() => router.push("/new")}
           className="active:opacity-80 h-8 w-8 items-center justify-center rounded-lg bg-accent"
@@ -204,6 +220,10 @@ export function Sidebar() {
         <FooterIcon name="help-circle-outline" hint="Help" onPress={() => router.push("/help")} />
         <FooterIcon name="settings-outline" hint="Settings" onPress={() => router.push("/settings")} />
       </View>
+
+      {/* Same filter sheet as mobile (Home/Search) — 1:1 controls via the shared
+          component; renders as an in-window overlay through AppModal.desktop. */}
+      <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
     </View>
   );
 }

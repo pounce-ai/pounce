@@ -28,6 +28,7 @@ import QRCode from "qrcode";
 import { createHost } from "./agents/host.mjs";
 import { resolvePermission } from "./agents/acp.mjs";
 import { primaryLanIp } from "./agents/env.mjs";
+import { readConfig, writeConfig } from "./agents/config.mjs";
 
 const IS_WIN = process.platform === "win32";
 
@@ -329,7 +330,12 @@ async function listThreads(agent, onPage) {
  *  cold-dial page. */
 async function streamThreads(sink) {
   const agents = await getAgents();
-  const avail = agents.filter((a) => a.available && a.wire === "jsonl" && a.id !== "shell");
+  // Same as getThreads: list threads for every JSONL agent that has sessions on
+  // disk — NOT gated on `a.available`. History is viewable without a runnable CLI
+  // (codex shadowed by a wrapper, not on the GUI app's PATH, …); the CLI is only
+  // needed to RUN turns. The desktop app syncs via THIS streaming path, so the
+  // filter has to match or codex/etc. threads never reach it.
+  const avail = agents.filter((a) => a.wire === "jsonl" && a.id !== "shell");
   for (const a of avail) {
     await listThreads(a.id, async (page) => {
       for (const t of page) {
@@ -877,6 +883,21 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/v1/doctor") {
       return send(res, 200, { report: await host.doctor() });
+    }
+    if (url.pathname === "/v1/config" && req.method === "GET") {
+      return send(res, 200, { config: readConfig() });
+    }
+    if (url.pathname === "/v1/config" && req.method === "POST") {
+      // Manual overrides for custom setups: pin a binary's absolute path, add
+      // PATH dirs, or set env vars. `bins`/`env` merge (""→clear a key). The
+      // next spawn/probe picks these up (config is re-read on mtime change).
+      const patch = await readBody(req);
+      const config = writeConfig(patch || {});
+      // Detection depends on these — drop the cached agent list/threads so the
+      // next doctor/threads call reflects the new paths immediately.
+      cache.delete("agents");
+      cache.delete("threads");
+      return send(res, 200, { config });
     }
     if (url.pathname === "/v1/usage") {
       const agent = url.searchParams.get("agent");

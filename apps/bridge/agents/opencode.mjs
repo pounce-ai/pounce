@@ -18,7 +18,7 @@ import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { userMessage, thinking, assistantMessage, toolCall, toolResult, systemEvent } from "./events.mjs";
-import { agentEnv, binVersion } from "./env.mjs";
+import { agentEnv, binVersion, binPath } from "./env.mjs";
 
 const DATA_DIR = path.join(os.homedir(), ".local", "share", "opencode");
 const DB_FILE = path.join(DATA_DIR, "opencode.db");
@@ -199,7 +199,7 @@ export class OpencodeAdapter {
     return new Promise((resolve) => {
       let p;
       try {
-        p = spawn("opencode", ["models"], { env: agentEnv(), stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+        p = spawn(binPath("opencode"), ["models"], { env: agentEnv(), stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
       } catch { return resolve([]); }
       let out = "";
       const t = setTimeout(() => { try { p.kill("SIGKILL"); } catch {} }, 10_000);
@@ -231,7 +231,7 @@ export class OpencodeAdapter {
 
     let child;
     try {
-      child = spawn("opencode", args, {
+      child = spawn(binPath("opencode"), args, {
         cwd: cwd && existsSync(cwd) ? cwd : os.homedir(),
         env: agentEnv(), stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
       });

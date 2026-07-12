@@ -19,7 +19,7 @@ import {
   userMessage, thinking, assistantMessage, toolCall, toolResult, systemEvent,
   readTailLines,
 } from "./events.mjs";
-import { agentEnv, binVersion } from "./env.mjs";
+import { agentEnv, binVersion, binPath } from "./env.mjs";
 
 const ROOT = path.join(os.homedir(), ".codex", "sessions");
 const INDEX_FILE = path.join(os.homedir(), ".codex", "session_index.jsonl");
@@ -130,6 +130,19 @@ export class CodexAdapter {
       cur.push(ev);
       if (limit && turns.length > limit) turns.shift();
     };
+    // Disambiguate colliding event ids. Codex parts without their own `p.id`
+    // fall back to `<role>:<timestamp>`, and two parts can share a timestamp —
+    // which produced two events with the same id and crashed the app's message
+    // insert ("already exists"). The scan is deterministic over an append-only
+    // rollout, so a per-id counter yields ids that are unique AND stable across
+    // refetches. Only for messages/reasoning — tool-call ids are referenced by
+    // their outputs (`${callId}:o`) and must stay paired, so leave those raw.
+    const idCount = new Map();
+    const uniq = (id) => {
+      const n = idCount.get(id) || 0;
+      idCount.set(id, n + 1);
+      return n === 0 ? id : `${id}#${n}`;
+    };
 
     let rl;
     try {
@@ -149,15 +162,15 @@ export class CodexAdapter {
             .map((c) => (c?.type === "input_text" || c?.type === "output_text" ? c.text || "" : ""))
             .join("");
           if (!text.trim()) continue;
-          if (p.role === "assistant") add(assistantMessage(base(p.id || `a:${ts}`), text));
+          if (p.role === "assistant") add(assistantMessage(base(uniq(p.id || `a:${ts}`)), text));
           else if (p.role === "user") {
             const cleaned = stripNoise(text, "codex").trim();
-            if (cleaned) add(userMessage(base(p.id || `u:${ts}`), cleaned), true);
+            if (cleaned) add(userMessage(base(uniq(p.id || `u:${ts}`)), cleaned), true);
           }
           // developer role: injected instructions — skip.
         } else if (p.type === "reasoning") {
           const text = (p.summary || []).map((s) => s?.text || "").join("\n").trim();
-          if (text) add(thinking(base(p.id || `r:${ts}`), text));
+          if (text) add(thinking(base(uniq(p.id || `r:${ts}`)), text));
         } else if (p.type === "function_call" || p.type === "custom_tool_call") {
           const callId = p.call_id || p.id || `c:${ts}`;
           add(toolCall(base(callId), codexCall(p)));
@@ -232,7 +245,7 @@ export class CodexAdapter {
 
     let child;
     try {
-      child = spawn("codex", args, {
+      child = spawn(binPath("codex"), args, {
         cwd: cwd && existsSync(cwd) ? cwd : os.homedir(),
         env: agentEnv(), stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
       });
