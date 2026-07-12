@@ -13,6 +13,7 @@ import { HistoryCache, eventBytes } from "./history-cache.mjs";
 import { ClaudeAdapter } from "./claude.mjs";
 import { CodexAdapter } from "./codex.mjs";
 import { OpencodeAdapter } from "./opencode.mjs";
+import { acpAvailable, startAcpTurn } from "./acp.mjs";
 
 export function createHost({ version = () => null } = {}) {
   const turns = new TurnManager();
@@ -97,8 +98,13 @@ export function createHost({ version = () => null } = {}) {
       // {stop, done} facade regardless, and honor a stop() that lands before
       // the child has spawned.
       let inner = null, stopped = false;
+      // Opt-in ACP transport (BRIDGE_ACP=1): drive the agent over the Agent
+      // Client Protocol instead of its stream-json path — richer tool status,
+      // plans, and permission prompts. Falls back to the adapter when the agent
+      // has no ACP server available.
+      const useAcp = process.env.BRIDGE_ACP === "1" && acpAvailable(agent);
       const done = Promise.resolve()
-        .then(() => adapter(agent).startTurn(opts, onEvent))
+        .then(() => (useAcp ? startAcpTurn(agent, opts, onEvent) : adapter(agent).startTurn(opts, onEvent)))
         .then((t) => {
           inner = t;
           if (stopped) t.stop();
