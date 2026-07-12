@@ -46,6 +46,13 @@
 			</dict>
 		</dict>
 	</dict>
+	<!-- On-device dictation (PounceSpeech → SFSpeechRecognizer + AVAudioEngine).
+	     macOS crashes the app if these usage strings are missing when access is
+	     requested. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Pounce uses the microphone for voice dictation — tap the mic and speak your message.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Pounce transcribes your speech on-device so you can dictate messages to the agent.</string>
 	<key>NSMainStoryboardFile</key>
 	<string>Main</string>
 	<key>NSPrincipalClass</key>

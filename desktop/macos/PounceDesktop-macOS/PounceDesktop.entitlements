@@ -8,5 +8,9 @@
          the Mac App Store. -->
     <key>com.apple.security.app-sandbox</key>
     <false/>
+    <!-- On-device dictation needs mic access; the hardened runtime (Release/
+         notarized) denies it without this entitlement even when unsandboxed. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
   </dict>
 </plist>
