@@ -14,6 +14,7 @@ import type { Session } from "@litter/shared";
 import { connection$, filters$ } from "@litter/app/state/stores";
 import { useDevices, useProjectNames, useThreads } from "@litter/app/state/db/hooks";
 import { SessionListSkeleton } from "@litter/app/components/Skeleton";
+import { RecentStrip } from "@litter/app/components/RecentStrip";
 import { ActivityDot, AgentLogo, cn, COLOR, INPUT_TWEAKS, timeAgo } from "@litter/app/ui";
 import { nav$ } from "../shims/router";
 
@@ -129,6 +130,10 @@ export function Sidebar() {
         </View>
       ) : null}
 
+      {/* Jump back in — the threads you opened most recently (hides when empty
+          or while searching). */}
+      {!q ? <RecentStrip /> : null}
+
       <LegendList
         style={{ flex: 1 }}
         data={filterRows(allRows, q)}
@@ -196,7 +201,6 @@ export function Sidebar() {
         </View>
         <FooterIcon name="qr-code-outline" hint="Pair phone" onPress={() => router.push("/pair")} />
         <FooterIcon name="time-outline" hint="Sync history" onPress={() => router.push("/sync-history")} />
-        <FooterIcon name="medkit-outline" hint="Diagnostics" onPress={() => router.push("/diagnostics")} />
         <FooterIcon name="help-circle-outline" hint="Help" onPress={() => router.push("/help")} />
         <FooterIcon name="settings-outline" hint="Settings" onPress={() => router.push("/settings")} />
       </View>

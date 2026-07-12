@@ -349,7 +349,11 @@ async function getThreads(fresh = false) {
     // List threads for every available JSONL agent (codex, claude, opencode,
     // hermes, …). `shell` has no threads. This replaces a hardcoded allowlist
     // that omitted codex (and amp/pi/grok/…).
-    const avail = agents.filter((a) => a.available && a.wire === "jsonl" && a.id !== "shell");
+    // List threads for every JSONL agent that has sessions on disk — NOT gated
+    // on `a.available`. You can VIEW an agent's history without a runnable CLI
+    // (e.g. `codex` shadowed by a wrapper, or not on the GUI app's PATH); the CLI
+    // is only needed to RUN new turns (gated in startTurn). Empty dirs cost nothing.
+    const avail = agents.filter((a) => a.wire === "jsonl" && a.id !== "shell");
     const lists = await Promise.all(avail.map((a) => listThreads(a.id).catch(() => [])));
     const threads = lists.flat().sort((x, y) => (y.createdAt || "").localeCompare(x.createdAt || ""));
 
