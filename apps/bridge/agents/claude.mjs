@@ -44,6 +44,19 @@ function cleanPreview(raw) {
   return text.trim() || null;
 }
 
+/** Lightweight refs for a user record's inline base64 image blocks. The ref
+ *  `<uuid>:<blockIndex>` locates the block again in getImage (no data copied). */
+function imageRefs(content, uuid) {
+  const out = [];
+  if (!Array.isArray(content)) return out;
+  content.forEach((b, i) => {
+    if (b?.type === "image" && b.source?.type === "base64" && b.source.data) {
+      out.push({ mediaType: b.source.media_type || "image/png", ref: `${uuid}:${i}` });
+    }
+  });
+  return out;
+}
+
 /** Is this user record an actual human message (not meta, not a tool result)? */
 function isRealUserLine(o) {
   if (o.type !== "user" || o.isMeta || o.isSidechain) return false;
@@ -141,11 +154,14 @@ export class ClaudeAdapter {
           continue;
         }
         if (!Array.isArray(c)) continue;
+        const uuid = o.uuid || `u:${ts}`;
+        // Attached images are inline base64 blocks (~0.5MB each) — too heavy to
+        // ship in the events list, so attach lightweight refs the client fetches
+        // lazily from /v1/image, and drop the "[Image #N]" placeholder text.
+        const imgs = imageRefs(c, uuid);
         const text = contentText(c);
-        if (text.trim()) {
-          const cleaned = stripNoise(text, "claude");
-          if (cleaned.trim()) add(userMessage(base(o.uuid || `u:${ts}`), cleaned), true);
-        }
+        const cleaned = stripNoise(text, "claude").replace(/\[Image #\d+\]/g, "").trim();
+        if (cleaned || imgs.length) add(userMessage(base(uuid), cleaned, imgs), true);
         for (const b of c) {
           if (b?.type !== "tool_result") continue;
           const callId = b.tool_use_id || o.uuid;
@@ -197,6 +213,37 @@ export class ClaudeAdapter {
       ));
     }
     return events;
+  }
+
+  /** Decode one image block's bytes on demand — the ref (`<uuid>:<index>`)
+   *  points at an inline base64 block getEvents chose not to inline. Scans the
+   *  transcript for the record (a cheap substring prefilter skips the JSON.parse
+   *  on unrelated lines of a huge file). */
+  async getImage(threadId, ref) {
+    const s = String(ref);
+    const sep = s.lastIndexOf(":");
+    if (sep < 0) return null;
+    const uuid = s.slice(0, sep);
+    const idx = Number(s.slice(sep + 1));
+    const file = await this.findFile(threadId);
+    if (!file || !Number.isInteger(idx)) return null;
+    let rl;
+    try { rl = createInterface({ input: createReadStream(file, "utf8"), crlfDelay: Infinity }); }
+    catch { return null; }
+    try {
+      for await (const line of rl) {
+        if (!line || !line.includes(uuid)) continue;
+        let o; try { o = JSON.parse(line); } catch { continue; }
+        if (o.uuid !== uuid) continue;
+        const c = o.message?.content;
+        const b = Array.isArray(c) ? c[idx] : null;
+        if (b?.type === "image" && b.source?.data) {
+          return { mediaType: b.source.media_type || "image/png", buffer: Buffer.from(b.source.data, "base64") };
+        }
+        return null;
+      }
+    } finally { rl.close(); }
+    return null;
   }
 
   /** Cheap activity probe: live child wins; otherwise judge the transcript tail. */

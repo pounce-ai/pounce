@@ -77,6 +77,13 @@ export function createHost({ version = () => null } = {}) {
       return adapter(agent).getActivity(threadId);
     },
 
+    /** Fetch one attachment's bytes ({ mediaType, buffer }) — null if the
+     *  adapter doesn't support images or the ref is stale. */
+    getImage(agent, threadId, ref) {
+      const a = adapter(agent);
+      return a.getImage ? a.getImage(threadId, ref) : Promise.resolve(null);
+    },
+
     listModels(agent) {
       return adapter(agent).listModels();
     },

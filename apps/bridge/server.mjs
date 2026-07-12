@@ -853,6 +853,21 @@ const server = http.createServer(async (req, res) => {
       const limit = Number(url.searchParams.get("limit")) || undefined;
       return send(res, 200, { events: await getMessages(agent, thread, fresh, limit) });
     }
+    if (url.pathname === "/v1/image") {
+      const agent = url.searchParams.get("agent");
+      const thread = url.searchParams.get("thread");
+      const ref = url.searchParams.get("ref");
+      if (!agent || !thread || !ref) return send(res, 400, { error: "agent, thread, ref required" });
+      const img = await host.getImage(agent, thread, ref).catch(() => null);
+      if (!img) return send(res, 404, { error: "image not found" });
+      res.writeHead(200, {
+        "content-type": img.mediaType,
+        "cache-control": "private, max-age=86400",
+        "access-control-allow-origin": "*",
+      });
+      res.end(img.buffer);
+      return;
+    }
     if (url.pathname === "/v1/usage") {
       const agent = url.searchParams.get("agent");
       const thread = url.searchParams.get("thread");

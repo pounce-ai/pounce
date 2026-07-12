@@ -25,7 +25,17 @@ interface TimelineBase {
 export interface UserMessageEvent extends TimelineBase {
   readonly type: "user_message";
   readonly text: string;
-  readonly images?: readonly { readonly data: string; readonly mediaType: string }[];
+  readonly images?: readonly MessageImage[];
+}
+
+/** An attached image. The bridge sends a lightweight `ref`; the client resolves
+ *  it to a loadable `uri` (a token-authed bridge URL) in fetchMessages. `data`
+ *  is the legacy inline-base64 path (locally-composed / sent images). */
+export interface MessageImage {
+  readonly mediaType: string;
+  readonly ref?: string;
+  readonly uri?: string;
+  readonly data?: string;
 }
 
 export interface AssistantMessageEvent extends TimelineBase {

@@ -9,7 +9,8 @@ import { openSync, readSync, closeSync, fstatSync } from "node:fs";
 // --- event constructors ------------------------------------------------------
 // `base` = { id, conversationId, seq, ts }
 
-export const userMessage = (base, text) => ({ ...base, type: "user_message", text });
+export const userMessage = (base, text, images) =>
+  ({ ...base, type: "user_message", text, ...(images && images.length ? { images } : {}) });
 
 export const thinking = (base, text) => ({ ...base, type: "thinking_finished", text, durationMs: 0 });
 

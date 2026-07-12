@@ -1,9 +1,10 @@
 import { memo, useMemo, useState } from "react";
-import { Pressable, Text, View } from "react-native";
-import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
+import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { LegendList, type LegendListRef, useViewability } from "@legendapp/list/react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   assertNeverEvent,
+  type MessageImage,
   type TimelineEvent,
   type ToolCallEvent,
   type ToolResultEvent,
@@ -12,6 +13,7 @@ import { defaultMarked } from "../state/stores";
 import { useThreadMarkers } from "../state/db/hooks";
 import { cn, COLOR } from "../ui";
 import { MessageMarkdown } from "../components/MessageMarkdown";
+import { Modal } from "../components/AppModal";
 import {
   cleanAssistantText,
   isEmptyUserMessage,
@@ -231,7 +233,7 @@ const Row = memo(function Row({
       if (isInterrupt(event.text)) return <Meta text="⎿ Interrupted by user" level="warning" />;
       return (
         <Pressable onLongPress={onLongPress} delayLongPress={350}>
-          <UserRow text={event.text} agent={agent} />
+          <UserRow text={event.text} agent={agent} images={event.images} />
         </Pressable>
       );
     case "assistant_message":
@@ -302,15 +304,79 @@ function AssistantBubble({
   return <Bubble role="assistant" text={clean} streaming={streaming} marked={marked} onRun={onRun} />;
 }
 
-function UserRow({ text, agent }: { text: string; agent?: string }) {
+function UserRow({
+  text,
+  agent,
+  images,
+}: {
+  text: string;
+  agent?: string;
+  images?: readonly MessageImage[];
+}) {
   const p = useMemo(() => parseUserMessage(text, agent), [text, agent]);
-  if (isEmptyUserMessage(p)) return null;
+  const hasImages = !!images?.length;
+  // An image-only message (no prose) must still render, so don't bail on empty.
+  if (isEmptyUserMessage(p) && !hasImages) return null;
   return (
     <View className="gap-1.5">
       {p.command ? <CommandChip name={p.command.name} args={p.command.args} /> : null}
       {p.output ? <OutputNote text={p.output.text} isError={p.output.isError} /> : null}
+      {hasImages ? <InlineImages images={images!} /> : null}
       {p.text ? <Bubble role="user" text={p.text} /> : null}
     </View>
+  );
+}
+
+const THUMB = 128;
+
+/**
+ * Attached images as right-aligned thumbnails; tap opens a full-size lightbox.
+ * Each thumbnail is lazy — it only fetches once its row scrolls into view
+ * (useViewability), so opening a screenshot-heavy thread doesn't pull every
+ * image at once. Keyed by uri so a recycled row re-gates the new image.
+ */
+function InlineImages({ images }: { images: readonly MessageImage[] }) {
+  const [preview, setPreview] = useState<string | null>(null);
+  const shown = images.filter((i) => i.uri);
+  if (!shown.length) return null;
+  return (
+    <View className="flex-row flex-wrap justify-end gap-1.5">
+      {shown.map((img) => (
+        <LazyImage key={img.uri} uri={img.uri!} onPress={() => setPreview(img.uri!)} />
+      ))}
+      <Modal visible={!!preview} transparent animationType="fade" onRequestClose={() => setPreview(null)}>
+        <Pressable
+          onPress={() => setPreview(null)}
+          style={StyleSheet.absoluteFill}
+          className="items-center justify-center"
+        >
+          <View style={StyleSheet.absoluteFill} className="bg-black/90" />
+          {preview ? (
+            <Image source={{ uri: preview }} style={{ width: "94%", height: "84%" }} resizeMode="contain" />
+          ) : null}
+        </Pressable>
+      </Modal>
+    </View>
+  );
+}
+
+/** One thumbnail whose network fetch is deferred until the row is viewable. */
+function LazyImage({ uri, onPress }: { uri: string; onPress: () => void }) {
+  const [visible, setVisible] = useState(false);
+  useViewability((token) => {
+    if (token.isViewable) setVisible(true);
+  });
+  return (
+    <Pressable onPress={onPress} className="active:opacity-80">
+      {visible ? (
+        <Image source={{ uri }} style={{ width: THUMB, height: THUMB, borderRadius: 12 }} resizeMode="cover" />
+      ) : (
+        <View
+          style={{ width: THUMB, height: THUMB, borderRadius: 12 }}
+          className="border border-border bg-surface-alt"
+        />
+      )}
+    </Pressable>
   );
 }
 

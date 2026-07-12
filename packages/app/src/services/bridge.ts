@@ -560,7 +560,24 @@ export async function fetchMessages(
     cfg,
     `/v1/messages?agent=${encodeURIComponent(agent)}&thread=${encodeURIComponent(threadId)}${limit}`,
   );
-  return events;
+  // Resolve image refs to loadable, token-authed bridge URLs. The client only
+  // hits these when a message scrolls into view (lazy <Image>), so the events
+  // payload stays tiny even for threads full of screenshots.
+  const base = await bridgeBase(cfg);
+  return events.map((e) => {
+    if (e.type !== "user_message" || !e.images?.length) return e;
+    const images = e.images.map((img) =>
+      img.ref && !img.uri
+        ? {
+            ...img,
+            uri: `${base}/v1/image?agent=${encodeURIComponent(agent)}&thread=${encodeURIComponent(
+              threadId,
+            )}&ref=${encodeURIComponent(img.ref)}&token=${encodeURIComponent(cfg.token)}`,
+          }
+        : img,
+    );
+    return { ...e, images };
+  });
 }
 
 /** Per-thread token usage + cost, read from the host's agent transcript. */
