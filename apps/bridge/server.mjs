@@ -27,6 +27,7 @@ import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import { createHost } from "./agents/host.mjs";
 import { resolvePermission } from "./agents/acp.mjs";
+import { primaryLanIp } from "./agents/env.mjs";
 
 const IS_WIN = process.platform === "win32";
 
@@ -1047,7 +1048,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 function localIp() {
-  return Object.values(os.networkInterfaces()).flat().find((i) => i?.family === "IPv4" && !i.internal)?.address;
+  return primaryLanIp();
 }
 
 // True if something already accepts connections on the port (a running bridge).

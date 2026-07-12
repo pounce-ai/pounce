@@ -31,6 +31,35 @@ export function agentEnv() {
 }
 
 /**
+ * The machine's reachable LAN IPv4 address(es), best candidate first. The naive
+ * "first non-internal IPv4" breaks on Macs with a VPN, Docker, Tailscale, or
+ * Ethernet+Wi-Fi, where it can advertise an address the phone can't reach — the
+ * classic "pairing QR doesn't work on the same Wi-Fi". Prefer real private-LAN
+ * addresses on physical interfaces (en*), skip virtual/link-local/CGNAT.
+ */
+export function lanIps() {
+  const VIRTUAL = /^(utun|awdl|llw|bridge|vnic|vbox|vmnet|docker|tap|tun|ham|zt|gpd|ppp)/i;
+  const isPrivate = (a) => /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a);
+  const rows = [];
+  for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
+    if (VIRTUAL.test(name)) continue;
+    for (const a of addrs || []) {
+      if (a.family !== "IPv4" || a.internal) continue;
+      if (/^169\.254\./.test(a.address)) continue; // link-local
+      if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(a.address)) continue; // CGNAT (Tailscale)
+      rows.push({ address: a.address, priv: isPrivate(a.address), phys: /^en\d/i.test(name) });
+    }
+  }
+  rows.sort((x, y) => Number(y.priv) - Number(x.priv) || Number(y.phys) - Number(x.phys));
+  return rows.map((r) => r.address);
+}
+
+/** The single best LAN IP to advertise (or null when offline). */
+export function primaryLanIp() {
+  return lanIps()[0] || null;
+}
+
+/**
  * Probe whether a CLI answers `--version` (≤5s). Resolves the trimmed version
  * string or null. Used for `isAvailable` so an agent without its binary simply
  * doesn't appear in the app — same UX as the old daemon's `available` flag.

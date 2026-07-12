@@ -180,6 +180,14 @@ export interface DoctorAgent {
  *  the Diagnostics screen so a fresh/custom setup sees what to fix. */
 export interface DoctorReport {
   readonly ok: boolean;
+  /** LAN reachability for phone pairing — the address baked into the QR + all
+   *  candidates (a multi-interface Mac can advertise an unreachable one). */
+  readonly network: {
+    readonly advertised: string | null;
+    readonly ips: readonly string[];
+    readonly port: number;
+    readonly reachable: boolean;
+  };
   readonly node: { readonly ok: boolean; readonly path: string; readonly version: string };
   readonly git: { readonly ok: boolean; readonly version: string | null };
   readonly agents: readonly DoctorAgent[];

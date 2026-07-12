@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { agentEnv, binVersion } from "./env.mjs";
+import { agentEnv, binVersion, lanIps } from "./env.mjs";
 
 const IS_WIN = process.platform === "win32";
 
@@ -58,8 +58,14 @@ export async function buildDoctorReport(adapters) {
   const gitVersion = await binVersion("git");
   const tunnelBin = tunnelBinary();
   const sessionsTotal = agents.reduce((s, a) => s + a.sessionCount, 0);
+  const ips = lanIps();
+  const port = Number(process.env.BRIDGE_PORT || 8099);
 
   return {
+    // How the phone reaches this Mac on the LAN. `advertised` is the address
+    // baked into the pairing QR; `ips` are all candidates (a multi-interface Mac
+    // — VPN/Docker/Ethernet — can advertise an unreachable one).
+    network: { advertised: ips[0] || null, ips, port, reachable: ips.length > 0 },
     ok:
       agents.some((a) => a.installed) && sessionsTotal >= 0, // "usable" = at least one agent CLI
     node: { ok: true, path: process.execPath, version: process.version.replace(/^v/, "") },

@@ -19,17 +19,21 @@ function Row({
   detail,
   hint,
   warn,
+  alwaysHint,
 }: {
   ok: boolean;
   title: string;
   detail?: string | null;
-  /** Shown when not ok (or when `warn`) — how to fix it. */
+  /** Shown when not ok (or when `warn`/`alwaysHint`) — how to fix it. */
   hint?: string;
   /** A soft warning (works, but limited) rather than a hard failure. */
   warn?: boolean;
+  /** Show the hint even when ok (e.g. common pairing gotchas). */
+  alwaysHint?: boolean;
 }) {
   const color = ok ? COLOR.success : warn ? "#d29922" : COLOR.danger;
   const icon = ok ? "checkmark-circle" : warn ? "alert-circle" : "close-circle";
+  const showHint = !ok || warn || alwaysHint;
   return (
     <View className="flex-row gap-2.5 border-b border-border px-4 py-3">
       <Ionicons name={icon} size={18} color={color} style={{ marginTop: 1 }} />
@@ -38,7 +42,7 @@ function Row({
           <Text className="text-[14px] font-medium text-fg">{title}</Text>
           {detail ? <Text className="ml-2 font-mono text-[11px] text-fg-muted">{detail}</Text> : null}
         </View>
-        {!ok || warn ? (hint ? <Text className="mt-1 text-[12px] leading-[17px] text-fg-muted">{hint}</Text> : null) : null}
+        {showHint && hint ? <Text className="mt-1 text-[12px] leading-[17px] text-fg-muted">{hint}</Text> : null}
       </View>
     </View>
   );
@@ -100,6 +104,21 @@ export default function DiagnosticsScreen() {
           </Text>
 
           <Row ok={report.node.ok} title="Node.js" detail={report.node.version} />
+
+          <Row
+            ok={report.network.reachable}
+            warn={report.network.ips.length > 1}
+            alwaysHint
+            title="Phone pairing (same Wi-Fi)"
+            detail={report.network.advertised ? `${report.network.advertised}:${report.network.port}` : "no LAN address"}
+            hint={
+              !report.network.reachable
+                ? "No local network address found — connect this Mac to Wi-Fi/Ethernet."
+                : report.network.ips.length > 1
+                  ? `Multiple network addresses (${report.network.ips.join(", ")}). Pounce advertises the first; if your phone can't connect on the same Wi-Fi, that address may be a VPN/Docker one it can't reach — and check System Settings → Network → Firewall allows incoming connections for Pounce.`
+                  : "If your phone still can't connect on the same Wi-Fi, allow incoming connections for Pounce in System Settings → Network → Firewall."
+            }
+          />
 
           {report.agents.map((a) => (
             <Row
