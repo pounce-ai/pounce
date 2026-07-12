@@ -18,7 +18,7 @@
  * bundled desktop bridge keeps the stream-json path until the adapters ship
  * with it.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
@@ -48,11 +48,12 @@ export function resolvePermission(requestId, optionId) {
   return true;
 }
 
-/** Per-agent: how to spawn its ACP server. `pkg` → `node <resolved entry>`;
- *  `cmd`+`args` → run directly (must be on PATH). */
+/** Per-agent: how to spawn its ACP server. `pkg` → `node <entry>` (bundled into
+ *  Resources/bridge/adapters in the desktop app, else resolved from
+ *  node_modules in dev); `cmd`+`args` → run directly (must be on PATH). */
 const ADAPTERS = {
-  claude: { pkg: "@agentclientprotocol/claude-agent-acp" },
-  codex: { pkg: "@agentclientprotocol/codex-acp" },
+  claude: { pkg: "@agentclientprotocol/claude-agent-acp", bundle: "claude-agent-acp" },
+  codex: { pkg: "@agentclientprotocol/codex-acp", bundle: "codex-acp" },
   opencode: { cmd: "opencode", args: ["acp"] },
 };
 
@@ -60,6 +61,10 @@ function spawnSpec(agent) {
   const a = ADAPTERS[agent];
   if (!a) return null;
   if (a.pkg) {
+    // Prefer the adapter bundled beside this launcher (the packaged desktop app
+    // has no node_modules); fall back to node_modules resolution in dev.
+    const bundled = new URL(`./adapters/${a.bundle}.mjs`, import.meta.url).pathname;
+    if (existsSync(bundled)) return { command: process.execPath, args: [bundled] };
     let entry;
     try { entry = require.resolve(a.pkg); } catch { return null; }
     return { command: process.execPath, args: [entry] };
@@ -70,6 +75,16 @@ function spawnSpec(agent) {
 /** Whether an ACP turn can run for this agent right now. */
 export function acpAvailable(agent) {
   return spawnSpec(agent) != null;
+}
+
+/** Resolve a binary's absolute path via the given env's PATH (sync, cheap). */
+function resolveBin(name, env) {
+  try {
+    const r = spawnSync("/bin/sh", ["-c", `command -v ${name}`], { env, encoding: "utf8" });
+    return r.stdout?.trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 /** Map an ACP tool_call kind → the app's tool naming (shell gets the $ chrome). */
@@ -128,9 +143,18 @@ export function startAcpTurn(agent, { threadId, text, cwd, images, model, permis
   const fresh = !threadId || !/^[0-9a-f]{8}-/i.test(threadId);
   const dir = cwd && existsSync(cwd) ? cwd : process.env.HOME;
 
+  const env = agentEnv();
+  // The claude ACP adapter uses @anthropic-ai/claude-agent-sdk, which needs an
+  // explicit path to the claude executable (it doesn't search PATH). When
+  // bundled (desktop) the SDK's native binary isn't present, so point it at the
+  // same claude the stream-json path uses.
+  if (agent === "claude" && !env.CLAUDE_CODE_EXECUTABLE) {
+    const found = resolveBin("claude", env);
+    if (found) env.CLAUDE_CODE_EXECUTABLE = found;
+  }
   const child = spawn(spec.command, spec.args, {
     cwd: dir,
-    env: agentEnv(),
+    env,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });

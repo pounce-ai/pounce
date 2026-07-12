@@ -36,6 +36,10 @@ static void PounceStartBridge(void)
   task.arguments = @[ @"-c", script ];
   NSMutableDictionary *env = [[NSProcessInfo processInfo].environment mutableCopy];
   if (env[@"BRIDGE_PORT"] == nil) env[@"BRIDGE_PORT"] = @"8099";
+  // Drive Pounce-initiated live turns over ACP (richer tool status, plans,
+  // permission prompts) using the adapters bundled in Resources/bridge/adapters.
+  // The runner falls back to the stream-json path if an adapter isn't available.
+  if (env[@"BRIDGE_ACP"] == nil) env[@"BRIDGE_ACP"] = @"1";
   task.environment = env;
   task.terminationHandler = ^(NSTask *t) {
     NSLog(@"[bridge] exited with status %d", t.terminationStatus);
