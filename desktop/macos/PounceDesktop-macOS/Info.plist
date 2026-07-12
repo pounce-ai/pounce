@@ -53,6 +53,16 @@
 	<string>Pounce uses the microphone for voice dictation — tap the mic and speak your message.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Pounce transcribes your speech on-device so you can dictate messages to the agent.</string>
+	<!-- Sparkle auto-update. Feed is the gh-pages appcast; SUPublicEDKey verifies
+	     each update's EdDSA signature. Automatic checks start OFF (and Sparkle's
+	     own first-run prompt is suppressed) — the app's consent modal + Settings
+	     toggle drive it via PounceUpdater. -->
+	<key>SUFeedURL</key>
+	<string>https://peppyhop.github.io/pounce/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>0sFmzeVVbdM7FoJR7gws0hKMUDe0ZgmU95LtqKhIpo4=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
 	<key>NSMainStoryboardFile</key>
 	<string>Main</string>
 	<key>NSPrincipalClass</key>

@@ -13,6 +13,11 @@ target 'PounceDesktop-macOS' do
   platform :macos, '14.0'
   use_expo_modules!
 
+  # Sparkle — macOS auto-update framework (download → EdDSA-verify → install →
+  # relaunch). Drives the PounceUpdater native module; feed is the gh-pages
+  # appcast. Notarization-compatible when the whole app is signed deep.
+  pod 'Sparkle', '~> 2.9'
+
   config_command = [
     'npx',
     'expo-modules-autolinking',

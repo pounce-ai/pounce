@@ -7,6 +7,7 @@ import { Shell } from "./src/shell/Shell";
 import { bootstrap } from "@litter/app/services/runtime";
 import { ensureLocalBridge } from "./src/services/localBridge";
 import { heartbeat } from "./src/services/heartbeat";
+import { UpdateConsent } from "./src/components/UpdateConsent";
 
 export default function App() {
   useEffect(() => {
@@ -35,6 +36,7 @@ export default function App() {
     <Providers>
       <StatusBar style="light" />
       <Shell />
+      <UpdateConsent />
     </Providers>
   );
 }

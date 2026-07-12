@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sparkle appcast for the Pounce macOS desktop app.
+  Served at https://peppyhop.github.io/pounce/appcast.xml (GitHub Pages, main/docs).
+  Regenerated at each desktop release: put the new signed Pounce.dmg in a folder
+  and run Sparkle's generate_appcast on it, then commit the updated file here.
+  No <item> = no update available (clients stay put).
+-->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Pounce for macOS</title>
+    <link>https://peppyhop.github.io/pounce/appcast.xml</link>
+    <description>Automatic updates for the Pounce desktop app.</description>
+    <language>en</language>
+  </channel>
+</rss>

@@ -7,11 +7,17 @@
  * cached threads) — the heartbeat re-adopts the local bridge within seconds.
  * Adding ANOTHER machine's bridge stays available via manual entry.
  */
-import { useState } from "react";
-import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from "react-native";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, Alert, Pressable, Switch, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { clearBridgeConfig, syncLiveData } from "../services/bridge";
 import { allCollections, clearCollection } from "../state/db/collections";
+import {
+  checkForUpdatesNow,
+  isAutoUpdateEnabled,
+  isUpdaterSupported,
+  setAutoUpdateEnabled,
+} from "../services/updater";
 import { cn, COLOR, INPUT_TWEAKS } from "../ui";
 
 // Kept in sync with the mobile implementation's props (importing the type from
@@ -42,6 +48,27 @@ export function DeviceSetupCard({
 }: DeviceSetupCardProps) {
   const [resyncing, setResyncing] = useState(false);
   const [resyncDone, setResyncDone] = useState(false);
+
+  // Auto-update (Sparkle) — shown only where supported (macOS). The toggle
+  // reflects and drives the native updater's automatic-check setting.
+  const [updaterOn, setUpdaterOn] = useState(false);
+  const [autoUpdate, setAutoUpdate] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const ok = await isUpdaterSupported();
+      if (!alive) return;
+      setUpdaterOn(ok);
+      if (ok) setAutoUpdate(await isAutoUpdateEnabled());
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const toggleAutoUpdate = (v: boolean) => {
+    setAutoUpdate(v);
+    setAutoUpdateEnabled(v);
+  };
 
   const resync = async () => {
     setResyncing(true);
@@ -118,6 +145,27 @@ export function DeviceSetupCard({
           <Text className="text-[14px] font-semibold text-danger">Reset app data</Text>
         </Pressable>
       </View>
+      {updaterOn ? (
+        <View className="gap-2 border-t border-border pt-3">
+          <View className="flex-row items-center justify-between">
+            <View className="flex-1 pr-3">
+              <Text className="text-[14px] font-medium text-fg">Automatic updates</Text>
+              <Text className="text-[12px] leading-[17px] text-fg-muted">
+                Download and install new versions in the background (signature-verified).
+              </Text>
+            </View>
+            <Switch
+              value={autoUpdate}
+              onValueChange={toggleAutoUpdate}
+              trackColor={{ true: COLOR.accent, false: COLOR.fgFaint }}
+            />
+          </View>
+          <Pressable onPress={() => checkForUpdatesNow()} className="active:opacity-60 self-start">
+            <Text className="text-[13px] font-medium text-accent">Check for updates now</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       <Pressable onPress={() => setManual((m) => !m)} className="active:opacity-60 self-center pt-1">
         <Text className="text-[13px] text-fg-muted">
           {manual ? "Hide" : "Add another machine…"}
