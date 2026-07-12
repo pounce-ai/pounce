@@ -1,7 +1,15 @@
 #import "AppDelegate.h"
+#import "PounceUpdater.h"
 
 #import <React/RCTBundleURLProvider.h>
 #import <ReactAppDependencyProvider/RCTAppDependencyProvider.h>
+#import <Sparkle/Sparkle.h>
+
+// Menu-bar (tray) status item. Kept alive for the app's lifetime so the icon
+// stays in the menu bar; a released NSStatusItem drops out of it.
+@interface AppDelegate ()
+@property (nonatomic, strong) NSStatusItem *statusItem;
+@end
 
 // The Pounce bridge (apps/bridge/server.mjs, bundled into Resources/bridge by
 // the "Bundle Pounce Bridge" build phase) runs as a child process for the
@@ -88,6 +96,77 @@ static void PounceStartBridge(void)
   self.window.backgroundColor = bg;
   self.window.contentView.wantsLayer = YES;
   self.window.contentView.layer.backgroundColor = bg.CGColor;
+
+  [self setupStatusItem];
+}
+
+#pragma mark - Menu-bar tray
+
+// A persistent menu-bar icon so Pounce stays one click away even when its window
+// is closed (the app keeps running to host the bridge). The menu offers the two
+// things you'd reach for from the menu bar: reopen the window and check for
+// updates — plus Quit.
+- (void)setupStatusItem
+{
+  self.statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
+
+  // Template image → the system tints it for light/dark menu bars automatically.
+  NSImage *icon = [NSImage imageWithSystemSymbolName:@"pawprint.fill"
+                            accessibilityDescription:@"Pounce"];
+  if (icon != nil) {
+    [icon setTemplate:YES]; // dot-syntax `.template` is a C++ keyword in this .mm
+    self.statusItem.button.image = icon;
+  } else {
+    self.statusItem.button.title = @"Pounce"; // keep the item visible if the symbol is unavailable
+  }
+  self.statusItem.button.toolTip = @"Pounce";
+
+  NSMenu *menu = [[NSMenu alloc] init];
+
+  NSMenuItem *open = [[NSMenuItem alloc] initWithTitle:@"Open Pounce"
+                                                action:@selector(openMainWindow:)
+                                         keyEquivalent:@"o"];
+  open.target = self;
+  [menu addItem:open];
+
+  NSMenuItem *update = [[NSMenuItem alloc] initWithTitle:@"Check for Updates…"
+                                                  action:@selector(checkForUpdatesFromTray:)
+                                           keyEquivalent:@"u"];
+  update.target = self;
+  [menu addItem:update];
+
+  [menu addItem:[NSMenuItem separatorItem]];
+
+  NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:@"Quit Pounce"
+                                                action:@selector(terminate:)
+                                         keyEquivalent:@"q"];
+  quit.target = NSApp;
+  [menu addItem:quit];
+
+  self.statusItem.menu = menu;
+}
+
+// Reveal the main window and bring the app forward. When the last window is
+// closed the NSWindow still exists (we don't release it), so re-ordering it
+// front is enough.
+- (void)openMainWindow:(id)sender
+{
+  [NSApp activateIgnoringOtherApps:YES];
+  [self.window makeKeyAndOrderFront:sender];
+}
+
+- (void)checkForUpdatesFromTray:(id)sender
+{
+  SPUStandardUpdaterController *updater = [PounceUpdater sharedController];
+  [updater checkForUpdates:sender];
+}
+
+// Clicking the Dock icon (or reopening) with no visible window should bring the
+// main window back rather than no-op.
+- (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)flag
+{
+  if (!flag) [self.window makeKeyAndOrderFront:nil];
+  return YES;
 }
 
 - (NSURL *)sourceURLForBridge:(RCTBridge *)bridge

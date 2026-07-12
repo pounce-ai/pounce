@@ -1,0 +1,197 @@
+name: Release Desktop
+
+# Build, sign, notarize, and publish the Pounce desktop app (desktop/) from CI,
+# plus the headless cross-platform bridge bundle. Manual only — no accidental
+# releases. The version comes from desktop/macos/PounceDesktop-macOS/Info.plist,
+# so bump it (CFBundleShortVersionString + CFBundleVersion) in a PR first, merge,
+# then run this workflow from main.
+#
+# Required repo secrets (the macOS signing/notarization ones already exist from
+# release-bridge.yml):
+#   MAC_CERT_P12_BASE64      Developer ID Application cert (.p12), base64
+#   MAC_CERT_PASSWORD        …its password
+#   ELECTROBUN_DEVELOPER_ID  "Developer ID Application: … (TEAMID)"
+#   ELECTROBUN_APPLEAPIKEY_P8 App Store Connect API key (.p8), base64
+#   ELECTROBUN_APPLEAPIKEY   …its Key ID
+#   ELECTROBUN_APPLEAPIISSUER …its Issuer ID
+#   SPARKLE_ED_PRIVATE_KEY   NEW — exported Sparkle EdDSA key. Produce locally with
+#                            desktop/macos/Pods/Sparkle/bin/generate_keys -x key.txt
+#                            and paste key.txt's contents as the secret.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build + sign + notarize but do NOT create a release or commit the appcast"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  # Cross-platform bridge bundle (repo-free; needs only Node on the target host).
+  bridge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - name: Pack bridge bundle
+        run: bun run bridge:pack
+      - name: Zip bundle
+        run: |
+          cd dist && zip -r pounce-bridge.zip pounce-bridge
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pounce-bridge
+          path: dist/pounce-bridge.zip
+          if-no-files-found: error
+
+  # Signed + notarized macOS app → DMG + Sparkle appcast.
+  desktop:
+    runs-on: macos-14
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Preflight — required secrets present
+        env:
+          CERT: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          DEVID: ${{ secrets.ELECTROBUN_DEVELOPER_ID }}
+          NKEY: ${{ secrets.ELECTROBUN_APPLEAPIKEY_P8 }}
+          SPARKLE: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          miss=0
+          for v in CERT DEVID NKEY SPARKLE; do
+            if [ -z "${!v}" ]; then echo "::error::missing secret for $v"; miss=1; fi
+          done
+          [ "$miss" = 0 ] || { echo "Set the required secrets (see workflow header)."; exit 1; }
+
+      - name: Install JS deps (root + desktop)
+        run: |
+          bun install
+          cd desktop && bun install
+
+      - name: pod install
+        working-directory: desktop/macos
+        run: pod install
+
+      - name: Read app version
+        id: ver
+        run: |
+          PLIST=desktop/macos/PounceDesktop-macOS/Info.plist
+          V=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST")
+          B=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Desktop $V (build $B)"
+
+      - name: Import signing certificate
+        env:
+          CERT_P12: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          echo "$CERT_P12" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p "$CERT_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$CERT_PASSWORD" build.keychain
+          security set-keychain-settings build.keychain   # no auto-lock during the run
+          security import /tmp/cert.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$CERT_PASSWORD" build.keychain
+          rm -f /tmp/cert.p12
+
+      - name: Write notary + Sparkle keys
+        env:
+          NOTARY_P8: ${{ secrets.ELECTROBUN_APPLEAPIKEY_P8 }}
+          SPARKLE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          echo "$NOTARY_P8" | base64 --decode > /tmp/asc_key.p8
+          printf '%s' "$SPARKLE_KEY" > /tmp/sparkle_ed_key.txt
+
+      - name: Build (Release, unsigned — signed inside-out afterwards)
+        working-directory: desktop/macos
+        run: |
+          xcodebuild -workspace PounceDesktop.xcworkspace -scheme PounceDesktop-macOS \
+            -configuration Release -derivedDataPath build-release \
+            CODE_SIGNING_ALLOWED=NO build
+
+      - name: Sign · DMG · notarize · appcast
+        env:
+          APP: desktop/macos/build-release/Build/Products/Release/Pounce.app
+          SIGN_IDENTITY: ${{ secrets.ELECTROBUN_DEVELOPER_ID }}
+          SIGN_KEYCHAIN: build.keychain
+          ENTITLEMENTS: desktop/macos/PounceDesktop-macOS/PounceDesktop.entitlements
+          OUT_DMG: ${{ github.workspace }}/dist/Pounce.dmg
+          APPCAST_OUT: ${{ github.workspace }}/dist/appcast.xml
+          NOTARY_KEY_P8: /tmp/asc_key.p8
+          NOTARY_KEY_ID: ${{ secrets.ELECTROBUN_APPLEAPIKEY }}
+          NOTARY_ISSUER: ${{ secrets.ELECTROBUN_APPLEAPIISSUER }}
+          GENERATE_APPCAST: desktop/macos/Pods/Sparkle/bin/generate_appcast
+          SPARKLE_KEY_FILE: /tmp/sparkle_ed_key.txt
+          DOWNLOAD_URL_PREFIX: https://github.com/${{ github.repository }}/releases/download/desktop-v${{ steps.ver.outputs.version }}/
+        run: |
+          mkdir -p dist
+          bash scripts/desktop/release.sh
+
+      - name: Scrub secret key files
+        if: always()
+        run: rm -f /tmp/asc_key.p8 /tmp/sparkle_ed_key.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-dmg
+          path: |
+            dist/Pounce.dmg
+            dist/appcast.xml
+          if-no-files-found: error
+
+  # Publish the release (DMG + bridge bundle), THEN commit the appcast to main so
+  # its enclosure URL resolves before Pages serves it to auto-updaters.
+  release:
+    needs: [bridge, desktop]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop-v${{ needs.desktop.outputs.version }}
+          name: Pounce Desktop ${{ needs.desktop.outputs.version }}
+          make_latest: true
+          body: |
+            Desktop app ${{ needs.desktop.outputs.version }}. Auto-updates via Sparkle; requires macOS 14+.
+
+            - **macOS:** `Pounce.dmg` — signed + notarized. Open, drag Pounce to Applications, launch.
+            - **Windows / Linux (headless bridge):** `pounce-bridge.zip` — unzip, then `install.sh` (Linux/macOS) or `install.ps1` (Windows). Needs Node.js on the host; pair from the mobile app on the same Wi‑Fi.
+          files: |
+            artifacts/Pounce.dmg
+            artifacts/pounce-bridge.zip
+          fail_on_unmatched_files: true
+
+      - name: Commit appcast to main (Pages serves docs/)
+        run: |
+          cp artifacts/appcast.xml docs/appcast.xml
+          if git diff --quiet -- docs/appcast.xml; then
+            echo "appcast unchanged"; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/appcast.xml
+          git commit -m "Desktop: Sparkle appcast for ${{ needs.desktop.outputs.version }}"
+          git push origin main

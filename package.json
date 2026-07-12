@@ -25,6 +25,7 @@
     "bridge:restart": "pkill -f 'apps/bridge/server.mjs' 2>/dev/null; sleep 1; node apps/bridge/server.mjs",
     "bridge:install": "bash scripts/bridge-install.sh",
     "bridge:uninstall": "bash scripts/bridge-uninstall.sh",
+    "bridge:pack": "bun run scripts/bridge/pack.mjs",
     "bridge:qr": "node apps/bridge/pair.mjs",
     "dev:ios": "cd apps/mobile && EXPO_USE_PRECOMPILED_MODULES=0 npx expo run:ios --device",
     "testflight": "cd apps/mobile && npx testflight",
