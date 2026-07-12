@@ -25,7 +25,8 @@ import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { client, ndJsonStream, PROTOCOL_VERSION } from "@agentclientprotocol/sdk";
 import { assistantMessage, permissionRequest, systemEvent, thinking, toolCall, toolResult } from "./events.mjs";
-import { agentEnv } from "./env.mjs";
+import { agentEnv, binPath } from "./env.mjs";
+import { binOverride } from "./config.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -69,7 +70,8 @@ function spawnSpec(agent) {
     try { entry = require.resolve(a.pkg); } catch { return null; }
     return { command: process.execPath, args: [entry] };
   }
-  return { command: a.cmd, args: a.args || [] };
+  // Direct-CLI adapter (opencode) — honor a user-pinned binary path.
+  return { command: binPath(a.cmd), args: a.args || [] };
 }
 
 /** Whether an ACP turn can run for this agent right now. */
@@ -149,7 +151,8 @@ export function startAcpTurn(agent, { threadId, text, cwd, images, model, permis
   // bundled (desktop) the SDK's native binary isn't present, so point it at the
   // same claude the stream-json path uses.
   if (agent === "claude" && !env.CLAUDE_CODE_EXECUTABLE) {
-    const found = resolveBin("claude", env);
+    // A user-pinned claude path wins; otherwise resolve off PATH.
+    const found = binOverride("claude") || resolveBin("claude", env);
     if (found) env.CLAUDE_CODE_EXECUTABLE = found;
   }
   const child = spawn(spec.command, spec.args, {

@@ -174,6 +174,20 @@ export interface DoctorAgent {
   readonly path: string | null;
   readonly version: string | null;
   readonly sessionCount: number;
+  /** The binary name to pin when auto-detection fails (null if not applicable). */
+  readonly bin?: string | null;
+  /** The user's current pinned absolute path for this binary, if any. */
+  readonly override?: string | null;
+}
+
+/** User-set overrides for custom setups (persisted at ~/.pounce/config.json). */
+export interface PounceConfig {
+  /** binary name → absolute path (e.g. { claude: "/opt/claude/bin/claude" }). */
+  readonly bins: Readonly<Record<string, string>>;
+  /** Extra PATH search directories. */
+  readonly extraPath: readonly string[];
+  /** Extra environment variables for agent spawns. */
+  readonly env: Readonly<Record<string, string>>;
 }
 
 /** The host's runtime health — what's installed, found, and reachable. Drives
@@ -196,6 +210,8 @@ export interface DoctorReport {
   readonly host: string;
   readonly home: string;
   readonly platform: string;
+  /** Path to the overrides file the app writes via POST /v1/config. */
+  readonly configFile?: string;
 }
 
 /** A paired machine running the alleycat daemon (Mac mini, Air, SSH box, …). */

@@ -16,6 +16,7 @@ import type {
   Host,
   PairPayload,
   PermissionMode,
+  PounceConfig,
   Repository,
   RunImage,
   Session,
@@ -838,6 +839,39 @@ export async function fetchDoctor(hostId: string): Promise<DoctorReport | null> 
   try {
     const { report } = await get<{ report: DoctorReport }>(cfg, "/v1/doctor");
     return report;
+  } catch {
+    return null;
+  }
+}
+
+/** Read the host's manual overrides (pinned binary paths, extra PATH/env). */
+export async function fetchHostConfig(hostId: string): Promise<PounceConfig | null> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return null;
+  try {
+    const { config } = await get<{ config: PounceConfig }>(cfg, "/v1/config");
+    return config;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist a manual-override patch on the host. `bins`/`env` merge (""→clear a
+ *  key); the host re-detects agents on the next sync. Returns the new config. */
+export async function saveHostConfig(
+  hostId: string,
+  patch: { bins?: Record<string, string>; extraPath?: string[]; env?: Record<string, string> },
+): Promise<PounceConfig | null> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return null;
+  try {
+    const res = await fetch(`${await bridgeBase(cfg)}/v1/config`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    const j = (await res.json()) as { config?: PounceConfig };
+    return j.config ?? null;
   } catch {
     return null;
   }

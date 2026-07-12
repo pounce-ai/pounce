@@ -8,11 +8,14 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { agentEnv, binVersion, lanIps } from "./env.mjs";
+import { binOverride, CONFIG_FILE } from "./config.mjs";
 
 const IS_WIN = process.platform === "win32";
 
-/** Absolute path a binary resolves to on the host's PATH (with our extra dirs). */
+/** Absolute path a binary resolves to: user-pinned override first, else PATH. */
 function whichBin(name) {
+  const pinned = binOverride(name);
+  if (pinned && existsSync(pinned)) return pinned;
   try {
     const r = IS_WIN
       ? spawnSync("where", [name], { env: agentEnv(), encoding: "utf8" })
@@ -51,7 +54,18 @@ export async function buildDoctorReport(adapters) {
       try {
         sessionCount = (await a.listThreads()).length;
       } catch {}
-      return { id: a.id, name: a.displayName, installed, path: binPath, version, sessionCount };
+      return {
+        id: a.id,
+        name: a.displayName,
+        installed,
+        path: binPath,
+        version,
+        sessionCount,
+        // The binary name to pin and its current user override (so the app can
+        // pre-fill a "Set path…" field and let a custom setup fix detection).
+        bin: bin || null,
+        override: bin ? binOverride(bin) : null,
+      };
     }),
   );
 
@@ -77,5 +91,7 @@ export async function buildDoctorReport(adapters) {
     host: os.hostname().replace(/\.local$/, ""),
     home: os.homedir(),
     platform: process.platform,
+    // Where manual overrides live, so the UI can point the user at the file.
+    configFile: CONFIG_FILE,
   };
 }

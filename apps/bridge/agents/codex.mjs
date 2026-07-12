@@ -19,7 +19,7 @@ import {
   userMessage, thinking, assistantMessage, toolCall, toolResult, systemEvent,
   readTailLines,
 } from "./events.mjs";
-import { agentEnv, binVersion } from "./env.mjs";
+import { agentEnv, binVersion, binPath } from "./env.mjs";
 
 const ROOT = path.join(os.homedir(), ".codex", "sessions");
 const INDEX_FILE = path.join(os.homedir(), ".codex", "session_index.jsonl");
@@ -232,7 +232,7 @@ export class CodexAdapter {
 
     let child;
     try {
-      child = spawn("codex", args, {
+      child = spawn(binPath("codex"), args, {
         cwd: cwd && existsSync(cwd) ? cwd : os.homedir(),
         env: agentEnv(), stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
       });

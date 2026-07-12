@@ -9,11 +9,13 @@
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { readConfig, binOverride } from "./config.mjs";
 
 const IS_WIN = process.platform === "win32";
 
 export function agentEnv() {
   const home = os.homedir();
+  const cfg = readConfig();
   const extra = IS_WIN
     ? [
         process.env.ProgramFiles && path.join(process.env.ProgramFiles, "nodejs"),
@@ -26,8 +28,24 @@ export function agentEnv() {
         `${home}/.volta/bin`, `${home}/.bun/bin`, `${home}/.claude/local`,
         `${home}/.nvm/current/bin`, `${home}/.fnm/aliases/default/bin`,
       ];
-  const PATH = [process.env.PATH || "", ...extra.filter(Boolean)].filter(Boolean).join(path.delimiter);
-  return { ...process.env, PATH };
+  // A user-pinned binary's directory goes on the FRONT so both the binary itself
+  // and any `#!/usr/bin/env node` shebang inside a wrapper resolve to the pinned
+  // toolchain. Then the caller's PATH, then their extra dirs, then our defaults.
+  const overrideDirs = Object.values(cfg.bins).map((p) => path.dirname(p));
+  const PATH = [...overrideDirs, process.env.PATH || "", ...cfg.extraPath, ...extra.filter(Boolean)]
+    .filter(Boolean)
+    .join(path.delimiter);
+  // cfg.env comes before PATH so our computed PATH always wins.
+  return { ...process.env, ...cfg.env, PATH };
+}
+
+/**
+ * How to invoke a named binary: the user's pinned absolute path if set, else the
+ * bare name for PATH resolution. Use this instead of spawning the literal name
+ * so custom setups (shadowed/oddly-installed CLIs) can be fixed from the app.
+ */
+export function binPath(name) {
+  return binOverride(name) || name;
 }
 
 /**
@@ -68,7 +86,7 @@ export function binVersion(bin, args = ["--version"]) {
   return new Promise((resolve) => {
     let p;
     try {
-      p = spawn(bin, args, { env: agentEnv(), stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+      p = spawn(binPath(bin), args, { env: agentEnv(), stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
     } catch { return resolve(null); }
     let out = "";
     const t = setTimeout(() => { try { p.kill("SIGKILL"); } catch {} }, 5000);
