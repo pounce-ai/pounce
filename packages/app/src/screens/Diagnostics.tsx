@@ -98,29 +98,31 @@ export default function DiagnosticsScreen() {
       ) : (
         <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
           <Text className="px-4 pb-2 pt-1 text-[13px] leading-[19px] text-fg-muted">
-            {report.sessionsTotal > 0
-              ? `Found ${report.sessionsTotal} session${report.sessionsTotal === 1 ? "" : "s"} on ${report.host}.`
-              : `No agent sessions found on ${report.host} yet — install an agent CLI below, then start a task.`}
+            {(report.sessionsTotal ?? 0) > 0
+              ? `Found ${report.sessionsTotal} session${report.sessionsTotal === 1 ? "" : "s"} on ${report.host ?? "this Mac"}.`
+              : `No agent sessions found on ${report.host ?? "this Mac"} yet — install an agent CLI below, then start a task.`}
           </Text>
 
-          <Row ok={report.node.ok} title="Node.js" detail={report.node.version} />
+          <Row ok={!!report.node?.ok} title="Node.js" detail={report.node?.version} />
 
-          <Row
-            ok={report.network.reachable}
-            warn={report.network.ips.length > 1}
-            alwaysHint
-            title="Phone pairing (same Wi-Fi)"
-            detail={report.network.advertised ? `${report.network.advertised}:${report.network.port}` : "no LAN address"}
-            hint={
-              !report.network.reachable
-                ? "No local network address found — connect this Mac to Wi-Fi/Ethernet."
-                : report.network.ips.length > 1
-                  ? `Multiple network addresses (${report.network.ips.join(", ")}). Pounce advertises the first; if your phone can't connect on the same Wi-Fi, that address may be a VPN/Docker one it can't reach — and check System Settings → Network → Firewall allows incoming connections for Pounce.`
-                  : "If your phone still can't connect on the same Wi-Fi, allow incoming connections for Pounce in System Settings → Network → Firewall."
-            }
-          />
+          {report.network ? (
+            <Row
+              ok={!!report.network.reachable}
+              warn={(report.network.ips?.length ?? 0) > 1}
+              alwaysHint
+              title="Phone pairing (same Wi-Fi)"
+              detail={report.network.advertised ? `${report.network.advertised}:${report.network.port}` : "no LAN address"}
+              hint={
+                !report.network.reachable
+                  ? "No local network address found — connect this Mac to Wi-Fi/Ethernet."
+                  : (report.network.ips?.length ?? 0) > 1
+                    ? `Multiple network addresses (${(report.network.ips ?? []).join(", ")}). Pounce advertises the first; if your phone can't connect on the same Wi-Fi, that address may be a VPN/Docker one it can't reach — and check System Settings → Network → Firewall allows incoming connections for Pounce.`
+                    : "If your phone still can't connect on the same Wi-Fi, allow incoming connections for Pounce in System Settings → Network → Firewall."
+              }
+            />
+          ) : null}
 
-          {report.agents.map((a) => (
+          {(report.agents ?? []).map((a) => (
             <Row
               key={a.id}
               ok={a.installed}
@@ -137,15 +139,17 @@ export default function DiagnosticsScreen() {
             />
           ))}
 
-          <Row
-            ok={report.tunnel.ok}
-            warn={!report.tunnel.ok}
-            title="Remote access"
-            detail={report.tunnel.mode === "internet" ? "internet" : "LAN only"}
-            hint="The off-LAN tunnel isn't installed, so your phone can reach this Mac only on the same Wi-Fi. On the same network it works now."
-          />
+          {report.tunnel ? (
+            <Row
+              ok={!!report.tunnel.ok}
+              warn={!report.tunnel.ok}
+              title="Remote access"
+              detail={report.tunnel.mode === "internet" ? "internet" : "LAN only"}
+              hint="The off-LAN tunnel isn't installed, so your phone can reach this Mac only on the same Wi-Fi. On the same network it works now."
+            />
+          ) : null}
 
-          <Row ok={report.git.ok} title="git" detail={report.git.version?.replace(/^git version /, "")} hint="git isn't found — some repo features (diffs, commits) won't work." />
+          <Row ok={!!report.git?.ok} title="git" detail={report.git?.version?.replace(/^git version /, "")} hint="git isn't found — some repo features (diffs, commits) won't work." />
         </ScrollView>
       )}
     </View>
