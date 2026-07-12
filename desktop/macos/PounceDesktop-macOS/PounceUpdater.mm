@@ -4,10 +4,6 @@
 #import "PounceUpdater.h"
 #import <Sparkle/Sparkle.h>
 
-@interface PounceUpdater ()
-@property (nonatomic, strong) SPUStandardUpdaterController *controller;
-@end
-
 @implementation PounceUpdater
 
 RCT_EXPORT_MODULE();
@@ -15,21 +11,28 @@ RCT_EXPORT_MODULE();
 // Sparkle must live on the main thread.
 + (BOOL)requiresMainQueueSetup { return YES; }
 
-// Lazily create the standard updater controller (starts the updater, which
-// reads SUFeedURL / SUPublicEDKey from Info.plist). Automatic checks stay OFF
-// until the user opts in — SUEnableAutomaticChecks=NO in Info.plist suppresses
-// Sparkle's own first-run prompt so our consent modal is the single source.
-- (SPUStandardUpdaterController *)controllerOrNil {
-  if (self.controller == nil) {
+// The one shared updater controller (starts the updater, which reads SUFeedURL /
+// SUPublicEDKey from Info.plist). Automatic checks stay OFF until the user opts
+// in — SUEnableAutomaticChecks=NO in Info.plist suppresses Sparkle's own
+// first-run prompt so our consent modal is the single source. Shared with the
+// menu-bar tray so both trigger the same updater. Main-thread only.
++ (SPUStandardUpdaterController *)sharedController {
+  static SPUStandardUpdaterController *controller = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
     @try {
-      self.controller = [[SPUStandardUpdaterController alloc] initWithStartingUpdater:YES
-                                                                      updaterDelegate:nil
-                                                                   userDriverDelegate:nil];
+      controller = [[SPUStandardUpdaterController alloc] initWithStartingUpdater:YES
+                                                                 updaterDelegate:nil
+                                                              userDriverDelegate:nil];
     } @catch (NSException *e) {
       NSLog(@"[updater] failed to start Sparkle: %@", e);
     }
-  }
-  return self.controller;
+  });
+  return controller;
+}
+
+- (SPUStandardUpdaterController *)controllerOrNil {
+  return [PounceUpdater sharedController];
 }
 
 RCT_EXPORT_METHOD(isSupported:(RCTPromiseResolveBlock)resolve

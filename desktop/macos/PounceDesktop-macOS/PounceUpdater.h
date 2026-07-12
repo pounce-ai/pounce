@@ -9,5 +9,14 @@
 //
 #import <React/RCTBridgeModule.h>
 
+@class SPUStandardUpdaterController;
+
 @interface PounceUpdater : NSObject <RCTBridgeModule>
+
+/// The single Sparkle updater controller, shared between this RN module and the
+/// menu-bar (tray) "Check for Updates…" item so there's one updater — one feed,
+/// one consent state. Lazily created on the main thread; nil if Sparkle failed
+/// to start. Call only from the main thread.
++ (SPUStandardUpdaterController *)sharedController;
+
 @end

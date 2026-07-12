@@ -246,21 +246,37 @@ export default function DiagnosticsScreen() {
 
           {(report.agents ?? []).map((a) => {
             const override = a.override ?? overrideFor(a.bin);
+            // An agent with transcripts on disk but no runnable CLI is "history
+            // only": its past sessions still sync and show up in filters (you can
+            // browse them), but new turns need the CLI. Surface that as a soft
+            // warning instead of a hard "not installed" — otherwise it reads as a
+            // contradiction with the agent appearing in the filter list.
+            const historyOnly = !a.installed && a.sessionCount > 0;
             return (
               <Row
                 key={a.id}
                 ok={a.installed}
                 title={a.name}
-                detail={a.installed ? (a.sessionCount ? `${a.sessionCount} sessions` : "no sessions") : undefined}
-                warn={a.installed && a.sessionCount === 0}
+                detail={
+                  a.installed
+                    ? a.sessionCount
+                      ? `${a.sessionCount} sessions`
+                      : "no sessions"
+                    : historyOnly
+                      ? `${a.sessionCount} sessions · history only`
+                      : undefined
+                }
+                warn={historyOnly || (a.installed && a.sessionCount === 0)}
                 hint={
-                  !a.installed
-                    ? `${a.name} isn't installed (or wasn't found on PATH). Install its CLI — or if it's installed somewhere custom, set its path below.`
-                    : a.sessionCount === 0
-                      ? `Installed, but no conversations yet — start a task in Pounce or run it once in a terminal.`
-                      : override
-                        ? `Using your custom path.`
-                        : undefined
+                  historyOnly
+                    ? `${a.name}'s past sessions are here (and appear in filters), but its CLI wasn't found on PATH — so you can browse them, not start new turns. Install the CLI, or set its path below if it's installed somewhere custom.`
+                    : !a.installed
+                      ? `${a.name} isn't installed (or wasn't found on PATH). Install its CLI — or if it's installed somewhere custom, set its path below.`
+                      : a.sessionCount === 0
+                        ? `Installed, but no conversations yet — start a task in Pounce or run it once in a terminal.`
+                        : override
+                          ? `Using your custom path.`
+                          : undefined
                 }
                 alwaysHint={!!override}
               >
