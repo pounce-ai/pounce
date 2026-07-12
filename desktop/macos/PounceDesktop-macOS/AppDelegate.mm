@@ -7,7 +7,9 @@
 
 // Menu-bar (tray) status item. Kept alive for the app's lifetime so the icon
 // stays in the menu bar; a released NSStatusItem drops out of it.
-@interface AppDelegate ()
+// NSWindowDelegate so the red close button hides the window (keeping the app —
+// and the bridge child process — alive) instead of destroying it.
+@interface AppDelegate () <NSWindowDelegate>
 @property (nonatomic, strong) NSStatusItem *statusItem;
 @end
 
@@ -97,7 +99,30 @@ static void PounceStartBridge(void)
   self.window.contentView.wantsLayer = YES;
   self.window.contentView.layer.backgroundColor = bg.CGColor;
 
+  // Own the window's lifecycle: the red close button should hide the window
+  // (app + bridge keep running, reachable from the tray), not tear it down.
+  // releasedWhenClosed=NO is belt-and-suspenders so `self.window` stays valid.
+  self.window.delegate = self;
+  self.window.releasedWhenClosed = NO;
+
   [self setupStatusItem];
+}
+
+#pragma mark - Window lifecycle
+
+// Hide instead of close, so closing the window never quits the app or drops the
+// bridge — and the same window is always there for the tray to re-show.
+- (BOOL)windowShouldClose:(NSWindow *)sender
+{
+  [sender orderOut:nil];
+  return NO;
+}
+
+// Even if some path does close the last window for real, keep the app (and the
+// bridge child process) alive — Quit from the tray is the only way out.
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender
+{
+  return NO;
 }
 
 #pragma mark - Menu-bar tray
@@ -146,12 +171,14 @@ static void PounceStartBridge(void)
   self.statusItem.menu = menu;
 }
 
-// Reveal the main window and bring the app forward. When the last window is
-// closed the NSWindow still exists (we don't release it), so re-ordering it
-// front is enough.
+// Reveal the main window and bring the app forward. The window object survives a
+// close (strong ref + releasedWhenClosed=NO), so re-ordering it front is enough.
+// Use -[NSApplication activate] (macOS 14+): activateIgnoringOtherApps: is
+// deprecated and a no-op from a background context on Sonoma+, which is why the
+// tray item appeared to "do nothing".
 - (void)openMainWindow:(id)sender
 {
-  [NSApp activateIgnoringOtherApps:YES];
+  [NSApp activate];
   [self.window makeKeyAndOrderFront:sender];
 }
 
@@ -165,7 +192,10 @@ static void PounceStartBridge(void)
 // main window back rather than no-op.
 - (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)flag
 {
-  if (!flag) [self.window makeKeyAndOrderFront:nil];
+  if (!flag) {
+    [NSApp activate];
+    [self.window makeKeyAndOrderFront:nil];
+  }
   return YES;
 }
 
