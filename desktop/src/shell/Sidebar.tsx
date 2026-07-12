@@ -166,9 +166,16 @@ export function Sidebar() {
             <View className="items-center px-6 py-16">
               <Text className="text-[28px]">🐾</Text>
               <Text className="mt-2 text-center text-[13px] font-semibold text-fg">No threads yet</Text>
-              <Text className="mt-1 text-center text-[12px] text-fg-muted">
+              <Text className="mt-1 text-center text-[12px] leading-[17px] text-fg-muted">
                 Start a task with the + button, or run an agent in a repo on this Mac.
               </Text>
+              <Pressable
+                onPress={() => router.push("/diagnostics")}
+                className="active:opacity-70 mt-3 flex-row items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2"
+              >
+                <Ionicons name="medkit-outline" size={13} color={COLOR.fgMuted} />
+                <Text className="text-[12px] font-medium text-fg-muted">Check setup</Text>
+              </Pressable>
             </View>
           )
         }
@@ -189,6 +196,7 @@ export function Sidebar() {
         </View>
         <FooterIcon name="qr-code-outline" hint="Pair phone" onPress={() => router.push("/pair")} />
         <FooterIcon name="time-outline" hint="Sync history" onPress={() => router.push("/sync-history")} />
+        <FooterIcon name="medkit-outline" hint="Diagnostics" onPress={() => router.push("/diagnostics")} />
         <FooterIcon name="help-circle-outline" hint="Help" onPress={() => router.push("/help")} />
         <FooterIcon name="settings-outline" hint="Settings" onPress={() => router.push("/settings")} />
       </View>

@@ -12,6 +12,7 @@ import type {
   Agent,
   AgentCapabilities,
   Device,
+  DoctorReport,
   Host,
   PairPayload,
   PermissionMode,
@@ -827,6 +828,18 @@ export async function interruptTurn(
     return !!j.ok;
   } catch {
     return false;
+  }
+}
+
+/** Fetch the host's Pounce Doctor report (what's installed/found/reachable). */
+export async function fetchDoctor(hostId: string): Promise<DoctorReport | null> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return null;
+  try {
+    const { report } = await get<{ report: DoctorReport }>(cfg, "/v1/doctor");
+    return report;
+  } catch {
+    return null;
   }
 }
 

@@ -24,6 +24,7 @@ import TerminalScreen from "@litter/app/screens/Terminal";
 import ConnectScreen from "@litter/app/screens/Connect";
 import HelpScreen from "@litter/app/screens/Help";
 import SyncHistoryScreen from "@litter/app/screens/SyncHistory";
+import DiagnosticsScreen from "@litter/app/screens/Diagnostics";
 import PairScreen from "../screens/Pair";
 
 /** Modal cards need an explicit height: the screens inside are flex-1, so a
@@ -39,6 +40,7 @@ const MODALS: Record<string, { component: ComponentType; width: number; height: 
   "/connect": { component: ConnectScreen, width: 560, height: 460 },
   "/help": { component: HelpScreen, width: 620, height: 640 },
   "/sync-history": { component: SyncHistoryScreen, width: 620, height: 600 },
+  "/diagnostics": { component: DiagnosticsScreen, width: 620, height: 620 },
   "/pair": { component: PairScreen, width: 560, height: 640 },
 };
 

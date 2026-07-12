@@ -166,6 +166,30 @@ export interface Session {
   readonly permissionMode?: PermissionMode | null;
 }
 
+/** One agent CLI's health, from the Pounce Doctor report. */
+export interface DoctorAgent {
+  readonly id: string;
+  readonly name: string;
+  readonly installed: boolean;
+  readonly path: string | null;
+  readonly version: string | null;
+  readonly sessionCount: number;
+}
+
+/** The host's runtime health — what's installed, found, and reachable. Drives
+ *  the Diagnostics screen so a fresh/custom setup sees what to fix. */
+export interface DoctorReport {
+  readonly ok: boolean;
+  readonly node: { readonly ok: boolean; readonly path: string; readonly version: string };
+  readonly git: { readonly ok: boolean; readonly version: string | null };
+  readonly agents: readonly DoctorAgent[];
+  readonly tunnel: { readonly ok: boolean; readonly path: string | null; readonly mode: "internet" | "lan-only" };
+  readonly sessionsTotal: number;
+  readonly host: string;
+  readonly home: string;
+  readonly platform: string;
+}
+
 /** A paired machine running the alleycat daemon (Mac mini, Air, SSH box, …). */
 export interface Device {
   readonly id: Id;
