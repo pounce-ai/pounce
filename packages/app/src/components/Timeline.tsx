@@ -253,6 +253,10 @@ const Row = memo(function Row({
     case "thinking_finished":
       return <Meta text={event.text ? `💭 ${event.text}` : "Thought"} />;
     case "tool_call": {
+      // Entering plan mode is a state change, not a tool worth a card — show the
+      // same quiet banner Claude Code does.
+      if (event.call.name === "EnterPlanMode")
+        return <Meta text="⏸ Entered plan mode — exploring, no changes yet" level="info" />;
       // Plan mode: ExitPlanMode carries the proposed plan as markdown — render
       // it as a first-class plan card, not a muted one-line tool row.
       const plan =
@@ -549,7 +553,10 @@ function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: 
           {open ? preview : preview.replace(/\s+/g, " ")}
         </Text>
         {running ? (
-          <Text className="text-[11px] text-fg-muted">…</Text>
+          <View className="flex-row items-center gap-1">
+            <View className="h-1.5 w-1.5 rounded-full bg-success" />
+            <Text className="text-[10px] font-semibold uppercase tracking-wide text-success">Running</Text>
+          </View>
         ) : expandable ? (
           <Ionicons name={open ? "chevron-up" : "chevron-down"} size={13} color={COLOR.fgFaint} />
         ) : null}
