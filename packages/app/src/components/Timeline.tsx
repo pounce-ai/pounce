@@ -252,7 +252,14 @@ const Row = memo(function Row({
       return <Meta text="Thinking…" />;
     case "thinking_finished":
       return <Meta text={event.text ? `💭 ${event.text}` : "Thought"} />;
-    case "tool_call":
+    case "tool_call": {
+      // Plan mode: ExitPlanMode carries the proposed plan as markdown — render
+      // it as a first-class plan card, not a muted one-line tool row.
+      const plan =
+        event.call.name === "ExitPlanMode"
+          ? (event.call.input as { plan?: unknown } | undefined)?.plan
+          : undefined;
+      if (typeof plan === "string" && plan.trim()) return <PlanCard plan={plan} />;
       if (!batchHeader) return <ToolAccordion event={event} result={pairedResult} cwd={cwd} />;
       return (
         <View className="gap-2">
@@ -260,6 +267,7 @@ const Row = memo(function Row({
           <ToolAccordion event={event} result={pairedResult} cwd={cwd} />
         </View>
       );
+    }
     case "tool_result":
       return <ToolResult content={event.result.content} isError={event.result.isError} />;
     case "task_created":
@@ -323,6 +331,20 @@ function UserRow({
       {p.output ? <OutputNote text={p.output.text} isError={p.output.isError} /> : null}
       {hasImages ? <InlineImages images={images!} /> : null}
       {p.text ? <Bubble role="user" text={p.text} /> : null}
+    </View>
+  );
+}
+
+/** Plan mode's proposed plan (from ExitPlanMode), rendered as markdown in a
+ *  distinct accent card so it reads as a plan, not a buried tool call. */
+function PlanCard({ plan }: { plan: string }) {
+  return (
+    <View className="gap-1.5 rounded-xl border border-accent/40 bg-accent/5 p-3">
+      <View className="flex-row items-center gap-1.5">
+        <Ionicons name="map-outline" size={13} color={COLOR.accent} />
+        <Text className="text-[12px] font-semibold uppercase tracking-wide text-accent">Plan</Text>
+      </View>
+      <MessageMarkdown text={plan} role="assistant" />
     </View>
   );
 }
