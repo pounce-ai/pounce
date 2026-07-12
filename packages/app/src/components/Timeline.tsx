@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   assertNeverEvent,
   type MessageImage,
+  type PermissionRequestEvent,
   type TimelineEvent,
   type ToolCallEvent,
   type ToolResultEvent,
@@ -112,12 +113,15 @@ export const Timeline = memo(function Timeline({
   onLongPressEvent,
   onRunCommand,
   onAtBottomChange,
+  onRespondPermission,
 }: {
   events: TimelineEvent[];
   /** Which agent produced these events — selects the body-cleaning rules. */
   agent?: string;
   /** The thread's working dir (worktree) — tool-call paths render relative to it. */
   cwd?: string | null;
+  /** Answer an ACP permission prompt (requestId, chosen optionId or null). */
+  onRespondPermission?: (requestId: string, optionId: string | null) => void;
   footer?: React.ReactElement;
   /** Marker state is scoped per session — required for marked indicators. */
   sessionId?: string;
@@ -163,6 +167,7 @@ export const Timeline = memo(function Timeline({
             item.type === "tool_call" ? resultByCallId.get(item.call.id || item.id) : undefined
           }
           batchHeader={headers.get(item.id)}
+          onRespondPermission={onRespondPermission}
         />
       )}
       // A blended average across the row types (short user bubbles / meta lines
@@ -211,6 +216,7 @@ const Row = memo(function Row({
   pairedResult,
   batchHeader,
   cwd,
+  onRespondPermission,
 }: {
   event: TimelineEvent;
   agent?: string;
@@ -224,6 +230,8 @@ const Row = memo(function Row({
   batchHeader?: string;
   /** Thread cwd — tool-call file paths render relative to it. */
   cwd?: string | null;
+  /** Answer an ACP permission prompt (requestId, chosen optionId or null). */
+  onRespondPermission?: (requestId: string, optionId: string | null) => void;
 }) {
   const onLongPress = onLongPressEvent ? () => onLongPressEvent(event) : undefined;
   switch (event.type) {
@@ -286,6 +294,8 @@ const Row = memo(function Row({
       return <Term data={event.data} stream={event.stream} />;
     case "system_event":
       return <Meta text={event.message} level={event.level} />;
+    case "permission_request":
+      return <PermissionCard event={event} onRespond={onRespondPermission} />;
     default:
       return assertNeverEvent(event);
   }
@@ -335,6 +345,59 @@ function UserRow({
       {p.output ? <OutputNote text={p.output.text} isError={p.output.isError} /> : null}
       {hasImages ? <InlineImages images={images!} /> : null}
       {p.text ? <Bubble role="user" text={p.text} /> : null}
+    </View>
+  );
+}
+
+/**
+ * An ACP permission prompt: the agent is asking to run a tool. Renders the
+ * options as buttons; tapping answers the paused turn on the host and locks the
+ * card to the chosen outcome. Reject options render subdued, allow options
+ * accented.
+ */
+function PermissionCard({
+  event,
+  onRespond,
+}: {
+  event: PermissionRequestEvent;
+  onRespond?: (requestId: string, optionId: string | null) => void;
+}) {
+  const [chosen, setChosen] = useState<string | null>(null);
+  const answered = chosen !== null;
+  const pick = (optionId: string, label: string) => {
+    if (answered) return;
+    setChosen(label);
+    onRespond?.(event.requestId, optionId);
+  };
+  return (
+    <View className="gap-2 rounded-xl border border-warning/40 bg-warning/10 p-3">
+      <View className="flex-row items-center gap-1.5">
+        <Ionicons name="shield-checkmark-outline" size={13} color="#d29922" />
+        <Text className="flex-1 text-[13px] font-medium text-fg">{event.toolTitle}</Text>
+      </View>
+      {answered ? (
+        <Text className="text-[12px] font-medium text-fg-muted">You chose: {chosen}</Text>
+      ) : (
+        <View className="flex-row flex-wrap gap-2">
+          {event.options.map((o) => {
+            const reject = /reject|deny|no/i.test(o.kind || o.optionId || o.name);
+            return (
+              <Pressable
+                key={o.optionId}
+                onPress={() => pick(o.optionId, o.name)}
+                className={cn(
+                  "active:opacity-80 rounded-lg px-3 py-2",
+                  reject ? "border border-border bg-surface-alt" : "bg-accent",
+                )}
+              >
+                <Text className={cn("text-[13px] font-semibold", reject ? "text-fg-muted" : "text-white")}>
+                  {o.name}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
     </View>
   );
 }

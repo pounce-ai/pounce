@@ -22,11 +22,31 @@ import { spawn } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { client, ndJsonStream, PROTOCOL_VERSION } from "@agentclientprotocol/sdk";
-import { assistantMessage, systemEvent, thinking, toolCall, toolResult } from "./events.mjs";
+import { assistantMessage, permissionRequest, systemEvent, thinking, toolCall, toolResult } from "./events.mjs";
 import { agentEnv } from "./env.mjs";
 
 const require = createRequire(import.meta.url);
+
+/**
+ * Pending interactive permission prompts, keyed by requestId. When the agent
+ * asks (session/request_permission), the runner parks a resolver here and emits
+ * a permission_request event; the app POSTs its choice to /v1/turn/permission,
+ * which calls resolvePermission() to unpark the turn. Auto-cancelled if the
+ * turn ends first.
+ */
+const pendingPermissions = new Map();
+
+/** Resolve a parked permission prompt with the app's chosen option (or null to
+ *  cancel). Returns true if a matching prompt was waiting. */
+export function resolvePermission(requestId, optionId) {
+  const entry = pendingPermissions.get(requestId);
+  if (!entry) return false;
+  pendingPermissions.delete(requestId);
+  entry.resolve(optionId);
+  return true;
+}
 
 /** Per-agent: how to spawn its ACP server. `pkg` → `node <resolved entry>`;
  *  `cmd`+`args` → run directly (must be on PATH). */
@@ -95,7 +115,15 @@ function planMarkdown(entries) {
  * `{ stop, done }` where done resolves with the real thread id (= ACP session
  * id). Emits app timeline events through `onEvent`.
  */
-export function startAcpTurn(agent, { threadId, text, cwd, images, model }, onEvent) {
+/** Pounce PermissionMode → the ACP adapter's session mode id. Unset defaults to
+ *  "default" (Manual) so the user gets interactive prompts — the adapter's own
+ *  default is "auto" (silent-approve), which would bypass the whole point. */
+const ACP_MODE = {
+  default: "default", acceptEdits: "acceptEdits",
+  bypassPermissions: "bypassPermissions", plan: "plan",
+};
+
+export function startAcpTurn(agent, { threadId, text, cwd, images, model, permissionMode }, onEvent) {
   const spec = spawnSpec(agent);
   const fresh = !threadId || !/^[0-9a-f]{8}-/i.test(threadId);
   const dir = cwd && existsSync(cwd) ? cwd : process.env.HOME;
@@ -162,17 +190,45 @@ export function startAcpTurn(agent, { threadId, text, cwd, images, model }, onEv
     const u = ctx.params?.update;
     if (u?.sessionUpdate) { try { onUpdate(u); } catch {} }
   });
-  // M1: auto-allow (prefer an "allow once" option). M2 relays this to the app.
-  app.onRequest("session/request_permission", (ctx) => {
+  const myRequests = new Set(); // requestIds parked by this turn (cleanup on stop)
+  // Relay the prompt to the app and wait for its choice. A generous timeout
+  // auto-allows so a disconnected / older client can't hang the turn forever.
+  app.onRequest("session/request_permission", async (ctx) => {
     const opts = ctx.params?.options || [];
-    const pick = opts.find((o) => /allow/i.test(o.optionId) || /allow/i.test(o.name || "")) || opts[0];
-    return { outcome: pick ? { outcome: "selected", optionId: pick.optionId } : { outcome: "cancelled" } };
+    if (!opts.length) return { outcome: { outcome: "cancelled" } };
+    const allow = opts.find((o) => /allow/i.test(o.optionId) || /allow/i.test(o.name || "")) || opts[0];
+    const requestId = randomUUID();
+    myRequests.add(requestId);
+    if (forwarding) {
+      onEvent(permissionRequest(base(`perm:${requestId}`), {
+        requestId,
+        toolName: ctx.params?.toolCall?.kind || "tool",
+        toolTitle: ctx.params?.toolCall?.title || "Run this tool?",
+        options: opts.map((o) => ({ optionId: o.optionId, name: o.name, kind: o.kind })),
+      }));
+    }
+    const optionId = await new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (pendingPermissions.delete(requestId)) resolve(allow.optionId); // fallback
+      }, 180_000).unref?.();
+      pendingPermissions.set(requestId, {
+        resolve: (id) => { clearTimeout(timer); resolve(id); },
+      });
+    });
+    myRequests.delete(requestId);
+    if (!optionId) return { outcome: { outcome: "cancelled" } };
+    return { outcome: { outcome: "selected", optionId } };
   });
 
   let resolveDone, rejectDone;
   const done = new Promise((res, rej) => { resolveDone = res; rejectDone = rej; });
   let realThreadId = threadId || null;
   let stopped = false;
+  // Unpark any prompts still waiting (turn ended / interrupted) so their
+  // promises don't leak and the ACP request gets a cancelled outcome.
+  const cancelPending = () => {
+    for (const id of myRequests) resolvePermission(id, null);
+  };
 
   app
     .connectWith(stream, async (ctx) => {
@@ -196,6 +252,11 @@ export function startAcpTurn(agent, { threadId, text, cwd, images, model }, onEv
         const r = await ctx.request("session/new", { cwd: dir, mcpServers: [] });
         realThreadId = r.sessionId;
       }
+      // Put the session in the requested permission mode (default = Manual, which
+      // prompts). Best-effort — older adapters may not support session/set_mode.
+      try {
+        await ctx.request("session/set_mode", { sessionId: realThreadId, modeId: ACP_MODE[permissionMode] || "default" });
+      } catch {}
       const content = [{ type: "text", text }];
       for (const img of images || []) {
         if (img?.data) content.push({ type: "image", mimeType: img.mediaType || "image/png", data: img.data });
@@ -203,8 +264,9 @@ export function startAcpTurn(agent, { threadId, text, cwd, images, model }, onEv
       forwarding = true;
       await ctx.request("session/prompt", { sessionId: realThreadId, prompt: content });
     })
-    .then(() => { try { child.kill(); } catch {} resolveDone(realThreadId); })
+    .then(() => { cancelPending(); try { child.kill(); } catch {} resolveDone(realThreadId); })
     .catch((e) => {
+      cancelPending();
       try { child.kill(); } catch {}
       if (!stopped) {
         onEvent(systemEvent(base(`${realThreadId || "acp"}:err`),
@@ -214,7 +276,7 @@ export function startAcpTurn(agent, { threadId, text, cwd, images, model }, onEv
     });
 
   return {
-    stop: () => { stopped = true; try { child.kill("SIGTERM"); } catch {} },
+    stop: () => { stopped = true; cancelPending(); try { child.kill("SIGTERM"); } catch {} },
     done,
   };
 }

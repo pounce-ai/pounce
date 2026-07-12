@@ -26,6 +26,7 @@ import { pathToFileURL } from "node:url";
 import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import { createHost } from "./agents/host.mjs";
+import { resolvePermission } from "./agents/acp.mjs";
 
 const IS_WIN = process.platform === "win32";
 
@@ -990,6 +991,12 @@ const server = http.createServer(async (req, res) => {
       const { token } = await readBody(req);
       if (token && pushTokens.delete(token)) savePushTokens();
       return send(res, 200, { ok: true });
+    }
+    if (url.pathname === "/v1/turn/permission" && req.method === "POST") {
+      const { requestId, optionId } = await readBody(req);
+      if (!requestId) return send(res, 400, { error: "requestId required" });
+      const ok = resolvePermission(requestId, optionId ?? null);
+      return send(res, 200, { ok });
     }
     if (url.pathname === "/v1/turn/interrupt" && req.method === "POST") {
       const { agent, threadId } = await readBody(req);

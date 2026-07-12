@@ -26,6 +26,9 @@ export const toolResult = (base, { toolCallId, content, isError = false }) =>
 export const systemEvent = (base, message, level = "warning") =>
   ({ ...base, type: "system_event", message, level });
 
+export const permissionRequest = (base, { requestId, toolName, toolTitle, options }) =>
+  ({ ...base, type: "permission_request", requestId, toolName, toolTitle, options });
+
 // --- bounded reads -----------------------------------------------------------
 
 /**

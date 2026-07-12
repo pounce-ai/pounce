@@ -102,6 +102,27 @@ export interface SystemEvent extends TimelineBase {
   readonly source?: string;
 }
 
+/** One choice offered for a pending permission (ACP `session/request_permission`). */
+export interface PermissionOption {
+  readonly optionId: string;
+  readonly name: string;
+  /** allow_once | allow_always | reject_once | reject_always | … */
+  readonly kind?: string;
+}
+
+/**
+ * An agent (over ACP) is asking the user to approve a tool call before it runs.
+ * The client renders the options; the chosen `optionId` is POSTed back to the
+ * bridge, which resolves the paused turn. Only appears on ACP-driven live turns.
+ */
+export interface PermissionRequestEvent extends TimelineBase {
+  readonly type: "permission_request";
+  readonly requestId: string;
+  readonly toolName: string;
+  readonly toolTitle: string;
+  readonly options: readonly PermissionOption[];
+}
+
 /** The discriminated union the timeline list switches over. */
 export type TimelineEvent =
   | UserMessageEvent
@@ -113,7 +134,8 @@ export type TimelineEvent =
   | TaskEvent
   | GitEvent
   | TerminalEvent
-  | SystemEvent;
+  | SystemEvent
+  | PermissionRequestEvent;
 
 export type TimelineEventType = TimelineEvent["type"];
 

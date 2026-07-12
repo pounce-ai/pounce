@@ -40,7 +40,7 @@ import {
   useThreadMarkers,
   useThreadModel,
 } from "../state/db/hooks";
-import { fetchMessages, fetchUsage, interruptTurn, streamLiveMessage, type ThreadUsage } from "../services/bridge";
+import { fetchMessages, fetchUsage, interruptTurn, respondPermission, streamLiveMessage, type ThreadUsage } from "../services/bridge";
 import { Ionicons } from "@expo/vector-icons";
 import { ActivityDot, ACTIVITY_LABEL, AgentLogo, BranchChip, cn, COLOR } from "../ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "../ui/agent-meta";
@@ -543,6 +543,9 @@ export default function SessionScreen() {
               onLongPressEvent={onLongPressEvent}
               onRunCommand={canSteer ? onRunCommand : undefined}
               onAtBottomChange={setAtBottom}
+              onRespondPermission={(requestId, optionId) => {
+                if (session?.hostId) void respondPermission(session.hostId, requestId, optionId);
+              }}
               footer={running ? <WorkingIndicator agent={session.agent} label={workLabel} since={turnStartTs} /> : undefined}
             />
             {/* Floating "jump to latest" — appears when scrolled up off the bottom. */}

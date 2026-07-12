@@ -830,6 +830,28 @@ export async function interruptTurn(
   }
 }
 
+/** Answer a pending ACP permission prompt (from a permission_request event).
+ *  `optionId` null cancels. Resolves the paused turn on the host. */
+export async function respondPermission(
+  hostId: string,
+  requestId: string,
+  optionId: string | null,
+): Promise<boolean> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return false;
+  try {
+    const res = await fetch(`${await bridgeBase(cfg)}/v1/turn/permission`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ requestId, optionId }),
+    });
+    const j = (await res.json()) as { ok?: boolean };
+    return !!j.ok;
+  } catch {
+    return false;
+  }
+}
+
 export interface RepoEntry {
   path: string;
   type: "file" | "dir";
