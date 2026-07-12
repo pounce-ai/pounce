@@ -8,6 +8,7 @@
  */
 
 import type { AgentId } from "./pairing";
+import type { PermissionMode } from "./protocol";
 
 export type ISODateString = string;
 export type Id = string;
@@ -160,6 +161,9 @@ export interface Session {
   readonly needsAttention: boolean;
   readonly createdAt: ISODateString;
   readonly updatedAt: ISODateString;
+  /** The thread's current permission mode on the host (from its transcript), so
+   *  the composer's mode picker reflects a terminal session's mode. */
+  readonly permissionMode?: PermissionMode | null;
 }
 
 /** A paired machine running the alleycat daemon (Mac mini, Air, SSH box, …). */

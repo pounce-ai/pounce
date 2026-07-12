@@ -93,6 +93,12 @@ export default function SessionScreen() {
   // the composer). Session-view state; undefined mode = the agent's default.
   const [mode, setMode] = useState<PermissionMode | undefined>(undefined);
   const [effort, setEffort] = useState<ReasoningEffort | undefined>(undefined);
+  // Reflect the thread's actual permission mode (a terminal session may run in
+  // acceptEdits/plan/…) so the picker isn't stuck on default. Follows the synced
+  // mode as it changes; a local pick sticks until the host's mode next changes.
+  useEffect(() => {
+    if (session?.permissionMode) setMode(session.permissionMode);
+  }, [session?.permissionMode]);
   // A freshly-created thread still carries its temporary new_* id here; favouriting
   // it would orphan once live sync swaps in the real id, so gate the star on that.
   const canFavourite = !!session && !session.id.startsWith("new_");

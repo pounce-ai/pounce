@@ -41,6 +41,7 @@ interface BridgeThread {
   createdAt: string | null;
   gitBranch: string | null;
   modelProvider: string | null;
+  permissionMode: string | null;
   repo: string;
   worktree: string | null;
   isWorktree: boolean;
@@ -291,6 +292,7 @@ function buildWorkspace(
         needsAttention,
         createdAt: createdTs,
         updatedAt: updatedTs,
+        permissionMode: (t.permissionMode as Session["permissionMode"]) ?? null,
       };
       const r = repos[repoId];
       repos[repoId] = r
@@ -509,6 +511,7 @@ export async function syncLiveData(
           needsAttention,
           createdAt: createdTs,
           updatedAt: updatedTs,
+          permissionMode: (t.permissionMode as Session["permissionMode"]) ?? null,
         };
         const r = repos[repoId];
         repos[repoId] = r

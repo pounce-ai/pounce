@@ -24,6 +24,12 @@ import {
 import { agentEnv, binVersion } from "./env.mjs";
 
 const ROOT = path.join(os.homedir(), ".claude", "projects");
+// Claude Code's permission-mode names → the app's canonical PermissionMode.
+const CLAUDE_MODE = {
+  normal: "default", default: "default",
+  auto: "acceptEdits", acceptEdits: "acceptEdits",
+  plan: "plan", bypassPermissions: "bypassPermissions",
+};
 // A turn started outside the bridge shows as "running" while its file is this fresh.
 const RUNNING_WINDOW_MS = 120_000;
 const TURN_TIMEOUT_MS = Number(process.env.BRIDGE_TURN_TIMEOUT_MS || 300_000);
@@ -567,23 +573,30 @@ function scanTranscript(file, st) {
       stream.destroy();
       // Sessions with no real user message (warmups, snapshots-only) are noise.
       if (!sawUserLine) return resolve(null);
-      // Claude Code writes an AI-generated title as `ai-title` records — but
-      // mid-file, past this head scan. The freshest one lives near the end, so
-      // one cheap 64KB tail read recovers it. (Sessions that predate the
-      // feature just fall back to the preview.)
-      if (!name) {
-        for (const line of readTailLines(file).reverse()) {
-          if (!line.includes('"ai-title"')) continue;
+      // Both the freshest AI title and the CURRENT permission mode live mid/
+      // late-file (past this head scan) — one cheap 64KB tail read (latest-first)
+      // recovers each. `permission-mode` records and every `user` record carry
+      // `permissionMode` (normal/auto/plan/bypassPermissions); the newest wins.
+      let permissionMode = null;
+      for (const line of readTailLines(file).reverse()) {
+        if (!name && line.includes('"ai-title"')) {
           try {
             const o = JSON.parse(line);
-            if (o.type === "ai-title" && o.aiTitle) { name = String(o.aiTitle).slice(0, 200); break; }
+            if (o.type === "ai-title" && o.aiTitle) name = String(o.aiTitle).slice(0, 200);
           } catch {}
         }
+        if (!permissionMode && line.includes("permissionMode")) {
+          try {
+            const o = JSON.parse(line);
+            if (typeof o.permissionMode === "string") permissionMode = CLAUDE_MODE[o.permissionMode] || null;
+          } catch {}
+        }
+        if (name && permissionMode) break;
       }
       resolve({
         id, filePath: file, cwd, name, preview: preview || previewFallback,
         createdAt, updatedAt: new Date(st.mtimeMs).toISOString(),
-        gitBranch, sizeBytes: st.size,
+        gitBranch, sizeBytes: st.size, permissionMode,
       });
     };
     rl.on("line", (line) => {

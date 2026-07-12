@@ -308,6 +308,7 @@ async function listThreads(agent, onPage) {
       createdAt: m.createdAt || null,
       gitBranch: m.gitBranch || null,
       modelProvider: m.modelProvider || null,
+      permissionMode: m.permissionMode || null,
       repo: info.repo,
       worktree: info.worktree,
       isWorktree: info.isWorktree,
