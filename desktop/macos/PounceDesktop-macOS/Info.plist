@@ -19,7 +19,7 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.1</string>
+	<string>1.0.2</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -30,9 +30,11 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>2</string>
+	<string>3</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>NSAppSleepDisabled</key>
+	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -46,37 +48,25 @@
 			</dict>
 		</dict>
 	</dict>
-	<!-- On-device dictation (PounceSpeech → SFSpeechRecognizer + AVAudioEngine).
-	     macOS crashes the app if these usage strings are missing when access is
-	     requested. -->
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Pounce uses the microphone for voice dictation — tap the mic and speak your message.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Pounce transcribes your speech on-device so you can dictate messages to the agent.</string>
-	<!-- Sparkle auto-update. Feed is the gh-pages appcast; SUPublicEDKey verifies
-	     each update's EdDSA signature. Automatic checks start OFF (and Sparkle's
-	     own first-run prompt is suppressed) — the app's consent modal + Settings
-	     toggle drive it via PounceUpdater. -->
-	<key>SUFeedURL</key>
-	<string>https://peppyhop.github.io/pounce/appcast.xml</string>
-	<key>SUPublicEDKey</key>
-	<string>0sFmzeVVbdM7FoJR7gws0hKMUDe0ZgmU95LtqKhIpo4=</string>
-	<key>SUEnableAutomaticChecks</key>
-	<false/>
 	<key>NSMainStoryboardFile</key>
 	<string>Main</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Pounce uses the microphone for voice dictation — tap the mic and speak your message.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
-	<!-- A live agent monitor: App Nap defers new HTTP requests once the window
-	     is occluded (timers keep ticking but syncs never reach the bridge), and
-	     automatic termination would kill the embedded bridge child. -->
-	<key>NSAppSleepDisabled</key>
-	<true/>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Pounce transcribes your speech on-device so you can dictate messages to the agent.</string>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
 	<key>NSSupportsSuddenTermination</key>
 	<false/>
 	<key>RCTNewArchEnabled</key>
 	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
+	<key>SUFeedURL</key>
+	<string>https://peppyhop.github.io/pounce/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>0sFmzeVVbdM7FoJR7gws0hKMUDe0ZgmU95LtqKhIpo4=</string>
 </dict>
 </plist>
