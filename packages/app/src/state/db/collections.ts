@@ -174,9 +174,20 @@ type WithId = { id: string };
  *  changed keys — each persists the whole blob once). */
 export function upsertRows<T extends WithId>(c: RowCollection, rows: T[]): void {
   const toInsert: T[] = [];
+  const insertAt = new Map<string, number>(); // id → its index in toInsert
   for (const r of rows) {
-    if (c.has(r.id)) c.update(r.id, (draft) => void Object.assign(draft, r));
-    else toInsert.push(r);
+    if (c.has(r.id)) {
+      c.update(r.id, (draft) => void Object.assign(draft, r));
+    } else if (insertAt.has(r.id)) {
+      // Duplicate id WITHIN this batch (e.g. two source events that derived the
+      // same id — seen with codex messages sharing a timestamp). Never push a
+      // dup into a single insert(): the collection throws "already exists" and
+      // takes the whole screen down. Last write wins, matching upsert semantics.
+      toInsert[insertAt.get(r.id)!] = r;
+    } else {
+      insertAt.set(r.id, toInsert.length);
+      toInsert.push(r);
+    }
   }
   if (toInsert.length) c.insert(toInsert);
 }
