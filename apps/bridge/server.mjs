@@ -870,6 +870,9 @@ const server = http.createServer(async (req, res) => {
       res.end(img.buffer);
       return;
     }
+    if (url.pathname === "/v1/doctor") {
+      return send(res, 200, { report: await host.doctor() });
+    }
     if (url.pathname === "/v1/usage") {
       const agent = url.searchParams.get("agent");
       const thread = url.searchParams.get("thread");

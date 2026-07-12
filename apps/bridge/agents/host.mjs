@@ -14,6 +14,7 @@ import { ClaudeAdapter } from "./claude.mjs";
 import { CodexAdapter } from "./codex.mjs";
 import { OpencodeAdapter } from "./opencode.mjs";
 import { acpAvailable, startAcpTurn } from "./acp.mjs";
+import { buildDoctorReport } from "./doctor.mjs";
 
 export function createHost({ version = () => null } = {}) {
   const turns = new TurnManager();
@@ -76,6 +77,11 @@ export function createHost({ version = () => null } = {}) {
 
     getActivity(agent, threadId) {
       return adapter(agent).getActivity(threadId);
+    },
+
+    /** Diagnostic report: node, agent CLIs, sessions, git, tunnel. */
+    doctor() {
+      return buildDoctorReport([...adapters.values()]);
     },
 
     /** Fetch one attachment's bytes ({ mediaType, buffer }) — null if the
