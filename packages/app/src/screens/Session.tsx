@@ -120,12 +120,21 @@ export default function SessionScreen() {
   const host = session?.hostId;
   const agent = session?.agent;
   const tid = session?.id;
+  // A turn running in ANOTHER window (a terminal / FleetView Claude Code
+  // session) only reaches us via transcript re-reads, so its tool calls and
+  // messages appear a whole sync cycle late (the "why is Pounce blank mid-turn"
+  // gap). While such a thread is active — but NOT while we're the one streaming,
+  // which would clobber live events — poll the recent turns fast so mirrored
+  // activity shows near-real-time like the terminal does.
+  const mirroredRunning =
+    (session?.activity === "running" || session?.activity === "streaming") && !sending;
   const recentQ = useQuery({
     queryKey: ["messages", host, agent, tid, "recent"],
     queryFn: () => fetchMessages(host!, agent!, tid!, { limit: 4 }),
     enabled: canFetch,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
+    refetchInterval: mirroredRunning ? 2500 : false,
   });
   const fullQ = useQuery({
     queryKey: ["messages", host, agent, tid, "full"],
@@ -522,6 +531,7 @@ export default function SessionScreen() {
             <Timeline
               events={rawEvents}
               agent={session.agent}
+              cwd={session.cwd}
               sessionId={id!}
               listRef={listRef}
               onLongPressEvent={onLongPressEvent}

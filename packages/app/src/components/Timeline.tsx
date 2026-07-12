@@ -18,6 +18,11 @@ import {
   parseUserMessage,
 } from "@litter/transcript";
 
+/** Claude Code / Codex write an interruption as a user-role text marker. */
+function isInterrupt(text: string): boolean {
+  return /^\s*\[Request interrupted by user/i.test(text);
+}
+
 function toolCallIds(events: TimelineEvent[]): Set<string> {
   const s = new Set<string>();
   for (const e of events) if (e.type === "tool_call") s.add(e.call.id || e.id);
@@ -98,6 +103,7 @@ function batchHeaders(data: TimelineEvent[]): Map<string, string> {
 export const Timeline = memo(function Timeline({
   events,
   agent,
+  cwd,
   footer,
   sessionId,
   listRef,
@@ -108,6 +114,8 @@ export const Timeline = memo(function Timeline({
   events: TimelineEvent[];
   /** Which agent produced these events — selects the body-cleaning rules. */
   agent?: string;
+  /** The thread's working dir (worktree) — tool-call paths render relative to it. */
+  cwd?: string | null;
   footer?: React.ReactElement;
   /** Marker state is scoped per session — required for marked indicators. */
   sessionId?: string;
@@ -148,6 +156,7 @@ export const Timeline = memo(function Timeline({
           marked={markerMap.get(item.id) ?? defaultMarked(item, agent)}
           onLongPressEvent={onLongPressEvent}
           onRunCommand={onRunCommand}
+          cwd={cwd}
           pairedResult={
             item.type === "tool_call" ? resultByCallId.get(item.call.id || item.id) : undefined
           }
@@ -199,6 +208,7 @@ const Row = memo(function Row({
   onRunCommand,
   pairedResult,
   batchHeader,
+  cwd,
 }: {
   event: TimelineEvent;
   agent?: string;
@@ -210,10 +220,15 @@ const Row = memo(function Row({
   pairedResult?: ToolResultEvent;
   /** For the first call of a parallel batch: the synthesized summary line. */
   batchHeader?: string;
+  /** Thread cwd — tool-call file paths render relative to it. */
+  cwd?: string | null;
 }) {
   const onLongPress = onLongPressEvent ? () => onLongPressEvent(event) : undefined;
   switch (event.type) {
     case "user_message":
+      // An interruption isn't a message — Claude Code records it as user text
+      // but shows it as a system note. Mirror that instead of a prose bubble.
+      if (isInterrupt(event.text)) return <Meta text="⎿ Interrupted by user" level="warning" />;
       return (
         <Pressable onLongPress={onLongPress} delayLongPress={350}>
           <UserRow text={event.text} agent={agent} />
@@ -236,11 +251,11 @@ const Row = memo(function Row({
     case "thinking_finished":
       return <Meta text={event.text ? `💭 ${event.text}` : "Thought"} />;
     case "tool_call":
-      if (!batchHeader) return <ToolAccordion event={event} result={pairedResult} />;
+      if (!batchHeader) return <ToolAccordion event={event} result={pairedResult} cwd={cwd} />;
       return (
         <View className="gap-2">
           <Text className="pl-1 text-[12px] text-fg-muted">{batchHeader}</Text>
-          <ToolAccordion event={event} result={pairedResult} />
+          <ToolAccordion event={event} result={pairedResult} cwd={cwd} />
         </View>
       );
     case "tool_result":
@@ -376,12 +391,27 @@ function Bubble({
   );
 }
 
-function previewInput(input: unknown): string {
+/**
+ * Show file paths relative to the thread's working directory (its worktree) —
+ * `packages/app/src/Foo.tsx`, not `/Users/.../worktrees/…/packages/app/src/Foo.tsx`.
+ * This is the convention every coding agent's UI uses. Paths outside the cwd
+ * (rare) stay absolute so they're not misread as local.
+ */
+function relPath(p: string, cwd?: string | null): string {
+  if (!cwd || !p.startsWith("/")) return p;
+  const base = cwd.endsWith("/") ? cwd : `${cwd}/`;
+  return p.startsWith(base) ? p.slice(base.length) || p : p;
+}
+
+/** File-path-bearing tool inputs, per the common Claude Code / Codex tool set. */
+const PATH_KEYS = ["file_path", "path", "notebook_path", "filePath"] as const;
+
+function previewInput(input: unknown, cwd?: string | null): string {
   if (!input) return "";
   if (typeof input === "object") {
     const o = input as Record<string, unknown>;
     if (typeof o.command === "string") return o.command;
-    if (typeof o.file_path === "string") return o.file_path;
+    for (const k of PATH_KEYS) if (typeof o[k] === "string") return relPath(o[k] as string, cwd);
     if (typeof o.query === "string") return o.query;
   }
   return typeof input === "string" ? input : "";
@@ -396,14 +426,14 @@ const SHELL_GOLD = "#d29922";
  * Expanding reveals the full command and the tool's output nested in the same
  * card, instead of the output sprawling as its own full-width block.
  */
-function ToolAccordion({ event, result }: { event: ToolCallEvent; result?: ToolResultEvent }) {
+function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: ToolResultEvent; cwd?: string | null }) {
   // Rows are recycled: key the expansion to the event id so an open accordion
   // can't bleed into whatever event this component instance shows next.
   const [openId, setOpenId] = useState<string | null>(null);
   const open = openId === event.id;
   const { name, status, input } = event.call;
   const shell = SHELL_TOOLS.has(name.toLowerCase());
-  const preview = previewInput(input);
+  const preview = previewInput(input, cwd);
   const failed = status === "error" || result?.result.isError === true;
   const running = status === "pending" || status === "running";
   const expandable = !!result || preview.includes("\n");
