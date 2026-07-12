@@ -154,12 +154,29 @@ export const Timeline = memo(function Timeline({
           batchHeader={headers.get(item.id)}
         />
       )}
-      estimatedItemSize={72}
+      // A blended average across the row types (short user bubbles / meta lines
+      // vs. taller assistant turns) — closer to reality than 72, so scrolling
+      // through unmeasured history settles with less correction.
+      estimatedItemSize={96}
       recycleItems
-      maintainVisibleContentPosition
+      // Bottom-anchored streaming chat, Claude-style. Two independent behaviours,
+      // and conflating them was the "random jump" bug:
+      //   • size: true  — keep visible content steady when an item *resizes*
+      //     (the last bubble growing token-by-token, or an accordion above
+      //     expanding). New turns only ever append BELOW the viewport, so a
+      //     scrolled-up reading position stays put without data-anchoring.
+      //   • data: false — do NOT re-anchor to a visible item on every data
+      //     update. Streaming fires one data update per token; with the bare
+      //     `maintainVisibleContentPosition` (which normalizes to
+      //     { data: true, size: true }) each token re-anchored some visible row
+      //     and fought maintainScrollAtEnd's pin-to-tail — the jitter the user
+      //     saw. Tail-following is maintainScrollAtEnd's job alone.
+      maintainVisibleContentPosition={{ data: false, size: true }}
       alignItemsAtEnd
       // Open on the newest message (bottom), not the top of the history, and
-      // stay pinned to the end as live turns stream in.
+      // stay pinned to the end as live turns stream in (dataChange + itemLayout
+      // triggers follow the growing last bubble); only while near the end so a
+      // scrolled-up user isn't yanked down.
       initialScrollAtEnd
       maintainScrollAtEnd
       onScroll={(e) => {
