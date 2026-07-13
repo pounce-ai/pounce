@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActionSheetIOS, Alert, Pressable, Text, View } from "react-native";
+// eslint-disable-next-line @react-native/no-deprecated-api -- core Clipboard is
+// the only clipboard already inside shipped binaries (OTA-safe).
+import { ActionSheetIOS, Alert, Clipboard, Pressable, Text, View } from "react-native";
 import { KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeIn, FadeOut } from "../components/animation";
@@ -239,13 +241,15 @@ export default function SessionScreen() {
         return;
       }
       const marked = isMarked(id!, ev, session?.agent);
+      const text = "text" in ev ? (ev as { text?: string }).text : undefined;
+      const options = [marked ? "Remove marker" : "Add marker"];
+      if (text) options.push("Copy text");
+      options.push("Cancel");
       ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: [marked ? "Remove marker" : "Add marker", "Cancel"],
-          cancelButtonIndex: 1,
-        },
+        { options, cancelButtonIndex: options.length - 1 },
         (i) => {
           if (i === 0) toggleMarker(id!, ev, session?.agent);
+          else if (i === 1 && text) Clipboard.setString(text);
         },
       );
     },
@@ -266,13 +270,18 @@ export default function SessionScreen() {
         text: s.text || (s.images.length ? "🖼️ Image" : ""),
       };
       setLiveEvents((e) => mergeById(e, [optimistic]));
+      // Everything the turn streams, kept so the post-turn refetch can't erase
+      // it: the turn's `done` can resolve before the host has flushed the last
+      // assistant line to the transcript, so a re-parse may briefly miss it.
+      const turnEvents: TimelineEvent[] = [];
       const { threadId } = await streamLiveMessage(
         session.hostId,
         session.agent,
         session.id,
         session.cwd,
         s.text,
-        (ev) =>
+        (ev) => {
+          turnEvents.push(ev);
           setLiveEvents((e) => {
             // The daemon echoes the user turn as it streams; drop our optimistic
             // placeholder then so the message isn't shown twice.
@@ -281,7 +290,8 @@ export default function SessionScreen() {
                 ? e.filter((x) => !x.id.startsWith("opt:"))
                 : e;
             return mergeById(base, [ev]);
-          }),
+          });
+        },
         {
           images: s.images,
           permissionMode: modesFor(session.agent).length > 1
@@ -292,9 +302,15 @@ export default function SessionScreen() {
         },
       );
       if (threadId) {
-        const fetched = await fetchMessages(session.hostId, session.agent, threadId);
-        setLiveEvents(chrono(fetched));
-        saveThreadMessages(threadId, fetched); // one persist per completed turn
+        // fresh: the host's message cache can predate this turn. And if the
+        // re-parse STILL misses streamed events (transcript flush lag), keep
+        // them — replacing the list with an incomplete fetch made the reply
+        // vanish right as the turn finished.
+        const fetched = await fetchMessages(session.hostId, session.agent, threadId, { fresh: true });
+        const missing = turnEvents.filter((e) => !fetched.some((f) => f.id === e.id));
+        const merged = mergeById(chrono(fetched), missing);
+        setLiveEvents(merged);
+        saveThreadMessages(threadId, merged); // one persist per completed turn
       }
       refreshUsage();
       // A freshly-created task carries a temporary `new_*` id the daemon doesn't
