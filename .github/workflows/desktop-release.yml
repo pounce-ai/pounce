@@ -50,12 +50,18 @@ jobs:
           if-no-files-found: error
 
   # Signed + notarized macOS app → DMG + Sparkle appcast.
+  # macos-15 for a modern Xcode toolchain — react-native-macos's Podfile requires
+  # Xcode >= 16.1 (macos-14 runners ship 15.x and `pod install` bails).
   desktop:
-    runs-on: macos-14
+    runs-on: macos-15
     outputs:
       version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+      - name: Select Xcode (>= 16.1 for react-native-macos)
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
