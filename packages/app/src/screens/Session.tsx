@@ -335,7 +335,11 @@ export default function SessionScreen() {
           const merged = mergeById(chrono(fetched), missing);
           setLiveEvents(merged);
           saveThreadMessages(threadId, merged); // one persist per completed turn
-        } catch {}
+        } catch {
+          // Refetch failed but the turn happened — persist what we streamed so
+          // the rekey below (which remounts the route) doesn't blank the thread.
+          if (turnEvents.length) saveThreadMessages(threadId, chrono(turnEvents));
+        }
       }
       refreshUsage();
       // A freshly-created task carries a temporary `new_*` id the daemon doesn't
