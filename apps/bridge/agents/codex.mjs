@@ -290,8 +290,11 @@ export class CodexAdapter {
           if (it.text) emit(thinking(base(id), it.text));
         } else if (it.item_type === "command_execution" || it.type === "command_execution") {
           emit(toolCall(base(id), { name: "shell", input: { command: it.command || "" }, status: streaming ? "running" : "success" }));
-          if (!streaming && it.aggregated_output) {
-            emit(toolResult(base(`${id}:o`), { toolCallId: id, content: { kind: "text", text: it.aggregated_output }, isError: it.exit_code ? it.exit_code !== 0 : false }));
+          // item.updated carries the output aggregated SO FAR — forward it under
+          // a stable id so the app updates the running card's output in place
+          // (live terminal tail), instead of waiting for completion.
+          if (it.aggregated_output) {
+            emit(toolResult(base(`${id}:o`), { toolCallId: id, content: { kind: "text", text: it.aggregated_output }, isError: !streaming && it.exit_code ? it.exit_code !== 0 : false }));
           }
         } else if (it.item_type === "file_change" || it.type === "file_change") {
           const patch = (it.changes || []).map((c) => c.diff || "").join("\n");
