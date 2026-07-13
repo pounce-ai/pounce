@@ -21,7 +21,16 @@ export async function streamTurn(
   onChunk: (text: string) => boolean | void,
 ): Promise<void> {
   const f = await streamingFetch();
-  const res = await f(url, { method: opts.method ?? "POST", headers: opts.headers, body: opts.body });
+  // `stream: true` is nitro-fetch's opt-in to its real streaming path. Without
+  // it, nitroFetch BUFFERS the whole body and replays it as a single chunk once
+  // the response completes — the "entire reply appears at once" bug. Standard
+  // fetch (the Expo Go fallback) ignores the extra key.
+  const res = await f(url, {
+    method: opts.method ?? "POST",
+    headers: opts.headers,
+    body: opts.body,
+    stream: true,
+  } as RequestInit);
   if (!res.ok || !res.body) throw new Error(`turn failed: ${res.status}`);
   const reader = (res.body as ReadableStream<Uint8Array>).getReader();
   const dec = new TextDecoder();
@@ -29,12 +38,12 @@ export async function streamTurn(
     const { done, value } = await reader.read();
     if (done) break;
     // A truthy return means the caller saw its terminal SSE frame — stop
-    // reading NOW. When the server already closed (the native bridge answers
-    // in one burst), nitro-fetch may never signal `done`, so waiting for it
-    // hangs the await forever (seen: pairing spinner stuck on connect).
-    if (onChunk(dec.decode(value, { stream: true }))) {
-      await reader.cancel().catch(() => {});
-      break;
-    }
+    // reading now rather than waiting for the transport's close. Break WITHOUT
+    // reader.cancel(): nitro-fetch's completion callback close()es the stream
+    // unguarded, and closing a cancelled stream throws an UNCAUGHT
+    // "stream is not in a state that permits close" (crash in prod). The server
+    // ends the response right after the terminal frame, so the stream closes
+    // itself; any residual bytes just get dropped with the reader.
+    if (onChunk(dec.decode(value, { stream: true }))) break;
   }
 }
