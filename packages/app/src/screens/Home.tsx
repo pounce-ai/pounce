@@ -286,7 +286,10 @@ export default function HomeScreen() {
         estimatedItemSize={104}
         getItemType={(r) => r.type}
         keyboardDismissMode="on-drag"
-        ListHeaderComponent={connected ? <RecentStrip /> : null}
+        // Always render: recents come from persisted local state, so they must
+        // survive being offline/mid-reconnect — the strip hides itself when
+        // empty. Gating on `connected` made it vanish on every blip.
+        ListHeaderComponent={<RecentStrip />}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLOR.accent} />}
         ListEmptyComponent={
           loading ? (

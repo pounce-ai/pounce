@@ -421,7 +421,12 @@ function interruptTurn(agent, threadId) {
  *  exactly once with the real thread id. Returns a stop() to abort. */
 function streamTurn(agent, threadId, text, cwd, onEvent, onDone, opts = {}) {
   const t = host.startTurn(agent, { threadId, text, cwd, ...opts }, onEvent);
-  void t.done.then((realId) => onDone(realId || threadId));
+  // onDone must fire even when the turn errors — otherwise the client stream
+  // never gets its terminal frame and the busy marker leaks.
+  void t.done.then(
+    (realId) => onDone(realId || threadId),
+    () => onDone(threadId),
+  );
   return () => t.stop();
 }
 
@@ -1042,13 +1047,14 @@ const server = http.createServer(async (req, res) => {
         connection: "keep-alive",
         "access-control-allow-origin": "*",
       });
-      const write = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
-      // Mark the bridge busy for the duration so a daemon restart won't cut the
-      // turn off mid-flight (decremented exactly once, whichever end fires first).
+      let closed = false;
+      const write = (obj) => { if (!closed) { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch {} } };
+      // Mark the bridge busy until the TURN completes — not until the stream
+      // closes — so a daemon restart won't cut the turn off mid-flight.
       activeTurns++;
       let settled = false;
       const settle = () => { if (!settled) { settled = true; activeTurns = Math.max(0, activeTurns - 1); } };
-      const stop = streamTurn(
+      streamTurn(
         agent, threadId, text, cwd,
         (ev) => write({ event: ev }),
         (realThreadId) => {
@@ -1059,11 +1065,16 @@ const server = http.createServer(async (req, res) => {
           }
           cache.delete("threads");
           settle();
-          write({ done: true, threadId: realThreadId }); res.end();
+          write({ done: true, threadId: realThreadId });
+          if (!closed) { try { res.end(); } catch {} }
         },
         { images, permissionMode, reasoningEffort, model },
       );
-      req.on("close", () => { settle(); stop(); });
+      // A dropped stream (cellular blip, backgrounded app, tunnel hiccup) must
+      // NOT kill the running turn — the agent keeps working, the transcript
+      // persists, and the phone catches up via sync. Interrupting is explicit:
+      // POST /v1/turn/interrupt (the app's stop button).
+      req.on("close", () => { closed = true; });
       return;
     }
     return send(res, 404, { error: "not found" });

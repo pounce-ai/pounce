@@ -256,8 +256,9 @@ export default function SessionScreen() {
     [id],
   );
 
-  // One message → one streamed turn. Errors propagate so the Composer can
-  // restore the user's draft (or the queue drain can surface the failure).
+  // One message → one streamed turn. Only pre-delivery errors propagate (so the
+  // Composer restores the user's draft); once the host has the turn, failures
+  // in streaming/refetching are swallowed and sync catches up.
   const runTurn = useCallback(async (s: ComposerSubmit) => {
     if (!session) return;
     if (live) {
@@ -274,43 +275,67 @@ export default function SessionScreen() {
       // it: the turn's `done` can resolve before the host has flushed the last
       // assistant line to the transcript, so a re-parse may briefly miss it.
       const turnEvents: TimelineEvent[] = [];
-      const { threadId } = await streamLiveMessage(
-        session.hostId,
-        session.agent,
-        session.id,
-        session.cwd,
-        s.text,
-        (ev) => {
-          turnEvents.push(ev);
-          setLiveEvents((e) => {
-            // The daemon echoes the user turn as it streams; drop our optimistic
-            // placeholder then so the message isn't shown twice.
-            const base =
-              ev.type === "user_message" && !ev.id.startsWith("opt:")
-                ? e.filter((x) => !x.id.startsWith("opt:"))
-                : e;
-            return mergeById(base, [ev]);
-          });
-        },
-        {
-          images: s.images,
-          permissionMode: modesFor(session.agent).length > 1
-            ? (mode ?? modesFor(session.agent)[0]?.value)
-            : undefined,
-          reasoningEffort: effectiveCaps(session.agent, capsFor(session.agent)).thinking ? effort : undefined,
-          model: modelForThread(session.id),
-        },
-      );
+      // The daemon only streams frames once it has accepted the turn, so the
+      // first event marks the message as delivered. After that point an error
+      // (cellular blip mid-stream, post-turn refetch) must NOT propagate to the
+      // Composer — restoring the draft for a message the agent is already
+      // working on is how sent text "reappeared" in the input box.
+      let delivered = false;
+      let threadId: string | null = null;
+      try {
+        ({ threadId } = await streamLiveMessage(
+          session.hostId,
+          session.agent,
+          session.id,
+          session.cwd,
+          s.text,
+          (ev) => {
+            delivered = true;
+            turnEvents.push(ev);
+            setLiveEvents((e) => {
+              // The daemon echoes the user turn as it streams; drop our optimistic
+              // placeholder then so the message isn't shown twice.
+              const base =
+                ev.type === "user_message" && !ev.id.startsWith("opt:")
+                  ? e.filter((x) => !x.id.startsWith("opt:"))
+                  : e;
+              return mergeById(base, [ev]);
+            });
+          },
+          {
+            images: s.images,
+            permissionMode: modesFor(session.agent).length > 1
+              ? (mode ?? modesFor(session.agent)[0]?.value)
+              : undefined,
+            reasoningEffort: effectiveCaps(session.agent, capsFor(session.agent)).thinking ? effort : undefined,
+            model: modelForThread(session.id),
+          },
+        ));
+      } catch (err) {
+        if (!delivered) {
+          // The turn never reached the host: drop the optimistic echo and let
+          // the error propagate so the Composer restores the draft.
+          setLiveEvents((e) => e.filter((x) => x.id !== optimistic.id));
+          throw err;
+        }
+        // Delivered — the host keeps working even though our stream dropped.
+        // The sync tick refetches the transcript, so just stop streaming.
+        return;
+      }
       if (threadId) {
         // fresh: the host's message cache can predate this turn. And if the
         // re-parse STILL misses streamed events (transcript flush lag), keep
         // them — replacing the list with an incomplete fetch made the reply
-        // vanish right as the turn finished.
-        const fetched = await fetchMessages(session.hostId, session.agent, threadId, { fresh: true });
-        const missing = turnEvents.filter((e) => !fetched.some((f) => f.id === e.id));
-        const merged = mergeById(chrono(fetched), missing);
-        setLiveEvents(merged);
-        saveThreadMessages(threadId, merged); // one persist per completed turn
+        // vanish right as the turn finished. Best-effort: the turn is already
+        // delivered, so a refetch failure must not bubble up and restore the
+        // draft — the streamed events stay on screen and sync catches up.
+        try {
+          const fetched = await fetchMessages(session.hostId, session.agent, threadId, { fresh: true });
+          const missing = turnEvents.filter((e) => !fetched.some((f) => f.id === e.id));
+          const merged = mergeById(chrono(fetched), missing);
+          setLiveEvents(merged);
+          saveThreadMessages(threadId, merged); // one persist per completed turn
+        } catch {}
       }
       refreshUsage();
       // A freshly-created task carries a temporary `new_*` id the daemon doesn't

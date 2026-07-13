@@ -372,6 +372,10 @@ export async function syncLiveDataStreaming(): Promise<{ repos: number; sessions
   const devices: Record<string, Device> = {};
   const threadsByDevice: Record<string, { name: string; threads: BridgeThread[] }> = {};
   const daemonDown: string[] = [];
+  // Hosts whose sync ran to completion — only their threads may be deleted by
+  // the final authoritative sync. A host that errored (offline, cold tunnel,
+  // half-streamed) keeps its last-known state.
+  const syncedHostIds: string[] = [];
 
   // While streaming, MERGE fresh threads over whatever's already shown (persisted
   // last-known state) instead of replacing — so the list appears instantly and
@@ -410,6 +414,7 @@ export async function syncLiveDataStreaming(): Promise<{ repos: number; sessions
           devices[cfg.id] = { ...devices[cfg.id], sessionCount: threadsByDevice[cfg.id].threads.length };
           merge();
         });
+        syncedHostIds.push(cfg.id);
       } catch {
         online = false;
         devices[cfg.id] = {
@@ -423,7 +428,7 @@ export async function syncLiveDataStreaming(): Promise<{ repos: number; sessions
   );
 
   const { repos, sessions } = buildWorkspace(threadsByDevice, now, firstMsg);
-  syncWorkspace({ repos, sessions, devices });
+  syncWorkspace({ repos, sessions, devices }, { syncedHostIds });
   flagDaemonHealth(daemonDown);
   const warmed = new Set<string>();
   for (const s of Object.values(sessions)) {
@@ -450,6 +455,10 @@ export async function syncLiveData(
   // Devices whose bridge answered but whose agent daemon reported nothing — the
   // "reachable but no agents" state the user has to fix (restart the bridge/agent).
   const daemonDown: string[] = [];
+  // Hosts whose fetch succeeded — only they are authoritative below (see
+  // syncWorkspace): an unreachable host keeps its last-known threads instead of
+  // having them (and the user's recents/markers/messages) swept away.
+  const syncedHostIds: string[] = [];
 
   await Promise.all(
     configs.map(async (cfg) => {
@@ -472,6 +481,7 @@ export async function syncLiveData(
           if (a.capabilities) setAgentCaps(a.id, a.capabilities);
         }
         threads = t.threads;
+        syncedHostIds.push(cfg.id);
       } catch {
         online = false;
       }
@@ -537,7 +547,7 @@ export async function syncLiveData(
   );
 
   // syncWorkspace records the per-repo diff into Sync history before swapping.
-  syncWorkspace({ repos, sessions, devices });
+  syncWorkspace({ repos, sessions, devices }, { syncedHostIds });
   flagDaemonHealth(daemonDown);
   // Warm the model catalog for each device+agent in the background, so opening
   // the model picker later is instant. Fire-and-forget; throttled per key.
@@ -971,6 +981,10 @@ export interface TurnOptions {
   readonly model?: string;
 }
 
+/** How long a sent turn may go unacknowledged before we declare it undelivered.
+ *  Generous: an off-LAN send may first have to dial the iroh tunnel cold. */
+const TURN_ACK_TIMEOUT_MS = 30_000;
+
 export async function streamLiveMessage(
   hostId: string,
   agent: string,
@@ -985,7 +999,15 @@ export async function streamLiveMessage(
   let buf = "";
   let realThreadId: string | null = threadId;
   let finished = false;
+  // The bridge echoes the user message as the very first SSE frame, right when
+  // it accepts the turn — so "no frame yet" after a generous window means the
+  // send never landed (dead tunnel, sleeping host). Fail then instead of
+  // spinning forever on an optimistic bubble that sync will later erase.
+  let acked = false;
+  let abandoned = false;
   const parseFrames = (chunk: string) => {
+    if (abandoned) return true; // ack timed out — stop reading late bytes
+    acked = true;
     buf += chunk;
     let idx: number;
     while ((idx = buf.indexOf("\n\n")) !== -1) {
@@ -1009,7 +1031,7 @@ export async function streamLiveMessage(
     // Stop the seam once the turn's terminal frame lands (see streamTurn).
     return finished;
   };
-  await streamTurn(
+  const turn = streamTurn(
     `${await bridgeBase(cfg)}/v1/turn/stream`,
     {
       headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
@@ -1026,6 +1048,24 @@ export async function streamLiveMessage(
     },
     parseFrames,
   );
+  let ackTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      turn,
+      new Promise<never>((_, reject) => {
+        ackTimer = setTimeout(() => {
+          if (!acked) {
+            abandoned = true;
+            reject(new Error("host didn't acknowledge the message — check the connection"));
+          }
+        }, TURN_ACK_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(ackTimer);
+    // Never let the abandoned request surface as an unhandled rejection.
+    if (abandoned) turn.catch(() => {});
+  }
   return { threadId: realThreadId };
 }
 
