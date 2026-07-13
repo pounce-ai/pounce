@@ -17,7 +17,7 @@
  */
 import http from "node:http";
 import net from "node:net";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import os from "node:os";
@@ -35,7 +35,8 @@ const IS_WIN = process.platform === "win32";
 // The bridge reads agent sessions from disk and drives agent CLIs directly
 // via the native agent host (./agents). Off-LAN access rides pounce-tunnel
 // (apps/tunnel), an iroh p2p byte tunnel the phone dials by node id.
-const PORT = Number(process.env.BRIDGE_PORT || 8099);
+const DEFAULT_PORT = 8099;
+const PORT = Number(process.env.BRIDGE_PORT || DEFAULT_PORT);
 // How often the background watcher polls for state transitions to push.
 const WATCH_MS = Number(process.env.PUSH_WATCH_MS || 25_000);
 const TOKEN = process.env.BRIDGE_TOKEN || "pounce-bridge-local";
@@ -1170,8 +1171,22 @@ let tunnelChild = null;
 let tunnelBackoffMs = 1000;
 function ensureTunnel() {
   if (tunnelChild) return;
+  // The tunnel identity (~/.pounce/tunnel.key → one node id) is a SINGLETON:
+  // every `pounce-tunnel serve` claims the same node id, and the relay routes
+  // the phone to whichever instance registered last. So (a) only the bridge
+  // the phone actually paired with — the default-port one — may run it; a dev
+  // bridge on another port would hijack the identity and blackhole the phone's
+  // off-LAN traffic into its own (soon-dead) port. Set POUNCE_TUNNEL=1 to opt
+  // a non-default bridge in deliberately.
+  if (PORT !== DEFAULT_PORT && process.env.POUNCE_TUNNEL !== "1") return;
   const bin = tunnelBinary();
   if (!bin) return; // no tunnel installed — LAN-only
+  // (b) Sweep stale instances before claiming the identity: crashed/killed
+  // bridges orphan their tunnels (SIGKILL skips the exit handler), and dozens
+  // of zombies fighting over one node id made off-LAN a lottery.
+  if (!IS_WIN) {
+    try { execFileSync("pkill", ["-f", "pounce-tunnel serve"], { stdio: "ignore" }); } catch {} // exit 1 = no matches
+  }
   try {
     tunnelChild = spawn(bin, ["serve", "--token", TOKEN, "--target", `127.0.0.1:${PORT}`],
       { stdio: ["ignore", "ignore", "ignore"], windowsHide: true });
@@ -1187,6 +1202,14 @@ function ensureTunnel() {
   }
 }
 process.on("exit", () => { try { tunnelChild?.kill("SIGTERM"); } catch {} });
+// Default signal deaths bypass the exit handler — reap the tunnel explicitly
+// so Ctrl-C'd bridges stop leaving identity-squatting orphans behind.
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.on(sig, () => {
+    try { tunnelChild?.kill("SIGTERM"); } catch {}
+    process.exit(0);
+  });
+}
 
 // When run directly (node server.mjs / the pounce-bridge bin), start immediately
 // with the console QR. When imported (desktop app), the caller starts it.
