@@ -1,5 +1,5 @@
 import { type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { ActionSheetIOS, Alert, Image, Pressable, Text, View } from "react-native";
+import { ActionSheetIOS, Alert, Image, Keyboard, Pressable, Text, View } from "react-native";
 import {
   EnrichedMarkdownTextInput,
   type EnrichedMarkdownTextInputInstance,
@@ -320,6 +320,9 @@ export function Composer({
     const snapImages = images;
     setInput("");
     setImages([]);
+    // Sending collapses the keyboard so the streaming reply is visible
+    // (Claude/ChatGPT behavior). No-op on desktop, where there's no soft keyboard.
+    Keyboard.dismiss();
     try {
       await onSubmit({
         text: snapMarkdown.trim(),
