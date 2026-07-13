@@ -67,8 +67,12 @@ export async function bootstrap(): Promise<void> {
   markDevicesOffline();
   // Sweep any state left behind by devices that are no longer paired (e.g. a
   // machine re-paired under a new URL orphans its old threads). The persisted
-  // device configs are the source of truth for what's really paired.
-  reconcileDevices((await listDeviceConfigs()).map((d) => d.id));
+  // device configs are the source of truth for what's really paired — but an
+  // EMPTY read is ambiguous (genuinely unpaired vs. the keychain not readable
+  // this launch, e.g. a background launch before first unlock). Unpairing has
+  // its own cleanup path (forgetDevice), so never mass-wipe off an empty list.
+  const pairedIds = (await listDeviceConfigs().catch(() => [])).map((d) => d.id);
+  if (pairedIds.length) reconcileDevices(pairedIds);
   const bridge = await loadBridgeConfig();
   if (bridge && (await connectBridge(bridge))) {
     const { registerForPush } = await import("./push");

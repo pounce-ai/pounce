@@ -321,17 +321,23 @@ export function Composer({
     setInput("");
     setImages([]);
     // Sending collapses the keyboard so the streaming reply is visible
-    // (Claude/ChatGPT behavior). No-op on desktop, where there's no soft keyboard.
+    // (Claude/ChatGPT behavior). Keyboard.dismiss() alone is a no-op here: it
+    // only blurs inputs registered with RN's TextInputState, which the native
+    // markdown editor isn't — blur the instance directly.
+    inputRef.current?.blur();
     Keyboard.dismiss();
     try {
       await onSubmit({
         text: snapMarkdown.trim(),
         images: snapImages.map((i) => ({ data: i.data, mediaType: i.mediaType })),
       });
-    } catch {
-      // restore on failure so the user doesn't lose their message
+    } catch (err) {
+      // restore on failure so the user doesn't lose their message — and say so,
+      // or an off-LAN delivery failure looks like the app silently un-sending.
       setInput(snapMarkdown);
       setImages(snapImages);
+      const detail = err instanceof Error ? err.message : "";
+      Alert.alert("Message not sent", detail || "Couldn't reach the host — your message was put back in the box.");
     }
   };
 
@@ -519,13 +525,16 @@ function ControlPill({
       onPress={onPress}
       hitSlop={4}
       className={cn(
-        "active:opacity-70 h-8 flex-row items-center gap-1.5 rounded-full px-2.5",
+        // shrink/min-w-0: yoga's flexShrink defaults to 0, so a long label
+        // ("Accept edits", a long model name) would push the mic/send buttons
+        // off-screen instead of truncating.
+        "active:opacity-70 h-8 min-w-0 shrink flex-row items-center gap-1.5 rounded-full px-2.5",
         active ? "bg-accent-soft" : "bg-surface",
       )}
     >
       {agent ? <AgentLogo agent={agent} size={13} /> : null}
       {icon ? <Ionicons name={icon} size={12} color={active ? COLOR.accent : COLOR.fgMuted} /> : null}
-      <Text numberOfLines={1} className={cn("max-w-[150px] text-[13px] font-medium", active ? "text-accent" : "text-fg")}>
+      <Text numberOfLines={1} className={cn("max-w-[150px] shrink text-[13px] font-medium", active ? "text-accent" : "text-fg")}>
         {label}
       </Text>
       <Ionicons name="chevron-down" size={11} color={active ? COLOR.accent : COLOR.fgFaint} />

@@ -459,12 +459,10 @@ export function cascadeCleanup(): void {
   );
   deleteIds(agentCaps, agentCaps.toArray.filter((a) => !liveAgents.has(a.id)).map((a) => a.id));
 
-  // Sync history: drop vanished repos from each entry, then entries left empty.
-  for (const e of syncLog.toArray) {
-    const keptRepos = e.repos.filter((r) => liveRepoIds.has(r.repoId));
-    if (keptRepos.length === 0) syncLog.delete(e.id);
-    else if (keptRepos.length !== e.repos.length) syncLog.update(e.id, (d) => void (d.repos = keptRepos));
-  }
+  // syncLog is deliberately KEPT — it's a historical record of past syncs
+  // (rendered from its own rows, never joined against live repos), so entries
+  // must survive repos coming and going. It's bounded by SYNC_LOG_CAP and
+  // cleared only by a full workspace reset.
   // ignoredRepos$ is deliberately KEPT — hiding a folder is a preference that
   // should survive removing and re-pairing its device.
 }
@@ -517,13 +515,29 @@ export function mergeWorkspace(data: WorkspaceData): void {
   if (data.devices) upsertRows(devices, Object.values(data.devices));
 }
 
-/** Authoritative sync: make projects/threads/devices exactly match the incoming
- *  set (upsert present, delete absent), record the sync-history diff, and cascade
- *  satellites for anything removed. */
-export function syncWorkspace(data: WorkspaceData): void {
+/** Authoritative sync: make projects/threads/devices match the incoming set
+ *  (upsert present, delete absent), record the sync-history diff, and cascade
+ *  satellites for anything removed.
+ *
+ *  Authority is PER HOST: only hosts in `syncedHostIds` completed this sync, so
+ *  only their threads may be deleted for being absent. Any other host (offline,
+ *  mid-reconnect, failed fetch) keeps its last-known threads verbatim — a failed
+ *  read is not evidence the work is gone, and deleting here would cascade away
+ *  recents ("Jump back in"), markers, favorites and cached messages that can't
+ *  be rebuilt from the host. Omitting syncedHostIds means every host synced. */
+export function syncWorkspace(data: WorkspaceData, opts?: { syncedHostIds?: readonly string[] }): void {
   const prev = new Map(threads.toArray.map((s) => [s.id, s] as const));
-  const nextSessions = Object.values(data.sessions);
-  replaceAll(projects, Object.values(data.repos));
+  const synced = opts?.syncedHostIds ? new Set(opts.syncedHostIds) : null;
+  const preserved = synced ? threads.toArray.filter((s) => !synced.has(s.hostId)) : [];
+  const preservedRepoIds = new Set(preserved.map((s) => s.repoId));
+  // Preserved rows first: when a host half-streamed before failing, the fresher
+  // incoming row for the same id wins the upsert.
+  const nextSessions = [...preserved, ...Object.values(data.sessions)];
+  const nextRepos = [
+    ...projects.toArray.filter((r) => preservedRepoIds.has(r.id) && !data.repos[r.id]),
+    ...Object.values(data.repos),
+  ];
+  replaceAll(projects, nextRepos);
   replaceAll(threads, nextSessions);
   if (data.devices) replaceAll(devices, Object.values(data.devices));
   recordSync(prev, nextSessions, data.repos, new Date().toISOString());
