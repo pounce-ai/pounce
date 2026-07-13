@@ -109,13 +109,26 @@ export function createHost({ version = () => null } = {}) {
       // plans, and permission prompts. Falls back to the adapter when the agent
       // has no ACP server available.
       const useAcp = process.env.BRIDGE_ACP === "1" && acpAvailable(agent);
+      const runCli = () => Promise.resolve(adapter(agent).startTurn(opts, onEvent)).then((t) => {
+        inner = t;
+        if (stopped) t.stop();
+        return t.done;
+      });
+      const runAcp = () => Promise.resolve(startAcpTurn(agent, opts, onEvent)).then((t) => {
+        inner = t;
+        if (stopped) t.stop();
+        // ACP rejects `done` ONLY for pre-stream failures (adapter startup
+        // crash, e.g. a bundled runtime dep missing) — retry over the agent's
+        // classic CLI transport so the user's turn still runs. Mid-turn ACP
+        // failures resolve with their own error event and don't retry.
+        return t.done.catch((e) => {
+          if (stopped) throw e;
+          console.log(`[acp] ${agent} pre-stream failure — falling back to CLI transport: ${String(e?.message || e).slice(0, 300)}`);
+          return runCli();
+        });
+      });
       const done = Promise.resolve()
-        .then(() => (useAcp ? startAcpTurn(agent, opts, onEvent) : adapter(agent).startTurn(opts, onEvent)))
-        .then((t) => {
-          inner = t;
-          if (stopped) t.stop();
-          return t.done;
-        })
+        .then(() => (useAcp ? runAcp() : runCli()))
         .then(
           // A finished turn changed its thread's history — drop stale parses
           // now rather than waiting on the fs watcher's debounce.
