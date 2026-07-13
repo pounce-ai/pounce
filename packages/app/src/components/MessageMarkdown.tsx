@@ -1,5 +1,8 @@
-import { Component, memo, type ReactNode, useMemo } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Component, memo, type ReactNode, useMemo, useRef, useState } from "react";
+// eslint-disable-next-line @react-native/no-deprecated-api -- core Clipboard is
+// the only clipboard already inside shipped binaries (OTA-safe); expo-clipboard
+// would need a new native module and a store build.
+import { Clipboard, Pressable, ScrollView, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   EnrichedMarkdownText,
@@ -170,19 +173,34 @@ const PRISM_LANG: Record<string, string> = {
  */
 const CodeBlock = memo(function CodeBlock({ lang, code, onRun }: { lang: string; code: string; onRun?: (c: string) => void }) {
   const prismLang = PRISM_LANG[lang] ?? lang;
+  // Brief "Copied" confirmation on the copy action; timer cleared on re-tap so
+  // rapid taps don't flicker.
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copy = () => {
+    Clipboard.setString(code);
+    setCopied(true);
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopied(false), 1500);
+  };
   return (
     <View className="overflow-hidden rounded-xl border border-border bg-[#0d0d12]">
-      {lang || onRun ? (
-        <View className="flex-row items-center gap-2 border-b border-border/70 px-3 py-1.5">
-          <Text className="flex-1 font-mono text-[11px] lowercase text-fg-faint">{lang || "code"}</Text>
-          {onRun ? (
-            <Pressable onPress={() => onRun(code)} hitSlop={6} className="active:opacity-70 flex-row items-center gap-1">
-              <Ionicons name="play" size={12} color={COLOR.accent} />
-              <Text className="text-[12px] font-semibold text-accent">Run</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : null}
+      {/* Header always renders so every block has a Copy affordance. */}
+      <View className="flex-row items-center gap-3 border-b border-border/70 px-3 py-1.5">
+        <Text className="flex-1 font-mono text-[11px] lowercase text-fg-faint">{lang || "code"}</Text>
+        {onRun ? (
+          <Pressable onPress={() => onRun(code)} hitSlop={6} className="active:opacity-70 flex-row items-center gap-1">
+            <Ionicons name="play" size={12} color={COLOR.accent} />
+            <Text className="text-[12px] font-semibold text-accent">Run</Text>
+          </Pressable>
+        ) : null}
+        <Pressable onPress={copy} hitSlop={6} className="active:opacity-70 flex-row items-center gap-1">
+          <Ionicons name={copied ? "checkmark" : "copy-outline"} size={12} color={copied ? COLOR.success : COLOR.fgMuted} />
+          <Text className="text-[12px] font-semibold" style={{ color: copied ? COLOR.success : COLOR.fgMuted }}>
+            {copied ? "Copied" : "Copy"}
+          </Text>
+        </Pressable>
+      </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: 10 }}>
         <Highlight code={code} language={prismLang || "text"} theme={themes.vsDark}>
           {({ tokens, getTokenProps }) => (

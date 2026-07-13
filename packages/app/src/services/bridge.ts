@@ -556,14 +556,17 @@ export async function fetchMessages(
   hostId: string,
   agent: string,
   threadId: string,
-  opts?: { limit?: number },
+  opts?: { limit?: number; fresh?: boolean },
 ): Promise<TimelineEvent[]> {
   const cfg = await deviceForHost(hostId);
   if (!cfg) return [];
   const limit = opts?.limit ? `&limit=${opts.limit}` : "";
+  // fresh=1 makes the host re-parse the transcript instead of serving its LRU —
+  // used right after a turn, when the cache can predate the turn's writes.
+  const fresh = opts?.fresh ? "&fresh=1" : "";
   const { events } = await get<{ events: TimelineEvent[] }>(
     cfg,
-    `/v1/messages?agent=${encodeURIComponent(agent)}&thread=${encodeURIComponent(threadId)}${limit}`,
+    `/v1/messages?agent=${encodeURIComponent(agent)}&thread=${encodeURIComponent(threadId)}${limit}${fresh}`,
   );
   // Resolve image refs to loadable, token-authed bridge URLs. The client only
   // hits these when a message scrolls into view (lazy <Image>), so the events
