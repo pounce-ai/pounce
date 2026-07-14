@@ -49,7 +49,7 @@ import {
 } from "../state/db/hooks";
 import { fetchMessages, fetchUsage, interruptTurn, respondPermission, streamLiveMessage, type ThreadUsage } from "../services/bridge";
 import { Ionicons } from "@expo/vector-icons";
-import { ACTIVITY_LABEL, AgentStatusIcon, BranchChip, cn, COLOR } from "../ui";
+import { ACTIVITY_LABEL, AgentStatusIcon, BranchChip, cn, COLOR, pickSheet } from "../ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "../ui/agent-meta";
 
 /** Desktop renders this screen in a wide pane: pickers use Alert instead of
@@ -517,20 +517,6 @@ export default function SessionScreen() {
   const activeMode = mode ?? modes[0]?.value;
   const modeLabel = activeMode === "default" ? "Mode" : modes.find((m) => m.value === activeMode)?.label ?? "Mode";
   const effortLabel = REASONING_EFFORTS.find((e) => e.value === effort)?.label ?? "Effort";
-  const pickSheet = (title: string, labels: string[], onPick: (i: number) => void) => {
-    if (DESKTOP) {
-      // No ActionSheetIOS on macOS/Windows — Alert buttons map to NSAlert.
-      Alert.alert(title, undefined, [
-        ...labels.map((label, i) => ({ text: label, onPress: () => onPick(i) })),
-        { text: "Cancel", style: "cancel" as const },
-      ]);
-      return;
-    }
-    ActionSheetIOS.showActionSheetWithOptions(
-      { title, options: [...labels, "Cancel"], cancelButtonIndex: labels.length },
-      (i) => { if (i >= 0 && i < labels.length) onPick(i); },
-    );
-  };
   const openMode = () => pickSheet("Mode", modes.map((m) => `${m.label} · ${m.hint}`), (i) => setMode(modes[i].value));
   const openEffort = () => pickSheet("Reasoning effort", REASONING_EFFORTS.map((e) => e.label), (i) => setEffort(REASONING_EFFORTS[i].value));
 

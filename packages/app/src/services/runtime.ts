@@ -3,6 +3,7 @@
  * selection lives behind the ./transport seam (Iroh-or-HTTP on mobile,
  * HTTP-only on desktop). Pairing payloads go to the secure store, never MMKV.
  */
+import { AppState, Platform } from "react-native";
 import * as SecureStore from "./secureStore";
 import { LitterRuntime } from "@litter/runtime";
 import type { PairPayload } from "@litter/shared";
@@ -54,6 +55,30 @@ export async function refreshLive(fresh = false): Promise<void> {
   try { await syncLiveData({ fresh }); } catch { /* keep cached */ }
 }
 
+/** How often the foreground heartbeat re-syncs thread activity. */
+const FOREGROUND_SYNC_MS = 20_000;
+let foregroundSyncStarted = false;
+
+/**
+ * Mobile's equivalent of the desktop heartbeat: thread activity decays fast
+ * (a short turn never re-syncs on its own), so while the app is foregrounded
+ * the workspace re-syncs on a timer — and immediately on background→foreground
+ * so stale "Idle" never greets a returning user. Desktop has its own heartbeat
+ * (desktop/src/services/heartbeat.ts); this only runs on mobile.
+ */
+export function startForegroundSync(): void {
+  if (foregroundSyncStarted || Platform.OS === "macos" || Platform.OS === "windows") return;
+  foregroundSyncStarted = true;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const start = () => { timer ??= setInterval(() => void refreshLive(), FOREGROUND_SYNC_MS); };
+  const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+  start();
+  AppState.addEventListener("change", (s) => {
+    if (s === "active") { void refreshLive(); start(); }
+    else stop();
+  });
+}
+
 /** App boot: live bridge → paired host (first that succeeds, else disconnected). */
 export async function bootstrap(): Promise<void> {
   // Hydrate the react-db collections from MMKV, then one-time import any legacy
@@ -62,6 +87,7 @@ export async function bootstrap(): Promise<void> {
   const { migrateLegendToDb } = await import("../state/db/migrate");
   await preloadDb();
   migrateLegendToDb();
+  startForegroundSync();
   // Persisted `online` is stale until a live sync proves each host reachable —
   // otherwise past pairings show as "connected" on launch even when they're not.
   markDevicesOffline();

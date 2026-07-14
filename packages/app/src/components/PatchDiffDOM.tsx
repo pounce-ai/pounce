@@ -3,7 +3,8 @@
 import { Component, type ReactNode, useEffect, useMemo, useState } from "react";
 import { PatchDiff } from "@pierre/diffs/react";
 import type { DOMProps } from "expo/dom";
-import { splitPatch, type PatchFile } from "./diffPatch";
+import { extOf, splitPatch, type PatchFile } from "./diffPatch";
+import { COLOR } from "../ui/tokens";
 
 /**
  * The @pierre/diffs renderer, hosted in an Expo DOM component (a WebView that
@@ -34,7 +35,9 @@ let fileIconsWasm: FileIconsWasm | null = null;
 async function loadFileIcons(): Promise<void> {
   // Buffer + instantiate (not instantiateStreaming): survives wrong MIME types
   // and older WebKit. Retry a few times — a transient CDN failure otherwise
-  // leaves every file on the fallback glyph for the session.
+  // leaves every file on the fallback glyph for the session. Offline, skip
+  // the ~2.4s of retry backoff and go straight to fallback glyphs.
+  if (typeof navigator !== "undefined" && navigator.onLine === false) throw new Error("offline");
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -80,22 +83,22 @@ const ICON_EXT_ALIASES: Record<string, string> = {
 function getIconForFile(path: string): string | null {
   const direct = lookupIconForFile(path);
   if (direct) return direct;
-  const ext = path.split(".").pop()?.toLowerCase() ?? "";
-  const alias = ICON_EXT_ALIASES[ext];
+  const alias = ICON_EXT_ALIASES[extOf(path).slice(1)];
   return alias ? lookupIconForFile(`x.${alias}`) : null;
 }
 
-// --- theme tokens (mirrors the app's dark palette) ---------------------------
+// --- theme tokens — shared COLOR where it exists, surfaces local (tokens.ts
+// has no bg/border values; they mirror global.css) ---------------------------
 const C = {
   bg: "#0b0b0f",
   elevated: "#101016",
   border: "#26262e",
-  fg: "#ececf1",
-  fgMuted: "#9a9aa5",
-  fgFaint: "#62626d",
-  add: "#3fb950",
-  del: "#f85149",
-  accent: "#7c6ff0",
+  fg: COLOR.fg,
+  fgMuted: COLOR.fgMuted,
+  fgFaint: COLOR.fgFaint,
+  add: COLOR.success,
+  del: COLOR.danger,
+  accent: COLOR.accent,
 };
 
 function FileSection({
@@ -279,20 +282,29 @@ function PlainPatch({ text }: { text: string }) {
 export default function PatchDiffDOM({
   patch,
   diffStyle = "unified",
+  extFilter,
   seenPaths = [],
   onToggleSeen,
   onReady,
 }: {
   patch: string;
   diffStyle?: "unified" | "split";
+  /** Only show files with this extension (".ts"); null = all. Filtering here
+   *  keeps the patch prop stable — a filter change re-sends one small string
+   *  across the WebView bridge instead of the whole recomposed patch. */
+  extFilter?: string | null;
   /** Files already marked Seen — start collapsed. */
   seenPaths?: string[];
   onToggleSeen?: (path: string, seen: boolean) => Promise<void>;
   /** Fired once react-dom has mounted — the RN side hides its skeleton then. */
-  onReady?: () => Promise<void>;
+  onReady?: () => void | Promise<void>;
   dom?: DOMProps;
 }) {
   const files = useMemo(() => splitPatch(patch), [patch]);
+  const shown = useMemo(
+    () => (extFilter ? files.filter((f) => extOf(f.path) === extFilter) : files),
+    [files, extFilter],
+  );
   const [iconsReady, setIconsReady] = useState(false);
   useEffect(() => {
     void onReady?.();
@@ -328,7 +340,7 @@ export default function PatchDiffDOM({
           font-display: swap;
         }
       `}</style>
-      {files.map((f) => (
+      {shown.map((f) => (
         <FileSection
           key={f.path}
           file={f}

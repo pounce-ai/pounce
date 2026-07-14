@@ -263,13 +263,13 @@ export class ClaudeAdapter {
     if (this.turns.isRunning("claude", threadId)) {
       return { activity: "running", lastActivityAt: new Date().toISOString() };
     }
-    const file = await this.findFile(threadId);
     const cwd = this.index.metas.get(threadId)?.cwd;
-    let liveInCwd = null; // null = unknown → mtime heuristic decides
-    if (cwd) {
-      const live = await liveAgentCwds();
-      if (live) liveInCwd = live.get("claude")?.has(cwd) ?? false;
-    }
+    const [file, live] = await Promise.all([
+      this.findFile(threadId),
+      cwd ? liveAgentCwds() : null,
+    ]);
+    // null = liveness unknown → the mtime heuristic decides
+    const liveInCwd = cwd && live ? (live.get("claude")?.has(cwd) ?? false) : null;
     return judgeTranscript(file, liveInCwd);
   }
 
@@ -533,12 +533,8 @@ function judgeTranscript(file, liveInCwd = null) {
   try { mtimeMs = statSync(file).mtimeMs; } catch { return { activity: "idle", lastActivityAt: null }; }
   const lastActivityAt = new Date(mtimeMs).toISOString();
   const sinceWrite = Date.now() - mtimeMs;
-  const recent =
-    liveInCwd === false
-      ? false
-      : liveInCwd === true
-        ? sinceWrite < LIVE_EXTENDED_WINDOW_MS
-        : sinceWrite < RUNNING_WINDOW_MS;
+  const windowMs = liveInCwd ? LIVE_EXTENDED_WINDOW_MS : RUNNING_WINDOW_MS;
+  const recent = liveInCwd !== false && sinceWrite < windowMs;
 
   // Walk the tail backwards to the last meaningful record.
   const lines = readTailLines(file);

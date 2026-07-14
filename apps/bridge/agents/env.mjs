@@ -78,24 +78,25 @@ export function primaryLanIp() {
   return lanIps()[0] || null;
 }
 
-/** Run a command and resolve its stdout ("" on any failure). ≤5s. */
-function execOut(cmd, args) {
+/** Run a command, collecting stdout (capped) with a 5s kill timeout.
+ *  Resolves { code, out }; failures resolve { code: -1, out: "" }. */
+function runCollect(cmd, args, { env, maxBytes = Infinity } = {}) {
   return new Promise((resolve) => {
     let p;
     try {
-      p = spawn(cmd, args, { stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
-    } catch { return resolve(""); }
+      p = spawn(cmd, args, { env, stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+    } catch { return resolve({ code: -1, out: "" }); }
     let out = "";
     const t = setTimeout(() => { try { p.kill("SIGKILL"); } catch {} }, 5000);
-    p.stdout.on("data", (d) => (out += d));
-    p.on("close", () => { clearTimeout(t); resolve(out); });
-    p.on("error", () => { clearTimeout(t); resolve(""); });
+    p.stdout.on("data", (d) => { if (out.length < maxBytes) out += d; });
+    p.on("close", (code) => { clearTimeout(t); resolve({ code, out }); });
+    p.on("error", () => { clearTimeout(t); resolve({ code: -1, out: "" }); });
   });
 }
 
 /** Agent CLIs whose live processes we track for activity judgment. */
 const AGENT_BINS = new Set(["claude", "codex", "opencode"]);
-let liveCwdsCache = { at: 0, value: null };
+let liveCwdsCache = { at: 0, promise: null };
 
 /**
  * Working directories of live agent CLI processes, as Map<binName, Set<cwd>>.
@@ -103,17 +104,24 @@ let liveCwdsCache = { at: 0, value: null };
  * not in argv/env, transcript not held open), but its cwd is — and in the
  * worktree-per-session flow that's nearly a session identifier. Used to judge
  * "running" by process liveness instead of transcript-mtime guessing.
- * Cached 5s; resolves null when the scan isn't possible (Windows, ps failure)
- * so callers can fall back to the mtime heuristic.
+ * The in-flight promise is cached for 5s (failures included) so a burst of
+ * per-thread getActivity calls shares ONE ps/lsof scan. Resolves null when
+ * the scan isn't possible (Windows, ps failure) so callers can fall back to
+ * the mtime heuristic.
  */
-export async function liveAgentCwds() {
-  if (IS_WIN) return null;
-  if (liveCwdsCache.value !== null && Date.now() - liveCwdsCache.at < 5_000) {
-    return liveCwdsCache.value;
+export function liveAgentCwds() {
+  if (IS_WIN) return Promise.resolve(null);
+  if (liveCwdsCache.promise && Date.now() - liveCwdsCache.at < 5_000) {
+    return liveCwdsCache.promise;
   }
-  let value = null;
+  liveCwdsCache = { at: Date.now(), promise: scanLiveAgentCwds() };
+  return liveCwdsCache.promise;
+}
+
+async function scanLiveAgentCwds() {
   try {
-    const ps = await execOut("ps", ["-axo", "pid=,command="]);
+    const { out: ps } = await runCollect("ps", ["-axo", "pid=,command="]);
+    if (!ps) return null;
     const pids = []; // [pid, binName]
     for (const line of ps.split("\n")) {
       const m = line.match(/^\s*(\d+)\s+(\S+)/);
@@ -121,7 +129,7 @@ export async function liveAgentCwds() {
       const base = path.basename(m[2]);
       if (AGENT_BINS.has(base)) pids.push([m[1], base]);
     }
-    value = new Map();
+    const value = new Map();
     if (pids.length) {
       if (existsSync("/proc")) {
         for (const [pid, name] of pids) {
@@ -129,7 +137,7 @@ export async function liveAgentCwds() {
         }
       } else {
         // macOS: one batched lsof for all agent pids. -Fpn = p<pid> / n<path>.
-        const out = await execOut("lsof", ["-a", "-p", pids.map(([p]) => p).join(","), "-d", "cwd", "-Fpn"]);
+        const { out } = await runCollect("lsof", ["-a", "-p", pids.map(([p]) => p).join(","), "-d", "cwd", "-Fpn"]);
         let cur = null;
         for (const line of out.split("\n")) {
           if (line.startsWith("p")) cur = line.slice(1);
@@ -140,11 +148,10 @@ export async function liveAgentCwds() {
         }
       }
     }
+    return value;
   } catch {
-    value = null;
+    return null;
   }
-  liveCwdsCache = { at: Date.now(), value };
-  return value;
 }
 
 function addCwd(map, name, cwd) {
@@ -157,16 +164,7 @@ function addCwd(map, name, cwd) {
  * string or null. Used for `isAvailable` so an agent without its binary simply
  * doesn't appear in the app — same UX as the old daemon's `available` flag.
  */
-export function binVersion(bin, args = ["--version"]) {
-  return new Promise((resolve) => {
-    let p;
-    try {
-      p = spawn(binPath(bin), args, { env: agentEnv(), stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
-    } catch { return resolve(null); }
-    let out = "";
-    const t = setTimeout(() => { try { p.kill("SIGKILL"); } catch {} }, 5000);
-    p.stdout.on("data", (d) => { if (out.length < 4096) out += d; });
-    p.on("close", (code) => { clearTimeout(t); resolve(code === 0 ? out.trim().split("\n")[0] || "" : null); });
-    p.on("error", () => { clearTimeout(t); resolve(null); });
-  });
+export async function binVersion(bin, args = ["--version"]) {
+  const { code, out } = await runCollect(binPath(bin), args, { env: agentEnv(), maxBytes: 4096 });
+  return code === 0 ? out.trim().split("\n")[0] || "" : null;
 }

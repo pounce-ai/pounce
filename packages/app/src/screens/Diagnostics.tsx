@@ -299,6 +299,26 @@ export default function DiagnosticsScreen() {
 
           <Row ok={!!report.git?.ok} title="git" detail={report.git?.version?.replace(/^git version /, "")} hint="git isn't found — some repo features (diffs, commits) won't work." />
 
+          {report.gh ? (
+          <Row
+            ok={report.gh.ok && report.gh.authed !== false}
+            warn={report.gh.ok && report.gh.authed === false}
+            title="GitHub CLI (gh)"
+            detail={
+              !report.gh.ok
+                ? undefined
+                : report.gh.authed === false
+                  ? `${report.gh.version ?? ""} · not signed in`.trim()
+                  : report.gh.version ?? undefined
+            }
+            hint={
+              !report.gh.ok
+                ? "gh isn't installed — creating PRs and CI check status won't work. brew install gh"
+                : "gh isn't signed in — run `gh auth login` on this machine to enable PRs and checks."
+            }
+          />
+          ) : null}
+
           {report.configFile ? (
             <Text className="px-4 pt-3 text-[11px] leading-[16px] text-fg-faint">
               Custom paths are saved to {report.configFile}.

@@ -142,14 +142,12 @@ export function EnvironmentSheet({
   const needsPush = (git?.ahead ?? 0) > 0;
   const act = (run: () => void) => () => { onClose(); run(); };
 
-  const checkRow =
-    checks?.checks === "passing"
-      ? { icon: "checkmark-circle-outline" as const, color: COLOR.success, label: "Checks successful" }
-      : checks?.checks === "failing"
-        ? { icon: "close-circle-outline" as const, color: COLOR.danger, label: `Checks failing (${checks.failed}/${checks.total})` }
-        : checks?.checks === "pending"
-          ? { icon: "time-outline" as const, color: COLOR.fgMuted, label: "Checks running" }
-          : null;
+  const CHECK_ROW: Record<string, { icon: ComponentIcon; color: string; label: string }> = {
+    passing: { icon: "checkmark-circle-outline", color: COLOR.success, label: "Checks successful" },
+    failing: { icon: "close-circle-outline", color: COLOR.danger, label: `Checks failing (${checks?.failed}/${checks?.total})` },
+    pending: { icon: "time-outline", color: COLOR.fgMuted, label: "Checks running" },
+  };
+  const checkRow = checks?.checks ? CHECK_ROW[checks.checks] : null;
 
   const shownSources = allSources ? sources : sources.slice(0, SOURCES_COLLAPSED);
 

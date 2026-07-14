@@ -107,6 +107,26 @@ export function removeSource(threadId: string, path: string): void {
   sources$[threadId].set(cur.filter((s) => s.path !== path));
 }
 
+/** Move a thread's per-id observable state to a new id (temp id → real id),
+ *  and drop entries for threads that no longer exist. Shared by rekeyThread
+ *  and cascadeCleanup so sources/seen-files can't orphan in MMKV. */
+function rekeyThreadObservables(oldId: string, newId: string): void {
+  // Cast per store: the two observables' union collapses .set()'s signatures.
+  for (const store$ of [sources$, seenFiles$].map((s) => s as typeof sources$)) {
+    const v = store$[oldId].get();
+    if (v?.length) store$[newId].set(v);
+    store$[oldId].delete();
+  }
+}
+
+function sweepThreadObservables(liveThreadIds: ReadonlySet<string>): void {
+  for (const store$ of [sources$, seenFiles$]) {
+    for (const id of Object.keys(store$.get() ?? {})) {
+      if (!liveThreadIds.has(id)) store$[id].delete();
+    }
+  }
+}
+
 /** Diff files marked "Seen" per thread — Changes-screen review progress
  *  (GitHub PR style). Persisted so seen files come back collapsed. */
 export const seenFiles$ = observable<Record<string, string[]>>({});
@@ -449,6 +469,7 @@ export function rekeyThread(oldId: string, s: Session): void {
     threadModels.delete(oldId);
     upsertRows(threadModels, [{ id: s.id, model }]);
   }
+  rekeyThreadObservables(oldId, s.id);
 }
 
 /** Delete one thread and its dependent rows. */
@@ -475,6 +496,7 @@ export function cascadeCleanup(): void {
   deleteIds(projects, projects.toArray.filter((r) => !liveRepoIds.has(r.id)).map((r) => r.id));
 
   // Per-thread state.
+  sweepThreadObservables(liveThreadIds);
   deleteIds(recents, recents.toArray.filter((r) => !liveThreadIds.has(r.id)).map((r) => r.id));
   deleteIds(threadModels, threadModels.toArray.filter((t) => !liveThreadIds.has(t.id)).map((t) => t.id));
   deleteIds(markers, markers.toArray.filter((m) => !liveThreadIds.has(m.id.split("|")[0])).map((m) => m.id));

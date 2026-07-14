@@ -19,11 +19,14 @@ import {
   userMessage, thinking, assistantMessage, toolCall, toolResult, systemEvent,
   readTailLines,
 } from "./events.mjs";
-import { agentEnv, binVersion, binPath } from "./env.mjs";
+import { agentEnv, binVersion, binPath, liveAgentCwds } from "./env.mjs";
 
 const ROOT = path.join(os.homedir(), ".codex", "sessions");
 const INDEX_FILE = path.join(os.homedir(), ".codex", "session_index.jsonl");
 const RUNNING_WINDOW_MS = 120_000;
+// With a live codex process confirmed in the thread's cwd, a quiet mid-turn
+// transcript stays "running" this long (covers long tool calls/builds).
+const LIVE_EXTENDED_WINDOW_MS = 2 * 60 * 60_000;
 const TURN_TIMEOUT_MS = Number(process.env.BRIDGE_TURN_TIMEOUT_MS || 300_000);
 const FILE_RE = /^rollout-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})-([0-9a-f-]{36})\.jsonl$/;
 
@@ -198,12 +201,20 @@ export class CodexAdapter {
     if (this.turns.isRunning("codex", threadId)) {
       return { activity: "running", lastActivityAt: new Date().toISOString() };
     }
-    const file = await this.findFile(threadId);
+    const cwd = this.index.metas.get(threadId)?.cwd;
+    const [file, live] = await Promise.all([
+      this.findFile(threadId),
+      cwd ? liveAgentCwds() : null,
+    ]);
     if (!file) return { activity: "idle", lastActivityAt: null };
     let mtimeMs;
     try { mtimeMs = statSync(file).mtimeMs; } catch { return { activity: "idle", lastActivityAt: null }; }
     const lastActivityAt = new Date(mtimeMs).toISOString();
-    const recent = Date.now() - mtimeMs < RUNNING_WINDOW_MS;
+    // Same liveness refinement as the claude adapter: a live codex process in
+    // the thread's cwd keeps a quiet mid-turn "running"; its absence demotes
+    // immediately; unknown falls back to the mtime window.
+    const liveInCwd = cwd && live ? (live.get("codex")?.has(cwd) ?? false) : null;
+    const recent = liveInCwd !== false && Date.now() - mtimeMs < (liveInCwd ? LIVE_EXTENDED_WINDOW_MS : RUNNING_WINDOW_MS);
     // Last task marker wins: started-without-complete while fresh → running.
     for (const line of readTailLines(file).reverse()) {
       let o;

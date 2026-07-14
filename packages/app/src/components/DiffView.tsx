@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import PatchDiffDOM from "./PatchDiffDOM";
-import { filterPatchByExt } from "./diffPatch";
+import { classifyLine, LINE_CLASS } from "./diffPatch";
 import type { DiffViewProps } from "./DiffViewTypes";
 import { cn } from "../ui";
 
@@ -17,9 +17,17 @@ const DOM_READY_TIMEOUT_MS = 6000;
  * The WebView boots blank before react-dom hydrates, so a skeleton covers it
  * until the DOM component reports ready; if that never happens (bundler issue,
  * webview failure), a plain native line renderer takes over.
+ *
+ * memo matters here: the parent re-renders per keystroke in the commit box,
+ * and un-memoed props would re-marshal the whole patch into the WebView.
  */
-export function DiffView({ patch, layout = "unified", extFilter, seenPaths, onToggleSeen }: DiffViewProps) {
-  const filtered = useMemo(() => filterPatchByExt(patch, extFilter), [patch, extFilter]);
+export const DiffView = memo(function DiffView({
+  patch,
+  layout = "unified",
+  extFilter,
+  seenPaths,
+  onToggleSeen,
+}: DiffViewProps) {
   const [dom, setDom] = useState<"loading" | "ready" | "failed">("loading");
 
   useEffect(() => {
@@ -31,16 +39,17 @@ export function DiffView({ patch, layout = "unified", extFilter, seenPaths, onTo
     return () => clearTimeout(t);
   }, [dom]);
 
-  if (dom === "failed") return <FallbackDiff patch={filtered} />;
+  if (dom === "failed") return <FallbackDiff patch={patch} />;
 
   return (
     <View className="flex-1">
       <PatchDiffDOM
-        patch={filtered}
+        patch={patch}
         diffStyle={layout}
+        extFilter={extFilter}
         seenPaths={seenPaths}
         onToggleSeen={onToggleSeen}
-        onReady={async () => setDom("ready")}
+        onReady={() => setDom("ready")}
         dom={{
           style: { flex: 1, backgroundColor: "#0b0b0f", opacity: dom === "ready" ? 1 : 0 },
           containerStyle: { flex: 1 },
@@ -49,7 +58,7 @@ export function DiffView({ patch, layout = "unified", extFilter, seenPaths, onTo
       {dom === "loading" ? <DiffSkeleton /> : null}
     </View>
   );
-}
+});
 
 /** File-section shaped placeholder shown while the DOM renderer boots. */
 function DiffSkeleton() {
@@ -77,31 +86,13 @@ function DiffSkeleton() {
   );
 }
 
-type Kind = "header" | "hunk" | "add" | "del" | "ctx";
-
-function classify(line: string): Kind {
-  if (line.startsWith("@@")) return "hunk";
-  if (/^(diff --git|index |--- |\+\+\+ |new file|deleted file|rename )/.test(line)) return "header";
-  if (line.startsWith("+")) return "add";
-  if (line.startsWith("-")) return "del";
-  return "ctx";
-}
-
-const LINE_CLASS: Record<Kind, string> = {
-  header: "text-fg-faint",
-  hunk: "text-info",
-  add: "bg-diff-add-bg text-diff-add-fg",
-  del: "bg-diff-del-bg text-diff-del-fg",
-  ctx: "text-fg-muted",
-};
-
 /** Plain colored-line renderer — the escape hatch when the DOM viewer dies. */
 function FallbackDiff({ patch }: { patch: string }) {
   const lines = useMemo(() => patch.split("\n"), [patch]);
   return (
     <ScrollView className="flex-1" contentContainerStyle={{ paddingVertical: 6 }}>
       {lines.map((line, i) => (
-        <Text key={i} className={cn("px-3 font-mono text-[11px] leading-[18px]", LINE_CLASS[classify(line)])}>
+        <Text key={i} className={cn("px-3 font-mono text-[11px] leading-[18px]", LINE_CLASS[classifyLine(line)])}>
           {line || " "}
         </Text>
       ))}

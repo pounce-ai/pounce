@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { ActionSheetIOS, AppState, Modal, Pressable, RefreshControl, Text, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ActionSheetIOS, Animated as RNAnimated, Easing, Modal, Pressable, RefreshControl, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import { LinearTransition } from "react-native-reanimated";
@@ -181,22 +181,6 @@ export default function HomeScreen() {
     try { await refreshLive(true); } finally { setRefreshing(false); }
   };
 
-  // Thread activity decays fast (a short turn never re-syncs on its own), so
-  // while the app is foregrounded the list re-syncs on a timer — mobile's
-  // equivalent of the desktop heartbeat. Also refresh immediately on
-  // background→foreground so stale "Idle" never greets a returning user.
-  useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const start = () => { if (!timer) timer = setInterval(() => void refreshLive(), 20_000); };
-    const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
-    start();
-    const sub = AppState.addEventListener("change", (s) => {
-      if (s === "active") { void refreshLive(); start(); }
-      else stop();
-    });
-    return () => { stop(); sub.remove(); };
-  }, []);
-
   // Long-press a thread to favourite it. New threads carry a temporary id that's
   // swapped for the real one after the first turn, so block favouriting until
   // then — a favourite keyed on the temp id would orphan.
@@ -227,6 +211,20 @@ export default function HomeScreen() {
 
   const newInRepo = (repoId: string) => router.push({ pathname: "/new", params: { repoId } });
 
+  // Header subtitle, one branch per state; syncing lives in the wordmark
+  // badge (spinner → green tick), so null here = nothing worth a row.
+  const subtitle =
+    !connected && !loading ? (
+      <Text numberOfLines={1} className="text-[13px] text-fg-faint">Tap to sync a device</Text>
+    ) : attentionCount > 0 ? (
+      <>
+        <Ionicons name="alert-circle" size={13} color={COLOR.warning} />
+        <Text numberOfLines={1} className="text-[13px] text-warning">
+          {attentionCount} need{attentionCount === 1 ? "s" : ""} you
+        </Text>
+      </>
+    ) : null;
+
   return (
     <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>
       {/* Glance header */}
@@ -234,28 +232,20 @@ export default function HomeScreen() {
         <View className="flex-1 pr-2">
           <View className="flex-row items-start gap-1">
             <Text className="text-[26px] font-bold text-fg">Pounce</Text>
-            {connected && !loading && attentionCount === 0 ? (
-              // All caught up — a green superscript tick on the wordmark.
+            {/* Superscript status badge: spinner while syncing, then a green
+                tick once connected and caught up. */}
+            {loading ? (
+              <SyncSpinner />
+            ) : connected && attentionCount === 0 ? (
               <Ionicons name="checkmark-circle" size={12} color={COLOR.success} style={{ marginTop: 5 }} />
             ) : null}
           </View>
-          {!connected || loading || attentionCount > 0 || filterCount ? (
+          {subtitle || filterCount ? (
             <Pressable
               onPress={() => router.push("/settings")}
               className="active:opacity-60 mt-0.5 flex-row items-center gap-1"
             >
-              {!connected && !loading ? (
-                <Text numberOfLines={1} className="text-[13px] text-fg-faint">Tap to sync a device</Text>
-              ) : loading ? (
-                <Text numberOfLines={1} className="text-[13px] text-fg-faint">Syncing…</Text>
-              ) : attentionCount > 0 ? (
-                <>
-                  <Ionicons name="alert-circle" size={13} color={COLOR.warning} />
-                  <Text numberOfLines={1} className="text-[13px] text-warning">
-                    {attentionCount} need{attentionCount === 1 ? "s" : ""} you
-                  </Text>
-                </>
-              ) : null}
+              {subtitle}
               {filterCount ? <Text className="text-[13px] text-fg-faint">· filtered</Text> : null}
             </Pressable>
           ) : null}
@@ -353,6 +343,25 @@ export default function HomeScreen() {
 }
 
 /** Pinned "Favourites" section header on the Home list. */
+/** Rotating sync glyph — the wordmark badge's "working" state. Core Animated
+ *  so it spins on desktop too (the reanimated seam is static there). */
+function SyncSpinner() {
+  const turn = useRef(new RNAnimated.Value(0)).current;
+  useEffect(() => {
+    const loop = RNAnimated.loop(
+      RNAnimated.timing(turn, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [turn]);
+  const rotate = turn.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+  return (
+    <RNAnimated.View style={{ marginTop: 5, transform: [{ rotate }] }}>
+      <Ionicons name="sync" size={12} color={COLOR.fgFaint} />
+    </RNAnimated.View>
+  );
+}
+
 function FavHeader({
   count,
   collapsed,

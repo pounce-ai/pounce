@@ -1,39 +1,29 @@
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { LegendList } from "@legendapp/list/react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { extOf, splitPatch } from "./diffPatch";
+import {
+  classifyLine,
+  DIFF_META_RE,
+  extOf,
+  LINE_CLASS,
+  splitPatch,
+  type LineKind,
+  type PatchFile,
+} from "./diffPatch";
 import { cn, COLOR } from "../ui";
 import type { DiffViewProps } from "./DiffViewTypes";
-
-type Kind = "hunk" | "add" | "del" | "ctx";
-
-function classify(line: string): Kind {
-  if (line.startsWith("@@")) return "hunk";
-  if (line.startsWith("+")) return "add";
-  if (line.startsWith("-")) return "del";
-  return "ctx";
-}
-
-const LINE_CLASS: Record<Kind, string> = {
-  hunk: "text-info",
-  add: "bg-diff-add-bg text-diff-add-fg",
-  del: "bg-diff-del-bg text-diff-del-fg",
-  ctx: "text-fg-muted",
-};
 
 /** Flattened rows the list renders: a file separator, a unified line, or a
  *  split (side-by-side) pair. */
 type Row =
   | { type: "file"; path: string; adds: number; dels: number }
-  | { type: "line"; kind: Kind; text: string }
-  | { type: "pair"; left: { kind: Kind; text: string } | null; right: { kind: Kind; text: string } | null };
+  | { type: "line"; kind: LineKind; text: string }
+  | { type: "pair"; left: { kind: LineKind; text: string } | null; right: { kind: LineKind; text: string } | null };
 
 /** Body lines of one file's patch, with git metadata headers dropped. */
 function bodyLines(text: string): string[] {
-  return text
-    .split("\n")
-    .filter((l) => !/^(diff --git|index |--- |\+\+\+ |new file|deleted file|rename |similarity |old mode|new mode|Binary files)/.test(l));
+  return text.split("\n").filter((l) => !DIFF_META_RE.test(l));
 }
 
 /** Pair del/add runs into side-by-side rows for the split layout. */
@@ -41,13 +31,13 @@ function toPairs(lines: string[]): Row[] {
   const rows: Row[] = [];
   let i = 0;
   while (i < lines.length) {
-    const kind = classify(lines[i]);
+    const kind = classifyLine(lines[i]);
     if (kind === "del") {
       // Collect the deletion run, then the addition run that follows it.
       const dels: string[] = [];
-      while (i < lines.length && classify(lines[i]) === "del") dels.push(lines[i++]);
+      while (i < lines.length && classifyLine(lines[i]) === "del") dels.push(lines[i++]);
       const adds: string[] = [];
-      while (i < lines.length && classify(lines[i]) === "add") adds.push(lines[i++]);
+      while (i < lines.length && classifyLine(lines[i]) === "add") adds.push(lines[i++]);
       for (let n = 0; n < Math.max(dels.length, adds.length); n++) {
         rows.push({
           type: "pair",
@@ -78,18 +68,24 @@ function cellText(text: string): string {
 
 /**
  * Unified-diff viewer — desktop implementation. A native structured renderer
- * (file sections, unified/split layouts, file filter): react-native-webview
- * has no solid macOS/Windows build, so the @pierre/diffs DOM component mobile
- * uses can't run here.
+ * (file sections, unified/split layouts, extension filter, Viewed accordions):
+ * react-native-webview has no solid macOS/Windows build, so the @pierre/diffs
+ * DOM component mobile uses can't run here.
  */
-export function DiffView({ patch, layout = "unified", extFilter, seenPaths, onToggleSeen }: DiffViewProps) {
-  // File headers act as accordions — tapping one collapses that file's hunks.
-  // "Viewed" (GitHub PR style) marks review progress, collapses the file, and
-  // persists — already-seen files come back collapsed.
+export const DiffView = memo(function DiffView({
+  patch,
+  layout = "unified",
+  extFilter,
+  seenPaths = [],
+  onToggleSeen,
+}: DiffViewProps) {
+  // "Viewed" state lives in the persisted store the parent syncs via
+  // seenPaths/onToggleSeen; only the accordion collapse is local. Seen files
+  // start collapsed.
+  const viewed = useMemo(() => new Set(seenPaths), [seenPaths]);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(seenPaths));
-  const [viewed, setViewed] = useState<Set<string>>(() => new Set(seenPaths));
-  const toggleIn = (set: React.Dispatch<React.SetStateAction<Set<string>>>, path: string, force?: boolean) =>
-    set((cur) => {
+  const toggleCollapsed = (path: string, force?: boolean) =>
+    setCollapsed((cur) => {
       const next = new Set(cur);
       const on = force ?? !next.has(path);
       if (on) next.add(path);
@@ -98,26 +94,34 @@ export function DiffView({ patch, layout = "unified", extFilter, seenPaths, onTo
     });
   const toggleViewed = (path: string) => {
     const nowViewed = !viewed.has(path);
-    toggleIn(setViewed, path);
-    toggleIn(setCollapsed, path, nowViewed); // viewed collapses, unviewed expands
+    toggleCollapsed(path, nowViewed); // viewed collapses, unviewed expands
     void onToggleSeen?.(path, nowViewed);
   };
 
+  // Two-level memo: the parse and per-file row building depend only on the
+  // patch/layout, so a collapse toggle just re-concatenates arrays instead of
+  // re-running splitPatch + regexes over the whole diff.
+  const files = useMemo(() => splitPatch(patch), [patch]);
+  const fileRows = useMemo(
+    () =>
+      files.map((f: PatchFile) => ({
+        file: f,
+        rows:
+          layout === "split"
+            ? toPairs(bodyLines(f.text))
+            : bodyLines(f.text).map<Row>((l) => ({ type: "line", kind: classifyLine(l), text: l })),
+      })),
+    [files, layout],
+  );
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
-    for (const f of splitPatch(patch)) {
-      if (extFilter && extOf(f.path) !== extFilter) continue;
-      out.push({ type: "file", path: f.path, adds: f.adds, dels: f.dels });
-      if (collapsed.has(f.path)) continue;
-      const lines = bodyLines(f.text);
-      if (layout === "split") {
-        out.push(...toPairs(lines));
-      } else {
-        for (const l of lines) out.push({ type: "line", kind: classify(l), text: l });
-      }
+    for (const { file, rows: body } of fileRows) {
+      if (extFilter && extOf(file.path) !== extFilter) continue;
+      out.push({ type: "file", path: file.path, adds: file.adds, dels: file.dels });
+      if (!collapsed.has(file.path)) out.push(...body);
     }
     return out;
-  }, [patch, layout, extFilter, collapsed]);
+  }, [fileRows, extFilter, collapsed]);
 
   return (
     <LegendList
@@ -130,7 +134,7 @@ export function DiffView({ patch, layout = "unified", extFilter, seenPaths, onTo
           const isViewed = viewed.has(item.path);
           return (
             <Pressable
-              onPress={() => toggleIn(setCollapsed, item.path)}
+              onPress={() => toggleCollapsed(item.path)}
               className="active:bg-surface-hover mb-1 mt-3 flex-row items-center gap-2 border-b border-border bg-bg-elevated px-3 py-2"
             >
               <Ionicons
@@ -197,4 +201,4 @@ export function DiffView({ patch, layout = "unified", extFilter, seenPaths, onTo
       contentContainerStyle={{ paddingBottom: 6 }}
     />
   );
-}
+});

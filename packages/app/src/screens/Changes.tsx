@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, ActionSheetIOS, Alert, Linking, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Linking, Pressable, Text, TextInput, View } from "react-native";
 import { KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -20,12 +20,12 @@ import { extOf } from "../components/diffPatch";
 import { seenFiles$, setSeenFile } from "../state/stores";
 import { useSelector } from "@legendapp/state/react";
 import { useThread } from "../state/db/hooks";
-import { cn, COLOR } from "../ui";
-
-const DESKTOP = Platform.OS === "macos" || Platform.OS === "windows";
+import { cn, COLOR, IS_DESKTOP, pickSheet } from "../ui";
 
 /** Branches where committing directly is almost never intended. */
 const isMainBranch = (b: string | null | undefined) => b === "main" || b === "master";
+
+const NO_SEEN: string[] = [];
 
 export default function ChangesScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -43,7 +43,10 @@ export default function ChangesScreen() {
   // GitHub-style file filter: by extension, via a dropdown with counts.
   const [extFilter, setExtFilter] = useState<string | null>(null);
   // Files marked "Seen" — persisted per thread so they come back collapsed.
-  const seenPaths = useSelector(() => seenFiles$[id!].get()) ?? [];
+  // Stable identities matter: DiffView is memoized because its props cross the
+  // WebView bridge, so a fresh [] or closure per keystroke would re-marshal it.
+  const seenPaths = useSelector(() => seenFiles$[id!].get()) ?? NO_SEEN;
+  const onToggleSeen = useCallback(async (path: string, seen: boolean) => setSeenFile(id!, path, seen), [id]);
 
   const load = useCallback(async () => {
     if (!session?.cwd) return;
@@ -72,23 +75,8 @@ export default function ChangesScreen() {
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
   }, [changes?.files]);
 
-  /** Platform picker: NSAlert buttons on desktop, action sheet on mobile. */
-  const pick = (title: string, labels: string[], onPick: (i: number) => void) => {
-    if (DESKTOP) {
-      Alert.alert(title, undefined, [
-        ...labels.map((text, i) => ({ text, onPress: () => onPick(i) })),
-        { text: "Cancel", style: "cancel" as const },
-      ]);
-      return;
-    }
-    ActionSheetIOS.showActionSheetWithOptions(
-      { title, options: [...labels, "Cancel"], cancelButtonIndex: labels.length },
-      (i) => { if (i >= 0 && i < labels.length) onPick(i); },
-    );
-  };
-
   const pickExtFilter = () =>
-    pick("Filter by file type", [
+    pickSheet("Filter by file type", [
       `All files (${fileCount})`,
       ...extensions.map(([ext, n]) => `${ext} (${n})`),
     ], (i) => setExtFilter(i === 0 ? null : extensions[i - 1][0]));
@@ -215,7 +203,7 @@ export default function ChangesScreen() {
     }
   };
 
-  const pickPrMode = () => pick("Pull request mode", ["Draft PR", "PR"], (i) => setPrDraft(i === 0));
+  const pickPrMode = () => pickSheet("Pull request mode", ["Draft PR", "PR"], (i) => setPrDraft(i === 0));
 
   return (
     <KeyboardAvoidingView
@@ -245,7 +233,7 @@ export default function ChangesScreen() {
             ) : null}
           </View>
         </View>
-        {DESKTOP && fileCount > 0 ? (
+        {IS_DESKTOP && fileCount > 0 ? (
           <View className="flex-row overflow-hidden rounded-lg border border-border">
             {(["unified", "split"] as const).map((l) => (
               <Pressable
@@ -297,7 +285,7 @@ export default function ChangesScreen() {
             layout={layout}
             extFilter={extFilter}
             seenPaths={seenPaths}
-            onToggleSeen={async (path, seen) => setSeenFile(id!, path, seen)}
+            onToggleSeen={onToggleSeen}
           />
         )}
       </View>

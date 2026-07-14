@@ -134,22 +134,21 @@ export function Composer({
     setDraft(next);
     inputRef.current?.setValue(next);
   };
+  // Append text to the draft (space-joined) and focus — shared by every
+  // handle method that adds to, rather than replaces, what the user typed.
+  const appendToDraft = (text: string) => {
+    const cur = markdownRef.current.replace(/\s+$/, "");
+    setInput(cur ? `${cur} ${text}` : text);
+    inputRef.current?.focus();
+  };
+
   useImperativeHandle(ref, () => ({
     insert: (t: string) => {
       setInput(t);
       inputRef.current?.focus();
     },
-    addMentions: (paths: string[]) => {
-      const mentions = paths.map((p) => `@${p}`).join(" ");
-      const cur = markdownRef.current.replace(/\s+$/, "");
-      setInput(cur ? `${cur} ${mentions} ` : `${mentions} `);
-      inputRef.current?.focus();
-    },
-    startMention: () => {
-      const cur = markdownRef.current.replace(/\s+$/, "");
-      setInput(cur ? `${cur} @` : "@");
-      inputRef.current?.focus();
-    },
+    addMentions: (paths: string[]) => appendToDraft(`${paths.map((p) => `@${p}`).join(" ")} `),
+    startMention: () => appendToDraft("@"),
     attachImages: (files) => {
       for (const f of files) void attachLocalImage(f.path, f.mediaType);
     },

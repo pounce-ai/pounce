@@ -61,11 +61,26 @@ export function extOf(path: string): string {
   return i > 0 ? base.slice(i).toLowerCase() : "other";
 }
 
-/** Recompose a patch containing only files with the extension (null = all). */
-export function filterPatchByExt(patch: string, ext: string | null | undefined): string {
-  if (!ext) return patch;
-  return splitPatch(patch)
-    .filter((f) => extOf(f.path) === ext)
-    .map((f) => f.text)
-    .join("\n");
+/** Git metadata lines (not hunk content) in a unified diff. */
+export const DIFF_META_RE =
+  /^(diff --git|index |--- |\+\+\+ |new file|deleted file|rename |similarity |old mode|new mode|Binary files)/;
+
+export type LineKind = "header" | "hunk" | "add" | "del" | "ctx";
+
+/** Classify one raw diff line for rendering. */
+export function classifyLine(line: string): LineKind {
+  if (line.startsWith("@@")) return "hunk";
+  if (DIFF_META_RE.test(line)) return "header";
+  if (line.startsWith("+")) return "add";
+  if (line.startsWith("-")) return "del";
+  return "ctx";
 }
+
+/** Tailwind classes per diff-line kind (shared by every native renderer). */
+export const LINE_CLASS: Record<LineKind, string> = {
+  header: "text-fg-faint",
+  hunk: "text-info",
+  add: "bg-diff-add-bg text-diff-add-fg",
+  del: "bg-diff-del-bg text-diff-del-fg",
+  ctx: "text-fg-muted",
+};

@@ -98,10 +98,14 @@ function gitList(cwd, args) {
   });
 }
 
-/** Run a command, capturing exit code + stdout + stderr. Optional kill timeout. */
-function exec(cmd, args, cwd, timeoutMs = 0, env = undefined) {
+/** Run a command, capturing exit code + stdout + stderr. Optional kill
+ *  timeout; optional `input` is written to stdin. */
+function exec(cmd, args, cwd, timeoutMs = 0, env = undefined, input = undefined) {
   return new Promise((resolve) => {
-    const p = spawn(cmd, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    const p = spawn(cmd, args, {
+      cwd, env, windowsHide: true,
+      stdio: [input != null ? "pipe" : "ignore", "pipe", "pipe"],
+    });
     let out = "", err = "", killed = false;
     const timer = timeoutMs ? setTimeout(() => { killed = true; p.kill("SIGKILL"); }, timeoutMs) : null;
     p.stdout.on("data", (d) => (out += d));
@@ -111,7 +115,18 @@ function exec(cmd, args, cwd, timeoutMs = 0, env = undefined) {
       resolve({ code, out, err: err + (killed ? "\n[command timed out]" : "") });
     });
     p.on("error", (e) => { if (timer) clearTimeout(timer); resolve({ code: -1, out: "", err: String(e?.message || e) }); });
+    if (input != null) {
+      p.stdin.write(input);
+      p.stdin.end();
+    }
   });
+}
+
+/** Cap a diff's size, appending the marker the client strips as an exact line
+ *  (packages/app diffPatch.splitPatch matches it verbatim — keep in sync). */
+const DIFF_TRUNCATED_MARKER = "… (diff truncated)";
+function truncateDiff(text, max) {
+  return text.length > max ? `${text.slice(0, max)}\n${DIFF_TRUNCATED_MARKER}` : text;
 }
 const git = (cwd, args) => exec("git", ["-C", cwd, ...args]);
 
@@ -151,9 +166,7 @@ async function gitChanges(cwd) {
     else if (code.includes("R")) st = "renamed";
     files.push({ path: p, status: st, ...(counts[p] || { additions: 0, deletions: 0 }) });
   }
-  let diffText = diff.out;
-  const MAX = 200_000;
-  if (diffText.length > MAX) diffText = diffText.slice(0, MAX) + "\n… (diff truncated)";
+  const diffText = truncateDiff(diff.out, 200_000);
   // "behind\tahead" relative to upstream; no upstream → nulls.
   const [behind, ahead] = upstream.code === 0
     ? upstream.out.trim().split(/\s+/).map((n) => Number(n) || 0)
@@ -174,9 +187,7 @@ async function gitSuggest(cwd) {
     git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
     git(cwd, ["log", "--oneline", "-8"]),
   ]);
-  const MAX_DIFF = 60_000;
-  let diffText = diff.out;
-  if (diffText.length > MAX_DIFF) diffText = diffText.slice(0, MAX_DIFF) + "\n… (diff truncated)";
+  const diffText = truncateDiff(diff.out, 60_000);
   if (!status.out.trim() && !diffText.trim()) return { ok: false, error: "no changes to describe" };
   const prompt = [
     "You generate git metadata. Reply with ONLY a JSON object (no fences, no prose):",
@@ -194,7 +205,7 @@ async function gitSuggest(cwd) {
   ].join("\n");
   // Run from the OS temp dir, not the repo: claude -p records a session under
   // its cwd's project, which would surface these one-shot calls as threads.
-  const run = await execStdin(binPath("claude"), ["-p", "--model", "haiku"], os.tmpdir(), 90_000, prompt);
+  const run = await exec(binPath("claude"), ["-p", "--model", "haiku"], os.tmpdir(), 90_000, agentEnv(), prompt);
   if (run.code !== 0) return { ok: false, error: (run.err || "claude CLI failed").slice(0, 400) };
   const body = run.out.replace(/^```(?:json)?/m, "").replace(/```\s*$/m, "").trim();
   const start = body.indexOf("{");
@@ -212,24 +223,6 @@ async function gitSuggest(cwd) {
   } catch {
     return { ok: false, error: "model returned unparseable output" };
   }
-}
-
-/** exec() variant that writes `input` to the child's stdin. */
-function execStdin(cmd, args, cwd, timeoutMs, input) {
-  return new Promise((resolve) => {
-    const p = spawn(cmd, args, { cwd, env: agentEnv(), stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
-    let out = "", err = "", killed = false;
-    const timer = timeoutMs ? setTimeout(() => { killed = true; p.kill("SIGKILL"); }, timeoutMs) : null;
-    p.stdout.on("data", (d) => (out += d));
-    p.stderr.on("data", (d) => (err += d));
-    p.on("close", (code) => {
-      if (timer) clearTimeout(timer);
-      resolve({ code, out, err: err + (killed ? "\n[command timed out]" : "") });
-    });
-    p.on("error", (e) => { if (timer) clearTimeout(timer); resolve({ code: -1, out: "", err: String(e?.message || e) }); });
-    p.stdin.write(input);
-    p.stdin.end();
-  });
 }
 
 /**
