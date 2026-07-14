@@ -107,9 +107,20 @@ export function removeSource(threadId: string, path: string): void {
   sources$[threadId].set(cur.filter((s) => s.path !== path));
 }
 
+/** Diff files marked "Seen" per thread — Changes-screen review progress
+ *  (GitHub PR style). Persisted so seen files come back collapsed. */
+export const seenFiles$ = observable<Record<string, string[]>>({});
+
+export function setSeenFile(threadId: string, path: string, seen: boolean): void {
+  const cur = seenFiles$[threadId].get() ?? [];
+  const next = seen ? [...new Set([...cur, path])] : cur.filter((p) => p !== path);
+  seenFiles$[threadId].set(next);
+}
+
 persist(filters$, "filters"); // remember the user's last filter selection
 persist(user$, "user");
 persist(sources$, "sources");
+persist(seenFiles$, "seenFiles");
 
 /** Count of *narrowing* filters (device/agent/favourites) for the bottom-bar badge. */
 export function activeFilterCount(): number {

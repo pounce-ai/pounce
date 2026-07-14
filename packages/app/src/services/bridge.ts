@@ -768,8 +768,27 @@ export function gitCommit(hostId: string, cwd: string, message: string) {
 export function gitPush(hostId: string, cwd: string) {
   return gitPost<{ ok: boolean; output?: string }>(hostId, "/v1/git/push", { cwd });
 }
-export function gitPR(hostId: string, cwd: string, title?: string, body?: string) {
-  return gitPost<{ ok: boolean; url?: string; error?: string }>(hostId, "/v1/git/pr", { cwd, title, body });
+export function gitPR(hostId: string, cwd: string, opts?: { title?: string; body?: string; draft?: boolean }) {
+  return gitPost<{ ok: boolean; url?: string; error?: string }>(hostId, "/v1/git/pr", { cwd, ...opts });
+}
+
+/** Create + switch to a new branch (before committing work made on main). */
+export function gitBranch(hostId: string, cwd: string, name: string) {
+  return gitPost<{ ok: boolean; error?: string }>(hostId, "/v1/git/branch", { cwd, name });
+}
+
+/** Model-generated branch/commit/PR metadata for the working tree. Nothing is
+ *  applied — the caller must get explicit user approval first. */
+export interface GitSuggestion {
+  ok: boolean;
+  error?: string;
+  branchName?: string;
+  commitMessage?: string;
+  prTitle?: string;
+  prBody?: string;
+}
+export function gitSuggest(hostId: string, cwd: string) {
+  return gitPost<GitSuggestion>(hostId, "/v1/git/suggest", { cwd });
 }
 
 /** The host's direct-sync identity (so the app can sync off-LAN, not just via

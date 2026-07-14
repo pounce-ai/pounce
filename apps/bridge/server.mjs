@@ -27,7 +27,7 @@ import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import { createHost } from "./agents/host.mjs";
 import { resolvePermission } from "./agents/acp.mjs";
-import { primaryLanIp } from "./agents/env.mjs";
+import { agentEnv, binPath, primaryLanIp } from "./agents/env.mjs";
 import { readConfig, writeConfig } from "./agents/config.mjs";
 
 const IS_WIN = process.platform === "win32";
@@ -159,6 +159,77 @@ async function gitChanges(cwd) {
     ? upstream.out.trim().split(/\s+/).map((n) => Number(n) || 0)
     : [null, null];
   return { branch: branch.out.trim(), files, diff: diffText, ahead, behind, conflicts };
+}
+
+/**
+ * Model-generated git metadata for the working tree: branch name, commit
+ * message, PR title + body. Runs the host's claude CLI in print mode over the
+ * diff (cheap model). The client must show the result for user approval before
+ * acting on any of it — nothing here mutates the repo.
+ */
+async function gitSuggest(cwd) {
+  const [diff, status, branch, log] = await Promise.all([
+    git(cwd, ["-c", "core.quotepath=false", "diff", "HEAD"]),
+    git(cwd, ["status", "--porcelain=v1"]),
+    git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
+    git(cwd, ["log", "--oneline", "-8"]),
+  ]);
+  const MAX_DIFF = 60_000;
+  let diffText = diff.out;
+  if (diffText.length > MAX_DIFF) diffText = diffText.slice(0, MAX_DIFF) + "\n… (diff truncated)";
+  if (!status.out.trim() && !diffText.trim()) return { ok: false, error: "no changes to describe" };
+  const prompt = [
+    "You generate git metadata. Reply with ONLY a JSON object (no fences, no prose):",
+    '{"branchName": string, "commitMessage": string, "prTitle": string, "prBody": string}',
+    "- branchName: short kebab-case, describes the work (no user/prefix).",
+    "- commitMessage: imperative summary line ≤72 chars; optionally a blank line + short body.",
+    "- prTitle: ≤70 chars.",
+    "- prBody: brief markdown — what changed and why, a few bullets max.",
+    "Match the tone of the recent commit subjects.",
+    "",
+    `Current branch: ${branch.out.trim()}`,
+    `Recent commits:\n${log.out.trim()}`,
+    `git status:\n${status.out.trim()}`,
+    `Diff:\n${diffText}`,
+  ].join("\n");
+  // Run from the OS temp dir, not the repo: claude -p records a session under
+  // its cwd's project, which would surface these one-shot calls as threads.
+  const run = await execStdin(binPath("claude"), ["-p", "--model", "haiku"], os.tmpdir(), 90_000, prompt);
+  if (run.code !== 0) return { ok: false, error: (run.err || "claude CLI failed").slice(0, 400) };
+  const body = run.out.replace(/^```(?:json)?/m, "").replace(/```\s*$/m, "").trim();
+  const start = body.indexOf("{");
+  const end = body.lastIndexOf("}");
+  try {
+    const s = JSON.parse(body.slice(start, end + 1));
+    const clean = (v) => (typeof v === "string" ? v.trim() : "");
+    return {
+      ok: true,
+      branchName: clean(s.branchName).replace(/[^a-zA-Z0-9._/-]+/g, "-").replace(/^-+|-+$/g, ""),
+      commitMessage: clean(s.commitMessage),
+      prTitle: clean(s.prTitle),
+      prBody: clean(s.prBody),
+    };
+  } catch {
+    return { ok: false, error: "model returned unparseable output" };
+  }
+}
+
+/** exec() variant that writes `input` to the child's stdin. */
+function execStdin(cmd, args, cwd, timeoutMs, input) {
+  return new Promise((resolve) => {
+    const p = spawn(cmd, args, { cwd, env: agentEnv(), stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    let out = "", err = "", killed = false;
+    const timer = timeoutMs ? setTimeout(() => { killed = true; p.kill("SIGKILL"); }, timeoutMs) : null;
+    p.stdout.on("data", (d) => (out += d));
+    p.stderr.on("data", (d) => (err += d));
+    p.on("close", (code) => {
+      if (timer) clearTimeout(timer);
+      resolve({ code, out, err: err + (killed ? "\n[command timed out]" : "") });
+    });
+    p.on("error", (e) => { if (timer) clearTimeout(timer); resolve({ code: -1, out: "", err: String(e?.message || e) }); });
+    p.stdin.write(input);
+    p.stdin.end();
+  });
 }
 
 /**
@@ -1037,12 +1108,24 @@ const server = http.createServer(async (req, res) => {
         r = await git(cwd, ["push", "-u", "origin", "HEAD"]);
       return send(res, 200, { ok: r.code === 0, output: (r.err || r.out).trim() });
     }
+    if (url.pathname === "/v1/git/suggest" && req.method === "POST") {
+      const { cwd } = await readBody(req);
+      if (!cwd || !existsSync(cwd)) return send(res, 400, { error: "cwd required" });
+      return send(res, 200, await gitSuggest(cwd));
+    }
+    if (url.pathname === "/v1/git/branch" && req.method === "POST") {
+      // Create + switch to a new branch (used before committing work made on main).
+      const { cwd, name } = await readBody(req);
+      if (!cwd || !name) return send(res, 400, { error: "cwd, name required" });
+      const r = await git(cwd, ["checkout", "-b", name]);
+      return send(res, 200, { ok: r.code === 0, error: r.code === 0 ? undefined : (r.err || r.out).trim() });
+    }
     if (url.pathname === "/v1/git/pr" && req.method === "POST") {
-      const { cwd, title, body } = await readBody(req);
+      const { cwd, title, body, draft } = await readBody(req);
       if (!cwd) return send(res, 400, { error: "cwd required" });
       // Ensure the branch is pushed first, then open a PR via gh (if installed).
       let push = await git(cwd, ["push", "-u", "origin", "HEAD"]);
-      const r = await exec("gh", ["pr", "create", "--fill", ...(title ? ["--title", title] : []), ...(body ? ["--body", body] : [])], cwd);
+      const r = await exec("gh", ["pr", "create", "--fill", ...(draft ? ["--draft"] : []), ...(title ? ["--title", title] : []), ...(body ? ["--body", body] : [])], cwd);
       if (r.code !== 0)
         return send(res, 200, { ok: false, error: r.err || "gh not available or PR failed", pushed: push.code === 0 });
       const urlMatch = (r.out.match(/https?:\/\/\S+/) || [])[0] || null;
