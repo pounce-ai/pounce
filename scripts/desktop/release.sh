@@ -57,7 +57,7 @@ BRIDGE_DIR="$APP/Contents/Resources/bridge"
 if [ -d "$BRIDGE_DIR" ]; then
   while IFS= read -r -d '' bin; do
     if file "$bin" | grep -q "Mach-O"; then sign "$bin"; fi
-  done < <(find "$BRIDGE_DIR" -type f \( -name "*.node" -o -name "*.dylib" \))
+  done < <(find "$BRIDGE_DIR" -type f \( -name "*.node" -o -name "*.dylib" \) -print0)
 fi
 # The app last, with entitlements.
 codesign --force --options runtime --timestamp ${SIGN_KEYCHAIN:+--keychain "$SIGN_KEYCHAIN"} --entitlements "$ENTITLEMENTS" -s "$SIGN_IDENTITY" "$APP"
