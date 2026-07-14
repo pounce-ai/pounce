@@ -8,6 +8,7 @@
  */
 import os from "node:os";
 import path from "node:path";
+import { existsSync, readlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { readConfig, binOverride } from "./config.mjs";
 
@@ -75,6 +76,80 @@ export function lanIps() {
 /** The single best LAN IP to advertise (or null when offline). */
 export function primaryLanIp() {
   return lanIps()[0] || null;
+}
+
+/** Run a command and resolve its stdout ("" on any failure). ≤5s. */
+function execOut(cmd, args) {
+  return new Promise((resolve) => {
+    let p;
+    try {
+      p = spawn(cmd, args, { stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+    } catch { return resolve(""); }
+    let out = "";
+    const t = setTimeout(() => { try { p.kill("SIGKILL"); } catch {} }, 5000);
+    p.stdout.on("data", (d) => (out += d));
+    p.on("close", () => { clearTimeout(t); resolve(out); });
+    p.on("error", () => { clearTimeout(t); resolve(""); });
+  });
+}
+
+/** Agent CLIs whose live processes we track for activity judgment. */
+const AGENT_BINS = new Set(["claude", "codex", "opencode"]);
+let liveCwdsCache = { at: 0, value: null };
+
+/**
+ * Working directories of live agent CLI processes, as Map<binName, Set<cwd>>.
+ * The session id of an external agent process is unobservable (no lock file,
+ * not in argv/env, transcript not held open), but its cwd is — and in the
+ * worktree-per-session flow that's nearly a session identifier. Used to judge
+ * "running" by process liveness instead of transcript-mtime guessing.
+ * Cached 5s; resolves null when the scan isn't possible (Windows, ps failure)
+ * so callers can fall back to the mtime heuristic.
+ */
+export async function liveAgentCwds() {
+  if (IS_WIN) return null;
+  if (liveCwdsCache.value !== null && Date.now() - liveCwdsCache.at < 5_000) {
+    return liveCwdsCache.value;
+  }
+  let value = null;
+  try {
+    const ps = await execOut("ps", ["-axo", "pid=,command="]);
+    const pids = []; // [pid, binName]
+    for (const line of ps.split("\n")) {
+      const m = line.match(/^\s*(\d+)\s+(\S+)/);
+      if (!m) continue;
+      const base = path.basename(m[2]);
+      if (AGENT_BINS.has(base)) pids.push([m[1], base]);
+    }
+    value = new Map();
+    if (pids.length) {
+      if (existsSync("/proc")) {
+        for (const [pid, name] of pids) {
+          try { addCwd(value, name, readlinkSync(`/proc/${pid}/cwd`)); } catch {}
+        }
+      } else {
+        // macOS: one batched lsof for all agent pids. -Fpn = p<pid> / n<path>.
+        const out = await execOut("lsof", ["-a", "-p", pids.map(([p]) => p).join(","), "-d", "cwd", "-Fpn"]);
+        let cur = null;
+        for (const line of out.split("\n")) {
+          if (line.startsWith("p")) cur = line.slice(1);
+          else if (line.startsWith("n") && cur !== null) {
+            const name = pids.find(([p]) => p === cur)?.[1];
+            if (name) addCwd(value, name, line.slice(1));
+          }
+        }
+      }
+    }
+  } catch {
+    value = null;
+  }
+  liveCwdsCache = { at: Date.now(), value };
+  return value;
+}
+
+function addCwd(map, name, cwd) {
+  if (!map.has(name)) map.set(name, new Set());
+  map.get(name).add(cwd);
 }
 
 /**
