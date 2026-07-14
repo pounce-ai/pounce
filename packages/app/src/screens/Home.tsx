@@ -232,28 +232,33 @@ export default function HomeScreen() {
       {/* Glance header */}
       <View className="flex-row items-end justify-between px-4 pb-2 pt-1">
         <View className="flex-1 pr-2">
-          <Text className="text-[26px] font-bold text-fg">Pounce</Text>
-          <Pressable
-            onPress={() => router.push("/settings")}
-            className="active:opacity-60 mt-0.5 flex-row items-center gap-1"
-          >
-            {!connected && !loading ? (
-              <Text numberOfLines={1} className="text-[13px] text-fg-faint">Tap to sync a device</Text>
-            ) : loading ? (
-              <Text numberOfLines={1} className="text-[13px] text-fg-faint">Syncing…</Text>
-            ) : attentionCount > 0 ? (
-              <>
-                <Ionicons name="alert-circle" size={13} color={COLOR.warning} />
-                <Text numberOfLines={1} className="text-[13px] text-warning">
-                  {attentionCount} need{attentionCount === 1 ? "s" : ""} you
-                </Text>
-              </>
-            ) : (
-              // All caught up — a quiet checkmark says it without saying it.
-              <Ionicons name="checkmark-circle" size={14} color={COLOR.fgFaint} />
-            )}
-            {filterCount ? <Text className="text-[13px] text-fg-faint">· filtered</Text> : null}
-          </Pressable>
+          <View className="flex-row items-start gap-1">
+            <Text className="text-[26px] font-bold text-fg">Pounce</Text>
+            {connected && !loading && attentionCount === 0 ? (
+              // All caught up — a green superscript tick on the wordmark.
+              <Ionicons name="checkmark-circle" size={12} color={COLOR.success} style={{ marginTop: 5 }} />
+            ) : null}
+          </View>
+          {!connected || loading || attentionCount > 0 || filterCount ? (
+            <Pressable
+              onPress={() => router.push("/settings")}
+              className="active:opacity-60 mt-0.5 flex-row items-center gap-1"
+            >
+              {!connected && !loading ? (
+                <Text numberOfLines={1} className="text-[13px] text-fg-faint">Tap to sync a device</Text>
+              ) : loading ? (
+                <Text numberOfLines={1} className="text-[13px] text-fg-faint">Syncing…</Text>
+              ) : attentionCount > 0 ? (
+                <>
+                  <Ionicons name="alert-circle" size={13} color={COLOR.warning} />
+                  <Text numberOfLines={1} className="text-[13px] text-warning">
+                    {attentionCount} need{attentionCount === 1 ? "s" : ""} you
+                  </Text>
+                </>
+              ) : null}
+              {filterCount ? <Text className="text-[13px] text-fg-faint">· filtered</Text> : null}
+            </Pressable>
+          ) : null}
         </View>
         <View className="flex-row items-center gap-2 shrink-0">
           <FilterButton active={showFilters} onPress={() => setShowFilters(true)} />
