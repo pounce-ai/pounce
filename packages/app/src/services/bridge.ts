@@ -978,6 +978,28 @@ export async function respondQuestion(
   }
 }
 
+/** Launch a PTY-hosted interactive claude session (its prompts — AskUserQuestion,
+ *  … — become answerable from the app). Returns the real threadId, or null. */
+export async function startInteractive(
+  hostId: string,
+  text: string,
+  cwd: string | null,
+): Promise<string | null> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return null;
+  try {
+    const res = await fetch(`${await bridgeBase(cfg)}/v1/session/interactive`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ text, cwd }),
+    });
+    const j = (await res.json()) as { threadId?: string };
+    return j.threadId ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export interface RepoEntry {
   path: string;
   type: "file" | "dir";

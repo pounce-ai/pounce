@@ -8,6 +8,7 @@ import { insertThread, pendingTurns$, reposByActivity } from "../state/stores";
 import { useAgentCaps, useDevices, useProjects, useThreads } from "../state/db/hooks";
 import { Composer, type ComposerSubmit } from "../components/Composer";
 import { FolderBrowser } from "../components/FolderBrowser";
+import { startInteractive } from "../services/bridge";
 import { AgentLogo, agentLabel, cn, COLOR } from "../ui";
 import { effectiveCaps } from "../ui/agent-meta";
 
@@ -42,6 +43,9 @@ export default function NewTaskScreen() {
   const [selectedRepoId, setSelectedRepoId] = useState<string | null>(null);
   const [agent, setAgent] = useState<AgentId>("claude");
   const [browsing, setBrowsing] = useState(false);
+  // Interactive = the bridge hosts claude's real TUI in a PTY, so its prompts
+  // (AskUserQuestion, …) are answerable from the app. Claude-only for now.
+  const [interactive, setInteractive] = useState(false);
 
   const reportedCaps = useAgentCaps(agent);
   const caps = effectiveCaps(agent, reportedCaps);
@@ -77,10 +81,38 @@ export default function NewTaskScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoId]);
 
-  const launch = (s: ComposerSubmit) => {
-    const id = `new_${Date.now()}`;
+  const launch = async (s: ComposerSubmit) => {
     const nowIso = new Date().toISOString();
     const device = devices.find((d) => d.id === hostId) ?? devices[0];
+
+    // Interactive: the bridge spawns claude's TUI in a PTY now and returns the
+    // real threadId — open it directly (no pending headless turn). Its questions
+    // then surface as answerable cards. Falls through to the normal path on error.
+    if (interactive && agent === "claude" && device) {
+      const realId = await startInteractive(device.id, s.text, cwd);
+      if (realId) {
+        insertThread({
+          id: realId,
+          repoId: selectedRepoId ?? repoIdForCwd(cwd),
+          hostId: device.id,
+          host: device.name,
+          agent,
+          title: s.text.slice(0, 100) || "New task",
+          branch: null,
+          worktree: null,
+          cwd,
+          isLive: true,
+          activity: "running",
+          needsAttention: false,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        });
+        router.replace(`/session/${realId}`);
+        return;
+      }
+    }
+
+    const id = `new_${Date.now()}`;
     insertThread({
       id,
       repoId: selectedRepoId ?? repoIdForCwd(cwd),
@@ -177,6 +209,24 @@ export default function NewTaskScreen() {
 
       {/* Same composer as the session view — mode / effort / image / slash */}
       <View style={{ paddingBottom: insets.bottom + 8 }} className="border-t border-border bg-bg-elevated px-3 pt-2">
+        {agent === "claude" ? (
+          <Pressable
+            onPress={() => setInteractive((v) => !v)}
+            className={cn(
+              "active:opacity-80 mb-2 flex-row items-center gap-1.5 self-start rounded-full border px-3 py-1.5",
+              interactive ? "border-accent bg-accent-soft" : "border-border bg-surface",
+            )}
+          >
+            <Ionicons
+              name={interactive ? "flash" : "flash-outline"}
+              size={13}
+              color={interactive ? COLOR.accent : COLOR.fgMuted}
+            />
+            <Text className={cn("text-[12px]", interactive ? "text-accent" : "text-fg-muted")}>
+              Interactive{interactive ? " · answerable prompts" : ""}
+            </Text>
+          </Pressable>
+        ) : null}
         <Composer
           agent={agent}
           caps={caps}

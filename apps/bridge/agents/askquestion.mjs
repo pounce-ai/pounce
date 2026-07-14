@@ -65,10 +65,16 @@ export function parseAskUserQuestion(toolInput) {
 }
 
 /**
- * Build the keystroke stream that answers the picker. `answers[q]` is the array
- * of chosen option indices for question q (one entry for single-select). Out-of-
- * range / empty picks are clamped so we never send an unbounded run of Downs.
- * @returns {string} raw bytes to write to the PTY.
+ * Build the keystrokes that answer the picker, as an ORDERED LIST of discrete
+ * keypresses (each must be written with a gap between it and the next — see
+ * {@link writeKeys}). `answers[q]` is the chosen option indices for question q
+ * (one entry for single-select). Out-of-range / empty picks are clamped.
+ *
+ * Verified against real claude: the picker highlights option 0 on open, Enter
+ * selects the highlighted option, Down moves the highlight down — so option k is
+ * Down×k then Enter. A combined write (no gaps) selects option 0 regardless, so
+ * these MUST go out one key at a time with a delay.
+ * @returns {string[]} keypress tokens, in order.
  */
 export function answerKeystrokes(questions, answers) {
   const seq = [];
@@ -91,13 +97,26 @@ export function answerKeystrokes(questions, answers) {
       seq.push(ADVANCE); // select → next
     }
   }
-  return seq.join("");
+  return seq;
+}
+
+/**
+ * Write answer keystrokes to a PTY one at a time with a gap, so each arrow key
+ * registers before the next key (Enter especially) — a burst write selects the
+ * picker default. `write` is any `(bytes: string) => void` (e.g. pty.write).
+ */
+export async function writeKeys(write, keys, gapMs = 140) {
+  for (const k of keys) {
+    write(k);
+    await new Promise((r) => setTimeout(r, gapMs));
+  }
 }
 
 /** Human-readable form of a keystroke stream, for logging what we sent.
  *  Tokenizes longest-first so the CSI arrows (ESC [ A/B) match before a bare
  *  ESC, and the space key isn't confused with token separators. */
 export function describeKeys(bytes) {
+  if (Array.isArray(bytes)) bytes = bytes.join("");
   const table = [
     [KEYS.UP, "↑"], [KEYS.DOWN, "↓"], // 3-byte CSI — must precede bare ESC
     [KEYS.ENTER, "⏎"], [KEYS.TAB, "⇥"], [KEYS.SPACE, "␣"], [KEYS.ESC, "⎋"],

@@ -228,6 +228,7 @@ export default function SessionScreen() {
     (cmd: string) => composerRef.current?.insert(`!${cmd.trim()}`),
     [],
   );
+
   const [markerSheet, setMarkerSheet] = useState(false);
   const [envSheet, setEnvSheet] = useState(false);
 

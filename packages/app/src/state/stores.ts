@@ -218,8 +218,11 @@ export function statusBucket(s: Session): StatusBucket {
   return STATUS_BUCKET[s.activity];
 }
 
-/** A message is marked by default only if it carries prose. */
+/** A message is marked by default if it carries prose — and an AskUserQuestion
+ *  is ALWAYS marked, so a question the agent asked is a jump-to point you can
+ *  always find in the markers list. */
 export function defaultMarked(ev: TimelineEvent, agent?: string): boolean {
+  if (ev.type === "question_request") return true;
   return ev.type === "user_message" && parseUserMessage(ev.text, agent).text.trim().length > 0;
 }
 
