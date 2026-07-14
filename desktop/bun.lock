@@ -39,6 +39,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "react-native-macos@0.81.8": "patches/react-native-macos@0.81.8.patch",
+  },
   "overrides": {
     "react": "19.1.4",
     "react-native": "0.81.6",

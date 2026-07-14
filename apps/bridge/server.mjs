@@ -119,13 +119,15 @@ const git = (cwd, args) => exec("git", ["-C", cwd, ...args]);
 // used for busy checks before restart-ish operations.
 let activeTurns = 0;
 
-/** Uncommitted changes in `cwd`: branch, per-file status + counts, full diff. */
+/** Uncommitted changes in `cwd`: branch, per-file status + counts, full diff,
+ *  plus ahead/behind vs upstream and the count of conflicted files. */
 async function gitChanges(cwd) {
-  const [numstat, status, diff, branch] = await Promise.all([
+  const [numstat, status, diff, branch, upstream] = await Promise.all([
     git(cwd, ["diff", "HEAD", "--numstat"]),
     git(cwd, ["status", "--porcelain=v1", "--untracked-files=all"]),
     git(cwd, ["-c", "core.quotepath=false", "diff", "HEAD"]),
     git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
+    git(cwd, ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"]),
   ]);
   const counts = {};
   for (const line of numstat.out.split("\n").filter(Boolean)) {
@@ -136,9 +138,12 @@ async function gitChanges(cwd) {
     };
   }
   const files = [];
+  let conflicts = 0;
   for (const line of status.out.split("\n").filter(Boolean)) {
     const code = line.slice(0, 2);
     const p = line.slice(3).replace(/^"|"$/g, "");
+    // Unmerged-path XY codes (git-status(1)): both-modified, both-added, etc.
+    if (["DD", "AU", "UD", "UA", "DU", "AA", "UU"].includes(code)) conflicts++;
     let st = "modified";
     if (code.includes("?")) st = "untracked";
     else if (code.includes("A")) st = "added";
@@ -149,7 +154,32 @@ async function gitChanges(cwd) {
   let diffText = diff.out;
   const MAX = 200_000;
   if (diffText.length > MAX) diffText = diffText.slice(0, MAX) + "\n… (diff truncated)";
-  return { branch: branch.out.trim(), files, diff: diffText };
+  // "behind\tahead" relative to upstream; no upstream → nulls.
+  const [behind, ahead] = upstream.code === 0
+    ? upstream.out.trim().split(/\s+/).map((n) => Number(n) || 0)
+    : [null, null];
+  return { branch: branch.out.trim(), files, diff: diffText, ahead, behind, conflicts };
+}
+
+/**
+ * CI status for the branch's open PR via the gh CLI. Summarised to one word so
+ * the client renders a single row. null checks = no PR / gh missing / timeout —
+ * the row simply doesn't render.
+ */
+async function gitChecks(cwd) {
+  const r = await exec("gh", ["pr", "checks", "--json", "state"], cwd, 8000);
+  // gh exits non-zero when any check fails but still prints JSON — parse regardless.
+  try {
+    const arr = JSON.parse(r.out);
+    if (!Array.isArray(arr) || !arr.length) return { checks: null, failed: 0, total: 0 };
+    const states = arr.map((c) => String(c.state || "").toUpperCase());
+    const failed = states.filter((s) => ["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"].includes(s)).length;
+    const pending = states.filter((s) => ["PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED", "EXPECTED"].includes(s)).length;
+    const checks = failed ? "failing" : pending ? "pending" : "passing";
+    return { checks, failed, total: states.length };
+  } catch {
+    return { checks: null, failed: 0, total: 0 };
+  }
 }
 
 /**
@@ -980,6 +1010,12 @@ const server = http.createServer(async (req, res) => {
       const cwd = url.searchParams.get("cwd");
       if (!cwd || !existsSync(cwd)) return send(res, 200, { branch: null, files: [], diff: "" });
       return send(res, 200, await gitChanges(cwd));
+    }
+    if (url.pathname === "/v1/git/checks") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd || !existsSync(cwd)) return send(res, 200, { checks: null, failed: 0, total: 0 });
+      // gh hits the GitHub API — cache briefly so reopening the sheet is instant.
+      return send(res, 200, await cached(`checks:${cwd}`, 30_000, () => gitChecks(cwd)));
     }
     if (url.pathname === "/v1/git/commit" && req.method === "POST") {
       const { cwd, message } = await readBody(req);

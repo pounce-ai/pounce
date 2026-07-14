@@ -14,12 +14,14 @@ import { collapseToolResults, Timeline } from "../components/Timeline";
 import { WorkingIndicator } from "../components/WorkingIndicator";
 import { TimelineSkeleton } from "../components/Skeleton";
 import { Composer, type ComposerHandle, type ComposerSubmit } from "../components/Composer";
+import { DropZone, type DroppedFile } from "../components/DropZone";
 import { MarkerSheet, type Marker } from "../components/MarkerSheet";
 import { shortModel, ThreadUsageSummary } from "../components/ThreadStatusBar";
 import { EnvironmentSheet } from "../components/EnvironmentSheet";
 import { ModelSheet } from "../components/ModelSheet";
 import { useTimeline } from "../hooks/useTimeline";
 import {
+  addSources,
   cachedModels,
   capsFor,
   connection$,
@@ -29,10 +31,13 @@ import {
   modelForThread,
   pendingTurns$,
   rekeyThread,
+  removeSource,
   saveThreadMessages,
   setThreadModel,
+  sources$,
   toggleFavThread,
   toggleMarker,
+  type ThreadSource,
 } from "../state/stores";
 import {
   useAgentCaps,
@@ -61,6 +66,20 @@ function chrono(events: TimelineEvent[]): TimelineEvent[] {
     .map((e, i) => [e, i] as const)
     .sort(([a, ai], [b, bi]) => (a.ts ?? "").localeCompare(b.ts ?? "") || ai - bi)
     .map(([e]) => e);
+}
+
+/** Image files dropped on the composer attach as previews, not @mentions. */
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|heic|heif|tiff?)$/i;
+
+/** MIME type from an image filename — for drops where the OS gave none. */
+function mimeForImage(name: string): string {
+  const ext = name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? "";
+  const map: Record<string, string> = {
+    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+    webp: "image/webp", bmp: "image/bmp", heic: "image/heic", heif: "image/heif",
+    tif: "image/tiff", tiff: "image/tiff",
+  };
+  return map[ext] ?? "image/png";
 }
 
 function mergeById(cur: TimelineEvent[], inc: TimelineEvent[]): TimelineEvent[] {
@@ -210,6 +229,42 @@ export default function SessionScreen() {
   );
   const [markerSheet, setMarkerSheet] = useState(false);
   const [envSheet, setEnvSheet] = useState(false);
+
+  // Sources attached to this thread (drag-drop on desktop / "+" in the
+  // Environment sheet). Dropping records the reference and appends an @path
+  // mention to the draft — the agent reads the file/folder from disk.
+  const sources = useSelector(() => sources$[id!].get()) ?? [];
+  const onDropFiles = useCallback(
+    (files: DroppedFile[]) => {
+      if (!session?.isLive) return;
+      const cwd = session.cwd;
+      const kindOf = (f: DroppedFile): ThreadSource["kind"] =>
+        f.type?.startsWith("image/") || IMAGE_EXT.test(f.name)
+          ? "image"
+          : !f.type && !/\.[A-Za-z0-9]+$/.test(f.name)
+            ? "dir" // folders report no MIME type and (usually) no extension
+            : "file";
+      // Images become thumbnail attachments (like the photo picker); everything
+      // else is referenced as an @path mention the agent reads from disk.
+      const withImages = effectiveCaps(session.agent, reportedCaps).images;
+      const sources: ThreadSource[] = [];
+      const images: { path: string; mediaType: string }[] = [];
+      const mentions: string[] = [];
+      for (const f of files) {
+        const kind = kindOf(f);
+        // Mention paths relative to the worktree read better; anything outside
+        // it stays absolute (the agent can read either).
+        const rel = cwd && f.path.startsWith(`${cwd}/`) ? f.path.slice(cwd.length + 1) : f.path;
+        sources.push({ path: rel, name: f.name, kind });
+        if (kind === "image" && withImages) images.push({ path: f.path, mediaType: f.type || mimeForImage(f.name) });
+        else mentions.push(rel);
+      }
+      addSources(session.id, sources);
+      if (images.length) composerRef.current?.attachImages(images);
+      if (mentions.length) composerRef.current?.addMentions(mentions);
+    },
+    [session?.isLive, session?.cwd, session?.id, session?.agent, reportedCaps],
+  );
   // Marker overrides for this thread, live from the collection so the list
   // recomputes on every toggle.
   const markerMap = useThreadMarkers(id);
@@ -491,6 +546,9 @@ export default function SessionScreen() {
       keyboardVerticalOffset={0}
     >
       <Stack.Screen options={{ headerShown: false }} />
+      {/* Desktop: the whole pane is a drop target — dragging files/folders from
+          Finder adds them as sources. No-op wrapper on mobile. */}
+      <DropZone className="flex-1" onDropFiles={onDropFiles}>
       {/* Header */}
       <View style={{ paddingTop: insets.top }} className="border-b border-border bg-bg-elevated">
         <View className="flex-row items-center gap-2 px-3 pb-2.5 pt-1">
@@ -628,10 +686,18 @@ export default function SessionScreen() {
         visible={envSheet}
         session={session}
         running={running}
+        sources={sources}
         onClose={() => setEnvSheet(false)}
         onStop={() => void stop()}
         onViewChanges={() => router.push(`/changes?id=${session.id}`)}
         onTerminal={() => router.push(`/terminal?id=${session.id}`)}
+        onAddSource={canSteer ? () => composerRef.current?.startMention() : undefined}
+        onRemoveSource={(p) => removeSource(session.id, p)}
+        onFixConflicts={
+          canSteer
+            ? () => composerRef.current?.insert("Resolve the merge conflicts in this worktree, then continue.")
+            : undefined
+        }
       />
 
       <ModelSheet
@@ -710,6 +776,7 @@ export default function SessionScreen() {
         />
         </View>
       </View>
+      </DropZone>
     </KeyboardAvoidingView>
   );
 }

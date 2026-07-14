@@ -703,6 +703,18 @@ export interface GitChanges {
   branch: string | null;
   files: GitFile[];
   diff: string;
+  /** Commits ahead/behind upstream; null when there is no upstream (or an old bridge). */
+  ahead?: number | null;
+  behind?: number | null;
+  /** Count of unmerged (conflicted) files. */
+  conflicts?: number;
+}
+
+/** Summarised CI status of the branch's open PR (via gh on the host). */
+export interface GitChecks {
+  checks: "passing" | "failing" | "pending" | null;
+  failed: number;
+  total: number;
 }
 
 /** Summed additions/deletions across changed files. */
@@ -721,6 +733,17 @@ export async function fetchGitChanges(hostId: string, cwd: string): Promise<GitC
     return await get<GitChanges>(cfg, `/v1/git/changes?cwd=${encodeURIComponent(cwd)}`);
   } catch {
     return { branch: null, files: [], diff: "" };
+  }
+}
+
+/** CI checks for the branch's PR. null checks = no PR, no gh, or old bridge. */
+export async function fetchGitChecks(hostId: string, cwd: string): Promise<GitChecks> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return { checks: null, failed: 0, total: 0 };
+  try {
+    return await get<GitChecks>(cfg, `/v1/git/checks?cwd=${encodeURIComponent(cwd)}`);
+  } catch {
+    return { checks: null, failed: 0, total: 0 };
   }
 }
 

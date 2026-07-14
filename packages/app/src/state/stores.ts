@@ -82,8 +82,34 @@ export const connection$ = observable<{
   demo: boolean;
 }>({ status: "disconnected", activeHostId: null, demo: false });
 
+/** A file/folder the user attached to a thread as context (drag-drop on
+ *  desktop, "+" in the Environment sheet). Referenced by path — the agent
+ *  reads it from disk, so only the reference is stored. */
+export interface ThreadSource {
+  path: string;
+  name: string;
+  kind: "file" | "dir" | "image";
+}
+/** Sources per thread id. Persisted so the Environment panel survives restarts. */
+export const sources$ = observable<Record<string, ThreadSource[]>>({});
+
+/** Add sources to a thread, deduped by path. Returns the newly-added ones. */
+export function addSources(threadId: string, incoming: ThreadSource[]): ThreadSource[] {
+  const cur = sources$[threadId].get() ?? [];
+  const seen = new Set(cur.map((s) => s.path));
+  const fresh = incoming.filter((s) => !seen.has(s.path));
+  if (fresh.length) sources$[threadId].set([...cur, ...fresh]);
+  return fresh;
+}
+
+export function removeSource(threadId: string, path: string): void {
+  const cur = sources$[threadId].get() ?? [];
+  sources$[threadId].set(cur.filter((s) => s.path !== path));
+}
+
 persist(filters$, "filters"); // remember the user's last filter selection
 persist(user$, "user");
+persist(sources$, "sources");
 
 /** Count of *narrowing* filters (device/agent/favourites) for the bottom-bar badge. */
 export function activeFilterCount(): number {
