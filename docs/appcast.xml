@@ -3,12 +3,12 @@
     <channel>
         <title>Pounce</title>
         <item>
-            <title>1.0.6</title>
-            <pubDate>Mon, 13 Jul 2026 02:07:33 +0530</pubDate>
-            <sparkle:version>7</sparkle:version>
-            <sparkle:shortVersionString>1.0.6</sparkle:shortVersionString>
+            <title>1.0.9</title>
+            <pubDate>Mon, 13 Jul 2026 13:15:23 +0000</pubDate>
+            <sparkle:version>10</sparkle:version>
+            <sparkle:shortVersionString>1.0.9</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/peppyhop/pounce/releases/download/desktop-v1.0.6/Pounce.dmg" length="23102269" type="application/octet-stream" sparkle:edSignature="xcY0t0pFMDYo247CUVcTBFHNpJJeFYpE+Mqgcf4LlduIqdW80GW+F6cFPzv+PZARSV+6mWc7LnH27psxDnn0Ag=="/>
+            <enclosure url="https://github.com/peppyhop/pounce/releases/download/desktop-v1.0.9/Pounce.dmg" length="23226129" type="application/octet-stream" sparkle:edSignature="BhHO0t340JNgAlMFwS0neJXiHkTcXG6PleGpWYwY6+/93X5qXea0e8wddv4FRXBX+TimWZB7cIQWtDARzuZmAQ=="/>
         </item>
     </channel>
 </rss>

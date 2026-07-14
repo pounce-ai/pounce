@@ -592,6 +592,18 @@ function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: 
   const failed = status === "error" || result?.result.isError === true;
   const running = status === "pending" || status === "running";
   const expandable = !!result || preview.includes("\n");
+  // Live terminal tail: while the command runs, agents that stream partial
+  // output (codex today, claude via ACP later) keep updating the paired
+  // result in place — show its last lines inside the collapsed card so the
+  // user watches the command work instead of staring at a bare "Running".
+  const tail = useMemo(() => {
+    if (!running || open || result?.result.content?.kind !== "text") return null;
+    const raw = String(result.result.content.text ?? "");
+    // Strip ANSI escapes and carriage-return progress redraws before tailing.
+    const clean = raw.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/^.*\r(?!\n)/gm, "");
+    const lines = clean.trimEnd().split("\n").filter((l) => l.trim().length > 0);
+    return lines.length ? lines.slice(-3).join("\n") : null;
+  }, [running, open, result]);
   return (
     <Pressable
       disabled={!expandable}
@@ -627,6 +639,13 @@ function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: 
       {open && result ? (
         <View className="mt-2">
           <ResultBody content={result.result.content} isError={result.result.isError} nested />
+        </View>
+      ) : null}
+      {tail ? (
+        <View className="mt-2 rounded-lg bg-[#0d0d12] px-2.5 py-1.5">
+          <Text numberOfLines={3} className="font-mono text-[11px] leading-[15px] text-fg-faint">
+            {tail}
+          </Text>
         </View>
       ) : null}
     </Pressable>

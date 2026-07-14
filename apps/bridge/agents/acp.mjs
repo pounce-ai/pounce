@@ -155,6 +155,21 @@ export function startAcpTurn(agent, { threadId, text, cwd, images, model, permis
     const found = binOverride("claude") || resolveBin("claude", env);
     if (found) env.CLAUDE_CODE_EXECUTABLE = found;
   }
+  // The codex ACP adapter spawns the codex CLI. Without CODEX_PATH it
+  // require-resolves @openai/codex — a package the bundled (desktop) adapter
+  // doesn't ship, which crashed every codex ACP turn with MODULE_NOT_FOUND.
+  // Point it at the same codex the exec path uses.
+  if (agent === "codex" && !env.CODEX_PATH) {
+    const found = binOverride("codex") || resolveBin("codex", env);
+    if (found) env.CODEX_PATH = found;
+  }
+  // Track whether anything streamed to the app: a failure BEFORE any output
+  // means the adapter itself is broken (missing runtime dep, bad install) —
+  // that class rejects `done` so the host falls back to the agent's classic
+  // CLI transport instead of surfacing a dead turn.
+  let emitted = false;
+  const emitOut = onEvent;
+  onEvent = (ev) => { emitted = true; emitOut(ev); };
   const child = spawn(spec.command, spec.args, {
     cwd: dir,
     env,
@@ -295,6 +310,12 @@ export function startAcpTurn(agent, { threadId, text, cwd, images, model, permis
     .catch((e) => {
       cancelPending();
       try { child.kill(); } catch {}
+      if (!stopped && !emitted) {
+        // Nothing reached the app — adapter startup failure. Reject so the
+        // host retries the turn over the agent's classic CLI transport.
+        rejectDone(new Error(`ACP failed pre-stream: ${e?.message || e}${stderrTail ? ` — ${stderrTail.trim().slice(-200)}` : ""}`));
+        return;
+      }
       if (!stopped) {
         onEvent(systemEvent(base(`${realThreadId || "acp"}:err`),
           `ACP turn failed: ${e?.message || e}${stderrTail ? ` — ${stderrTail.trim().slice(-200)}` : ""}`, "error"));
