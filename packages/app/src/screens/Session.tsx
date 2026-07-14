@@ -14,12 +14,14 @@ import { collapseToolResults, Timeline } from "../components/Timeline";
 import { WorkingIndicator } from "../components/WorkingIndicator";
 import { TimelineSkeleton } from "../components/Skeleton";
 import { Composer, type ComposerHandle, type ComposerSubmit } from "../components/Composer";
+import { DropZone, type DroppedFile } from "../components/DropZone";
 import { MarkerSheet, type Marker } from "../components/MarkerSheet";
 import { shortModel, ThreadUsageSummary } from "../components/ThreadStatusBar";
 import { EnvironmentSheet } from "../components/EnvironmentSheet";
 import { ModelSheet } from "../components/ModelSheet";
 import { useTimeline } from "../hooks/useTimeline";
 import {
+  addSources,
   cachedModels,
   capsFor,
   connection$,
@@ -29,10 +31,13 @@ import {
   modelForThread,
   pendingTurns$,
   rekeyThread,
+  removeSource,
   saveThreadMessages,
   setThreadModel,
+  sources$,
   toggleFavThread,
   toggleMarker,
+  type ThreadSource,
 } from "../state/stores";
 import {
   useAgentCaps,
@@ -44,7 +49,7 @@ import {
 } from "../state/db/hooks";
 import { fetchMessages, fetchUsage, interruptTurn, respondPermission, streamLiveMessage, type ThreadUsage } from "../services/bridge";
 import { Ionicons } from "@expo/vector-icons";
-import { ActivityDot, ACTIVITY_LABEL, AgentLogo, BranchChip, cn, COLOR } from "../ui";
+import { ACTIVITY_LABEL, AgentStatusIcon, BranchChip, cn, COLOR, pickSheet } from "../ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "../ui/agent-meta";
 
 /** Desktop renders this screen in a wide pane: pickers use Alert instead of
@@ -61,6 +66,20 @@ function chrono(events: TimelineEvent[]): TimelineEvent[] {
     .map((e, i) => [e, i] as const)
     .sort(([a, ai], [b, bi]) => (a.ts ?? "").localeCompare(b.ts ?? "") || ai - bi)
     .map(([e]) => e);
+}
+
+/** Image files dropped on the composer attach as previews, not @mentions. */
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|heic|heif|tiff?)$/i;
+
+/** MIME type from an image filename — for drops where the OS gave none. */
+function mimeForImage(name: string): string {
+  const ext = name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? "";
+  const map: Record<string, string> = {
+    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+    webp: "image/webp", bmp: "image/bmp", heic: "image/heic", heif: "image/heif",
+    tif: "image/tiff", tiff: "image/tiff",
+  };
+  return map[ext] ?? "image/png";
 }
 
 function mergeById(cur: TimelineEvent[], inc: TimelineEvent[]): TimelineEvent[] {
@@ -210,6 +229,42 @@ export default function SessionScreen() {
   );
   const [markerSheet, setMarkerSheet] = useState(false);
   const [envSheet, setEnvSheet] = useState(false);
+
+  // Sources attached to this thread (drag-drop on desktop / "+" in the
+  // Environment sheet). Dropping records the reference and appends an @path
+  // mention to the draft — the agent reads the file/folder from disk.
+  const sources = useSelector(() => sources$[id!].get()) ?? [];
+  const onDropFiles = useCallback(
+    (files: DroppedFile[]) => {
+      if (!session?.isLive) return;
+      const cwd = session.cwd;
+      const kindOf = (f: DroppedFile): ThreadSource["kind"] =>
+        f.type?.startsWith("image/") || IMAGE_EXT.test(f.name)
+          ? "image"
+          : !f.type && !/\.[A-Za-z0-9]+$/.test(f.name)
+            ? "dir" // folders report no MIME type and (usually) no extension
+            : "file";
+      // Images become thumbnail attachments (like the photo picker); everything
+      // else is referenced as an @path mention the agent reads from disk.
+      const withImages = effectiveCaps(session.agent, reportedCaps).images;
+      const sources: ThreadSource[] = [];
+      const images: { path: string; mediaType: string }[] = [];
+      const mentions: string[] = [];
+      for (const f of files) {
+        const kind = kindOf(f);
+        // Mention paths relative to the worktree read better; anything outside
+        // it stays absolute (the agent can read either).
+        const rel = cwd && f.path.startsWith(`${cwd}/`) ? f.path.slice(cwd.length + 1) : f.path;
+        sources.push({ path: rel, name: f.name, kind });
+        if (kind === "image" && withImages) images.push({ path: f.path, mediaType: f.type || mimeForImage(f.name) });
+        else mentions.push(rel);
+      }
+      addSources(session.id, sources);
+      if (images.length) composerRef.current?.attachImages(images);
+      if (mentions.length) composerRef.current?.addMentions(mentions);
+    },
+    [session?.isLive, session?.cwd, session?.id, session?.agent, reportedCaps],
+  );
   // Marker overrides for this thread, live from the collection so the list
   // recomputes on every toggle.
   const markerMap = useThreadMarkers(id);
@@ -445,6 +500,9 @@ export default function SessionScreen() {
   const canSteer = session.isLive;
   const caps = effectiveCaps(session.agent, reportedCaps);
   const running = sending || session.activity === "running" || session.activity === "streaming";
+  // The synced thread record lags live turns (short turns never re-sync), so
+  // the header trusts the screen's own in-flight state over session.activity.
+  const headerActivity = running ? ("running" as const) : session.activity;
   // Phase label for the working indicator: "Responding…" once assistant text is
   // streaming, otherwise "Thinking…".
   const tail = rawEvents[rawEvents.length - 1];
@@ -463,20 +521,6 @@ export default function SessionScreen() {
   const activeMode = mode ?? modes[0]?.value;
   const modeLabel = activeMode === "default" ? "Mode" : modes.find((m) => m.value === activeMode)?.label ?? "Mode";
   const effortLabel = REASONING_EFFORTS.find((e) => e.value === effort)?.label ?? "Effort";
-  const pickSheet = (title: string, labels: string[], onPick: (i: number) => void) => {
-    if (DESKTOP) {
-      // No ActionSheetIOS on macOS/Windows — Alert buttons map to NSAlert.
-      Alert.alert(title, undefined, [
-        ...labels.map((label, i) => ({ text: label, onPress: () => onPick(i) })),
-        { text: "Cancel", style: "cancel" as const },
-      ]);
-      return;
-    }
-    ActionSheetIOS.showActionSheetWithOptions(
-      { title, options: [...labels, "Cancel"], cancelButtonIndex: labels.length },
-      (i) => { if (i >= 0 && i < labels.length) onPick(i); },
-    );
-  };
   const openMode = () => pickSheet("Mode", modes.map((m) => `${m.label} · ${m.hint}`), (i) => setMode(modes[i].value));
   const openEffort = () => pickSheet("Reasoning effort", REASONING_EFFORTS.map((e) => e.label), (i) => setEffort(REASONING_EFFORTS[i].value));
 
@@ -495,6 +539,9 @@ export default function SessionScreen() {
       keyboardVerticalOffset={0}
     >
       <Stack.Screen options={{ headerShown: false }} />
+      {/* Desktop: the whole pane is a drop target — dragging files/folders from
+          Finder adds them as sources. No-op wrapper on mobile. */}
+      <DropZone className="flex-1" onDropFiles={onDropFiles}>
       {/* Header */}
       <View style={{ paddingTop: insets.top }} className="border-b border-border bg-bg-elevated">
         <View className="flex-row items-center gap-2 px-3 pb-2.5 pt-1">
@@ -505,12 +552,11 @@ export default function SessionScreen() {
               <Text className="text-[22px] text-fg">‹</Text>
             </Pressable>
           ) : null}
-          <AgentLogo agent={session.agent} size={18} />
+          <AgentStatusIcon agent={session.agent} activity={headerActivity} size={18} />
           <View className="flex-1">
             <Text numberOfLines={1} className="text-[15px] font-semibold text-fg">{session.title}</Text>
             <View className="mt-0.5 flex-row items-center gap-2">
-              <ActivityDot status={session.activity} size={7} />
-              <Text className="text-[12px] text-fg-muted">{ACTIVITY_LABEL[session.activity]}</Text>
+              <Text className="text-[12px] text-fg-muted">{ACTIVITY_LABEL[headerActivity]}</Text>
               {session.branch ? (
                 <BranchChip branch={session.branch} worktree={session.worktree} size={10} color={COLOR.fgFaint} className="shrink" />
               ) : null}
@@ -632,10 +678,18 @@ export default function SessionScreen() {
         visible={envSheet}
         session={session}
         running={running}
+        sources={sources}
         onClose={() => setEnvSheet(false)}
         onStop={() => void stop()}
         onViewChanges={() => router.push(`/changes?id=${session.id}`)}
         onTerminal={() => router.push(`/terminal?id=${session.id}`)}
+        onAddSource={canSteer ? () => composerRef.current?.startMention() : undefined}
+        onRemoveSource={(p) => removeSource(session.id, p)}
+        onFixConflicts={
+          canSteer
+            ? () => composerRef.current?.insert("Resolve the merge conflicts in this worktree, then continue.")
+            : undefined
+        }
       />
 
       <ModelSheet
@@ -714,6 +768,7 @@ export default function SessionScreen() {
         />
         </View>
       </View>
+      </DropZone>
     </KeyboardAvoidingView>
   );
 }

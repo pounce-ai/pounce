@@ -54,5 +54,8 @@
         "react-native"
       ]
     }
+  },
+  "patchedDependencies": {
+    "react-native-macos@0.81.8": "patches/react-native-macos@0.81.8.patch"
   }
 }

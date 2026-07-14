@@ -1,6 +1,6 @@
-import type { ComponentProps } from "react";
+import { type ComponentProps, useEffect, useSyncExternalStore } from "react";
 import { cn } from "cnfast";
-import { Platform, View, Text } from "react-native";
+import { ActionSheetIOS, Alert, Platform, View, Text } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { ActivityStatus } from "@litter/shared";
 import { AgentLogo } from "./agent-logos";
@@ -8,7 +8,7 @@ import { AgentLogo } from "./agent-logos";
 // Shared tokens live in tokens.ts (no circular dep with agent-logos); re-export
 // them here so call sites keep importing everything from "../ui".
 export { COLOR, AGENT_LABEL, AGENT_HEX, agentLabel } from "./tokens";
-import { agentLabel, COLOR } from "./tokens";
+import { AGENT_HEX, agentLabel, COLOR } from "./tokens";
 
 /** Real brand logos for agents (Claude, Codex, OpenCode, Grok, …). */
 export { AgentLogo };
@@ -54,16 +54,6 @@ export function timeAgo(iso: string): string {
   return fmtDuration(Math.max(1, (Date.now() - Date.parse(iso)) / 1000));
 }
 
-const ACTIVITY_DOT: Record<ActivityStatus, string> = {
-  running: "bg-success",
-  streaming: "bg-success",
-  awaiting_input: "bg-warning",
-  completed: "bg-info",
-  idle: "bg-fg-faint",
-  failed: "bg-danger",
-  queued: "bg-warning",
-};
-
 export const ACTIVITY_LABEL: Record<ActivityStatus, string> = {
   running: "Running",
   streaming: "Streaming",
@@ -74,32 +64,22 @@ export const ACTIVITY_LABEL: Record<ActivityStatus, string> = {
   queued: "Queued",
 };
 
-/** Activity dot — axis A of the two-axis status model. Pulses when it needs you. */
-export function ActivityDot({
-  status,
-  size = 8,
-}: {
-  status: ActivityStatus;
-  size?: number;
-}) {
-  const active = status === "running" || status === "streaming" || status === "awaiting_input";
-  return (
-    <View style={{ width: size, height: size }} className="items-center justify-center">
-      {active ? (
-        <View
-          className={cn("absolute rounded-full opacity-30", ACTIVITY_DOT[status])}
-          style={{ width: size * 2, height: size * 2 }}
-        />
-      ) : null}
-      <View
-        className={cn("rounded-full", ACTIVITY_DOT[status])}
-        style={{ width: size, height: size }}
-      />
-    </View>
+type IoniconName = ComponentProps<typeof Ionicons>["name"];
+
+/** Platform picker: NSAlert buttons on desktop, an action sheet on mobile. */
+export function pickSheet(title: string, labels: string[], onPick: (i: number) => void): void {
+  if (IS_DESKTOP) {
+    Alert.alert(title, undefined, [
+      ...labels.map((text, i) => ({ text, onPress: () => onPick(i) })),
+      { text: "Cancel", style: "cancel" as const },
+    ]);
+    return;
+  }
+  ActionSheetIOS.showActionSheetWithOptions(
+    { title, options: [...labels, "Cancel"], cancelButtonIndex: labels.length },
+    (i) => { if (i >= 0 && i < labels.length) onPick(i); },
   );
 }
-
-type IoniconName = ComponentProps<typeof Ionicons>["name"];
 
 /** Infer a device-type icon from the machine's name (Mac mini, MacBook, etc.). */
 export function deviceIconName(name: string): IoniconName {
@@ -136,11 +116,112 @@ export function DeviceIcon({
 
 /** Agent identity: real brand logo + name. The single, uniform way to show an
  * agent everywhere (filter, cards, session header). */
-export function AgentChip({ agent, size = 14 }: { agent: string; size?: number }) {
+export function AgentChip({
+  agent,
+  size = 14,
+  activity,
+}: {
+  agent: string;
+  size?: number;
+  /** When provided, the logo doubles as the status indicator. */
+  activity?: ActivityStatus;
+}) {
   return (
     <View className="flex-row items-center gap-1.5">
-      <AgentLogo agent={agent} size={size} />
+      {activity ? (
+        <AgentStatusIcon agent={agent} activity={activity} size={size} />
+      ) : (
+        <AgentLogo agent={agent} size={size} />
+      )}
       <Text className="text-[12px] font-medium text-fg-muted">{agentLabel(agent)}</Text>
+    </View>
+  );
+}
+
+/** Claude Code's thinking glyphs — a starburst that grows and shrinks. The
+ *  cycle runs forward then back so it breathes instead of snapping.
+ *  U+FE0E forces text presentation: bare ✳ (and friends) otherwise render as
+ *  their emoji variant on iOS — a green square that ignores the text color. */
+const T = "\uFE0E";
+const THINKING_GLYPHS = [`·${T}`, `✢${T}`, `✳${T}`, `✶${T}`, `✽${T}`, `✶${T}`, `✳${T}`, `✢${T}`];
+const THINKING_FRAME_MS = 160;
+
+// One shared ticker for every animating icon: N running threads would
+// otherwise each run their own 6.25Hz timer. The interval only exists while
+// at least one icon is subscribed, and all icons animate in phase.
+let tickFrame = 0;
+let tickTimer: ReturnType<typeof setInterval> | null = null;
+const tickListeners = new Set<() => void>();
+function subscribeTicker(fn: () => void): () => void {
+  tickListeners.add(fn);
+  tickTimer ??= setInterval(() => {
+    tickFrame = (tickFrame + 1) % THINKING_GLYPHS.length;
+    tickListeners.forEach((l) => l());
+  }, THINKING_FRAME_MS);
+  return () => {
+    tickListeners.delete(fn);
+    if (!tickListeners.size && tickTimer) {
+      clearInterval(tickTimer);
+      tickTimer = null;
+    }
+  };
+}
+const noTick = () => () => {};
+const getFrame = () => tickFrame;
+
+/**
+ * Agent logo doubling as the status indicator (replaces logo + ActivityDot).
+ * While the agent works it becomes Claude Code's morphing-asterisk thinking
+ * animation, tinted the agent's brand color; at rest it's the plain logo, and
+ * a done thread wears a tiny lock.
+ */
+export function AgentStatusIcon({
+  agent,
+  activity,
+  size = 13,
+  animated = true,
+}: {
+  agent: string;
+  activity: ActivityStatus;
+  size?: number;
+  /** false = never animate (e.g. the open thread, whose own header already
+   *  shows the live state) — the static logo + lock badge still render. */
+  animated?: boolean;
+}) {
+  const active =
+    animated && (activity === "running" || activity === "streaming" || activity === "queued");
+  const frame = useSyncExternalStore(active ? subscribeTicker : noTick, getFrame);
+
+  if (active) {
+    return (
+      <View style={{ width: size, height: size }} className="items-center justify-center">
+        <Text
+          allowFontScaling={false}
+          style={{
+            color: AGENT_HEX[agent] ?? COLOR.accent,
+            fontSize: size + 1,
+            lineHeight: size + 3,
+            textAlign: "center",
+          }}
+        >
+          {THINKING_GLYPHS[frame]}
+        </Text>
+      </View>
+    );
+  }
+
+  const badge = size * 0.72;
+  return (
+    <View>
+      <AgentLogo agent={agent} size={size} />
+      {activity === "completed" ? (
+        <View
+          className="absolute items-center justify-center rounded-full bg-bg-elevated"
+          style={{ right: -badge * 0.35, bottom: -badge * 0.3, width: badge, height: badge }}
+        >
+          <Ionicons name="lock-closed" size={badge * 0.68} color={COLOR.fgMuted} />
+        </View>
+      ) : null}
     </View>
   );
 }

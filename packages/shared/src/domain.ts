@@ -204,6 +204,8 @@ export interface DoctorReport {
   };
   readonly node: { readonly ok: boolean; readonly path: string; readonly version: string };
   readonly git: { readonly ok: boolean; readonly version: string | null };
+  /** GitHub CLI — powers PR creation and CI check status. authed null = unknown. */
+  readonly gh?: { readonly ok: boolean; readonly version: string | null; readonly authed: boolean | null };
   readonly agents: readonly DoctorAgent[];
   readonly tunnel: { readonly ok: boolean; readonly path: string | null; readonly mode: "internet" | "lan-only" };
   readonly sessionsTotal: number;

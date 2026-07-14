@@ -21,7 +21,7 @@ import {
   userMessage, thinking, assistantMessage, toolCall, toolResult, systemEvent,
   readTailLines, patchFromStructured, contentText,
 } from "./events.mjs";
-import { agentEnv, binVersion, binPath } from "./env.mjs";
+import { agentEnv, binVersion, binPath, liveAgentCwds } from "./env.mjs";
 
 const ROOT = path.join(os.homedir(), ".claude", "projects");
 // Claude Code's permission-mode names → the app's canonical PermissionMode.
@@ -32,6 +32,9 @@ const CLAUDE_MODE = {
 };
 // A turn started outside the bridge shows as "running" while its file is this fresh.
 const RUNNING_WINDOW_MS = 120_000;
+// With a live agent process confirmed in the thread's cwd, a quiet mid-turn
+// transcript stays "running" this long (covers long tool calls/builds).
+const LIVE_EXTENDED_WINDOW_MS = 2 * 60 * 60_000;
 const TURN_TIMEOUT_MS = Number(process.env.BRIDGE_TURN_TIMEOUT_MS || 300_000);
 // Hard ceiling on one cached history's retained size; oldest turns are dropped.
 const MAX_HISTORY_BYTES = 8 * 1024 * 1024;
@@ -252,13 +255,22 @@ export class ClaudeAdapter {
     return null;
   }
 
-  /** Cheap activity probe: live child wins; otherwise judge the transcript tail. */
+  /** Cheap activity probe: live child wins; otherwise judge the transcript
+   *  tail, sharpened by process liveness — a live claude in the thread's cwd
+   *  keeps a quiet mid-turn "running" (long builds), and its absence demotes a
+   *  killed turn immediately instead of after the mtime window. */
   async getActivity(threadId) {
     if (this.turns.isRunning("claude", threadId)) {
       return { activity: "running", lastActivityAt: new Date().toISOString() };
     }
-    const file = await this.findFile(threadId);
-    return judgeTranscript(file);
+    const cwd = this.index.metas.get(threadId)?.cwd;
+    const [file, live] = await Promise.all([
+      this.findFile(threadId),
+      cwd ? liveAgentCwds() : null,
+    ]);
+    // null = liveness unknown → the mtime heuristic decides
+    const liveInCwd = cwd && live ? (live.get("claude")?.has(cwd) ?? false) : null;
+    return judgeTranscript(file, liveInCwd);
   }
 
   listModels() {
@@ -504,13 +516,25 @@ export class ClaudeAdapter {
   }
 }
 
-/** Judge a transcript's activity from its mtime + a 64KB tail read (sync, cheap). */
-function judgeTranscript(file) {
+/**
+ * Judge a transcript's activity from its mtime + a 64KB tail read (sync, cheap).
+ *
+ * `liveInCwd` (tri-state) refines the mid-turn verdict with process liveness:
+ *   true  → an agent process is alive in this thread's cwd, so a mid-turn tail
+ *           stays "running" even when a long tool call writes nothing for a
+ *           while — capped at 2h so an abandoned mid-turn transcript can't ride
+ *           a *different* session sharing the cwd forever;
+ *   false → no process, so a killed turn demotes to "completed" immediately;
+ *   null  → liveness unknown, fall back to the pure mtime window.
+ */
+function judgeTranscript(file, liveInCwd = null) {
   if (!file) return { activity: "idle", lastActivityAt: null };
   let mtimeMs;
   try { mtimeMs = statSync(file).mtimeMs; } catch { return { activity: "idle", lastActivityAt: null }; }
   const lastActivityAt = new Date(mtimeMs).toISOString();
-  const recent = Date.now() - mtimeMs < RUNNING_WINDOW_MS;
+  const sinceWrite = Date.now() - mtimeMs;
+  const windowMs = liveInCwd ? LIVE_EXTENDED_WINDOW_MS : RUNNING_WINDOW_MS;
+  const recent = liveInCwd !== false && sinceWrite < windowMs;
 
   // Walk the tail backwards to the last meaningful record.
   const lines = readTailLines(file);

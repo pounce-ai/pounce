@@ -70,6 +70,16 @@ export async function buildDoctorReport(adapters) {
   );
 
   const gitVersion = await binVersion("git");
+  // gh powers PR creation and CI check status. "Installed but not signed in"
+  // is its own failure mode — `gh auth status` exits non-zero when unauthed.
+  const ghVersion = await binVersion("gh");
+  let ghAuthed = null;
+  if (ghVersion) {
+    try {
+      const r = spawnSync(binOverride("gh") || "gh", ["auth", "status"], { env: agentEnv(), encoding: "utf8", timeout: 8000 });
+      ghAuthed = r.status === 0;
+    } catch { ghAuthed = null; }
+  }
   const tunnelBin = tunnelBinary();
   const sessionsTotal = agents.reduce((s, a) => s + a.sessionCount, 0);
   const ips = lanIps();
@@ -84,6 +94,7 @@ export async function buildDoctorReport(adapters) {
       agents.some((a) => a.installed) && sessionsTotal >= 0, // "usable" = at least one agent CLI
     node: { ok: true, path: process.execPath, version: process.version.replace(/^v/, "") },
     git: { ok: !!gitVersion, version: gitVersion },
+    gh: { ok: !!ghVersion, version: ghVersion ? ghVersion.replace(/^gh version /, "").split(" ")[0] : null, authed: ghAuthed },
     agents,
     // Off-LAN reachability. No binary → LAN-only (works on the same network).
     tunnel: { ok: !!tunnelBin, path: tunnelBin, mode: tunnelBin ? "internet" : "lan-only" },

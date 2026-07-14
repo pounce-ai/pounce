@@ -1,0 +1,18 @@
+diff --git a/React/Fabric/Mounting/ComponentViews/TextInput/RCTTextInputComponentView.mm b/React/Fabric/Mounting/ComponentViews/TextInput/RCTTextInputComponentView.mm
+index 5613469eb3d0e993045daa38e4ac8a6b292a6a3f..37228f9f2bb9a9f6063833e95ca430cad457420e 100644
+--- a/React/Fabric/Mounting/ComponentViews/TextInput/RCTTextInputComponentView.mm
++++ b/React/Fabric/Mounting/ComponentViews/TextInput/RCTTextInputComponentView.mm
+@@ -964,7 +964,12 @@ static NSSet<NSNumber *> *returnKeyTypesSet;
+   [_backedTextInputView becomeFirstResponder];
+ #else // [macOS
+   NSWindow *window = [_backedTextInputView window];
+-  [window makeFirstResponder:_backedTextInputView];
++  // Focus the actual responder (the inner NSTextView for multiline inputs).
++  // Making the RCTWrappedTextView wrapper firstResponder records the wrapper
++  // on the window, so keystrokes never reach the editor — and a redundant
++  // focus() while typing (e.g. Pressability treating space as a key press)
++  // kicks the editor out of first responder entirely.
++  [window makeFirstResponder:_backedTextInputView.responder];
+ #endif // macOS]
+ 
+   const auto &props = static_cast<const TextInputProps &>(*_props);
