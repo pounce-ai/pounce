@@ -80,26 +80,50 @@ export function pendingQuestion(threadId) {
   return questions ? { questionId: tu.id, questions } : null;
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** True once the turn is actually underway, judged by the TRANSCRIPT (not the
+ *  noisy TUI): a real assistant record landed, or an AskUserQuestion tool_use is
+ *  already pending. The on-screen "esc to interrupt" hint false-positives before
+ *  the turn produces anything, so we don't trust it. */
+function turnActive(threadId) {
+  return turnStarted(transcriptRows(threadId)) || !!pendingRaw(threadId);
+}
+
+/** Whether our prompt has landed as a user record — i.e. the submit was
+ *  accepted. Once true, the turn is queued: stop touching the composer so a
+ *  retry can't type a duplicate or Enter into a picker. */
+function promptAccepted(threadId, prompt) {
+  const key = prompt.slice(0, 40);
+  return transcriptRows(threadId).some(
+    (o) => o.type === "user" && typeof o.message?.content === "string" && o.message.content.includes(key),
+  );
+}
+
 /**
- * Type the prompt into the freshly-spawned TUI and submit it. The paste needs to
- * settle before Enter, and submission is occasionally dropped — so we retry Enter
- * once, but ONLY while the turn hasn't started AND no picker is on screen (a bare
- * Enter into a picker would select its default). Best-effort; never throws.
+ * Submit `text` into the freshly-spawned TUI, deterministically. claude's
+ * startup render is noisy and variable, so a fixed type+Enter is occasionally
+ * dropped. Instead: clear the composer (Ctrl-U, so a retry can't duplicate the
+ * prompt), type, Enter, and RETRY until the turn is active. We stop the instant
+ * it's active, so a retry can never leak an Enter into a later picker. Async,
+ * fire-and-forget; never throws.
  */
-function submitPrompt(session, threadId, text) {
+async function submitPrompt(session, threadId, text) {
   const prompt = String(text || "").trim();
   if (!prompt) return;
-  setTimeout(() => {
+  const done = () => promptAccepted(threadId, prompt) || turnActive(threadId);
+  await sleep(3000); // let the TUI finish its startup render
+  for (let i = 0; i < 10 && !done(); i++) {
+    // Only (re)type while the prompt still hasn't been accepted — the moment it
+    // lands as a user record we stop, so no duplicate submit and no Enter can
+    // reach a later picker. Ctrl-U first so an incomplete earlier type is cleared.
+    session.write("\x15"); // Ctrl-U — clear the composer
+    await sleep(150);
     session.write(prompt);
-    setTimeout(() => session.write("\r"), 600);
-  }, 3500); // let the input box render first
-  // one guarded retry
-  setTimeout(() => {
-    if (turnStarted(transcriptRows(threadId)) || pendingRaw(threadId)) return;
-    const screen = session.snapshot().replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
-    if (/to select|navigate|❯/i.test(screen)) return; // a picker is up — don't Enter
-    session.write("\r");
-  }, 12000);
+    await sleep(500);
+    session.write("\r"); // submit
+    for (let w = 0; w < 7 && !done(); w++) await sleep(650); // ~4.5s for it to land
+  }
 }
 
 /** Spawn claude's TUI in a PTY and submit `text`. Returns the real threadId. */
@@ -117,7 +141,7 @@ export function startInteractiveSession({ threadId, text, cwd, model }) {
     cols: 120,
     rows: 40,
   });
-  submitPrompt(session, sessionId, text);
+  void submitPrompt(session, sessionId, text).catch(() => {});
   return sessionId;
 }
 
