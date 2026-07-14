@@ -49,7 +49,7 @@ import {
 } from "../state/db/hooks";
 import { fetchMessages, fetchUsage, interruptTurn, respondPermission, streamLiveMessage, type ThreadUsage } from "../services/bridge";
 import { Ionicons } from "@expo/vector-icons";
-import { ActivityDot, ACTIVITY_LABEL, AgentLogo, BranchChip, cn, COLOR } from "../ui";
+import { ACTIVITY_LABEL, AgentStatusIcon, BranchChip, cn, COLOR } from "../ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "../ui/agent-meta";
 
 /** Desktop renders this screen in a wide pane: pickers use Alert instead of
@@ -496,6 +496,9 @@ export default function SessionScreen() {
   const canSteer = session.isLive;
   const caps = effectiveCaps(session.agent, reportedCaps);
   const running = sending || session.activity === "running" || session.activity === "streaming";
+  // The synced thread record lags live turns (short turns never re-sync), so
+  // the header trusts the screen's own in-flight state over session.activity.
+  const headerActivity = running ? ("running" as const) : session.activity;
   // Phase label for the working indicator: "Responding…" once assistant text is
   // streaming, otherwise "Thinking…".
   const tail = rawEvents[rawEvents.length - 1];
@@ -559,12 +562,11 @@ export default function SessionScreen() {
               <Text className="text-[22px] text-fg">‹</Text>
             </Pressable>
           ) : null}
-          <AgentLogo agent={session.agent} size={18} />
+          <AgentStatusIcon agent={session.agent} activity={headerActivity} size={18} />
           <View className="flex-1">
             <Text numberOfLines={1} className="text-[15px] font-semibold text-fg">{session.title}</Text>
             <View className="mt-0.5 flex-row items-center gap-2">
-              <ActivityDot status={session.activity} size={7} />
-              <Text className="text-[12px] text-fg-muted">{ACTIVITY_LABEL[session.activity]}</Text>
+              <Text className="text-[12px] text-fg-muted">{ACTIVITY_LABEL[headerActivity]}</Text>
               {session.branch ? (
                 <BranchChip branch={session.branch} worktree={session.worktree} size={10} color={COLOR.fgFaint} className="shrink" />
               ) : null}

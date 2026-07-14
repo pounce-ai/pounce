@@ -189,7 +189,27 @@ export function upsertRows<T extends WithId>(c: RowCollection, rows: T[]): void 
       toInsert.push(r);
     }
   }
-  if (toInsert.length) c.insert(toInsert);
+  if (!toInsert.length) return;
+  try {
+    c.insert(toInsert);
+  } catch {
+    // `has()` can disagree with the underlying store (a pending delete from an
+    // earlier transaction, hydration races) and the batched insert then throws
+    // "already exists" — which aborted the whole sync and froze every thread's
+    // activity at its last value. Recover row-by-row: insert, else update,
+    // else drop the row and let the next sync retry it.
+    for (const r of toInsert) {
+      try {
+        c.insert([r]);
+      } catch {
+        try {
+          c.update(r.id, (draft) => void Object.assign(draft, r));
+        } catch {
+          // unrecoverable this tick — next sync retries
+        }
+      }
+    }
+  }
 }
 
 /** Make the collection exactly `rows`: upsert the present, delete the absent.

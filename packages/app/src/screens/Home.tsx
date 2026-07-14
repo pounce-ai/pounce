@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { ActionSheetIOS, Modal, Pressable, RefreshControl, Text, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { ActionSheetIOS, AppState, Modal, Pressable, RefreshControl, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import { LinearTransition } from "react-native-reanimated";
@@ -181,6 +181,22 @@ export default function HomeScreen() {
     try { await refreshLive(true); } finally { setRefreshing(false); }
   };
 
+  // Thread activity decays fast (a short turn never re-syncs on its own), so
+  // while the app is foregrounded the list re-syncs on a timer — mobile's
+  // equivalent of the desktop heartbeat. Also refresh immediately on
+  // background→foreground so stale "Idle" never greets a returning user.
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const start = () => { if (!timer) timer = setInterval(() => void refreshLive(), 20_000); };
+    const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+    start();
+    const sub = AppState.addEventListener("change", (s) => {
+      if (s === "active") { void refreshLive(); start(); }
+      else stop();
+    });
+    return () => { stop(); sub.remove(); };
+  }, []);
+
   // Long-press a thread to favourite it. New threads carry a temporary id that's
   // swapped for the real one after the first turn, so block favouriting until
   // then — a favourite keyed on the temp id would orphan.
@@ -217,17 +233,26 @@ export default function HomeScreen() {
       <View className="flex-row items-end justify-between px-4 pb-2 pt-1">
         <View className="flex-1 pr-2">
           <Text className="text-[26px] font-bold text-fg">Pounce</Text>
-          <Pressable onPress={() => router.push("/settings")} className="active:opacity-60">
-            <Text numberOfLines={1} className="text-[13px] text-fg-faint">
-              {!connected && !loading
-                ? "Tap to sync a device"
-                : loading
-                  ? "Syncing…"
-                  : attentionCount > 0
-                    ? `${attentionCount} need${attentionCount === 1 ? "s" : ""} you`
-                    : "All caught up"}
-              {filterCount ? " · filtered" : ""}
-            </Text>
+          <Pressable
+            onPress={() => router.push("/settings")}
+            className="active:opacity-60 mt-0.5 flex-row items-center gap-1"
+          >
+            {!connected && !loading ? (
+              <Text numberOfLines={1} className="text-[13px] text-fg-faint">Tap to sync a device</Text>
+            ) : loading ? (
+              <Text numberOfLines={1} className="text-[13px] text-fg-faint">Syncing…</Text>
+            ) : attentionCount > 0 ? (
+              <>
+                <Ionicons name="alert-circle" size={13} color={COLOR.warning} />
+                <Text numberOfLines={1} className="text-[13px] text-warning">
+                  {attentionCount} need{attentionCount === 1 ? "s" : ""} you
+                </Text>
+              </>
+            ) : (
+              // All caught up — a quiet checkmark says it without saying it.
+              <Ionicons name="checkmark-circle" size={14} color={COLOR.fgFaint} />
+            )}
+            {filterCount ? <Text className="text-[13px] text-fg-faint">· filtered</Text> : null}
           </Pressable>
         </View>
         <View className="flex-row items-center gap-2 shrink-0">

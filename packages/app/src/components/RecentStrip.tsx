@@ -2,7 +2,7 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import type { Session } from "@litter/shared";
 import { useProjectNames, useRecentSessions } from "../state/db/hooks";
-import { ActivityDot, AgentLogo, cn } from "../ui";
+import { AgentStatusIcon, cn } from "../ui";
 
 const MAX_RECENT = 8;
 /** Title line height (px). Two lines are reserved so one- and two-line titles
@@ -51,8 +51,8 @@ function RecentCard({ session, repoName }: { session: Session; repoName: string 
       )}
     >
       <View className="flex-row items-center gap-1.5">
-        <ActivityDot status={session.activity} size={7} />
-        <AgentLogo agent={session.agent} size={13} />
+        {/* Never animates: this strip is a shortcut, not a status board. */}
+        <AgentStatusIcon agent={session.agent} activity={session.activity} size={14} animated={false} />
       </View>
       {/* Reserve two lines so one- and two-line titles keep every card the same
           height and pin the repo name to a consistent baseline across the strip. */}
