@@ -1,7 +1,7 @@
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import type { Session } from "@litter/shared";
-import { ActivityDot, ACTIVITY_LABEL, AgentChip, BranchChip, cn, timeAgo } from "../ui";
+import { ACTIVITY_LABEL, AgentChip, BranchChip, cn, timeAgo } from "../ui";
 
 export function SessionCard({
   session,
@@ -23,10 +23,16 @@ export function SessionCard({
       )}
     >
       <View className="flex-row items-center gap-2">
-        <Text numberOfLines={1} className="flex-1 text-[15px] font-semibold text-fg">
+        <Text
+          numberOfLines={1}
+          className={cn(
+            "flex-1 text-[15px] font-semibold",
+            session.activity === "idle" ? "text-fg-muted" : "text-fg",
+          )}
+        >
           {session.title}
         </Text>
-        <AgentChip agent={session.agent} />
+        <AgentChip agent={session.agent} activity={session.activity} />
       </View>
 
       <View className="mt-1.5 flex-row items-center gap-1.5">
@@ -42,17 +48,14 @@ export function SessionCard({
       </View>
 
       <View className="mt-2 flex-row items-center justify-between">
-        <View className="flex-row items-center gap-1.5">
-          <ActivityDot status={session.activity} />
-          <Text
-            className={cn(
-              "text-[12px]",
-              needs ? "text-warning" : session.activity === "failed" ? "text-danger" : "text-fg-faint",
-            )}
-          >
-            {ACTIVITY_LABEL[session.activity]}
-          </Text>
-        </View>
+        <Text
+          className={cn(
+            "text-[12px]",
+            needs ? "text-warning" : session.activity === "failed" ? "text-danger" : "text-fg-faint",
+          )}
+        >
+          {ACTIVITY_LABEL[session.activity]}
+        </Text>
         <Text className="text-[11px] text-fg-faint">{timeAgo(session.updatedAt)}</Text>
       </View>
     </Pressable>

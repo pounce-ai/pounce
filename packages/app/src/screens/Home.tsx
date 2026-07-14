@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { ActionSheetIOS, Modal, Pressable, RefreshControl, Text, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ActionSheetIOS, Animated as RNAnimated, Easing, Modal, Pressable, RefreshControl, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import { LinearTransition } from "react-native-reanimated";
@@ -213,24 +213,44 @@ export default function HomeScreen() {
 
   const newInRepo = (repoId: string) => router.push({ pathname: "/new", params: { repoId } });
 
+  // Header subtitle, one branch per state; syncing lives in the wordmark
+  // badge (spinner → green tick), so null here = nothing worth a row.
+  const subtitle =
+    !connected && !loading ? (
+      <Text numberOfLines={1} className="text-[13px] text-fg-faint">Tap to sync a device</Text>
+    ) : attentionCount > 0 ? (
+      <>
+        <Ionicons name="alert-circle" size={13} color={COLOR.warning} />
+        <Text numberOfLines={1} className="text-[13px] text-warning">
+          {attentionCount} need{attentionCount === 1 ? "s" : ""} you
+        </Text>
+      </>
+    ) : null;
+
   return (
     <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>
       {/* Glance header */}
       <View className="flex-row items-end justify-between px-4 pb-2 pt-1">
         <View className="flex-1 pr-2">
-          <Text className="text-[26px] font-bold text-fg">Pounce</Text>
-          <Pressable onPress={() => router.push("/settings")} className="active:opacity-60">
-            <Text numberOfLines={1} className="text-[13px] text-fg-faint">
-              {!connected && !loading
-                ? "Tap to sync a device"
-                : loading
-                  ? "Syncing…"
-                  : attentionCount > 0
-                    ? `${attentionCount} need${attentionCount === 1 ? "s" : ""} you`
-                    : "All caught up"}
-              {filterCount ? " · filtered" : ""}
-            </Text>
-          </Pressable>
+          <View className="flex-row items-start gap-1">
+            <Text className="text-[26px] font-bold text-fg">Pounce</Text>
+            {/* Superscript status badge: spinner while syncing, then a green
+                tick once connected and caught up. */}
+            {loading ? (
+              <SyncSpinner />
+            ) : connected && attentionCount === 0 ? (
+              <Ionicons name="checkmark-circle" size={12} color={COLOR.success} style={{ marginTop: 5 }} />
+            ) : null}
+          </View>
+          {subtitle || filterCount ? (
+            <Pressable
+              onPress={() => router.push("/settings")}
+              className="active:opacity-60 mt-0.5 flex-row items-center gap-1"
+            >
+              {subtitle}
+              {filterCount ? <Text className="text-[13px] text-fg-faint">· filtered</Text> : null}
+            </Pressable>
+          ) : null}
         </View>
         <View className="flex-row items-center gap-2 shrink-0">
           <FilterButton active={showFilters} onPress={() => setShowFilters(true)} />
@@ -325,6 +345,25 @@ export default function HomeScreen() {
 }
 
 /** Pinned "Favourites" section header on the Home list. */
+/** Rotating sync glyph — the wordmark badge's "working" state. Core Animated
+ *  so it spins on desktop too (the reanimated seam is static there). */
+function SyncSpinner() {
+  const turn = useRef(new RNAnimated.Value(0)).current;
+  useEffect(() => {
+    const loop = RNAnimated.loop(
+      RNAnimated.timing(turn, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [turn]);
+  const rotate = turn.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+  return (
+    <RNAnimated.View style={{ marginTop: 5, transform: [{ rotate }] }}>
+      <Ionicons name="sync" size={12} color={COLOR.fgFaint} />
+    </RNAnimated.View>
+  );
+}
+
 function FavHeader({
   count,
   collapsed,

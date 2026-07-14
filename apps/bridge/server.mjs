@@ -27,7 +27,7 @@ import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import { createHost } from "./agents/host.mjs";
 import { resolvePermission } from "./agents/acp.mjs";
-import { primaryLanIp } from "./agents/env.mjs";
+import { agentEnv, binPath, primaryLanIp } from "./agents/env.mjs";
 import { readConfig, writeConfig } from "./agents/config.mjs";
 
 const IS_WIN = process.platform === "win32";
@@ -98,10 +98,14 @@ function gitList(cwd, args) {
   });
 }
 
-/** Run a command, capturing exit code + stdout + stderr. Optional kill timeout. */
-function exec(cmd, args, cwd, timeoutMs = 0, env = undefined) {
+/** Run a command, capturing exit code + stdout + stderr. Optional kill
+ *  timeout; optional `input` is written to stdin. */
+function exec(cmd, args, cwd, timeoutMs = 0, env = undefined, input = undefined) {
   return new Promise((resolve) => {
-    const p = spawn(cmd, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    const p = spawn(cmd, args, {
+      cwd, env, windowsHide: true,
+      stdio: [input != null ? "pipe" : "ignore", "pipe", "pipe"],
+    });
     let out = "", err = "", killed = false;
     const timer = timeoutMs ? setTimeout(() => { killed = true; p.kill("SIGKILL"); }, timeoutMs) : null;
     p.stdout.on("data", (d) => (out += d));
@@ -111,7 +115,18 @@ function exec(cmd, args, cwd, timeoutMs = 0, env = undefined) {
       resolve({ code, out, err: err + (killed ? "\n[command timed out]" : "") });
     });
     p.on("error", (e) => { if (timer) clearTimeout(timer); resolve({ code: -1, out: "", err: String(e?.message || e) }); });
+    if (input != null) {
+      p.stdin.write(input);
+      p.stdin.end();
+    }
   });
+}
+
+/** Cap a diff's size, appending the marker the client strips as an exact line
+ *  (packages/app diffPatch.splitPatch matches it verbatim — keep in sync). */
+const DIFF_TRUNCATED_MARKER = "… (diff truncated)";
+function truncateDiff(text, max) {
+  return text.length > max ? `${text.slice(0, max)}\n${DIFF_TRUNCATED_MARKER}` : text;
 }
 const git = (cwd, args) => exec("git", ["-C", cwd, ...args]);
 
@@ -119,13 +134,15 @@ const git = (cwd, args) => exec("git", ["-C", cwd, ...args]);
 // used for busy checks before restart-ish operations.
 let activeTurns = 0;
 
-/** Uncommitted changes in `cwd`: branch, per-file status + counts, full diff. */
+/** Uncommitted changes in `cwd`: branch, per-file status + counts, full diff,
+ *  plus ahead/behind vs upstream and the count of conflicted files. */
 async function gitChanges(cwd) {
-  const [numstat, status, diff, branch] = await Promise.all([
+  const [numstat, status, diff, branch, upstream] = await Promise.all([
     git(cwd, ["diff", "HEAD", "--numstat"]),
     git(cwd, ["status", "--porcelain=v1", "--untracked-files=all"]),
     git(cwd, ["-c", "core.quotepath=false", "diff", "HEAD"]),
     git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
+    git(cwd, ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"]),
   ]);
   const counts = {};
   for (const line of numstat.out.split("\n").filter(Boolean)) {
@@ -136,9 +153,12 @@ async function gitChanges(cwd) {
     };
   }
   const files = [];
+  let conflicts = 0;
   for (const line of status.out.split("\n").filter(Boolean)) {
     const code = line.slice(0, 2);
     const p = line.slice(3).replace(/^"|"$/g, "");
+    // Unmerged-path XY codes (git-status(1)): both-modified, both-added, etc.
+    if (["DD", "AU", "UD", "UA", "DU", "AA", "UU"].includes(code)) conflicts++;
     let st = "modified";
     if (code.includes("?")) st = "untracked";
     else if (code.includes("A")) st = "added";
@@ -146,10 +166,84 @@ async function gitChanges(cwd) {
     else if (code.includes("R")) st = "renamed";
     files.push({ path: p, status: st, ...(counts[p] || { additions: 0, deletions: 0 }) });
   }
-  let diffText = diff.out;
-  const MAX = 200_000;
-  if (diffText.length > MAX) diffText = diffText.slice(0, MAX) + "\n… (diff truncated)";
-  return { branch: branch.out.trim(), files, diff: diffText };
+  const diffText = truncateDiff(diff.out, 200_000);
+  // "behind\tahead" relative to upstream; no upstream → nulls.
+  const [behind, ahead] = upstream.code === 0
+    ? upstream.out.trim().split(/\s+/).map((n) => Number(n) || 0)
+    : [null, null];
+  return { branch: branch.out.trim(), files, diff: diffText, ahead, behind, conflicts };
+}
+
+/**
+ * Model-generated git metadata for the working tree: branch name, commit
+ * message, PR title + body. Runs the host's claude CLI in print mode over the
+ * diff (cheap model). The client must show the result for user approval before
+ * acting on any of it — nothing here mutates the repo.
+ */
+async function gitSuggest(cwd) {
+  const [diff, status, branch, log] = await Promise.all([
+    git(cwd, ["-c", "core.quotepath=false", "diff", "HEAD"]),
+    git(cwd, ["status", "--porcelain=v1"]),
+    git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
+    git(cwd, ["log", "--oneline", "-8"]),
+  ]);
+  const diffText = truncateDiff(diff.out, 60_000);
+  if (!status.out.trim() && !diffText.trim()) return { ok: false, error: "no changes to describe" };
+  const prompt = [
+    "You generate git metadata. Reply with ONLY a JSON object (no fences, no prose):",
+    '{"branchName": string, "commitMessage": string, "prTitle": string, "prBody": string}',
+    "- branchName: short kebab-case, describes the work (no user/prefix).",
+    "- commitMessage: imperative summary line ≤72 chars; optionally a blank line + short body.",
+    "- prTitle: ≤70 chars.",
+    "- prBody: brief markdown — what changed and why, a few bullets max.",
+    "Match the tone of the recent commit subjects.",
+    "",
+    `Current branch: ${branch.out.trim()}`,
+    `Recent commits:\n${log.out.trim()}`,
+    `git status:\n${status.out.trim()}`,
+    `Diff:\n${diffText}`,
+  ].join("\n");
+  // Run from the OS temp dir, not the repo: claude -p records a session under
+  // its cwd's project, which would surface these one-shot calls as threads.
+  const run = await exec(binPath("claude"), ["-p", "--model", "haiku"], os.tmpdir(), 90_000, agentEnv(), prompt);
+  if (run.code !== 0) return { ok: false, error: (run.err || "claude CLI failed").slice(0, 400) };
+  const body = run.out.replace(/^```(?:json)?/m, "").replace(/```\s*$/m, "").trim();
+  const start = body.indexOf("{");
+  const end = body.lastIndexOf("}");
+  try {
+    const s = JSON.parse(body.slice(start, end + 1));
+    const clean = (v) => (typeof v === "string" ? v.trim() : "");
+    return {
+      ok: true,
+      branchName: clean(s.branchName).replace(/[^a-zA-Z0-9._/-]+/g, "-").replace(/^-+|-+$/g, ""),
+      commitMessage: clean(s.commitMessage),
+      prTitle: clean(s.prTitle),
+      prBody: clean(s.prBody),
+    };
+  } catch {
+    return { ok: false, error: "model returned unparseable output" };
+  }
+}
+
+/**
+ * CI status for the branch's open PR via the gh CLI. Summarised to one word so
+ * the client renders a single row. null checks = no PR / gh missing / timeout —
+ * the row simply doesn't render.
+ */
+async function gitChecks(cwd) {
+  const r = await exec("gh", ["pr", "checks", "--json", "state"], cwd, 8000);
+  // gh exits non-zero when any check fails but still prints JSON — parse regardless.
+  try {
+    const arr = JSON.parse(r.out);
+    if (!Array.isArray(arr) || !arr.length) return { checks: null, failed: 0, total: 0 };
+    const states = arr.map((c) => String(c.state || "").toUpperCase());
+    const failed = states.filter((s) => ["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"].includes(s)).length;
+    const pending = states.filter((s) => ["PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED", "EXPECTED"].includes(s)).length;
+    const checks = failed ? "failing" : pending ? "pending" : "passing";
+    return { checks, failed, total: states.length };
+  } catch {
+    return { checks: null, failed: 0, total: 0 };
+  }
 }
 
 /**
@@ -981,6 +1075,12 @@ const server = http.createServer(async (req, res) => {
       if (!cwd || !existsSync(cwd)) return send(res, 200, { branch: null, files: [], diff: "" });
       return send(res, 200, await gitChanges(cwd));
     }
+    if (url.pathname === "/v1/git/checks") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd || !existsSync(cwd)) return send(res, 200, { checks: null, failed: 0, total: 0 });
+      // gh hits the GitHub API — cache briefly so reopening the sheet is instant.
+      return send(res, 200, await cached(`checks:${cwd}`, 30_000, () => gitChecks(cwd)));
+    }
     if (url.pathname === "/v1/git/commit" && req.method === "POST") {
       const { cwd, message } = await readBody(req);
       if (!cwd || !message) return send(res, 400, { error: "cwd, message required" });
@@ -1001,12 +1101,24 @@ const server = http.createServer(async (req, res) => {
         r = await git(cwd, ["push", "-u", "origin", "HEAD"]);
       return send(res, 200, { ok: r.code === 0, output: (r.err || r.out).trim() });
     }
+    if (url.pathname === "/v1/git/suggest" && req.method === "POST") {
+      const { cwd } = await readBody(req);
+      if (!cwd || !existsSync(cwd)) return send(res, 400, { error: "cwd required" });
+      return send(res, 200, await gitSuggest(cwd));
+    }
+    if (url.pathname === "/v1/git/branch" && req.method === "POST") {
+      // Create + switch to a new branch (used before committing work made on main).
+      const { cwd, name } = await readBody(req);
+      if (!cwd || !name) return send(res, 400, { error: "cwd, name required" });
+      const r = await git(cwd, ["checkout", "-b", name]);
+      return send(res, 200, { ok: r.code === 0, error: r.code === 0 ? undefined : (r.err || r.out).trim() });
+    }
     if (url.pathname === "/v1/git/pr" && req.method === "POST") {
-      const { cwd, title, body } = await readBody(req);
+      const { cwd, title, body, draft } = await readBody(req);
       if (!cwd) return send(res, 400, { error: "cwd required" });
       // Ensure the branch is pushed first, then open a PR via gh (if installed).
       let push = await git(cwd, ["push", "-u", "origin", "HEAD"]);
-      const r = await exec("gh", ["pr", "create", "--fill", ...(title ? ["--title", title] : []), ...(body ? ["--body", body] : [])], cwd);
+      const r = await exec("gh", ["pr", "create", "--fill", ...(draft ? ["--draft"] : []), ...(title ? ["--title", title] : []), ...(body ? ["--body", body] : [])], cwd);
       if (r.code !== 0)
         return send(res, 200, { ok: false, error: r.err || "gh not available or PR failed", pushed: push.code === 0 });
       const urlMatch = (r.out.match(/https?:\/\/\S+/) || [])[0] || null;

@@ -10,6 +10,7 @@ export const COLOR = {
   fgMuted: "#9a9aa5",
   fgFaint: "#62626d",
   success: "#3fb950",
+  warning: "#d29922",
   danger: "#f85149",
 } as const;
 

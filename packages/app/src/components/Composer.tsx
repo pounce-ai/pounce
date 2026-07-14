@@ -70,6 +70,12 @@ export interface ComposerSubmit {
  *  drop text into the composer for the user to review before sending. */
 export interface ComposerHandle {
   insert: (text: string) => void;
+  /** Append `@path` references (dropped/attached sources) to the draft. */
+  addMentions: (paths: string[]) => void;
+  /** Append a bare "@" and focus — opens the file-mention autocomplete. */
+  startMention: () => void;
+  /** Attach local image files (dropped on desktop) as thumbnail attachments. */
+  attachImages: (files: { path: string; mediaType: string }[]) => void;
 }
 
 interface Attachment {
@@ -128,12 +134,47 @@ export function Composer({
     setDraft(next);
     inputRef.current?.setValue(next);
   };
+  // Append text to the draft (space-joined) and focus — shared by every
+  // handle method that adds to, rather than replaces, what the user typed.
+  const appendToDraft = (text: string) => {
+    const cur = markdownRef.current.replace(/\s+$/, "");
+    setInput(cur ? `${cur} ${text}` : text);
+    inputRef.current?.focus();
+  };
+
   useImperativeHandle(ref, () => ({
     insert: (t: string) => {
       setInput(t);
       inputRef.current?.focus();
     },
+    addMentions: (paths: string[]) => appendToDraft(`${paths.map((p) => `@${p}`).join(" ")} `),
+    startMention: () => appendToDraft("@"),
+    attachImages: (files) => {
+      for (const f of files) void attachLocalImage(f.path, f.mediaType);
+    },
   }));
+
+  // Read a dropped image off local disk (desktop drag-and-drop) and attach it
+  // like a picked photo — thumbnail preview + sent as image data.
+  const attachLocalImage = async (path: string, mediaType: string) => {
+    try {
+      const uri = `file://${encodeURI(path)}`;
+      const blob = await (await fetch(uri)).blob();
+      const data = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        // result = "data:<mime>;base64,<data>" — keep only the payload.
+        r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(blob);
+      });
+      if (!data) throw new Error("empty file");
+      setImages((cur) =>
+        cur.some((i) => i.uri === uri) ? cur : [...cur, { uri, data, mediaType }],
+      );
+    } catch {
+      Alert.alert("Couldn't attach image", `${path.split("/").pop()} couldn't be read.`);
+    }
+  };
   const [images, setImages] = useState<Attachment[]>([]);
 
   // Voice dictation: fills the input as you speak, with a visible listening state

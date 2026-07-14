@@ -16,7 +16,7 @@ import { useDevices, useIgnoredSet, useProjectNames, useThreads } from "@litter/
 import { SessionListSkeleton } from "@litter/app/components/Skeleton";
 import { LiveStrip } from "@litter/app/components/LiveStrip";
 import { FilterButton, FilterSheet } from "@litter/app/components/FilterSheet";
-import { ActivityDot, AgentLogo, cn, COLOR, INPUT_TWEAKS, timeAgo } from "@litter/app/ui";
+import { AgentStatusIcon, cn, COLOR, INPUT_TWEAKS, timeAgo } from "@litter/app/ui";
 import { nav$ } from "../shims/router";
 
 type Row =
@@ -292,17 +292,20 @@ function ThreadRow({
       )}
     >
       <View className="flex-row items-center gap-2">
-        <ActivityDot status={s.activity} size={6} />
+        {/* The open thread's feed already shows live state — its row stays calm. */}
+        <AgentStatusIcon agent={s.agent} activity={s.activity} size={12} animated={!selected} />
         <Text
           numberOfLines={1}
-          className={cn("flex-1 text-[13px]", selected ? "font-semibold text-fg" : "text-fg")}
+          className={cn(
+            "flex-1 text-[13px]",
+            selected ? "font-semibold text-fg" : s.activity === "idle" ? "text-fg-muted" : "text-fg",
+          )}
         >
           {s.title}
         </Text>
         <Text className="text-[11px] text-fg-faint">{timeAgo(s.updatedAt)}</Text>
       </View>
-      <View className="mt-0.5 flex-row items-center gap-1.5 pl-[14px]">
-        <AgentLogo agent={s.agent} size={11} />
+      <View className="mt-0.5 flex-row items-center gap-1.5 pl-[20px]">
         {s.branch ? (
           <Text numberOfLines={1} className="flex-1 font-mono text-[10.5px] text-fg-faint">
             ⎇ {s.branch}

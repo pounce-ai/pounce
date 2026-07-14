@@ -2,7 +2,7 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import type { Session } from "@litter/shared";
 import { useLiveSessions, useProjectNames, useSessionsByLastActive } from "../state/db/hooks";
-import { ActivityDot, AgentLogo, cn } from "../ui";
+import { AgentStatusIcon, cn } from "../ui";
 
 /** How many fallback (most-recently-active) cards to show when nothing is live. */
 const FALLBACK_COUNT = 5;
@@ -34,7 +34,7 @@ export function LiveStrip() {
         className="active:opacity-70 flex-row items-center justify-between px-4 pb-2"
       >
         <View className="flex-row items-center gap-1.5">
-          {isLive ? <ActivityDot status="running" size={7} /> : null}
+          {isLive ? <View className="h-1.5 w-1.5 rounded-full bg-success" /> : null}
           <Text className="text-[12px] uppercase tracking-wide text-fg-faint">
             {isLive ? `Live · ${live.length}` : "Recent"}
           </Text>
@@ -69,8 +69,8 @@ function LiveCard({ session, repoName }: { session: Session; repoName: string })
       )}
     >
       <View className="flex-row items-center gap-1.5">
-        <ActivityDot status={session.activity} size={7} />
-        <AgentLogo agent={session.agent} size={13} />
+        {/* Never animates: this strip is a shortcut, not a status board. */}
+        <AgentStatusIcon agent={session.agent} activity={session.activity} size={14} animated={false} />
       </View>
       {/* Reserve two lines so one- and two-line titles keep every card the same
           height and pin the repo name to a consistent baseline across the strip. */}
