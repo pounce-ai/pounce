@@ -31,7 +31,7 @@ import {
   useThreads,
 } from "../state/db/hooks";
 import { SessionCard } from "../components/SessionCard";
-import { RecentStrip } from "../components/RecentStrip";
+import { LiveStrip } from "../components/LiveStrip";
 import { SessionListSkeleton } from "../components/Skeleton";
 import { FilterButton, FilterSheet } from "../components/FilterSheet";
 import { cn, COLOR, DeviceIcon } from "../ui";
@@ -88,6 +88,8 @@ export default function HomeScreen() {
     device: filters$.device.get(),
     agent: filters$.agent.get(),
     repos: filters$.repos.get(),
+    statuses: filters$.statuses.get(),
+    branchQuery: filters$.branchQuery.get(),
     needsOnly: filters$.needsOnly.get(),
     favOnly: filters$.favOnly.get(),
   }));
@@ -289,7 +291,7 @@ export default function HomeScreen() {
         // Always render: recents come from persisted local state, so they must
         // survive being offline/mid-reconnect — the strip hides itself when
         // empty. Gating on `connected` made it vanish on every blip.
-        ListHeaderComponent={<RecentStrip />}
+        ListHeaderComponent={<LiveStrip />}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLOR.accent} />}
         ListEmptyComponent={
           loading ? (

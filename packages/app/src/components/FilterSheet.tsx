@@ -23,6 +23,7 @@ import {
   filters$,
   isRepoIgnored,
   reposByActivity,
+  type StatusBucket,
   toggleRepoIgnore,
 } from "../state/stores";
 import {
@@ -88,10 +89,17 @@ function FilterChip({
   );
 }
 
+/** The three coarse status buckets, each with the dot colour ActivityDot uses. */
+const STATUS_CHIPS: { bucket: StatusBucket; label: string; dot: string }[] = [
+  { bucket: "active", label: "Active", dot: "bg-success" },
+  { bucket: "idle", label: "Idle", dot: "bg-fg-faint" },
+  { bucket: "done", label: "Done", dot: "bg-info" },
+];
+
 /**
- * Shared filter bottom sheet — status · project · device · agent — writing
- * straight to `filters$`, so Home and Search stay in lockstep. Sections only
- * appear when there's a real choice to make (>1 project / device / agent).
+ * Shared filter bottom sheet — show · status · device · agent · branch · project
+ * — writing straight to `filters$`, so Home and Search stay in lockstep. Sections
+ * only appear when there's a real choice to make (>1 project / device / agent).
  */
 export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const insets = useSafeAreaInsets();
@@ -117,6 +125,14 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
     const q = repoQuery.trim().toLowerCase();
     return q ? repos.filter((r) => r.name.toLowerCase().includes(q)) : repos;
   }, [repos, repoQuery]);
+  const toggleStatus = (b: StatusBucket) =>
+    filters$.statuses.set(
+      f.statuses.includes(b) ? f.statuses.filter((x) => x !== b) : [...f.statuses, b],
+    );
+  const hasBranches = useMemo(
+    () => rawThreads.some((s) => s.branch || s.worktree),
+    [rawThreads],
+  );
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -157,6 +173,22 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
           </View>
         </View>
 
+        {/* Status — coarse buckets over the activity axis (multi-select; none = all). */}
+        <View className="gap-1.5">
+          <Text className="text-[11px] uppercase tracking-wide text-fg-faint">Status</Text>
+          <View className="flex-row flex-wrap gap-2">
+            {STATUS_CHIPS.map((c) => (
+              <FilterChip
+                key={c.bucket}
+                label={c.label}
+                active={f.statuses.includes(c.bucket)}
+                onPress={() => toggleStatus(c.bucket)}
+                icon={<View className={cn("h-2 w-2 rounded-full", c.dot)} />}
+              />
+            ))}
+          </View>
+        </View>
+
         {devices.length > 1 ? (
           <View className="gap-1.5">
             <Text className="text-[11px] uppercase tracking-wide text-fg-faint">Device</Text>
@@ -193,6 +225,31 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
                   onPress={() => filters$.agent.set(f.agent === a ? null : a)}
                 />
               ))}
+            </View>
+          </View>
+        ) : null}
+
+        {/* Branch / worktree — free-text substring match over both, so you can
+            narrow to a feature branch or a specific worktree path. */}
+        {hasBranches ? (
+          <View className="gap-1.5">
+            <Text className="text-[11px] uppercase tracking-wide text-fg-faint">Branch / worktree</Text>
+            <View className="h-9 flex-row items-center gap-2 rounded-xl bg-surface-alt px-3">
+              <Ionicons name="git-branch-outline" size={14} color={COLOR.fgFaint} />
+              <TextInput
+                value={f.branchQuery}
+                onChangeText={(t) => filters$.branchQuery.set(t)}
+                placeholder="Search branch or worktree…"
+                placeholderTextColor={COLOR.fgFaint}
+                autoCapitalize="none"
+                autoCorrect={false}
+                className={cn("flex-1 text-[14px] text-fg", inputH("h-9"))}
+              />
+              {f.branchQuery ? (
+                <Pressable onPress={() => filters$.branchQuery.set("")} hitSlop={8} className="active:opacity-60">
+                  <Ionicons name="close-circle" size={15} color={COLOR.fgFaint} />
+                </Pressable>
+              ) : null}
             </View>
           </View>
         ) : null}

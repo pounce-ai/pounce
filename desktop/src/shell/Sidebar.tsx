@@ -14,7 +14,7 @@ import type { Session } from "@litter/shared";
 import { applyFilters, connection$, filters$, needsYou } from "@litter/app/state/stores";
 import { useDevices, useIgnoredSet, useProjectNames, useThreads } from "@litter/app/state/db/hooks";
 import { SessionListSkeleton } from "@litter/app/components/Skeleton";
-import { RecentStrip } from "@litter/app/components/RecentStrip";
+import { LiveStrip } from "@litter/app/components/LiveStrip";
 import { FilterButton, FilterSheet } from "@litter/app/components/FilterSheet";
 import { ActivityDot, AgentLogo, cn, COLOR, INPUT_TWEAKS, timeAgo } from "@litter/app/ui";
 import { nav$ } from "../shims/router";
@@ -146,9 +146,9 @@ export function Sidebar() {
         </View>
       ) : null}
 
-      {/* Jump back in — the threads you opened most recently (hides when empty
-          or while searching). */}
-      {!q ? <RecentStrip /> : null}
+      {/* Live — sessions working right now, or the most recently active as a
+          fallback (hides when empty or while searching). */}
+      {!q ? <LiveStrip /> : null}
 
       <LegendList
         style={{ flex: 1 }}

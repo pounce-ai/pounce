@@ -10,6 +10,7 @@
  */
 import { observable } from "@legendapp/state";
 import type {
+  ActivityStatus,
   PermissionMode,
   Repository,
   RunImage,
@@ -57,17 +58,32 @@ export interface PendingTurn {
 }
 export const pendingTurns$ = observable<Record<string, PendingTurn>>({});
 
+/** Coarse status buckets for the Home/Search status filter. Every activity maps
+ *  to exactly one bucket: `active` = a turn in flight, `idle` = live but no turn,
+ *  `done` = the turn ended (success or failure). See {@link statusBucket}. */
+export type StatusBucket = "active" | "idle" | "done";
+
 /** Active filters for the Home list. null = all. */
 export const filters$ = observable<{
   device: string | null;
   agent: string | null;
   repos: string[]; // multi-select folders; empty = all
+  statuses: StatusBucket[]; // multi-select status buckets; empty = all
+  branchQuery: string; // substring match over branch + worktree; "" = all
   needsOnly: boolean;
   favOnly: boolean;
-}>({ device: null, agent: null, repos: [], needsOnly: true, favOnly: false });
+}>({ device: null, agent: null, repos: [], statuses: [], branchQuery: "", needsOnly: true, favOnly: false });
 
 /** The zero state for every filter — a single source for "Clear all". */
-export const CLEARED_FILTERS = { device: null, agent: null, repos: [], needsOnly: false, favOnly: false };
+export const CLEARED_FILTERS = {
+  device: null,
+  agent: null,
+  repos: [],
+  statuses: [],
+  branchQuery: "",
+  needsOnly: false,
+  favOnly: false,
+};
 
 export const user$ = observable<UserProfile>({
   id: "local",
@@ -85,16 +101,31 @@ export const connection$ = observable<{
 persist(filters$, "filters"); // remember the user's last filter selection
 persist(user$, "user");
 
-/** Count of *narrowing* filters (device/agent/favourites) for the bottom-bar badge. */
+/** Count of *narrowing* filters (device/agent/status/branch/favourites) for the badge. */
 export function activeFilterCount(): number {
   const f = filters$.get();
-  return (f.device ? 1 : 0) + (f.agent ? 1 : 0) + (f.repos.length ? 1 : 0) + (f.favOnly ? 1 : 0);
+  return (
+    (f.device ? 1 : 0) +
+    (f.agent ? 1 : 0) +
+    (f.repos.length ? 1 : 0) +
+    (f.statuses.length ? 1 : 0) +
+    (f.branchQuery.trim() ? 1 : 0) +
+    (f.favOnly ? 1 : 0)
+  );
 }
 
 /** Whether any filter deviates from the default view (drives "Clear all"). */
 export function hasActiveFilter(): boolean {
   const f = filters$.get();
-  return !!(f.agent || f.device || f.repos.length || f.needsOnly || f.favOnly);
+  return !!(
+    f.agent ||
+    f.device ||
+    f.repos.length ||
+    f.statuses.length ||
+    f.branchQuery.trim() ||
+    f.needsOnly ||
+    f.favOnly
+  );
 }
 
 // --- pure helpers (operate on plain data, no store reads) ---
@@ -114,25 +145,50 @@ export function rankSession(s: Session): number {
   return 3;
 }
 
+/** Every activity collapses into one coarse bucket for the status filter. */
+const STATUS_BUCKET: Record<ActivityStatus, StatusBucket> = {
+  running: "active",
+  streaming: "active",
+  queued: "active",
+  awaiting_input: "active",
+  idle: "idle",
+  completed: "done",
+  failed: "done",
+};
+
+/** The coarse status bucket a session falls in (drives the status filter). */
+export function statusBucket(s: Session): StatusBucket {
+  return STATUS_BUCKET[s.activity];
+}
+
 /** A message is marked by default only if it carries prose. */
 export function defaultMarked(ev: TimelineEvent, agent?: string): boolean {
   return ev.type === "user_message" && parseUserMessage(ev.text, agent).text.trim().length > 0;
 }
 
 export interface FilterContext {
-  filters: { device: string | null; agent: string | null; repos: string[] };
+  filters: {
+    device: string | null;
+    agent: string | null;
+    repos: string[];
+    statuses?: StatusBucket[];
+    branchQuery?: string;
+  };
   ignored: Set<string>;
   repoName: (repoId: string) => string;
 }
 
 /** The active-session predicate, made from plain data so a full-list pass doesn't
- *  re-read any store per session. Ignored/dotfolders never show; device/agent/repo
- *  filters narrow. */
+ *  re-read any store per session. Ignored/dotfolders never show; device/agent/repo/
+ *  status/branch filters narrow. */
 export function passesFilter(s: Session, ctx: FilterContext): boolean {
   if (ctx.ignored.has(s.repoId) || isDotName(ctx.repoName(s.repoId))) return false;
   if (ctx.filters.device && s.hostId !== ctx.filters.device) return false;
   if (ctx.filters.agent && s.agent !== ctx.filters.agent) return false;
   if (ctx.filters.repos.length && !ctx.filters.repos.includes(s.repoId)) return false;
+  if (ctx.filters.statuses?.length && !ctx.filters.statuses.includes(statusBucket(s))) return false;
+  const bq = ctx.filters.branchQuery?.trim().toLowerCase();
+  if (bq && !`${s.branch ?? ""} ${s.worktree ?? ""}`.toLowerCase().includes(bq)) return false;
   return true;
 }
 

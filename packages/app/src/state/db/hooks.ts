@@ -19,14 +19,12 @@ import {
   markers,
   messages,
   projects,
-  recents,
   syncLog,
   threadModels,
   threads,
   type AgentModelsRow,
   type DeviceOverrideRow,
   type MessageRow,
-  type RecentRow,
   type SyncLogRow,
 } from "./collections";
 
@@ -57,23 +55,39 @@ export function useDeviceOverrides(): Record<string, DeviceOverrideRow> {
   return useMemo(() => Object.fromEntries(rows.map((o) => [o.id, o])), [rows]);
 }
 
-export function useRecents(): RecentRow[] {
-  return (useLiveQuery((q) => q.from({ r: recents })).data as RecentRow[] | undefined) ?? [];
+/** Threads eligible to surface in the Live strip / activity list: not in an
+ *  ignored or dotfolder repo (dotfolders stay hidden everywhere). */
+function useVisibleThreads(): Session[] {
+  const all = useThreads();
+  const ignored = useIgnoredSet();
+  const names = useProjectNames();
+  return useMemo(
+    () => all.filter((s) => !ignored.has(s.repoId) && !(names[s.repoId] ?? "").startsWith(".")),
+    [all, ignored, names],
+  );
 }
 
-/** Threads the user opened most recently (newest first) that still exist —
- *  drives "Jump back in". Ordering comes from visits, not agent activity. */
-export function useRecentSessions(limit: number): Session[] {
-  const opens = useRecents();
-  const all = useThreads();
+/** Sessions whose agent is working right now (running/streaming), most-recent
+ *  activity first — the primary content of the Live strip. */
+export function useLiveSessions(): Session[] {
+  const visible = useVisibleThreads();
+  return useMemo(
+    () =>
+      visible
+        .filter((s) => s.activity === "running" || s.activity === "streaming")
+        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)),
+    [visible],
+  );
+}
+
+/** All visible sessions ordered by last activity (newest first). `limit` caps
+ *  the count; omit for the full ordered list. */
+export function useSessionsByLastActive(limit?: number): Session[] {
+  const visible = useVisibleThreads();
   return useMemo(() => {
-    const byId = new Map(all.map((s) => [s.id, s]));
-    return opens
-      .filter((o) => byId.has(o.id))
-      .sort((a, b) => Date.parse(b.openedAt) - Date.parse(a.openedAt))
-      .slice(0, limit)
-      .map((o) => byId.get(o.id)!);
-  }, [opens, all, limit]);
+    const sorted = [...visible].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+    return limit == null ? sorted : sorted.slice(0, limit);
+  }, [visible, limit]);
 }
 
 /** repoId → display name, for cheap lookups in lists. */
