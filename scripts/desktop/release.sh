@@ -49,6 +49,16 @@ if [ -d "$SP" ]; then
   sign "$APP/Contents/Frameworks/Sparkle.framework"
 fi
 [ -d "$APP/Contents/Frameworks/hermes.framework" ] && sign "$APP/Contents/Frameworks/hermes.framework"
+# The embedded bridge ships native N-API binaries (zigpty's PTY .node, and any
+# the agent SDK carries) under Resources/bridge. Notarization rejects the app
+# unless every Mach-O is hardened-runtime signed, so sign them inside-out here.
+# The non-macOS prebuilds (linux/win .node = ELF/PE) aren't Mach-O — skip them.
+BRIDGE_DIR="$APP/Contents/Resources/bridge"
+if [ -d "$BRIDGE_DIR" ]; then
+  while IFS= read -r -d '' bin; do
+    if file "$bin" | grep -q "Mach-O"; then sign "$bin"; fi
+  done < <(find "$BRIDGE_DIR" -type f \( -name "*.node" -o -name "*.dylib" \))
+fi
 # The app last, with entitlements.
 codesign --force --options runtime --timestamp ${SIGN_KEYCHAIN:+--keychain "$SIGN_KEYCHAIN"} --entitlements "$ENTITLEMENTS" -s "$SIGN_IDENTITY" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
