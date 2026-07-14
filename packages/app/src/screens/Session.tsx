@@ -47,7 +47,7 @@ import {
   useThreadMarkers,
   useThreadModel,
 } from "../state/db/hooks";
-import { fetchMessages, fetchUsage, interruptTurn, respondPermission, streamLiveMessage, type ThreadUsage } from "../services/bridge";
+import { fetchMessages, fetchUsage, interruptTurn, respondPermission, respondQuestion, streamLiveMessage, type ThreadUsage } from "../services/bridge";
 import { Ionicons } from "@expo/vector-icons";
 import { ACTIVITY_LABEL, AgentStatusIcon, BranchChip, cn, COLOR, pickSheet } from "../ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "../ui/agent-meta";
@@ -124,7 +124,8 @@ export default function SessionScreen() {
   // it would orphan once live sync swaps in the real id, so gate the star on that.
   const canFavourite = !!session && !session.id.startsWith("new_");
 
-  // Record that the user opened this thread — drives the home "Jump back in" strip.
+  // Record that the user opened this thread — kept as visit history (the Live
+  // strip now orders by agent activity, not visits).
   useEffect(() => {
     if (session?.id && !session.id.startsWith("new_")) {
       markOpened(session.id, new Date().toISOString());
@@ -227,6 +228,7 @@ export default function SessionScreen() {
     (cmd: string) => composerRef.current?.insert(`!${cmd.trim()}`),
     [],
   );
+
   const [markerSheet, setMarkerSheet] = useState(false);
   const [envSheet, setEnvSheet] = useState(false);
 
@@ -636,6 +638,9 @@ export default function SessionScreen() {
               onAtBottomChange={setAtBottom}
               onRespondPermission={(requestId, optionId) => {
                 if (session?.hostId) void respondPermission(session.hostId, requestId, optionId);
+              }}
+              onRespondQuestion={(questionId, answers) => {
+                if (session?.hostId && id) void respondQuestion(session.hostId, id, questionId, answers);
               }}
               footer={running ? <WorkingIndicator agent={session.agent} label={workLabel} since={turnStartTs} /> : undefined}
             />

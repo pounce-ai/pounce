@@ -6,6 +6,7 @@ import {
   assertNeverEvent,
   type MessageImage,
   type PermissionRequestEvent,
+  type QuestionRequestEvent,
   type TimelineEvent,
   type ToolCallEvent,
   type ToolResultEvent,
@@ -114,6 +115,7 @@ export const Timeline = memo(function Timeline({
   onRunCommand,
   onAtBottomChange,
   onRespondPermission,
+  onRespondQuestion,
 }: {
   events: TimelineEvent[];
   /** Which agent produced these events — selects the body-cleaning rules. */
@@ -122,6 +124,8 @@ export const Timeline = memo(function Timeline({
   cwd?: string | null;
   /** Answer an ACP permission prompt (requestId, chosen optionId or null). */
   onRespondPermission?: (requestId: string, optionId: string | null) => void;
+  /** Answer an AskUserQuestion (questionId, chosen option indices per question). */
+  onRespondQuestion?: (questionId: string, answers: number[][]) => void;
   footer?: React.ReactElement;
   /** Marker state is scoped per session — required for marked indicators. */
   sessionId?: string;
@@ -168,6 +172,7 @@ export const Timeline = memo(function Timeline({
           }
           batchHeader={headers.get(item.id)}
           onRespondPermission={onRespondPermission}
+          onRespondQuestion={onRespondQuestion}
         />
       )}
       // A blended average across the row types (short user bubbles / meta lines
@@ -217,6 +222,7 @@ const Row = memo(function Row({
   batchHeader,
   cwd,
   onRespondPermission,
+  onRespondQuestion,
 }: {
   event: TimelineEvent;
   agent?: string;
@@ -232,6 +238,8 @@ const Row = memo(function Row({
   cwd?: string | null;
   /** Answer an ACP permission prompt (requestId, chosen optionId or null). */
   onRespondPermission?: (requestId: string, optionId: string | null) => void;
+  /** Answer an AskUserQuestion (questionId, chosen option indices per question). */
+  onRespondQuestion?: (questionId: string, answers: number[][]) => void;
 }) {
   const onLongPress = onLongPressEvent ? () => onLongPressEvent(event) : undefined;
   switch (event.type) {
@@ -296,6 +304,8 @@ const Row = memo(function Row({
       return <Meta text={event.message} level={event.level} />;
     case "permission_request":
       return <PermissionCard event={event} onRespond={onRespondPermission} />;
+    case "question_request":
+      return <QuestionCard event={event} onRespond={onRespondQuestion} />;
     default:
       return assertNeverEvent(event);
   }
@@ -397,6 +407,127 @@ function PermissionCard({
             );
           })}
         </View>
+      )}
+    </View>
+  );
+}
+
+/**
+ * AskUserQuestion — the agent is blocked on one or more multiple-choice
+ * questions. Each question is single- or multi-select; tapping toggles options,
+ * and Submit (enabled once every question has a pick) sends the chosen option
+ * indices back to the host, which drives the CLI's picker to answer. Locks to a
+ * summary once submitted. Mirrors PermissionCard's "answer the paused turn" role.
+ */
+function QuestionCard({
+  event,
+  onRespond,
+}: {
+  event: QuestionRequestEvent;
+  onRespond?: (questionId: string, answers: number[][]) => void;
+}) {
+  // selections[q] = chosen option indices for question q (one for single-select).
+  const [selections, setSelections] = useState<number[][]>(() => event.questions.map(() => []));
+  const [submitted, setSubmitted] = useState(false);
+
+  const toggle = (q: number, opt: number) => {
+    if (submitted) return;
+    setSelections((prev) => {
+      const next = prev.map((s) => [...s]);
+      const cur = next[q];
+      if (event.questions[q].multiSelect) {
+        const at = cur.indexOf(opt);
+        if (at >= 0) cur.splice(at, 1);
+        else cur.push(opt);
+      } else {
+        next[q] = cur[0] === opt ? [] : [opt];
+      }
+      return next;
+    });
+  };
+
+  const complete = selections.every((s) => s.length > 0);
+  const submit = () => {
+    if (submitted || !complete) return;
+    setSubmitted(true);
+    onRespond?.(event.questionId, selections);
+  };
+
+  return (
+    <View className="gap-3 rounded-xl border border-accent/40 bg-accent/5 p-3">
+      <View className="flex-row items-center gap-1.5">
+        <Ionicons name="help-circle-outline" size={14} color={COLOR.accent} />
+        <Text className="text-[12px] font-semibold uppercase tracking-wide text-accent">
+          {event.questions.length > 1 ? `${event.questions.length} questions` : "Question"}
+        </Text>
+      </View>
+
+      {event.questions.map((q, qi) => (
+        <View key={qi} className="gap-2">
+          {event.questions.length > 1 && q.header ? (
+            <Text className="text-[11px] uppercase tracking-wide text-fg-faint">{q.header}</Text>
+          ) : null}
+          <Text className="text-[13px] font-medium text-fg">{q.question}</Text>
+          {q.multiSelect ? (
+            <Text className="text-[11px] text-fg-faint">Choose any that apply</Text>
+          ) : null}
+          <View className="gap-1.5">
+            {q.options.map((o, oi) => {
+              const on = selections[qi].includes(oi);
+              return (
+                <Pressable
+                  key={oi}
+                  disabled={submitted}
+                  onPress={() => toggle(qi, oi)}
+                  className={cn(
+                    "active:opacity-80 flex-row items-start gap-2 rounded-lg border p-2.5",
+                    on ? "border-accent bg-accent/15" : "border-border bg-surface",
+                  )}
+                >
+                  <Ionicons
+                    name={
+                      q.multiSelect
+                        ? on ? "checkbox" : "square-outline"
+                        : on ? "radio-button-on" : "radio-button-off"
+                    }
+                    size={16}
+                    color={on ? COLOR.accent : COLOR.fgFaint}
+                  />
+                  <View className="flex-1">
+                    <Text className={cn("text-[13px] font-medium", on ? "text-accent" : "text-fg")}>
+                      {o.label}
+                    </Text>
+                    {o.description ? (
+                      <Text className="mt-0.5 text-[11px] text-fg-muted">{o.description}</Text>
+                    ) : null}
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ))}
+
+      {submitted ? (
+        <Text className="text-[12px] font-medium text-fg-muted">
+          Answered:{" "}
+          {event.questions
+            .map((q, qi) => selections[qi].map((oi) => q.options[oi]?.label).join(", "))
+            .join(" · ")}
+        </Text>
+      ) : (
+        <Pressable
+          onPress={submit}
+          disabled={!complete}
+          className={cn(
+            "active:opacity-90 h-10 items-center justify-center rounded-lg",
+            complete ? "bg-accent" : "bg-surface-alt",
+          )}
+        >
+          <Text className={cn("text-[13px] font-semibold", complete ? "text-white" : "text-fg-faint")}>
+            Submit
+          </Text>
+        </Pressable>
       )}
     </View>
   );

@@ -27,6 +27,7 @@ import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import { createHost } from "./agents/host.mjs";
 import { resolvePermission } from "./agents/acp.mjs";
+import { startInteractiveSession, answerQuestion, pendingQuestion, isInteractive } from "./agents/pty-turn.mjs";
 import { agentEnv, binPath, primaryLanIp } from "./agents/env.mjs";
 import { readConfig, writeConfig } from "./agents/config.mjs";
 
@@ -528,7 +529,25 @@ function streamTurn(agent, threadId, text, cwd, onEvent, onDone, opts = {}) {
 async function getMessages(agent, threadId, fresh = false, limit) {
   // The host keeps parsed histories in a hard-capped LRU that its fs watcher
   // invalidates the moment a transcript changes.
-  return host.getEvents(agent, threadId, { limit, fresh });
+  const events = await host.getEvents(agent, threadId, { limit, fresh });
+  // A PTY-hosted interactive session blocked on AskUserQuestion → append a
+  // synthesized question_request so the app can render the answerable card. Only
+  // fires for interactive sessions (pendingQuestion is null otherwise), and
+  // clears itself once the answer lands in the transcript.
+  const pq = pendingQuestion(threadId);
+  if (pq) {
+    const lastSeq = events.length ? events[events.length - 1].seq || 0 : 0;
+    events.push({
+      id: `q:${pq.questionId}`,
+      conversationId: threadId,
+      seq: lastSeq + 1,
+      ts: new Date().toISOString(),
+      type: "question_request",
+      questionId: pq.questionId,
+      questions: pq.questions,
+    });
+  }
+  return events;
 }
 
 // --- Per-thread token usage + cost -----------------------------------------
@@ -1144,6 +1163,24 @@ const server = http.createServer(async (req, res) => {
       if (!requestId) return send(res, 400, { error: "requestId required" });
       const ok = resolvePermission(requestId, optionId ?? null);
       return send(res, 200, { ok });
+    }
+    if (url.pathname === "/v1/turn/answer" && req.method === "POST") {
+      // Answer a pending AskUserQuestion on a PTY-hosted session by driving the
+      // picker keystrokes. `answers` = chosen option indices per question.
+      const { threadId, answers } = await readBody(req);
+      if (!threadId || !Array.isArray(answers)) return send(res, 400, { error: "threadId, answers required" });
+      const ok = await answerQuestion(threadId, answers);
+      if (ok) cache.delete("threads"); // activity changes as the turn resumes
+      return send(res, 200, { ok });
+    }
+    if (url.pathname === "/v1/session/interactive" && req.method === "POST") {
+      // Launch claude's TUI in a PTY so its interactive prompts (AskUserQuestion,
+      // …) are answerable from the app. Returns the real threadId.
+      const { threadId, text, cwd, model } = await readBody(req);
+      if (!text) return send(res, 400, { error: "text required" });
+      const id = startInteractiveSession({ threadId, text, cwd, model });
+      cache.delete("threads");
+      return send(res, 200, { threadId: id });
     }
     if (url.pathname === "/v1/turn/interrupt" && req.method === "POST") {
       const { agent, threadId } = await readBody(req);

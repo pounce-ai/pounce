@@ -954,6 +954,52 @@ export async function respondPermission(
   }
 }
 
+/** Answer a pending AskUserQuestion (from a question_request event). `answers`
+ *  is the chosen option indices per question. The host drives the CLI's picker
+ *  (keystrokes) to answer the paused turn. */
+export async function respondQuestion(
+  hostId: string,
+  threadId: string,
+  questionId: string,
+  answers: number[][],
+): Promise<boolean> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return false;
+  try {
+    const res = await fetch(`${await bridgeBase(cfg)}/v1/turn/answer`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ threadId, questionId, answers }),
+    });
+    const j = (await res.json()) as { ok?: boolean };
+    return !!j.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Launch a PTY-hosted interactive claude session (its prompts — AskUserQuestion,
+ *  … — become answerable from the app). Returns the real threadId, or null. */
+export async function startInteractive(
+  hostId: string,
+  text: string,
+  cwd: string | null,
+): Promise<string | null> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return null;
+  try {
+    const res = await fetch(`${await bridgeBase(cfg)}/v1/session/interactive`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ text, cwd }),
+    });
+    const j = (await res.json()) as { threadId?: string };
+    return j.threadId ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export interface RepoEntry {
   path: string;
   type: "file" | "dir";

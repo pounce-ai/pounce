@@ -16,6 +16,7 @@ import { nav$, router, RouteParamsProvider } from "../shims/router";
 import { COLOR } from "@litter/app/ui";
 import { Sidebar } from "./Sidebar";
 import SessionScreen from "@litter/app/screens/Session";
+import SessionsScreen from "@litter/app/screens/Sessions";
 import SearchScreen from "@litter/app/screens/Search";
 import SettingsScreen from "@litter/app/screens/Settings";
 import NewTaskScreen from "@litter/app/screens/New";
@@ -33,6 +34,7 @@ import PairScreen from "../screens/Pair";
  *  still clamps these on small windows. */
 const MODALS: Record<string, { component: ComponentType; width: number; height: number }> = {
   "/search": { component: SearchScreen, width: 620, height: 560 },
+  "/sessions": { component: SessionsScreen, width: 620, height: 660 },
   "/settings": { component: SettingsScreen, width: 620, height: 660 },
   "/new": { component: NewTaskScreen, width: 640, height: 660 },
   "/changes": { component: ChangesScreen, width: 860, height: 660 },

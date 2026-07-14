@@ -27,6 +27,7 @@ export default function RootLayout() {
       >
         <Stack.Screen name="(app)" />
         <Stack.Screen name="session/[id]" />
+        <Stack.Screen name="sessions" options={{ presentation: "modal" }} />
         <Stack.Screen name="new" options={{ presentation: "modal" }} />
         <Stack.Screen name="changes" options={{ presentation: "modal" }} />
         <Stack.Screen name="terminal" options={{ presentation: "modal" }} />

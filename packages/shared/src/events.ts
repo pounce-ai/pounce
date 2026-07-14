@@ -123,6 +123,34 @@ export interface PermissionRequestEvent extends TimelineBase {
   readonly options: readonly PermissionOption[];
 }
 
+/** One choice offered for an AskUserQuestion question. `preview` is the SDK's
+ *  focus-preview (mockups/code/comparisons) when present. */
+export interface QuestionOption {
+  readonly label: string;
+  readonly description?: string;
+  readonly preview?: string;
+}
+
+/** One question in an AskUserQuestion call. `header` is the short chip label. */
+export interface Question {
+  readonly question: string;
+  readonly header: string;
+  readonly multiSelect: boolean;
+  readonly options: readonly QuestionOption[];
+}
+
+/**
+ * The agent called AskUserQuestion and is blocked awaiting a multiple-choice
+ * answer. The client renders the questions/options; the chosen labels are POSTed
+ * back to the bridge, which drives the hosted CLI's picker (keystrokes) to
+ * answer the paused turn. Only appears on PTY-hosted interactive sessions.
+ */
+export interface QuestionRequestEvent extends TimelineBase {
+  readonly type: "question_request";
+  readonly questionId: string;
+  readonly questions: readonly Question[];
+}
+
 /** The discriminated union the timeline list switches over. */
 export type TimelineEvent =
   | UserMessageEvent
@@ -135,7 +163,8 @@ export type TimelineEvent =
   | GitEvent
   | TerminalEvent
   | SystemEvent
-  | PermissionRequestEvent;
+  | PermissionRequestEvent
+  | QuestionRequestEvent;
 
 export type TimelineEventType = TimelineEvent["type"];
 

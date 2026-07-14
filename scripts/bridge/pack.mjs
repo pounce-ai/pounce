@@ -33,9 +33,10 @@ step(`Packing bridge → ${path.relative(process.cwd(), OUT) || OUT}`);
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 
-// 1. Launcher: server.mjs + workspace deps → one file.
+// 1. Launcher: server.mjs + workspace deps → one file. zigpty is kept external
+//    (it loads a native .node the bundler can't follow) and shipped in step 3.
 step("Bundling launcher");
-run(["build", path.join(REPO, "apps/bridge/desktop-launcher.mjs"), "--target=node", "--outfile", path.join(OUT, "launcher.mjs")]);
+run(["build", path.join(REPO, "apps/bridge/desktop-launcher.mjs"), "--target=node", "--external", "zigpty", "--outfile", path.join(OUT, "launcher.mjs")]);
 
 // 2. ACP adapters (claude, codex) beside the launcher — the bridge spawns these
 //    for richer live-turn status when BRIDGE_ACP=1; the stream-json path works
@@ -63,6 +64,17 @@ if (existsSync(sdkSrc)) {
   cpSync(sdkSrc, sdkDst, { recursive: true });
 } else {
   console.warn(`  ! claude-agent-sdk not found — claude ACP turns will fail to import`);
+}
+
+// 3b. zigpty — the PTY host for interactive (answerable) sessions. Statically
+//     imported by the launcher but kept external (native N-API .node prebuilds),
+//     so ship it as a sibling package the launcher's `import "zigpty"` resolves.
+const zigptySrc = path.join(REPO, "node_modules/zigpty");
+if (existsSync(zigptySrc)) {
+  step("Copying zigpty (native PTY)");
+  cpSync(zigptySrc, path.join(OUT, "node_modules/zigpty"), { recursive: true });
+} else {
+  console.warn(`  ! zigpty not found — interactive PTY sessions will be unavailable`);
 }
 
 // 4. Install/uninstall scripts + README.
