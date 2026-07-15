@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Text, View } from "react-native";
 import {
   Animated,
@@ -23,30 +23,72 @@ function Dot({ delay }: { delay: number }) {
   return <Animated.View style={[style, { width: 5, height: 5, borderRadius: 3, backgroundColor: COLOR.fgMuted }]} />;
 }
 
-/** Claude Code-style working verbs — one is picked per turn. */
+/** Claude Code's full "working" gerund list (extracted verbatim from the CLI).
+ *  Unlike the CLI — which re-rolls a random word every few seconds — we pick ONE
+ *  deterministically per turn (see below) so every Pounce surface (phone,
+ *  desktop) shows the SAME word for the same turn. A clock-rotated word couldn't
+ *  stay in sync across devices. */
 const VERBS = [
-  "Pouncing", "Transmuting", "Cogitating", "Levitating", "Percolating",
-  "Brewing", "Noodling", "Marinating", "Simmering", "Conjuring",
-  "Scheming", "Untangling", "Ruminating", "Tinkering", "Sautéing",
+  "Accomplishing", "Actioning", "Actualizing", "Architecting", "Baking", "Beaming", "Beboppin'",
+  "Befuddling", "Billowing", "Blanching", "Bloviating", "Boogieing", "Boondoggling", "Booping",
+  "Bootstrapping", "Brewing", "Bunning", "Burrowing", "Calculating", "Canoodling", "Caramelizing",
+  "Cascading", "Catapulting", "Cerebrating", "Channeling", "Channelling", "Choreographing",
+  "Churning", "Clauding", "Coalescing", "Cogitating", "Combobulating", "Composing", "Computing",
+  "Concocting", "Considering", "Contemplating", "Cooking", "Crafting", "Creating", "Crunching",
+  "Crystallizing", "Cultivating", "Deciphering", "Deliberating", "Determining", "Dilly-dallying",
+  "Discombobulating", "Doing", "Doodling", "Drizzling", "Ebbing", "Effecting", "Elucidating",
+  "Embellishing", "Enchanting", "Envisioning", "Fermenting", "Fiddle-faddling", "Finagling",
+  "Flibbertigibbeting", "Flowing", "Flummoxing", "Fluttering", "Forging", "Forming", "Frolicking",
+  "Frosting", "Gallivanting", "Galloping", "Garnishing", "Generating", "Gesticulating",
+  "Germinating", "Gitifying", "Grooving", "Gusting", "Harmonizing", "Hashing", "Hatching",
+  "Herding", "Honking", "Hullaballooing", "Hyperspacing", "Ideating", "Imagining", "Improvising",
+  "Incubating", "Inferring", "Infusing", "Ionizing", "Jitterbugging", "Julienning", "Kneading",
+  "Leavening", "Levitating", "Lollygagging", "Manifesting", "Marinating", "Meandering",
+  "Metamorphosing", "Misting", "Moonwalking", "Moseying", "Mulling", "Mustering", "Musing",
+  "Nebulizing", "Nesting", "Newspapering", "Noodling", "Nucleating", "Orbiting", "Orchestrating",
+  "Osmosing", "Perambulating", "Percolating", "Perusing", "Philosophising", "Photosynthesizing",
+  "Pollinating", "Pondering", "Pontificating", "Pouncing", "Precipitating", "Prestidigitating",
+  "Processing", "Proofing", "Propagating", "Puttering", "Puzzling", "Quantumizing",
+  "Razzle-dazzling", "Razzmatazzing", "Recombobulating", "Reticulating", "Roosting", "Ruminating",
+  "Scampering", "Schlepping", "Scurrying", "Seasoning", "Shenaniganing", "Shimmying", "Simmering",
+  "Skedaddling", "Sketching", "Slithering", "Smooshing", "Sock-hopping", "Spelunking", "Spinning",
+  "Sprouting", "Stewing", "Sublimating", "Swirling", "Swooping", "Symbioting", "Synthesizing",
+  "Tempering", "Thinking", "Thundering", "Tinkering", "Tomfoolering", "Topsy-turvying",
+  "Transfiguring", "Transmuting", "Twisting", "Undulating", "Unfurling", "Unravelling", "Vibing",
+  "Waddling", "Wandering", "Warping", "Whatchamacalliting", "Whirlpooling", "Whirring",
+  "Whisking", "Wibbling", "Working", "Wrangling", "Zesting", "Zigzagging",
 ];
 
+/** Stable 32-bit hash of a string → same verb for the same turn on every client. */
+function hashStr(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+/** Compact token count, Claude Code style: 4123 → "4.1k". */
+function fmtTokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
+}
+
 /**
- * A quiet "the agent is working" row for the tail of the timeline during a
- * turn. Mirrors Claude Code's TUI spinner: a whimsical verb picked per turn,
- * the ticking elapsed time since the user's message, and the current phase
- * ("Transmuting… (24s · thinking)").
+ * A quiet "the agent is working" row for the tail of the timeline during a turn.
+ * Mirrors Claude Code's TUI spinner: a whimsical verb, ticking elapsed time, and
+ * a live ↓ output-token count — e.g. "Transmuting… (1m 48s · ↓ 4.0k tokens)".
+ * The verb is deterministic per turn so it matches across devices.
  */
 export function WorkingIndicator({
   agent,
-  label = "Working…",
   since,
+  tokens,
 }: {
   agent?: string;
-  label?: string;
-  /** ISO timestamp of the turn's user message — drives the elapsed counter. */
+  /** ISO timestamp of the turn's user message — seeds the verb AND drives the timer. */
   since?: string;
+  /** Estimated output tokens streamed so far this turn (from Session). */
+  tokens?: number;
 }) {
-  const [verb] = useState(() => VERBS[Math.floor(Math.random() * VERBS.length)]);
+  const verb = useMemo(() => VERBS[hashStr(since ?? "") % VERBS.length], [since]);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!since) return;
@@ -55,10 +97,9 @@ export function WorkingIndicator({
   }, [since]);
 
   const elapsed = since ? Math.max(0, (now - Date.parse(since)) / 1000) : null;
-  const phase = label.replace("…", "").toLowerCase();
   const detail =
     elapsed != null && Number.isFinite(elapsed)
-      ? ` (${fmtDuration(elapsed)} · ${phase})`
+      ? ` (${fmtDuration(elapsed)}${tokens && tokens > 0 ? ` · ↓ ${fmtTokens(tokens)} tokens` : ""})`
       : "";
   return (
     <View className="flex-row items-center gap-2 py-1.5">

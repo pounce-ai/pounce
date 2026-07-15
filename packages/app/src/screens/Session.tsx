@@ -523,16 +523,23 @@ export default function SessionScreen() {
   // The synced thread record lags live turns (short turns never re-sync), so
   // the header trusts the screen's own in-flight state over session.activity.
   const headerActivity = running ? ("running" as const) : session.activity;
-  // Phase label for the working indicator: "Responding…" once assistant text is
-  // streaming, otherwise "Thinking…".
-  const tail = rawEvents[rawEvents.length - 1];
-  const workLabel =
-    tail?.type === "assistant_message" && tail.streaming ? "Responding…" : "Thinking…";
-  // Turn start = the newest user message; feeds the indicator's elapsed timer.
+  // Turn start = the newest user message; seeds the indicator's verb + elapsed
+  // timer. Also estimate output tokens streamed since then (~4 chars/token) for
+  // the "↓ N tokens" readout — approximate (it can't see hidden reasoning
+  // tokens), and jumpy on mirrored sessions whose transcript only lands text on
+  // message completion; smooth for turns started here (they stream live).
   let turnStartTs: string | undefined;
+  let turnStartIdx = rawEvents.length;
   for (let i = rawEvents.length - 1; i >= 0; i--) {
-    if (rawEvents[i].type === "user_message") { turnStartTs = rawEvents[i].ts; break; }
+    if (rawEvents[i].type === "user_message") { turnStartTs = rawEvents[i].ts; turnStartIdx = i; break; }
   }
+  let outChars = 0;
+  for (let i = turnStartIdx + 1; i < rawEvents.length; i++) {
+    const e = rawEvents[i];
+    if (e.type === "assistant_message") outChars += e.text.length;
+    else if (e.type === "thinking_finished") outChars += (e.text ?? "").length;
+  }
+  const turnTokens = Math.round(outChars / 4);
 
   // Permission-mode + reasoning-effort controls (shown on the status bar).
   const modes = modesFor(session.agent);
@@ -663,7 +670,7 @@ export default function SessionScreen() {
               onSendInput={(data) => {
                 if (session?.hostId && id) void sendSessionInput(session.hostId, id, data);
               }}
-              footer={running ? <WorkingIndicator agent={session.agent} label={workLabel} since={turnStartTs} /> : undefined}
+              footer={running ? <WorkingIndicator agent={session.agent} since={turnStartTs} tokens={turnTokens} /> : undefined}
             />
             {/* Floating "jump to latest" — appears when scrolled up off the bottom. */}
             {!atBottom ? (
