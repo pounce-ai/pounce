@@ -27,7 +27,7 @@ import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import { createHost } from "./agents/host.mjs";
 import { resolvePermission } from "./agents/acp.mjs";
-import { startInteractiveSession, answerQuestion, pendingQuestion, isInteractive } from "./agents/pty-turn.mjs";
+import { startInteractiveSession, answerPrompt, pendingPrompt, isInteractive, sendInput } from "./agents/pty-turn.mjs";
 import { agentEnv, binPath, primaryLanIp } from "./agents/env.mjs";
 import { readConfig, writeConfig } from "./agents/config.mjs";
 
@@ -530,24 +530,32 @@ async function getMessages(agent, threadId, fresh = false, limit) {
   // The host keeps parsed histories in a hard-capped LRU that its fs watcher
   // invalidates the moment a transcript changes.
   const events = await host.getEvents(agent, threadId, { limit, fresh });
-  // A PTY-hosted interactive session blocked on AskUserQuestion → append a
-  // synthesized question_request so the app can render the answerable card. Only
-  // fires for interactive sessions (pendingQuestion is null otherwise), and
-  // clears itself once the answer lands in the transcript.
-  const pq = pendingQuestion(threadId);
-  if (pq) {
-    const lastSeq = events.length ? events[events.length - 1].seq || 0 : 0;
-    events.push({
-      id: `q:${pq.questionId}`,
+  // A PTY-hosted interactive session blocked on ANY prompt (trust / permission /
+  // plan / AskUserQuestion / menu) → append a synthesized prompt_request so the
+  // app can render an answerable card. Detected generically from the screen, so
+  // it's null for non-interactive sessions and clears once the prompt is gone.
+  const pp = pendingPrompt(threadId);
+  if (!pp) return events;
+  // `events` is the host's CACHED array — never push onto it (that would append
+  // a fresh prompt_request every poll and pile up duplicate keys in the app's
+  // list). Return a new array with the synthesized event tacked on.
+  const lastSeq = events.length ? events[events.length - 1].seq || 0 : 0;
+  return [
+    ...events,
+    {
+      id: `prompt:${pp.promptId}`,
       conversationId: threadId,
       seq: lastSeq + 1,
       ts: new Date().toISOString(),
-      type: "question_request",
-      questionId: pq.questionId,
-      questions: pq.questions,
-    });
-  }
-  return events;
+      type: "prompt_request",
+      promptId: pp.promptId,
+      title: pp.title,
+      kind: pp.kind,
+      options: pp.options,
+      highlighted: pp.highlighted,
+      multiSelect: pp.multiSelect,
+    },
+  ];
 }
 
 // --- Per-thread token usage + cost -----------------------------------------
@@ -1164,13 +1172,22 @@ const server = http.createServer(async (req, res) => {
       const ok = resolvePermission(requestId, optionId ?? null);
       return send(res, 200, { ok });
     }
-    if (url.pathname === "/v1/turn/answer" && req.method === "POST") {
-      // Answer a pending AskUserQuestion on a PTY-hosted session by driving the
-      // picker keystrokes. `answers` = chosen option indices per question.
-      const { threadId, answers } = await readBody(req);
-      if (!threadId || !Array.isArray(answers)) return send(res, 400, { error: "threadId, answers required" });
-      const ok = await answerQuestion(threadId, answers);
+    if (url.pathname === "/v1/session/prompt/answer" && req.method === "POST") {
+      // Answer a pending interactive prompt on a PTY-hosted session by selecting
+      // an option (trust / permission / plan / AskUserQuestion / any menu).
+      const { threadId, optionIndex } = await readBody(req);
+      if (!threadId || !Number.isInteger(optionIndex)) return send(res, 400, { error: "threadId, optionIndex required" });
+      const ok = await answerPrompt(threadId, optionIndex);
       if (ok) cache.delete("threads"); // activity changes as the turn resumes
+      return send(res, 200, { ok });
+    }
+    if (url.pathname === "/v1/session/input" && req.method === "POST") {
+      // Raw keystrokes / text into a PTY-hosted session — the escape hatch for
+      // free-form prompts, ↑/↓ steering, Esc, Ctrl-C. `data` is written verbatim.
+      const { threadId, data } = await readBody(req);
+      if (!threadId || typeof data !== "string") return send(res, 400, { error: "threadId, data required" });
+      const ok = sendInput(threadId, data);
+      if (ok) cache.delete("threads");
       return send(res, 200, { ok });
     }
     if (url.pathname === "/v1/session/interactive" && req.method === "POST") {

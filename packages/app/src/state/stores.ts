@@ -133,6 +133,9 @@ function rekeyThreadObservables(oldId: string, newId: string): void {
     if (v?.length) store$[newId].set(v);
     store$[oldId].delete();
   }
+  // Interactive marker (a boolean map, not an array) — carry it across the swap.
+  if (interactiveThreads$[oldId].get()) interactiveThreads$[newId].set(true);
+  interactiveThreads$[oldId].delete();
 }
 
 function sweepThreadObservables(liveThreadIds: ReadonlySet<string>): void {
@@ -140,6 +143,9 @@ function sweepThreadObservables(liveThreadIds: ReadonlySet<string>): void {
     for (const id of Object.keys(store$.get() ?? {})) {
       if (!liveThreadIds.has(id)) store$[id].delete();
     }
+  }
+  for (const id of Object.keys(interactiveThreads$.get() ?? {})) {
+    if (!liveThreadIds.has(id)) interactiveThreads$[id].delete();
   }
 }
 
@@ -153,10 +159,28 @@ export function setSeenFile(threadId: string, path: string, seen: boolean): void
   seenFiles$[threadId].set(next);
 }
 
+/** Threads the user launched as PTY-hosted interactive (answerable) sessions.
+ *  Their composer follow-ups route back through the interactive path — the
+ *  bridge reuses the live PTY or `--resume`s the SAME session — instead of a
+ *  fresh headless turn, so a test thread stays one thread and its prompts stay
+ *  answerable. Persisted so the routing survives restarts. */
+export const interactiveThreads$ = observable<Record<string, true>>({});
+
+/** Mark a thread as interactive (called when it's launched from New → Interactive). */
+export function markInteractive(threadId: string): void {
+  interactiveThreads$[threadId].set(true);
+}
+
+/** Whether a thread's follow-ups should drive the interactive PTY path. */
+export function isThreadInteractive(threadId: string): boolean {
+  return !!interactiveThreads$[threadId].get();
+}
+
 persist(filters$, "filters"); // remember the user's last filter selection
 persist(user$, "user");
 persist(sources$, "sources");
 persist(seenFiles$, "seenFiles");
+persist(interactiveThreads$, "interactiveThreads");
 
 /** Count of *narrowing* filters (device/agent/status/branch/favourites) for the badge. */
 export function activeFilterCount(): number {
@@ -218,11 +242,11 @@ export function statusBucket(s: Session): StatusBucket {
   return STATUS_BUCKET[s.activity];
 }
 
-/** A message is marked by default if it carries prose — and an AskUserQuestion
- *  is ALWAYS marked, so a question the agent asked is a jump-to point you can
- *  always find in the markers list. */
+/** A message is marked by default if it carries prose — and an interactive
+ *  prompt (trust / permission / plan / question) is ALWAYS marked, so a prompt
+ *  the agent is blocked on is a jump-to point you can always find. */
 export function defaultMarked(ev: TimelineEvent, agent?: string): boolean {
-  if (ev.type === "question_request") return true;
+  if (ev.type === "prompt_request") return true;
   return ev.type === "user_message" && parseUserMessage(ev.text, agent).text.trim().length > 0;
 }
 

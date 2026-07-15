@@ -954,22 +954,44 @@ export async function respondPermission(
   }
 }
 
-/** Answer a pending AskUserQuestion (from a question_request event). `answers`
- *  is the chosen option indices per question. The host drives the CLI's picker
- *  (keystrokes) to answer the paused turn. */
-export async function respondQuestion(
+/** Answer a pending interactive prompt (from a prompt_request event) by picking
+ *  option `optionIndex`. Generic across trust / permission / plan / AskUserQuestion
+ *  — the host moves the on-screen highlight there and presses Enter. */
+export async function respondPrompt(
   hostId: string,
   threadId: string,
-  questionId: string,
-  answers: number[][],
+  optionIndex: number,
 ): Promise<boolean> {
   const cfg = await deviceForHost(hostId);
   if (!cfg) return false;
   try {
-    const res = await fetch(`${await bridgeBase(cfg)}/v1/turn/answer`, {
+    const res = await fetch(`${await bridgeBase(cfg)}/v1/session/prompt/answer`, {
       method: "POST",
       headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
-      body: JSON.stringify({ threadId, questionId, answers }),
+      body: JSON.stringify({ threadId, optionIndex }),
+    });
+    const j = (await res.json()) as { ok?: boolean };
+    return !!j.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Send raw input to a PTY-hosted session — free-form prompt replies, ↑/↓
+ *  steering, Esc, Ctrl-C. `data` is written to the CLI's stdin verbatim (append
+ *  "\r" to submit typed text). The generic escape hatch behind the prompt card. */
+export async function sendSessionInput(
+  hostId: string,
+  threadId: string,
+  data: string,
+): Promise<boolean> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return false;
+  try {
+    const res = await fetch(`${await bridgeBase(cfg)}/v1/session/input`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ threadId, data }),
     });
     const j = (await res.json()) as { ok?: boolean };
     return !!j.ok;
@@ -979,11 +1001,16 @@ export async function respondQuestion(
 }
 
 /** Launch a PTY-hosted interactive claude session (its prompts — AskUserQuestion,
- *  … — become answerable from the app). Returns the real threadId, or null. */
+ *  … — become answerable from the app). Returns the real threadId, or null.
+ *
+ *  Pass an existing `threadId` to CONTINUE that session (the bridge reuses its
+ *  live PTY or `--resume`s it) instead of spawning a fresh one — so a test
+ *  thread stays a single thread across relaunches. */
 export async function startInteractive(
   hostId: string,
   text: string,
   cwd: string | null,
+  threadId?: string,
 ): Promise<string | null> {
   const cfg = await deviceForHost(hostId);
   if (!cfg) return null;
@@ -991,7 +1018,7 @@ export async function startInteractive(
     const res = await fetch(`${await bridgeBase(cfg)}/v1/session/interactive`, {
       method: "POST",
       headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
-      body: JSON.stringify({ text, cwd }),
+      body: JSON.stringify({ text, cwd, threadId }),
     });
     const j = (await res.json()) as { threadId?: string };
     return j.threadId ?? null;

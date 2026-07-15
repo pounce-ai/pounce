@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type { AgentId } from "@litter/shared";
-import { insertThread, pendingTurns$, reposByActivity } from "../state/stores";
+import { insertThread, markInteractive, pendingTurns$, reposByActivity } from "../state/stores";
 import { useAgentCaps, useDevices, useProjects, useThreads } from "../state/db/hooks";
 import { Composer, type ComposerSubmit } from "../components/Composer";
 import { FolderBrowser } from "../components/FolderBrowser";
@@ -91,6 +91,10 @@ export default function NewTaskScreen() {
     if (interactive && agent === "claude" && device) {
       const realId = await startInteractive(device.id, s.text, cwd);
       if (realId) {
+        // Route this thread's future follow-ups back through the interactive
+        // path so they reuse/resume this one session (answerable prompts) rather
+        // than spawning fresh sessions — see isThreadInteractive in Session.
+        markInteractive(realId);
         insertThread({
           id: realId,
           repoId: selectedRepoId ?? repoIdForCwd(cwd),

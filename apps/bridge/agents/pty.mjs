@@ -20,6 +20,7 @@
  */
 import { spawn, hasNative } from "zigpty";
 import { IdleDetector } from "zigpty/idle";
+import { Screen } from "./screen.mjs";
 
 /** True when the native PTY binding loaded (real TTY). False → pipe fallback. */
 export const ptyNative = hasNative;
@@ -55,6 +56,9 @@ export class PtySession {
     this._scrollback = "";
     this._dataSinks = new Set();
     this._idleSinks = new Set();
+    // Headless VT emulator fed the same bytes — gives the RENDERED screen used
+    // for generic (agent-agnostic) interactive-prompt detection. See screen.mjs.
+    this._screen = new Screen({ cols, rows });
 
     this._pty = spawn(command, args, {
       cols,
@@ -69,6 +73,7 @@ export class PtySession {
     this._pty.onData((d) => {
       const s = typeof d === "string" ? d : d.toString("utf8");
       this._append(s);
+      this._screen.write(s);
       for (const sink of this._dataSinks) { try { sink(s); } catch {} }
     });
 
@@ -98,6 +103,12 @@ export class PtySession {
     return this._scrollback;
   }
 
+  /** The rendered visible screen as rows of `{ text, inverse }` — the substrate
+   *  for generic interactive-prompt detection (prompt-detect.mjs). */
+  screenLines() {
+    return this._screen.lines();
+  }
+
   /** Write raw bytes to the child's stdin (keystrokes, answers, ^C, …). */
   write(data) {
     try { this._pty.write(data); } catch {}
@@ -106,6 +117,7 @@ export class PtySession {
   resize(cols, rows) {
     this.cols = cols;
     this.rows = rows;
+    this._screen.resize(cols, rows);
     try { this._pty.resize(cols, rows); } catch {}
   }
 
