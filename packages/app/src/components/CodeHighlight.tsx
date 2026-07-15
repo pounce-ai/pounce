@@ -1,8 +1,26 @@
 import { memo } from "react";
 import { Text, View } from "react-native";
-import { Highlight, themes } from "prism-react-renderer";
+import { Highlight, Prism, themes } from "prism-react-renderer";
 import { classifyLine, extOf, splitPatch } from "./diffPatch";
 import { cn } from "../ui";
+
+// prism-react-renderer bundles a limited language set (no bash/ruby/java/…), so
+// a shell command or a non-TS diff would fall back to plain text. Register the
+// extra grammars onto its Prism instance. Order matters: the prismjs component
+// files attach to globalThis.Prism, so set it BEFORE requiring them — require()
+// runs in statement order, whereas `import` is hoisted. Static paths only, so
+// Metro can resolve them. This also lights up ```bash markdown blocks (same Prism).
+// Only self-contained grammars: these depend on clike/css (already bundled).
+// Avoid ones needing markup-templating (php) — it registers a global
+// after-tokenize hook that then crashes EVERY tokenize when the dep is missing.
+(globalThis as { Prism?: unknown }).Prism = Prism;
+/* eslint-disable @typescript-eslint/no-require-imports */
+require("prismjs/components/prism-bash");
+require("prismjs/components/prism-ruby");
+require("prismjs/components/prism-java");
+require("prismjs/components/prism-toml");
+require("prismjs/components/prism-scss");
+/* eslint-enable @typescript-eslint/no-require-imports */
 
 const MONO = "JetBrainsMono";
 
