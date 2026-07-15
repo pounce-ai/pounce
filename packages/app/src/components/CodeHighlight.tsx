@@ -1,0 +1,148 @@
+import { memo } from "react";
+import { Text, View } from "react-native";
+import { Highlight, themes } from "prism-react-renderer";
+import { classifyLine, extOf, splitPatch } from "./diffPatch";
+import { cn } from "../ui";
+
+const MONO = "JetBrainsMono";
+
+/** Language tags / file extensions → Prism language ids. Unknown → plain. */
+const PRISM_LANG: Record<string, string> = {
+  ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", mjs: "javascript", cjs: "javascript",
+  py: "python", rb: "ruby", sh: "bash", shell: "bash", zsh: "bash", bash: "bash", console: "bash",
+  "shell-session": "bash", yml: "yaml", yaml: "yaml", json: "json", md: "markdown", markdown: "markdown",
+  "c++": "cpp", cpp: "cpp", cc: "cpp", "c#": "csharp", cs: "csharp", c: "c", h: "c", rs: "rust",
+  go: "go", java: "java", kt: "kotlin", swift: "swift", css: "css", scss: "scss", html: "markup",
+  xml: "markup", svg: "markup", sql: "sql", toml: "toml", diff: "diff", rb2: "ruby", php: "php",
+};
+export function prismLang(tag: string): string {
+  const t = tag.replace(/^\./, "").toLowerCase();
+  return PRISM_LANG[t] ?? t;
+}
+
+/**
+ * Inline, Prism-highlighted code as nested <Text> — flows inside a flex row and
+ * wraps or truncates like normal text. The shared primitive behind the tool-card
+ * command line and each diff line, so highlighting stays consistent with the
+ * markdown code blocks.
+ */
+export const HlText = memo(function HlText({
+  code,
+  language,
+  size = 12,
+  numberOfLines,
+}: {
+  code: string;
+  language: string;
+  size?: number;
+  numberOfLines?: number;
+}) {
+  return (
+    <Highlight code={code} language={prismLang(language) || "text"} theme={themes.vsDark}>
+      {({ tokens, getTokenProps }) => (
+        <Text numberOfLines={numberOfLines} style={{ fontFamily: MONO, fontSize: size, lineHeight: size + 5.5 }}>
+          {tokens.map((line, i) => (
+            <Text key={i}>
+              {i > 0 ? "\n" : ""}
+              {line.map((token, j) => {
+                const { style } = getTokenProps({ token });
+                return (
+                  <Text
+                    key={j}
+                    style={{ color: (style?.color as string) ?? "#cdd0d6", fontStyle: style?.fontStyle as "italic" | undefined }}
+                  >
+                    {token.content}
+                  </Text>
+                );
+              })}
+            </Text>
+          ))}
+        </Text>
+      )}
+    </Highlight>
+  );
+});
+
+/**
+ * A unified-diff patch rendered GitHub-style natively (no WebView, so it's light
+ * enough for the timeline): a per-file header with +/− counts, hunk markers, and
+ * add / delete / context lines tinted by kind with their code content
+ * syntax-highlighted for the file's language. Long diffs are capped.
+ */
+export const DiffBlock = memo(function DiffBlock({
+  patch,
+  path,
+  maxLines = 90,
+  nested,
+}: {
+  patch: string;
+  path?: string;
+  maxLines?: number;
+  nested?: boolean;
+}) {
+  const files = splitPatch(patch);
+  // Not a `diff --git` multi-file patch (e.g. a bare hunk) — render it as one.
+  if (!files.length) files.push({ path: path ?? "diff", text: patch, adds: 0, dels: 0 });
+
+  return (
+    <View className={cn("overflow-hidden rounded-xl border border-border bg-[#0d0d12]", nested && "rounded-lg")}>
+      {files.map((file, fi) => {
+        const lang = EXT_LANG[extOf(file.path)] ?? "";
+        // Drop git-meta lines (diff --git / index / +++ / ---) — the header names the file.
+        const rows = file.text.split("\n").filter((l) => classifyLine(l) !== "header");
+        const shown = rows.slice(0, maxLines);
+        return (
+          <View key={fi}>
+            <View className="flex-row items-center gap-2 border-b border-border/70 px-3 py-1.5">
+              <Text numberOfLines={1} className="flex-1 font-mono text-[11px] text-fg-muted">{file.path}</Text>
+              {file.adds ? <Text className="text-[11px] font-semibold text-diff-add-fg">+{file.adds}</Text> : null}
+              {file.dels ? <Text className="text-[11px] font-semibold text-diff-del-fg">−{file.dels}</Text> : null}
+            </View>
+            <View className="py-1">
+              {shown.map((line, i) => {
+                const kind = classifyLine(line);
+                if (kind === "hunk") {
+                  return <Text key={i} className="px-2 font-mono text-[11px] text-info">{line}</Text>;
+                }
+                const prefix = kind === "add" ? "+" : kind === "del" ? "−" : " ";
+                const content = /^[+\- ]/.test(line) ? line.slice(1) : line;
+                return (
+                  <View
+                    key={i}
+                    className={cn("flex-row px-2", kind === "add" && "bg-diff-add-bg", kind === "del" && "bg-diff-del-bg")}
+                  >
+                    <Text
+                      style={{ width: 12 }}
+                      className={cn(
+                        "font-mono text-[11px]",
+                        kind === "add" ? "text-diff-add-fg" : kind === "del" ? "text-diff-del-fg" : "text-fg-faint",
+                      )}
+                    >
+                      {prefix}
+                    </Text>
+                    <View className="flex-1">
+                      <HlText code={content} language={lang} size={11.5} />
+                    </View>
+                  </View>
+                );
+              })}
+              {rows.length > maxLines ? (
+                <Text className="px-2 py-1 font-mono text-[11px] text-fg-faint">… {rows.length - maxLines} more lines</Text>
+              ) : null}
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+});
+
+/** File extension (`.ts`, `.json`, or `other`) → Prism language. */
+const EXT_LANG: Record<string, string> = {
+  ".ts": "typescript", ".tsx": "tsx", ".js": "javascript", ".jsx": "jsx", ".mjs": "javascript",
+  ".cjs": "javascript", ".py": "python", ".rb": "ruby", ".sh": "bash", ".zsh": "bash", ".bash": "bash",
+  ".yml": "yaml", ".yaml": "yaml", ".json": "json", ".md": "markdown", ".css": "css", ".scss": "scss",
+  ".html": "markup", ".xml": "markup", ".svg": "markup", ".sql": "sql", ".go": "go", ".rs": "rust",
+  ".java": "java", ".kt": "kotlin", ".swift": "swift", ".c": "c", ".h": "c", ".cpp": "cpp", ".cc": "cpp",
+  ".toml": "toml", ".php": "php", ".rb2": "ruby",
+};

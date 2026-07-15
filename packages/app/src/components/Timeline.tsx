@@ -15,6 +15,7 @@ import { defaultMarked } from "../state/stores";
 import { useThreadMarkers } from "../state/db/hooks";
 import { cn, COLOR } from "../ui";
 import { MessageMarkdown } from "../components/MessageMarkdown";
+import { DiffBlock, HlText } from "../components/CodeHighlight";
 import { Modal } from "../components/AppModal";
 import {
   cleanAssistantText,
@@ -745,12 +746,24 @@ function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: 
         ) : (
           <Text className="font-mono text-[12px] text-fg">⚙ {name}</Text>
         )}
-        <Text
-          numberOfLines={open ? undefined : 1}
-          className="flex-1 font-mono text-[12px] leading-[17px] text-fg-muted"
-        >
-          {open ? preview : preview.replace(/\s+/g, " ")}
-        </Text>
+        {shell ? (
+          // Highlight the command as bash — the collapsed row stays one line.
+          <View className="flex-1">
+            <HlText
+              code={open ? preview : preview.replace(/\s+/g, " ")}
+              language="bash"
+              size={12}
+              numberOfLines={open ? undefined : 1}
+            />
+          </View>
+        ) : (
+          <Text
+            numberOfLines={open ? undefined : 1}
+            className="flex-1 font-mono text-[12px] leading-[17px] text-fg-muted"
+          >
+            {open ? preview : preview.replace(/\s+/g, " ")}
+          </Text>
+        )}
         {running ? (
           <View className="flex-row items-center gap-1">
             <View className="h-1.5 w-1.5 rounded-full bg-success" />
@@ -779,12 +792,7 @@ function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function ResultBody({ content, isError, nested }: { content: any; isError: boolean; nested?: boolean }) {
   if (content?.kind === "diff") {
-    return (
-      <View className={cn("overflow-hidden rounded-xl border border-border bg-[#0d0d12]", nested && "rounded-lg")}>
-        <Text className="border-b border-border px-3 py-1 font-mono text-[11px] text-fg-muted">{content.path || "diff"}</Text>
-        <Text numberOfLines={nested ? 30 : 14} className="px-3 py-2 font-mono text-[11px] text-fg-muted">{content.patch}</Text>
-      </View>
-    );
+    return <DiffBlock patch={content.patch ?? ""} path={content.path} nested={nested} maxLines={nested ? 120 : 40} />;
   }
   const text = content?.kind === "text" ? content.text : content?.kind === "json" ? JSON.stringify(content.value) : "";
   if (!text) return null;
