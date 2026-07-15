@@ -1,3 +1,0 @@
-// Marks @litter/nitro as a native module for React Native autolinking so the
-// NitroLitter.podspec (Iroh client) is picked up by the iOS Podfile.
-module.exports = {};

@@ -17,7 +17,6 @@
     "@legendapp/list": "^3.2.0",
     "@legendapp/state": "^3.0.0-beta.47",
     "@litter/app": "workspace:*",
-    "@litter/nitro": "workspace:*",
     "@litter/runtime": "workspace:*",
     "@litter/shared": "workspace:*",
     "@litter/transcript": "workspace:*",

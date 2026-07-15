@@ -1,13 +1,12 @@
 /**
  * Transport selection seam — mobile implementation.
  *
- *   1. IrohTransport (via NitroLitter) when the native module is linked — the
- *      production p2p path.
- *   2. HttpTransport otherwise — works today over LAN / a tunnel, and is the
- *      fallback when running in Expo Go or before the native build exists.
+ * HttpTransport over LAN / a tunnel. (An Iroh p2p path via a NitroLitter native
+ * module was explored historically; it never shipped and was superseded by the
+ * pounce-tunnel remote path, so transport is HTTP everywhere now.)
  *
- * Desktop overrides this per-platform (transport.desktop.ts): always HTTP,
- * since @litter/nitro is iOS-only and the bridge runs on the same machine.
+ * Desktop overrides this per-platform (transport.desktop.ts): also always HTTP,
+ * since the bridge runs on the same machine.
  */
 import { HttpTransport } from "@litter/runtime";
 import type { Transport } from "@litter/runtime";
@@ -31,15 +30,6 @@ async function resolveFetch(): Promise<typeof fetch> {
 }
 
 export async function buildTransport(): Promise<Transport> {
-  // Lazy import so Expo Go (no native module) doesn't crash at startup.
-  try {
-    const nitro = await import("@litter/nitro");
-    if (nitro.isNitroLitterAvailable()) {
-      return new nitro.IrohTransport(nitro.getNitroLitter());
-    }
-  } catch {
-    // native module not present — fall through to HTTP
-  }
   const baseUrl =
     (await SecureStore.getItemAsync(HTTP_BASE_KEY)) ?? "http://127.0.0.1:8389";
   return new HttpTransport({ baseUrl, fetchImpl: await resolveFetch() });

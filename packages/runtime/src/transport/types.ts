@@ -1,12 +1,10 @@
 /**
  * Transport abstraction.
  *
- * Two concrete transports implement this:
- *   - HttpTransport  — fetch + SSE against the daemon's local `/v1/runs` +
- *                      `/events`. Runnable today over LAN / a tunnel.
- *   - IrohTransport  — the production p2p path, backed by the NitroLitter
- *                      native module (Iroh QUIC client). Same interface, so the
- *                      adapter and app are transport-agnostic.
+ * HttpTransport implements this: fetch + SSE against the daemon's local
+ * `/v1/runs` + `/events`, over LAN or a pounce-tunnel. (A p2p IrohTransport was
+ * explored historically via a NitroLitter native module and removed; the seam
+ * stays transport-agnostic so another can be added later.)
  *
  * Everything below speaks the *wire* protocol (@litter/shared/protocol). The
  * adapter is responsible for translating to the stable domain model.
@@ -47,7 +45,7 @@ export interface SubscribeOptions {
 }
 
 export interface Transport {
-  readonly kind: "http" | "iroh";
+  readonly kind: "http";
 
   connect(pairing: PairPayload): Promise<HostStatus>;
   disconnect(): Promise<void>;

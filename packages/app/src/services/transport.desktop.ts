@@ -1,9 +1,8 @@
 /**
  * Transport selection seam — desktop implementation.
  *
- * Always HTTP: @litter/nitro (the Iroh native module) is iOS-only, and the
- * bridge runs on this machine anyway. Streaming goes through the XHR-backed
- * streamTurn seam, so plain global fetch suffices here.
+ * Always HTTP: the bridge runs on this machine anyway. Streaming goes through
+ * the XHR-backed streamTurn seam, so plain global fetch suffices here.
  */
 import { HttpTransport } from "@litter/runtime";
 import type { Transport } from "@litter/runtime";
