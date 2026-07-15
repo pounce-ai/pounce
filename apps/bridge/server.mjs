@@ -1008,6 +1008,30 @@ const server = http.createServer(async (req, res) => {
       res.end(img.buffer);
       return;
     }
+    if (url.pathname === "/v1/file") {
+      // Serve a local IMAGE file by absolute path — used to preview a Read of an
+      // image (screenshot) in its tool card. Token-authed like every route, and
+      // deliberately IMAGE-ONLY (never arbitrary files) so this can't exfiltrate
+      // source/secrets. Streamed + size-capped.
+      const IMG_MIME = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+        ".webp": "image/webp", ".bmp": "image/bmp", ".heic": "image/heic", ".svg": "image/svg+xml",
+      };
+      const p = url.searchParams.get("path");
+      if (!p) return send(res, 400, { error: "path required" });
+      const mime = IMG_MIME[path.extname(p).toLowerCase()];
+      if (!mime) return send(res, 415, { error: "not an image" });
+      let st;
+      try { st = statSync(p); } catch { return send(res, 404, { error: "not found" }); }
+      if (!st.isFile() || st.size > 25 * 1024 * 1024) return send(res, 404, { error: "not found" });
+      res.writeHead(200, {
+        "content-type": mime,
+        "cache-control": "private, max-age=86400",
+        "access-control-allow-origin": "*",
+      });
+      createReadStream(p).pipe(res);
+      return;
+    }
     if (url.pathname === "/v1/doctor") {
       return send(res, 200, { report: await host.doctor() });
     }

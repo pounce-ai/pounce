@@ -94,6 +94,10 @@ export interface ToolCall {
   readonly input: unknown;
   readonly status: ToolStatus;
   readonly startedAt: ISODateString;
+  /** Token-authed bridge URL for an image this call reads (Read of a .png/.jpg/…),
+   *  so the card shows a thumbnail instead of just the path. Resolved client-side
+   *  in fetchMessages; lazy-loaded, so it never bloats the events payload. */
+  readonly previewUri?: string;
 }
 
 export interface ToolResult {
