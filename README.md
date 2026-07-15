@@ -25,7 +25,6 @@ server, the shared packages, and the landing page.
 | `apps/mobile` | The Pounce **Expo / React Native** app (iOS & Android) |
 | `apps/bridge` | The **bridge server** (`server.mjs`) — the native agent host + LAN HTTP surface the apps talk to |
 | `desktop` | The **Pounce desktop app** (expo‑desktop → react‑native‑macos / windows) — the full app UI with the bridge embedded |
-| `bridge-desktop` | **Deprecated** — the old standalone desktop Bridge ([Electrobun](https://electrobun.dev)). Superseded by `desktop/`, which embeds the bridge |
 | `packages/nitro` | Native **Iroh** client (Rust + Nitro) for direct device‑to‑device sync |
 | `packages/{shared,runtime,ui}` | Shared types, runtime/transport, and UI primitives |
 | `docs/` | The landing page (served via GitHub Pages) |
