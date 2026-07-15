@@ -41,9 +41,25 @@ function toolCallIds(events: TimelineEvent[]): Set<string> {
  */
 export function collapseToolResults(events: TimelineEvent[]): TimelineEvent[] {
   const calls = toolCallIds(events);
-  return events.filter(
+  const filtered = events.filter(
     (e) => !(e.type === "tool_result" && calls.has(e.result.toolCallId || e.id.replace(/:o$/, ""))),
   );
+  // Dedup by id. A streamed live event and its re-parsed transcript twin can
+  // briefly coexist with the same id (e.g. right after a turn completes);
+  // LegendList's keyExtractor rejects the collision ("Detected overlapping
+  // key …"), dropping rows and gapping the list. Keep the LAST occurrence —
+  // the authoritative transcript copy (and the one fetchMessages resolves a
+  // previewUri onto) — in stable order.
+  const seen = new Set<string>();
+  const out: TimelineEvent[] = [];
+  for (let i = filtered.length - 1; i >= 0; i--) {
+    const e = filtered[i];
+    if (seen.has(e.id)) continue;
+    seen.add(e.id);
+    out.push(e);
+  }
+  out.reverse();
+  return out;
 }
 
 /** One human phrase for `n` calls of one tool, Claude Code's TUI wording. */
