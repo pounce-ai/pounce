@@ -161,6 +161,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CC="$HOME/bin/ccache-clang" CXX="$HOME/bin/ccache-clang++" \
             COMPILER_INDEX_STORE_ENABLE=NO \
+            CLANG_ENABLE_EXPLICIT_MODULES=NO \
             build
           echo "::group::ccache stats"; ccache --show-stats; echo "::endgroup::"
 

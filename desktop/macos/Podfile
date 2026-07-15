@@ -64,6 +64,11 @@ target 'PounceDesktop-macOS' do
           # ccache is incompatible with the compiler index store; it adds no
           # value in CI anyway.
           config.build_settings['COMPILER_INDEX_STORE_ENABLE'] = 'NO'
+          # Xcode 16+/26 default explicit modules ON, but the ccache-clang
+          # wrapper isn't a recognized explicit-modules compiler (build fails
+          # with "compiler was not recognized"). Fall back to implicit modules,
+          # the model ccache's CC/CXX wrapper actually works with.
+          config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
         end
       end
     end
