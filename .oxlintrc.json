@@ -1,0 +1,30 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "unicorn", "oxc", "import"],
+  "categories": {
+    "correctness": "error"
+  },
+  "env": { "browser": true, "node": true, "es2024": true },
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/build/**",
+    "**/build-release/**",
+    "**/*.bundle.js",
+    "**/*.min.*",
+    "bridge-desktop/**",
+    "packages/nitro/**",
+    "scripts/**"
+  ],
+  "rules": {
+    "react/react-in-jsx-scope": "off",
+    "no-control-regex": "off",
+    "no-underscore-dangle": "off",
+    "react-hooks/exhaustive-deps": "warn",
+    "react/no-did-update-set-state": "warn",
+    "no-unused-expressions": "warn",
+    "no-unused-vars": "warn",
+    "unicorn/no-useless-spread": "warn",
+    "unicorn/no-useless-fallback-in-spread": "warn",
+    "unicorn/prefer-string-starts-ends-with": "warn"
+  }
+}

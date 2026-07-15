@@ -1,0 +1,4 @@
+{
+  "printWidth": 100,
+  "ignorePatterns": ["dist", "**/*.min.*", "**/*.bundle.js", "bridge-desktop"]
+}
