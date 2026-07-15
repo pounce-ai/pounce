@@ -123,32 +123,29 @@ export interface PermissionRequestEvent extends TimelineBase {
   readonly options: readonly PermissionOption[];
 }
 
-/** One choice offered for an AskUserQuestion question. `preview` is the SDK's
- *  focus-preview (mockups/code/comparisons) when present. */
-export interface QuestionOption {
+/** One selectable option in an interactive prompt. */
+export interface PromptOption {
   readonly label: string;
-  readonly description?: string;
-  readonly preview?: string;
-}
-
-/** One question in an AskUserQuestion call. `header` is the short chip label. */
-export interface Question {
-  readonly question: string;
-  readonly header: string;
-  readonly multiSelect: boolean;
-  readonly options: readonly QuestionOption[];
 }
 
 /**
- * The agent called AskUserQuestion and is blocked awaiting a multiple-choice
- * answer. The client renders the questions/options; the chosen labels are POSTed
- * back to the bridge, which drives the hosted CLI's picker (keystrokes) to
- * answer the paused turn. Only appears on PTY-hosted interactive sessions.
+ * The hosted CLI is blocked on an interactive prompt and the app can answer it.
+ * This is GENERIC and agent-agnostic: trust-folder, tool permission, plan-mode
+ * approval, AskUserQuestion — every one renders as a numbered on-screen menu, so
+ * the bridge detects it from the terminal SCREEN (not a per-agent transcript
+ * call) and surfaces the same shape. The app renders the options; the chosen
+ * index is POSTed back, and the bridge moves the on-screen highlight there and
+ * presses Enter. `kind` is a cosmetic hint for UI copy only. Free-form prompts
+ * are handled by sending raw input instead. Only on PTY-hosted sessions.
  */
-export interface QuestionRequestEvent extends TimelineBase {
-  readonly type: "question_request";
-  readonly questionId: string;
-  readonly questions: readonly Question[];
+export interface PromptRequestEvent extends TimelineBase {
+  readonly type: "prompt_request";
+  readonly promptId: string;
+  readonly title: string;
+  readonly kind: string; // "trust" | "permission" | "plan" | "prompt"
+  readonly options: readonly PromptOption[];
+  readonly highlighted: number; // index the CLI currently has highlighted
+  readonly multiSelect: boolean;
 }
 
 /** The discriminated union the timeline list switches over. */
@@ -164,7 +161,7 @@ export type TimelineEvent =
   | TerminalEvent
   | SystemEvent
   | PermissionRequestEvent
-  | QuestionRequestEvent;
+  | PromptRequestEvent;
 
 export type TimelineEventType = TimelineEvent["type"];
 

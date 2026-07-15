@@ -27,6 +27,7 @@ import {
   connection$,
   defaultMarked,
   isMarked,
+  isThreadInteractive,
   markOpened,
   modelForThread,
   pendingTurns$,
@@ -47,7 +48,7 @@ import {
   useThreadMarkers,
   useThreadModel,
 } from "../state/db/hooks";
-import { fetchMessages, fetchUsage, interruptTurn, respondPermission, respondQuestion, streamLiveMessage, type ThreadUsage } from "../services/bridge";
+import { fetchMessages, fetchUsage, interruptTurn, respondPermission, respondPrompt, sendSessionInput, startInteractive, streamLiveMessage, type ThreadUsage } from "../services/bridge";
 import { Ionicons } from "@expo/vector-icons";
 import { ACTIVITY_LABEL, AgentStatusIcon, BranchChip, cn, COLOR, pickSheet } from "../ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "../ui/agent-meta";
@@ -327,6 +328,23 @@ export default function SessionScreen() {
         type: "user_message",
         text: s.text || (s.images.length ? "🖼️ Image" : ""),
       };
+      // Interactive thread: drive the hosted PTY (the bridge reuses its live PTY
+      // or `--resume`s the SAME session) so prompts stay answerable and no new
+      // session is spawned. PTY turns don't stream over SSE, so echo the message
+      // and poll the transcript — the synthesized prompt_request / reply lands
+      // there — rather than wait on the 20s workspace sync.
+      if (isThreadInteractive(session.id)) {
+        setLiveEvents((e) => mergeById(e, [optimistic]));
+        await startInteractive(session.hostId, s.text, session.cwd, session.id);
+        // The render seeds from full ▸ recent history, so refetch both — the
+        // submit lands over a few seconds (see submitPrompt), so poll a handful
+        // of times to surface the reply / question card promptly.
+        for (const ms of [1500, 2500, 4000, 6000]) {
+          await new Promise((r) => setTimeout(r, ms));
+          await Promise.all([recentQ.refetch(), fullQ.refetch()]).catch(() => {});
+        }
+        return;
+      }
       setLiveEvents((e) => mergeById(e, [optimistic]));
       // Everything the turn streams, kept so the post-turn refetch can't erase
       // it: the turn's `done` can resolve before the host has flushed the last
@@ -417,7 +435,7 @@ export default function SessionScreen() {
         text: s.text,
       });
     }
-  }, [session, live, refreshUsage, mode, effort, router]);
+  }, [session, live, refreshUsage, mode, effort, router, recentQ, fullQ]);
 
   // Follow-ups typed while a turn runs are queued and drained in order — the
   // Claude Code / Codex model. inFlightRef gates re-entrancy synchronously so a
@@ -639,8 +657,11 @@ export default function SessionScreen() {
               onRespondPermission={(requestId, optionId) => {
                 if (session?.hostId) void respondPermission(session.hostId, requestId, optionId);
               }}
-              onRespondQuestion={(questionId, answers) => {
-                if (session?.hostId && id) void respondQuestion(session.hostId, id, questionId, answers);
+              onRespondPrompt={(_promptId, optionIndex) => {
+                if (session?.hostId && id) void respondPrompt(session.hostId, id, optionIndex);
+              }}
+              onSendInput={(data) => {
+                if (session?.hostId && id) void sendSessionInput(session.hostId, id, data);
               }}
               footer={running ? <WorkingIndicator agent={session.agent} label={workLabel} since={turnStartTs} /> : undefined}
             />

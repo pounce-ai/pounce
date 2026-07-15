@@ -1,12 +1,12 @@
 import { memo, useMemo, useState } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { LegendList, type LegendListRef, useViewability } from "@legendapp/list/react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   assertNeverEvent,
   type MessageImage,
   type PermissionRequestEvent,
-  type QuestionRequestEvent,
+  type PromptRequestEvent,
   type TimelineEvent,
   type ToolCallEvent,
   type ToolResultEvent,
@@ -115,7 +115,8 @@ export const Timeline = memo(function Timeline({
   onRunCommand,
   onAtBottomChange,
   onRespondPermission,
-  onRespondQuestion,
+  onRespondPrompt,
+  onSendInput,
 }: {
   events: TimelineEvent[];
   /** Which agent produced these events — selects the body-cleaning rules. */
@@ -124,8 +125,10 @@ export const Timeline = memo(function Timeline({
   cwd?: string | null;
   /** Answer an ACP permission prompt (requestId, chosen optionId or null). */
   onRespondPermission?: (requestId: string, optionId: string | null) => void;
-  /** Answer an AskUserQuestion (questionId, chosen option indices per question). */
-  onRespondQuestion?: (questionId: string, answers: number[][]) => void;
+  /** Answer an interactive prompt by option index (trust/permission/plan/question). */
+  onRespondPrompt?: (promptId: string, optionIndex: number) => void;
+  /** Send raw input to the hosted CLI (free-form replies, Esc) — prompt escape hatch. */
+  onSendInput?: (data: string) => void;
   footer?: React.ReactElement;
   /** Marker state is scoped per session — required for marked indicators. */
   sessionId?: string;
@@ -172,7 +175,8 @@ export const Timeline = memo(function Timeline({
           }
           batchHeader={headers.get(item.id)}
           onRespondPermission={onRespondPermission}
-          onRespondQuestion={onRespondQuestion}
+          onRespondPrompt={onRespondPrompt}
+          onSendInput={onSendInput}
         />
       )}
       // A blended average across the row types (short user bubbles / meta lines
@@ -222,7 +226,8 @@ const Row = memo(function Row({
   batchHeader,
   cwd,
   onRespondPermission,
-  onRespondQuestion,
+  onRespondPrompt,
+  onSendInput,
 }: {
   event: TimelineEvent;
   agent?: string;
@@ -238,8 +243,10 @@ const Row = memo(function Row({
   cwd?: string | null;
   /** Answer an ACP permission prompt (requestId, chosen optionId or null). */
   onRespondPermission?: (requestId: string, optionId: string | null) => void;
-  /** Answer an AskUserQuestion (questionId, chosen option indices per question). */
-  onRespondQuestion?: (questionId: string, answers: number[][]) => void;
+  /** Answer an interactive prompt by option index (trust/permission/plan/question). */
+  onRespondPrompt?: (promptId: string, optionIndex: number) => void;
+  /** Send raw input to the hosted CLI (free-form replies, Esc). */
+  onSendInput?: (data: string) => void;
 }) {
   const onLongPress = onLongPressEvent ? () => onLongPressEvent(event) : undefined;
   switch (event.type) {
@@ -304,8 +311,8 @@ const Row = memo(function Row({
       return <Meta text={event.message} level={event.level} />;
     case "permission_request":
       return <PermissionCard event={event} onRespond={onRespondPermission} />;
-    case "question_request":
-      return <QuestionCard event={event} onRespond={onRespondQuestion} />;
+    case "prompt_request":
+      return <PromptCard event={event} onRespond={onRespondPrompt} onSendInput={onSendInput} />;
     default:
       return assertNeverEvent(event);
   }
@@ -412,122 +419,108 @@ function PermissionCard({
   );
 }
 
+/** Header copy + icon per prompt kind — cosmetic only. */
+const PROMPT_KIND: Record<string, { label: string; icon: keyof typeof Ionicons.glyphMap }> = {
+  trust: { label: "Trust folder", icon: "shield-checkmark-outline" },
+  permission: { label: "Permission", icon: "key-outline" },
+  plan: { label: "Plan", icon: "map-outline" },
+  prompt: { label: "Question", icon: "help-circle-outline" },
+};
+
 /**
- * AskUserQuestion — the agent is blocked on one or more multiple-choice
- * questions. Each question is single- or multi-select; tapping toggles options,
- * and Submit (enabled once every question has a pick) sends the chosen option
- * indices back to the host, which drives the CLI's picker to answer. Locks to a
- * summary once submitted. Mirrors PermissionCard's "answer the paused turn" role.
+ * A generic interactive prompt — trust-folder, tool permission, plan approval,
+ * AskUserQuestion, any on-screen menu. The bridge detects it from the terminal
+ * screen (agent-agnostic), so this ONE card answers them all: pick an option and
+ * Confirm (the host moves the highlight there and presses Enter), or type a
+ * free-form reply. Locks to a summary once answered. Mirrors PermissionCard.
  */
-function QuestionCard({
+function PromptCard({
   event,
   onRespond,
+  onSendInput,
 }: {
-  event: QuestionRequestEvent;
-  onRespond?: (questionId: string, answers: number[][]) => void;
+  event: PromptRequestEvent;
+  onRespond?: (promptId: string, optionIndex: number) => void;
+  onSendInput?: (data: string) => void;
 }) {
-  // selections[q] = chosen option indices for question q (one for single-select).
-  const [selections, setSelections] = useState<number[][]>(() => event.questions.map(() => []));
-  const [submitted, setSubmitted] = useState(false);
+  const [selected, setSelected] = useState<number>(event.highlighted ?? 0);
+  const [submitted, setSubmitted] = useState<string | null>(null);
+  const [typing, setTyping] = useState(false);
+  const [text, setText] = useState("");
+  const meta = PROMPT_KIND[event.kind] ?? PROMPT_KIND.prompt;
 
-  const toggle = (q: number, opt: number) => {
+  const confirm = () => {
     if (submitted) return;
-    setSelections((prev) => {
-      const next = prev.map((s) => [...s]);
-      const cur = next[q];
-      if (event.questions[q].multiSelect) {
-        const at = cur.indexOf(opt);
-        if (at >= 0) cur.splice(at, 1);
-        else cur.push(opt);
-      } else {
-        next[q] = cur[0] === opt ? [] : [opt];
-      }
-      return next;
-    });
+    setSubmitted(event.options[selected]?.label ?? "answered");
+    onRespond?.(event.promptId, selected);
   };
-
-  const complete = selections.every((s) => s.length > 0);
-  const submit = () => {
-    if (submitted || !complete) return;
-    setSubmitted(true);
-    onRespond?.(event.questionId, selections);
+  const sendText = () => {
+    if (submitted || !text.trim()) return;
+    setSubmitted(`“${text.trim()}”`);
+    onSendInput?.(text + "\r");
   };
 
   return (
     <View className="gap-3 rounded-xl border border-accent/40 bg-accent/5 p-3">
       <View className="flex-row items-center gap-1.5">
-        <Ionicons name="help-circle-outline" size={14} color={COLOR.accent} />
-        <Text className="text-[12px] font-semibold uppercase tracking-wide text-accent">
-          {event.questions.length > 1 ? `${event.questions.length} questions` : "Question"}
-        </Text>
+        <Ionicons name={meta.icon} size={14} color={COLOR.accent} />
+        <Text className="text-[12px] font-semibold uppercase tracking-wide text-accent">{meta.label}</Text>
       </View>
 
-      {event.questions.map((q, qi) => (
-        <View key={qi} className="gap-2">
-          {event.questions.length > 1 && q.header ? (
-            <Text className="text-[11px] uppercase tracking-wide text-fg-faint">{q.header}</Text>
-          ) : null}
-          <Text className="text-[13px] font-medium text-fg">{q.question}</Text>
-          {q.multiSelect ? (
-            <Text className="text-[11px] text-fg-faint">Choose any that apply</Text>
-          ) : null}
+      {event.title ? <Text className="text-[13px] font-medium text-fg">{event.title}</Text> : null}
+
+      {submitted ? (
+        <Text className="text-[12px] font-medium text-fg-muted">Answered: {submitted}</Text>
+      ) : typing ? (
+        <View className="gap-2">
+          <TextInput
+            value={text}
+            onChangeText={setText}
+            autoFocus
+            placeholder="Type a reply…"
+            placeholderTextColor={COLOR.fgFaint}
+            onSubmitEditing={sendText}
+            returnKeyType="send"
+            className="min-h-[40px] rounded-lg border border-border bg-surface px-3 py-2 text-[13px] text-fg"
+          />
+          <View className="flex-row gap-2">
+            <Pressable onPress={() => setTyping(false)} className="active:opacity-80 h-9 flex-1 items-center justify-center rounded-lg bg-surface-alt">
+              <Text className="text-[13px] text-fg-muted">Back to options</Text>
+            </Pressable>
+            <Pressable onPress={sendText} disabled={!text.trim()} className={cn("active:opacity-90 h-9 flex-1 items-center justify-center rounded-lg", text.trim() ? "bg-accent" : "bg-surface-alt")}>
+              <Text className={cn("text-[13px] font-semibold", text.trim() ? "text-white" : "text-fg-faint")}>Send</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : (
+        <>
           <View className="gap-1.5">
-            {q.options.map((o, oi) => {
-              const on = selections[qi].includes(oi);
+            {event.options.map((o, oi) => {
+              const on = selected === oi;
               return (
                 <Pressable
                   key={oi}
-                  disabled={submitted}
-                  onPress={() => toggle(qi, oi)}
+                  onPress={() => setSelected(oi)}
                   className={cn(
-                    "active:opacity-80 flex-row items-start gap-2 rounded-lg border p-2.5",
+                    "active:opacity-80 flex-row items-center gap-2 rounded-lg border p-2.5",
                     on ? "border-accent bg-accent/15" : "border-border bg-surface",
                   )}
                 >
-                  <Ionicons
-                    name={
-                      q.multiSelect
-                        ? on ? "checkbox" : "square-outline"
-                        : on ? "radio-button-on" : "radio-button-off"
-                    }
-                    size={16}
-                    color={on ? COLOR.accent : COLOR.fgFaint}
-                  />
-                  <View className="flex-1">
-                    <Text className={cn("text-[13px] font-medium", on ? "text-accent" : "text-fg")}>
-                      {o.label}
-                    </Text>
-                    {o.description ? (
-                      <Text className="mt-0.5 text-[11px] text-fg-muted">{o.description}</Text>
-                    ) : null}
-                  </View>
+                  <Ionicons name={on ? "radio-button-on" : "radio-button-off"} size={16} color={on ? COLOR.accent : COLOR.fgFaint} />
+                  <Text className={cn("flex-1 text-[13px] font-medium", on ? "text-accent" : "text-fg")}>{o.label}</Text>
                 </Pressable>
               );
             })}
           </View>
-        </View>
-      ))}
-
-      {submitted ? (
-        <Text className="text-[12px] font-medium text-fg-muted">
-          Answered:{" "}
-          {event.questions
-            .map((q, qi) => selections[qi].map((oi) => q.options[oi]?.label).join(", "))
-            .join(" · ")}
-        </Text>
-      ) : (
-        <Pressable
-          onPress={submit}
-          disabled={!complete}
-          className={cn(
-            "active:opacity-90 h-10 items-center justify-center rounded-lg",
-            complete ? "bg-accent" : "bg-surface-alt",
-          )}
-        >
-          <Text className={cn("text-[13px] font-semibold", complete ? "text-white" : "text-fg-faint")}>
-            Submit
-          </Text>
-        </Pressable>
+          <Pressable onPress={confirm} className="active:opacity-90 h-10 items-center justify-center rounded-lg bg-accent">
+            <Text className="text-[13px] font-semibold text-white">Confirm</Text>
+          </Pressable>
+          {onSendInput ? (
+            <Pressable onPress={() => setTyping(true)} className="active:opacity-70 items-center">
+              <Text className="text-[12px] text-fg-muted">Type a reply instead</Text>
+            </Pressable>
+          ) : null}
+        </>
       )}
     </View>
   );
