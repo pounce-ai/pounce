@@ -549,14 +549,14 @@ const THUMB = 128;
  * (useViewability), so opening a screenshot-heavy thread doesn't pull every
  * image at once. Keyed by uri so a recycled row re-gates the new image.
  */
-function InlineImages({ images }: { images: readonly MessageImage[] }) {
+function InlineImages({ images, eager }: { images: readonly MessageImage[]; eager?: boolean }) {
   const [preview, setPreview] = useState<string | null>(null);
   const shown = images.filter((i) => i.uri);
   if (!shown.length) return null;
   return (
-    <View className="flex-row flex-wrap justify-end gap-1.5">
+    <View className={cn("flex-row flex-wrap gap-1.5", eager ? "justify-start" : "justify-end")}>
       {shown.map((img) => (
-        <LazyImage key={img.uri} uri={img.uri!} onPress={() => setPreview(img.uri!)} />
+        <LazyImage key={img.uri} uri={img.uri!} onPress={() => setPreview(img.uri!)} eager={eager} />
       ))}
       <Modal visible={!!preview} transparent animationType="fade" onRequestClose={() => setPreview(null)}>
         <Pressable
@@ -574,9 +574,11 @@ function InlineImages({ images }: { images: readonly MessageImage[] }) {
   );
 }
 
-/** One thumbnail whose network fetch is deferred until the row is viewable. */
-function LazyImage({ uri, onPress }: { uri: string; onPress: () => void }) {
-  const [visible, setVisible] = useState(false);
+/** One thumbnail whose network fetch is deferred until the row is viewable —
+ *  unless `eager`, which renders immediately (viewability doesn't fire reliably
+ *  for a thumbnail nested inside a tool card, so tool-card previews opt out). */
+function LazyImage({ uri, onPress, eager }: { uri: string; onPress: () => void; eager?: boolean }) {
+  const [visible, setVisible] = useState(!!eager);
   useViewability((token) => {
     if (token.isViewable) setVisible(true);
   });
@@ -716,7 +718,7 @@ function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: 
   const preview = previewInput(input, cwd);
   const failed = status === "error" || result?.result.isError === true;
   const running = status === "pending" || status === "running";
-  const expandable = !!result || preview.includes("\n");
+  const expandable = !!result || preview.includes("\n") || !!event.call.previewUri;
   // Live terminal tail: while the command runs, agents that stream partial
   // output (codex today, claude via ACP later) keep updating the paired
   // result in place — show its last lines inside the collapsed card so the
@@ -773,6 +775,14 @@ function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: 
           <Ionicons name={open ? "chevron-up" : "chevron-down"} size={13} color={COLOR.fgFaint} />
         ) : null}
       </View>
+      {open && event.call.previewUri ? (
+        // A Read of an image → show the picture, not just the path, once the
+        // card is expanded. Eager: a nested thumbnail's viewability doesn't
+        // fire reliably inside a card.
+        <View className="mt-2">
+          <InlineImages images={[{ uri: event.call.previewUri, mediaType: "" }]} eager />
+        </View>
+      ) : null}
       {open && result ? (
         <View className="mt-2">
           <ResultBody content={result.result.content} isError={result.result.isError} nested />

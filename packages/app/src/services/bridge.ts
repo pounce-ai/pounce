@@ -582,19 +582,33 @@ export async function fetchMessages(
   // hits these when a message scrolls into view (lazy <Image>), so the events
   // payload stays tiny even for threads full of screenshots.
   const base = await bridgeBase(cfg);
+  const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|heic|svg)$/i;
   return events.map((e) => {
-    if (e.type !== "user_message" || !e.images?.length) return e;
-    const images = e.images.map((img) =>
-      img.ref && !img.uri
-        ? {
-            ...img,
-            uri: `${base}/v1/image?agent=${encodeURIComponent(agent)}&thread=${encodeURIComponent(
-              threadId,
-            )}&ref=${encodeURIComponent(img.ref)}&token=${encodeURIComponent(cfg.token)}`,
-          }
-        : img,
-    );
-    return { ...e, images };
+    if (e.type === "user_message" && e.images?.length) {
+      const images = e.images.map((img) =>
+        img.ref && !img.uri
+          ? {
+              ...img,
+              uri: `${base}/v1/image?agent=${encodeURIComponent(agent)}&thread=${encodeURIComponent(
+                threadId,
+              )}&ref=${encodeURIComponent(img.ref)}&token=${encodeURIComponent(cfg.token)}`,
+            }
+          : img,
+      );
+      return { ...e, images };
+    }
+    // A Read of an image file → a token-authed bridge URL so the card previews
+    // it (lazy <Image>, so the payload stays small). Read's path is absolute.
+    if (e.type === "tool_call" && e.call.name === "Read") {
+      const fp = (e.call.input as { file_path?: string } | null | undefined)?.file_path;
+      if (typeof fp === "string" && IMG_EXT.test(fp)) {
+        return {
+          ...e,
+          call: { ...e.call, previewUri: `${base}/v1/file?path=${encodeURIComponent(fp)}&token=${encodeURIComponent(cfg.token)}` },
+        };
+      }
+    }
+    return e;
   });
 }
 
