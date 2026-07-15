@@ -50,5 +50,22 @@ target 'PounceDesktop-macOS' do
         end
       end
     end
+
+    # CI build cache: route the pod compilers through ccache (content-addressed,
+    # so a cached object is only reused when the source + flags are identical —
+    # never a stale build). Opt-in via USE_CCACHE=1; the release workflow writes
+    # the wrapper scripts. Local dev builds are unaffected. This turns the
+    # from-scratch native compile (~19 min) into a few minutes on a warm cache.
+    if ENV['USE_CCACHE'] == '1'
+      installer.pods_project.targets.each do |target|
+        target.build_configurations.each do |config|
+          config.build_settings['CC']  = "#{Dir.home}/bin/ccache-clang"
+          config.build_settings['CXX'] = "#{Dir.home}/bin/ccache-clang++"
+          # ccache is incompatible with the compiler index store; it adds no
+          # value in CI anyway.
+          config.build_settings['COMPILER_INDEX_STORE_ENABLE'] = 'NO'
+        end
+      end
+    end
   end
 end

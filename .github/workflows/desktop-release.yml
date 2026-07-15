@@ -69,6 +69,37 @@ jobs:
         with:
           node-version: 22
 
+      # Cache native compilation across runs — the from-scratch pod compile is
+      # ~19 min (the whole build's bottleneck). ccache is content-addressed, so a
+      # cached object is reused only when source + flags match — no stale-build
+      # risk. Pod targets pick up the wrappers via the Podfile post_install
+      # (USE_CCACHE=1); the app target gets them on the xcodebuild line.
+      - name: Set up ccache
+        run: |
+          brew install ccache
+          mkdir -p "$HOME/bin"
+          printf '#!/bin/sh\nexec ccache clang "$@"\n'   > "$HOME/bin/ccache-clang"
+          printf '#!/bin/sh\nexec ccache clang++ "$@"\n' > "$HOME/bin/ccache-clang++"
+          chmod +x "$HOME/bin/ccache-clang" "$HOME/bin/ccache-clang++"
+          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
+          echo "USE_CCACHE=1" >> "$GITHUB_ENV"
+          export CCACHE_DIR="$HOME/.ccache"
+          ccache --max-size=3G
+          ccache --set-config=compiler_check=content
+          ccache --set-config=sloppiness=clang_index_store,file_stat_matches,include_file_ctime,include_file_mtime,ivfsoverlay,pch_defines,modules,system_headers,time_macros
+          ccache --zero-stats
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          # run_id makes each run save a fresh entry; restore-keys pulls the most
+          # recent one. Podfile.lock in the key busts the cache when pods change.
+          key: ccache-desktop-${{ hashFiles('desktop/macos/Podfile.lock') }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-desktop-${{ hashFiles('desktop/macos/Podfile.lock') }}-
+            ccache-desktop-
+
       - name: Preflight — required secrets present
         env:
           CERT: ${{ secrets.MAC_CERT_P12_BASE64 }}
@@ -127,7 +158,11 @@ jobs:
         run: |
           xcodebuild -workspace PounceDesktop.xcworkspace -scheme PounceDesktop-macOS \
             -configuration Release -derivedDataPath build-release \
-            CODE_SIGNING_ALLOWED=NO build
+            CODE_SIGNING_ALLOWED=NO \
+            CC="$HOME/bin/ccache-clang" CXX="$HOME/bin/ccache-clang++" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build
+          echo "::group::ccache stats"; ccache --show-stats; echo "::endgroup::"
 
       - name: Sign · DMG · notarize · appcast
         env:
