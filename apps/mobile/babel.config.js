@@ -1,11 +1,25 @@
 module.exports = function (api) {
-  api.cache(true);
+  // The plugin set depends on the target platform (see the web-only plugin
+  // below), so cache per-platform rather than the blanket api.cache(true).
+  const platform = api.caller((caller) => (caller ? caller.platform : null));
+  api.cache.using(() => platform);
+  const isWeb = platform === "web";
+
   return {
     // Uniwind needs no Babel plugin (build-time Metro transform).
     // babel-preset-expo (SDK 54+) auto-injects the Reanimated 4 / worklets plugin.
     presets: ["babel-preset-expo"],
-    // react-native-boost: build-time optimization of RN core components. Must run
-    // before other plugins, so keep it first in the list.
-    plugins: ["react-native-boost/plugin"],
+    plugins: [
+      // react-native-boost: build-time optimization of RN core components. Must run
+      // before other plugins, so keep it first in the list.
+      "react-native-boost/plugin",
+      // Web = the Expo DOM components (only PatchDiffDOM). @pierre/diffs → shiki
+      // lazy-loads its highlighter/wasm via static import(); Metro splits those
+      // into an async __common-*.js chunk that Expo's DOM HTML serializer never
+      // emits, which breaks `expo export` — and therefore every OTA update.
+      // Inline those imports as synchronous requires on web only; native keeps
+      // its async imports (that path bundles fine and ships in the app-store build).
+      ...(isWeb ? ["babel-plugin-dynamic-import-node"] : []),
+    ],
   };
 };
