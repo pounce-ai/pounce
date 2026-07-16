@@ -8,10 +8,14 @@
     "./*": "./src/*"
   },
   "scripts": {
-    "typecheck": "echo 'typechecked by consumers (apps/mobile + desktop) — 39 platform variants + per-app RN version make a standalone tsc unsound'"
+    "typecheck": "echo 'typechecked by consumers (apps/mobile + desktop) — 39 platform variants + per-app RN version make a standalone tsc unsound'",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@litter/shared": "workspace:*",
     "@litter/transcript": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0"
   }
 }
