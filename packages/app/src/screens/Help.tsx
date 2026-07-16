@@ -5,7 +5,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { cn, COLOR, INPUT_TWEAKS, inputH } from "../ui";
 
-const DOCS_URL = "https://peppyhop.github.io/pounce/how-it-works.html";
+const DOCS_URL = "https://use-pounce.com/how-it-works.html";
 
 interface Faq {
   q: string;

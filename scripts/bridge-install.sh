@@ -93,7 +93,7 @@ EOF
   ;;
 
 *)
-  echo "error: unsupported OS '$(uname -s)' — on Windows, use the Pounce desktop app (github.com/peppyhop/pounce/releases)" >&2
+  echo "error: unsupported OS '$(uname -s)' — on Windows, use the Pounce desktop app (github.com/pounce-ai/pounce/releases)" >&2
   exit 1
   ;;
 esac

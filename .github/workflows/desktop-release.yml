@@ -21,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Build + sign + notarize but do NOT create a release or commit the appcast"
+        description: "Build + sign + notarize but do NOT publish a release"
         type: boolean
         default: false
 
@@ -195,16 +195,17 @@ jobs:
             dist/appcast.xml
           if-no-files-found: error
 
-  # Publish the release (DMG + bridge bundle), THEN commit the appcast to main so
-  # its enclosure URL resolves before Pages serves it to auto-updaters.
+  # Publish the release: DMG + bridge bundle + appcast, in one shot.
+  #
+  # appcast.xml ships as a release asset, and Sparkle polls it via the tag-less
+  # releases/latest/download/ URL (see SUFeedURL in Info.plist). That keeps the
+  # feed and the DMG its enclosure points at atomic — they are published by the
+  # same API call, so the feed can never advertise a build that isn't up yet.
   release:
     needs: [bridge, desktop]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -215,6 +216,8 @@ jobs:
         with:
           tag_name: desktop-v${{ needs.desktop.outputs.version }}
           name: Pounce Desktop ${{ needs.desktop.outputs.version }}
+          # Load-bearing: SUFeedURL resolves through releases/latest/download/,
+          # so a release that isn't "latest" is invisible to auto-update.
           make_latest: true
           body: |
             Desktop app ${{ needs.desktop.outputs.version }}. Auto-updates via Sparkle; requires macOS 14+.
@@ -224,16 +227,5 @@ jobs:
           files: |
             artifacts/Pounce.dmg
             artifacts/pounce-bridge.zip
+            artifacts/appcast.xml
           fail_on_unmatched_files: true
-
-      - name: Commit appcast to main (Pages serves docs/)
-        run: |
-          cp artifacts/appcast.xml docs/appcast.xml
-          if git diff --quiet -- docs/appcast.xml; then
-            echo "appcast unchanged"; exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/appcast.xml
-          git commit -m "Desktop: Sparkle appcast for ${{ needs.desktop.outputs.version }}"
-          git push origin main
