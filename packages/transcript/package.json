@@ -13,14 +13,16 @@
       "default": "./src/index.js"
     }
   },
-  "files": ["src"],
+  "files": [
+    "src"
+  ],
   "sideEffects": false,
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
-    "typescript": "^5.6.3",
+    "typescript": "~6.0.3",
     "vitest": "^2.1.0"
   }
 }

@@ -11,13 +11,13 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@litter/shared": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^5.6.3",
+    "typescript": "~6.0.3",
     "vitest": "^2.1.0"
   }
 }

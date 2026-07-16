@@ -1,6 +1,0 @@
-node_modules/
-build/
-dist/
-artifacts/
-*.tsbuildinfo
-server/

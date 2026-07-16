@@ -43,7 +43,7 @@
     "@react-native/metro-config": "~0.81",
     "@rnx-kit/metro-config": "latest",
     "@types/react": "~19.1.0",
-    "typescript": "~5.9.2"
+    "typescript": "~6.0.3"
   },
   "overrides": {
     "react": "19.1.4",
