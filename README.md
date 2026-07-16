@@ -1,10 +1,10 @@
 <div align="center">
-  <img src="docs/assets/icon.png" width="104" alt="Pounce" />
+  <img src="https://use-pounce.com/assets/icon.png" width="104" alt="Pounce" />
   <h1>Pounce</h1>
   <p><b>Control your coding agents from your pocket.</b></p>
   <p>
-    <a href="https://peppyhop.github.io/pounce/">Website</a> ·
-    <a href="https://github.com/peppyhop/pounce/releases/latest">Download the Bridge</a> (macOS · Windows · Linux) ·
+    <a href="https://use-pounce.com/">Website</a> ·
+    <a href="https://github.com/pounce-ai/pounce/releases/latest">Download the Bridge</a> (macOS · Windows · Linux) ·
     <a href="#getting-started-dev">Dev setup</a>
   </p>
 </div>
@@ -26,7 +26,7 @@ server, the shared packages, and the landing page.
 | `apps/bridge` | The **bridge server** (`server.mjs`) — the native agent host + LAN HTTP surface the apps talk to |
 | `desktop` | The **Pounce desktop app** (expo‑desktop → react‑native‑macos / windows) — the full app UI with the bridge embedded |
 | `packages/{shared,runtime,ui}` | Shared types, runtime/transport, and UI primitives |
-| `docs/` | The landing page (served via GitHub Pages) |
+| `docs/` | The landing page — served at [use-pounce.com](https://use-pounce.com/) via GitHub Pages (custom domain in `docs/CNAME`) |
 | `scripts/` | Release + host install helpers |
 
 ## How it works
@@ -38,7 +38,7 @@ syncs — then keeps a direct identity to reach your machine afterward.
 
 ## Get the app
 
-Grab the Bridge for your computer from [**Releases**](https://github.com/peppyhop/pounce/releases/latest),
+Grab the Bridge for your computer from [**Releases**](https://github.com/pounce-ai/pounce/releases/latest),
 run it, and scan the QR:
 
 - **macOS (Apple Silicon):** `Pounce.dmg` (signed + notarized) — open, drag to Applications, launch.
@@ -46,7 +46,7 @@ run it, and scan the QR:
   now: if SmartScreen appears, choose *More info → Run anyway*.
 - **Linux (x64 / arm64):** `Pounce-Setup-Linux-<arch>.tar.gz` — extract, run `./installer`
   (installs to `~/.local/share` and adds a desktop entry).
-- **iOS / Android:** in private beta — see the [website](https://peppyhop.github.io/pounce/).
+- **iOS / Android:** in private beta — see the [website](https://use-pounce.com/).
 
 ## Getting started (dev)
 

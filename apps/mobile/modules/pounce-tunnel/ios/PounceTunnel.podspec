@@ -7,7 +7,7 @@ Pod::Spec.new do |s|
   s.version        = package['version']
   s.summary        = package['description']
   s.author         = 'Pounce'
-  s.homepage       = 'https://github.com/peppyhop/pounce'
+  s.homepage       = 'https://github.com/pounce-ai/pounce'
   s.license        = 'MIT'
   s.platforms      = { :ios => '16.0' }
   s.source         = { :git => '' }

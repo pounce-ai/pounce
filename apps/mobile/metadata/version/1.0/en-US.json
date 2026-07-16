@@ -2,6 +2,6 @@
   "description": "Pounce puts your AI coding agents in your pocket.\n\nRun Pounce Bridge on your Mac, scan the pairing code, and your active agent sessions appear instantly on your phone. Watch agents think, write code, run commands, and open pull requests in real time — then step in whenever you want.\n\nWHAT YOU CAN DO\n• Follow every session live — messages, reasoning, tool calls, terminal output, and git activity in one clean timeline\n• Review code changes and diffs on the go\n• Send a new instruction or answer a prompt with a tap\n• Use your voice — hold and speak to steer an agent hands-free\n• Keep multiple projects and sessions organized in one place\n• Stay connected over your local network — fast, private, and secure\n\nHOW IT WORKS\n1. Install and run Pounce Bridge on your Mac\n2. Scan the pairing code with Pounce\n3. Your agents and projects appear automatically\n\nPounce connects directly to the Bridge running on your own machine, so your code and conversations stay on your network. No middleman, no waiting at your desk.\n\nWhether you're grabbing coffee, on the couch, or away from your laptop, Pounce keeps your agents moving.",
   "keywords": "coding,claude,code,developer,terminal,git,remote,assistant,programming,devtools,automation,ssh,llm",
   "promotionalText": "Watch your AI coding agents work in real time and jump in by tap or voice — review diffs, answer prompts, and keep every session moving from anywhere.",
-  "supportUrl": "https://peppyhop.github.io/pounce/",
-  "marketingUrl": "https://peppyhop.github.io/pounce/"
+  "supportUrl": "https://use-pounce.com/",
+  "marketingUrl": "https://use-pounce.com/"
 }
