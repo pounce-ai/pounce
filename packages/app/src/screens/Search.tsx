@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@pounce/shared";
@@ -25,13 +25,16 @@ const MIN_QUERY_LENGTH = 5;
 /** Full-screen thread search — matches title, branch, host, agent, repo. */
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
-  const [query, setQuery] = useState("");
+  // Desktop's sidebar seeds the modal via /search?q=… — start searching
+  // immediately instead of making the user retype.
+  const { q: seedQuery } = useLocalSearchParams<{ q?: string }>();
+  const [query, setQuery] = useState(seedQuery ? String(seedQuery) : "");
   // The list filters on a DEBOUNCED query: re-filtering per keystroke changes
   // the LegendList data while the keyboard/layout is still settling, which
   // trips a maintainVisibleContentPosition recalculation loop inside
   // legend-list (max-update-depth crash, repro'd on 3.1.2–3.3.2). One update
   // after typing pauses is also just better UX on large thread lists.
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState(seedQuery ? String(seedQuery) : "");
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query), 250);
     return () => clearTimeout(timer);
