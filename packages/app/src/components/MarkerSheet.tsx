@@ -2,7 +2,7 @@ import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-na
 import { Modal } from "./AppModal";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { cleanAssistantText, parseUserMessage } from "@litter/transcript";
+import { cleanAssistantText, parseUserMessage } from "@pounce/transcript";
 import { AgentLogo, COLOR, timeAgo } from "../ui";
 
 /** A marked message, resolved against the current event list. */

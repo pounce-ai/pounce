@@ -1,5 +1,5 @@
 // crypto.getRandomValues for @tanstack/db — must load before anything else.
-import '@litter/app/polyfills';
+import '@pounce/app/polyfills';
 import { registerRootComponent } from 'expo';
 
 import App from './App';

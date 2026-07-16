@@ -1,7 +1,7 @@
 /**
- * LitterRuntime — the high-level facade the app talks to.
+ * PounceRuntime — the high-level facade the app talks to.
  *
- * Wraps a {@link LitterAdapter} (which wraps a {@link Transport}) and exposes
+ * Wraps a {@link PounceAdapter} (which wraps a {@link Transport}) and exposes
  * project/conversation/task operations in domain terms. Screens and hooks use
  * this; they never import a transport or wire type directly.
  */
@@ -17,8 +17,8 @@ import type {
   Project,
   RunImage,
   TimelineEvent,
-} from "@litter/shared";
-import { LitterAdapter } from "./adapter/litterAdapter";
+} from "@pounce/shared";
+import { PounceAdapter } from "./adapter/pounceAdapter";
 import type { ConnectionState, Transport } from "./transport/types";
 
 export interface SendMessageInput {
@@ -30,18 +30,18 @@ export interface SendMessageInput {
   readonly permissionMode?: PermissionMode;
 }
 
-export class LitterRuntime {
-  #adapter: LitterAdapter;
+export class PounceRuntime {
+  #adapter: PounceAdapter;
 
   constructor(transport: Transport) {
-    this.#adapter = new LitterAdapter(transport);
+    this.#adapter = new PounceAdapter(transport);
   }
 
-  static withTransport(transport: Transport): LitterRuntime {
-    return new LitterRuntime(transport);
+  static withTransport(transport: Transport): PounceRuntime {
+    return new PounceRuntime(transport);
   }
 
-  get adapter(): LitterAdapter {
+  get adapter(): PounceAdapter {
     return this.#adapter;
   }
 

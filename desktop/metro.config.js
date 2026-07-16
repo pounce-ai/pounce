@@ -45,12 +45,12 @@ config.resolver.nodeModulesPaths = [path.resolve(projectRoot, "node_modules")];
 const PKG = (...p) => path.resolve(workspaceRoot, "packages", ...p);
 const EXACT = {
   "expo-router": path.resolve(projectRoot, "src/shims/router.tsx"),
-  "@litter/shared": PKG("shared/src/index.ts"),
-  "@litter/runtime": PKG("runtime/src/index.ts"),
-  "@litter/transcript": PKG("transcript/src/index.js"),
+  "@pounce/shared": PKG("shared/src/index.ts"),
+  "@pounce/runtime": PKG("runtime/src/index.ts"),
+  "@pounce/transcript": PKG("transcript/src/index.js"),
 };
 const PREFIX = {
-  "@litter/app/": PKG("app/src"),
+  "@pounce/app/": PKG("app/src"),
 };
 
 const prevResolveRequest = config.resolver.resolveRequest;

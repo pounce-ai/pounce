@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TimelineEvent } from "@litter/shared";
+import type { TimelineEvent } from "@pounce/shared";
 import { collapseToolResults } from "./timelineEvents";
 
 // Minimal fixtures — collapseToolResults only reads .type, .id, .call.id and

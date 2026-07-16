@@ -1,5 +1,5 @@
 {
-  "name": "@litter/bridge",
+  "name": "@pounce/bridge",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,7 +14,7 @@
     "@agentclientprotocol/claude-agent-acp": "^0.58.1",
     "@agentclientprotocol/codex-acp": "^1.1.2",
     "@agentclientprotocol/sdk": "^1.2.1",
-    "@litter/transcript": "workspace:*",
+    "@pounce/transcript": "workspace:*",
     "@wterm/core": "^0.3.0",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",

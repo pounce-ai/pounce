@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import type {
   CreateRunResponse,
   WireEnvelope,
-} from "@litter/shared";
-import { LitterAdapter } from "./litterAdapter";
+} from "@pounce/shared";
+import { PounceAdapter } from "./pounceAdapter";
 import type { Transport } from "../transport/types";
 
 function env(seq: number, payload: WireEnvelope["payload"]): WireEnvelope {
@@ -33,15 +33,15 @@ function stubTransport(envelopes: WireEnvelope[]): Transport {
   };
 }
 
-async function collect(adapter: LitterAdapter, conv: string) {
+async function collect(adapter: PounceAdapter, conv: string) {
   const out = [];
   for await (const batch of adapter.events(conv)) out.push(...batch);
   return out;
 }
 
-describe("LitterAdapter", () => {
+describe("PounceAdapter", () => {
   it("coalesces streaming assistant deltas into one growing message", async () => {
-    const adapter = new LitterAdapter(
+    const adapter = new PounceAdapter(
       stubTransport([
         env(1, { type: "UserEnvelope", message: "hi" }),
         env(2, { type: "ContentBlockDelta", index: 0, delta: { text: "Hel" } }),
@@ -56,7 +56,7 @@ describe("LitterAdapter", () => {
   });
 
   it("dedups already-applied seqs on resume overlap", async () => {
-    const adapter = new LitterAdapter(
+    const adapter = new PounceAdapter(
       stubTransport([
         env(1, { type: "UserEnvelope", message: "a" }),
         env(1, { type: "UserEnvelope", message: "a" }), // replayed dup
@@ -69,7 +69,7 @@ describe("LitterAdapter", () => {
   });
 
   it("degrades unknown wire types to system_event without throwing", async () => {
-    const adapter = new LitterAdapter(
+    const adapter = new PounceAdapter(
       stubTransport([env(1, { type: "SomeFutureVariant", foo: 1 })]),
     );
     const events = await collect(adapter, "c1");

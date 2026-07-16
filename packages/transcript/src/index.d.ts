@@ -1,5 +1,5 @@
 /**
- * @litter/transcript — normalize coding-agent session-transcript message bodies.
+ * @pounce/transcript — normalize coding-agent session-transcript message bodies.
  * See index.js for the full rationale and per-agent tag taxonomy.
  */
 

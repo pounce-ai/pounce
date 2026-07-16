@@ -1,5 +1,5 @@
 {
-  "name": "@litter/runtime",
+  "name": "@pounce/runtime",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,7 +14,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@litter/shared": "workspace:*"
+    "@pounce/shared": "workspace:*"
   },
   "devDependencies": {
     "typescript": "~6.0.3",

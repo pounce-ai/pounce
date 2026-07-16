@@ -2,7 +2,7 @@
  * Pure timeline-event helpers — no React/RN imports, so they can be unit-tested
  * in isolation and reused without pulling in the Timeline component.
  */
-import type { TimelineEvent } from "@litter/shared";
+import type { TimelineEvent } from "@pounce/shared";
 
 function toolCallIds(events: TimelineEvent[]): Set<string> {
   const s = new Set<string>();

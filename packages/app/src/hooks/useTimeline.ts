@@ -7,7 +7,7 @@
  * assistant message keeps one id while it grows, so it updates in place).
  */
 import { useEffect, useRef, useState, useCallback } from "react";
-import type { TimelineEvent } from "@litter/shared";
+import type { TimelineEvent } from "@pounce/shared";
 import { getRuntime } from "../services/runtime";
 
 export interface TimelineState {

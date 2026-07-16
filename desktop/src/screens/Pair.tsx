@@ -14,7 +14,7 @@ import {
   fetchLocalBridgeQr,
   type LocalBridgeInfo,
 } from "../services/localBridge";
-import { COLOR } from "@litter/app/ui";
+import { COLOR } from "@pounce/app/ui";
 
 export default function PairScreen() {
   const router = useRouter();

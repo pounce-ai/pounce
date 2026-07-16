@@ -3,7 +3,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } fro
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import type { AgentId } from "@litter/shared";
+import type { AgentId } from "@pounce/shared";
 import { insertThread, markInteractive, pendingTurns$, reposByActivity } from "../state/stores";
 import { useAgentCaps, useDevices, useProjects, useThreads } from "../state/db/hooks";
 import { Composer, type ComposerSubmit } from "../components/Composer";

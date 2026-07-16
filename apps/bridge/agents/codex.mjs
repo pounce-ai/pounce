@@ -13,7 +13,7 @@ import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { stripNoise } from "@litter/transcript";
+import { stripNoise } from "@pounce/transcript";
 import { SessionIndex } from "./session-index.mjs";
 import {
   userMessage, thinking, assistantMessage, toolCall, toolResult, systemEvent,

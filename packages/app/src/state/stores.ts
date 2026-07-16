@@ -17,10 +17,10 @@ import type {
   Session,
   TimelineEvent,
   UserProfile,
-} from "@litter/shared";
-import type { AgentCapabilities } from "@litter/shared";
-import type { Device, Host } from "@litter/shared";
-import { parseUserMessage } from "@litter/transcript";
+} from "@pounce/shared";
+import type { AgentCapabilities } from "@pounce/shared";
+import type { Device, Host } from "@pounce/shared";
+import { parseUserMessage } from "@pounce/transcript";
 import type { ModelInfo } from "../services/bridge";
 import { persist } from "../services/persistence";
 import {

@@ -7,7 +7,7 @@
  * scan, no manual token entry. Other machines' bridges are still added the
  * mobile way (Settings → add device).
  */
-import { addDeviceConfig, listDeviceConfigs } from "@litter/app/services/bridge";
+import { addDeviceConfig, listDeviceConfigs } from "@pounce/app/services/bridge";
 
 export const LOCAL_URL = `http://127.0.0.1:${process.env.EXPO_PUBLIC_BRIDGE_PORT ?? "8099"}`;
 

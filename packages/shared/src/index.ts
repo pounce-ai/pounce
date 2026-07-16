@@ -1,5 +1,5 @@
 /**
- * @litter/shared — the stable TypeScript contracts shared across the app,
+ * @pounce/shared — the stable TypeScript contracts shared across the app,
  * runtime adapter and Nitro layer. No runtime code, types only (+ tiny guards).
  */
 export * from "./pairing";

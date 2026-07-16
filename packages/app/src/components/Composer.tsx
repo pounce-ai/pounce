@@ -16,7 +16,7 @@ import {
   withTiming,
 } from "./animation";
 import { Ionicons } from "@expo/vector-icons";
-import type { AgentCapabilities, RunImage } from "@litter/shared";
+import type { AgentCapabilities, RunImage } from "@pounce/shared";
 import { SLASH_COMMANDS } from "../ui/agent-meta";
 import { fetchFiles, type RepoEntry } from "../services/bridge";
 import { isVoiceAvailable, startDictation, type Dictation } from "../services/voice";

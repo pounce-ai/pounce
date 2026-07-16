@@ -3,7 +3,7 @@
  *
  * Everything in this file is intentionally quarantined: it models the daemon's
  * HTTP/Iroh transport exactly as observed (`/v1/runs`, `/events`, seq replay,
- * `TurnStartParams`, ACP `CommandExec*`). The adapter layer in @litter/runtime
+ * `TurnStartParams`, ACP `CommandExec*`). The adapter layer in @pounce/runtime
  * is the ONLY place allowed to read these shapes; the app consumes the stable
  * domain/event types instead. This is the upgrade-compatibility seam.
  *

@@ -62,7 +62,7 @@ jobs:
         with:
           bun-version: latest
       # desktop/ is its own project (own lockfile) and compiles the shared
-      # @litter/app against react-native-macos, so it type-checks it under a
+      # @pounce/app against react-native-macos, so it type-checks it under a
       # different RN flavor than apps/mobile does.
       - name: Install (desktop)
         run: cd desktop && bun install

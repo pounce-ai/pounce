@@ -10,8 +10,7 @@ name = "pounce_tunnel"
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-# Same iroh the litter ecosystem runs (see packages/nitro/rust) — proven to
-# hole-punch from the user's real networks.
+# iroh p2p — proven to hole-punch from the user's real networks.
 iroh = "0.98.2"
 tokio = { version = "1", features = ["rt-multi-thread", "io-util", "net", "macros", "time", "sync"] }
 anyhow = "1"

@@ -17,7 +17,7 @@ import {
   setDeviceOverride,
 } from "../state/stores";
 import { useDeviceOverrides, useDevices } from "../state/db/hooks";
-import type { Device } from "@litter/shared";
+import type { Device } from "@pounce/shared";
 import {
   connectBridge,
   type DaemonInfo,

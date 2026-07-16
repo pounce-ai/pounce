@@ -5,8 +5,8 @@
  * pull-to-refresh like mobile: adopt the local bridge as soon as it's up,
  * connect if we aren't, refresh if we are.
  */
-import { connectBridge, loadBridgeConfig, syncLiveData } from "@litter/app/services/bridge";
-import { connection$ } from "@litter/app/state/stores";
+import { connectBridge, loadBridgeConfig, syncLiveData } from "@pounce/app/services/bridge";
+import { connection$ } from "@pounce/app/state/stores";
 import { ensureLocalBridge } from "./localBridge";
 
 export async function heartbeat(fresh = false): Promise<void> {

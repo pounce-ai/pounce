@@ -1,6 +1,6 @@
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useRouter } from "expo-router";
-import type { Session } from "@litter/shared";
+import type { Session } from "@pounce/shared";
 import { useLiveSessions, useProjectNames, useSessionsByLastActive } from "../state/db/hooks";
 import { AgentStatusIcon, cn } from "../ui";
 
