@@ -42,8 +42,18 @@ describe("collapseToolResults", () => {
   });
 
   it("keeps the LAST occurrence of a duplicated id (authoritative transcript copy)", () => {
-    const live = { type: "assistant_message", id: "x", text: "partial", streaming: true } as unknown as TimelineEvent;
-    const reparsed = { type: "assistant_message", id: "x", text: "final", streaming: false } as unknown as TimelineEvent;
+    const live = {
+      type: "assistant_message",
+      id: "x",
+      text: "partial",
+      streaming: true,
+    } as unknown as TimelineEvent;
+    const reparsed = {
+      type: "assistant_message",
+      id: "x",
+      text: "final",
+      streaming: false,
+    } as unknown as TimelineEvent;
     const out = collapseToolResults([live, reparsed]);
     expect(out).toHaveLength(1);
     expect((out[0] as { text: string }).text).toBe("final");
