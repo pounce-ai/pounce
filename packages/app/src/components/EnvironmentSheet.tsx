@@ -103,6 +103,10 @@ export function EnvironmentSheet({
   onAddSource,
   onRemoveSource,
   onFixConflicts,
+  fav,
+  onToggleFavourite,
+  markerCount = 0,
+  onMarkers,
 }: {
   visible: boolean;
   session: Session;
@@ -117,6 +121,12 @@ export function EnvironmentSheet({
   onRemoveSource?: (path: string) => void;
   /** "Fix" on the merge-conflicts row — hand the cleanup to the agent. */
   onFixConflicts?: () => void;
+  /** Thread actions — favourite toggle and the markers sheet moved here from
+   *  the session header to keep it uncluttered. */
+  fav?: boolean;
+  onToggleFavourite?: () => void;
+  markerCount?: number;
+  onMarkers?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const [git, setGit] = useState<GitChanges | null>(null);
@@ -160,6 +170,28 @@ export function EnvironmentSheet({
       >
         <View className="mb-3 h-1 w-10 self-center rounded-full bg-border" />
         <ScrollView bounces={false}>
+        {onToggleFavourite || (onMarkers && markerCount > 0) ? (
+          <>
+            <SectionHeader title="Thread" />
+            {onMarkers && markerCount > 0 ? (
+              <Row
+                icon="bookmark-outline"
+                label="Markers"
+                onPress={act(onMarkers)}
+                right={<Text className="text-[13px] font-semibold text-fg-muted">{markerCount}</Text>}
+              />
+            ) : null}
+            {onToggleFavourite ? (
+              <Row
+                icon={fav ? "star" : "star-outline"}
+                iconColor={fav ? COLOR.accent : undefined}
+                label={fav ? "Remove from favourites" : "Add to favourites"}
+                onPress={act(onToggleFavourite)}
+              />
+            ) : null}
+            <View className="my-2 h-px bg-border/60" />
+          </>
+        ) : null}
         <SectionHeader title="Environment" />
 
         {running ? <Row icon="stop-circle-outline" label="Stop agent" danger onPress={act(onStop)} /> : null}

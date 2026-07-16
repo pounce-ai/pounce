@@ -564,6 +564,59 @@ export async function syncLiveData(
   return { repos: Object.keys(repos).length, sessions: Object.keys(sessions).length, devices: Object.keys(devices).length };
 }
 
+/** One full-text hit from a device's history index. threadId matches the
+ *  Session id synced from that device, so hits join to the local store. */
+export interface MessageSearchHit {
+  hostId: string;
+  agent: string;
+  threadId: string;
+  snippet: string;
+  title: string | null;
+  timestamp: string | null;
+  matches: number;
+}
+
+/**
+ * Full-text search over message bodies across every paired device. Devices
+ * that are unreachable or don't have search installed (501) just contribute
+ * nothing — the section renders from whoever answered.
+ *
+ * Scoping: `thread` (with `hostId` + `agent`) searches WITHIN one session and
+ * returns per-message hits; `workspace` narrows to a repo/cwd substring;
+ * `hostId` alone limits the fan-out to one device.
+ */
+export async function searchMessages(
+  q: string,
+  opts?: { limit?: number; thread?: string; agent?: string; workspace?: string; hostId?: string },
+): Promise<MessageSearchHit[]> {
+  const all = await listDeviceConfigs();
+  const devices = opts?.hostId ? all.filter((d) => d.id === opts.hostId) : all;
+  const params = new URLSearchParams({ q, limit: String(opts?.limit ?? 20) });
+  if (opts?.thread) params.set("thread", opts.thread);
+  if (opts?.agent) params.set("agent", opts.agent);
+  if (opts?.workspace) params.set("workspace", opts.workspace);
+  const pages = await Promise.all(
+    devices.map(async (cfg) => {
+      try {
+        const { results } = await get<{ results: Omit<MessageSearchHit, "hostId">[] }>(
+          cfg,
+          `/v1/search?${params.toString()}`,
+          20_000,
+        );
+        return results.map((r) => ({ ...r, hostId: cfg.id }));
+      } catch {
+        return [];
+      }
+    }),
+  );
+  const hits = pages.flat();
+  // In-thread hits read top-to-bottom (chronological); cross-thread results
+  // stay newest-first.
+  return opts?.thread
+    ? hits.sort((a, b) => (Date.parse(a.timestamp ?? "") || 0) - (Date.parse(b.timestamp ?? "") || 0))
+    : hits.sort((a, b) => (Date.parse(b.timestamp ?? "") || 0) - (Date.parse(a.timestamp ?? "") || 0));
+}
+
 /** Fetch a session's real message history from its device. */
 export async function fetchMessages(
   hostId: string,

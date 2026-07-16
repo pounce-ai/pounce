@@ -30,6 +30,7 @@ import { resolvePermission } from "./agents/acp.mjs";
 import { startInteractiveSession, answerPrompt, pendingPrompt, isInteractive, sendInput } from "./agents/pty-turn.mjs";
 import { agentEnv, binPath, primaryLanIp } from "./agents/env.mjs";
 import { readConfig, writeConfig } from "./agents/config.mjs";
+import { createHistorySearch } from "./agents/search.mjs";
 
 const IS_WIN = process.platform === "win32";
 
@@ -46,6 +47,12 @@ const TOKEN = process.env.BRIDGE_TOKEN || "pounce-bridge-local";
 // fallback for standalone `node server.mjs` runs.
 let APP_VERSION = process.env.BRIDGE_APP_VERSION || null;
 const host = createHost({ version: () => APP_VERSION });
+// Full-text history search (ctx-backed). When ctx is missing, bootstrap it
+// automatically — pinned release, checksum-verified, dropped in ~/.pounce/bin
+// like pounce-tunnel. POUNCE_NO_CTX_INSTALL=1 opts out; /v1/search then 501s.
+const historySearch = createHistorySearch();
+if (historySearch.available()) historySearch.refresh();
+else if (process.env.POUNCE_NO_CTX_INSTALL !== "1") void historySearch.ensureInstalled();
 const BRIDGE_STARTED_AT = new Date().toISOString();
 /** /v1/daemon payload — kept shape-compatible with the old daemon report. */
 function hostInfo() {
@@ -506,6 +513,7 @@ function status() {
 async function runTurn(agent, threadId, text) {
   const realId = await host.startTurn(agent, { threadId, text }).done;
   cache.delete("threads");
+  historySearch.refresh();
   return getMessages(agent, realId || threadId, true);
 }
 
@@ -520,7 +528,7 @@ function streamTurn(agent, threadId, text, cwd, onEvent, onDone, opts = {}) {
   // onDone must fire even when the turn errors — otherwise the client stream
   // never gets its terminal frame and the busy marker leaks.
   void t.done.then(
-    (realId) => onDone(realId || threadId),
+    (realId) => { historySearch.refresh(); onDone(realId || threadId); },
     () => onDone(threadId),
   );
   return () => t.stop();
@@ -984,6 +992,25 @@ const server = http.createServer(async (req, res) => {
       // Honor the app's Restart action by dropping every cache instead.
       cache.clear();
       return send(res, 200, { restarted: true, daemon: hostInfo() });
+    }
+    // Full-text search over indexed session history. Results carry adapter
+    // thread ids, so the app joins them against its synced thread list.
+    if (url.pathname === "/v1/search") {
+      const q = url.searchParams.get("q");
+      if (!q) return send(res, 400, { error: "q required" });
+      if (!historySearch.available()) {
+        return send(res, 501, { error: "search unavailable", hint: "install ctx on this machine: https://ctx.rs" });
+      }
+      const agent = url.searchParams.get("agent") || undefined;
+      const workspace = url.searchParams.get("workspace") || undefined;
+      const since = url.searchParams.get("since") || undefined;
+      const thread = url.searchParams.get("thread") || undefined;
+      const limit = Number(url.searchParams.get("limit")) || 20;
+      const providers = (await getAgents()).map((a) => a.id);
+      const key = `search:${agent || "*"}:${workspace || "*"}:${since || "*"}:${thread || "*"}:${limit}:${q}`;
+      const results = await cached(key, 15_000, () =>
+        historySearch.search({ q, agent, workspace, since, thread, limit, providers }));
+      return send(res, 200, { results });
     }
     if (url.pathname === "/v1/messages") {
       const agent = url.searchParams.get("agent");
