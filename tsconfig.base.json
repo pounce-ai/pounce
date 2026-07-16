@@ -20,7 +20,6 @@
     "paths": {
       "@litter/shared": ["./packages/shared/src/index.ts"],
       "@litter/runtime": ["./packages/runtime/src/index.ts"],
-      "@litter/nitro": ["./packages/nitro/src/index.ts"],
       "@litter/ui": ["./packages/ui/src/index.ts"],
       "@litter/transcript": ["./packages/transcript/src/index.d.ts"]
     }

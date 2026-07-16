@@ -48,7 +48,6 @@ const EXACT = {
   "@litter/shared": PKG("shared/src/index.ts"),
   "@litter/runtime": PKG("runtime/src/index.ts"),
   "@litter/transcript": PKG("transcript/src/index.js"),
-  "@litter/nitro": PKG("nitro/src/index.ts"),
 };
 const PREFIX = {
   "@litter/app/": PKG("app/src"),
