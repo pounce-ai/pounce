@@ -1,5 +1,5 @@
 /**
- * @litter/transcript — normalize coding-agent session-transcript message bodies.
+ * @pounce/transcript — normalize coding-agent session-transcript message bodies.
  *
  * Coding-agent CLIs (Claude Code, Codex, opencode, …) each inline their own
  * agent-specific "plumbing" into message text — slash-command envelopes,

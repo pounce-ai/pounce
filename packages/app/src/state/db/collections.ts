@@ -19,7 +19,7 @@ import type {
   Repository,
   Session,
   TimelineEvent,
-} from "@litter/shared";
+} from "@pounce/shared";
 import type { ModelInfo } from "../../services/bridge";
 import { mmkvCollection } from "./storage";
 

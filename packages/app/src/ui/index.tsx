@@ -2,7 +2,7 @@ import { type ComponentProps, useEffect, useSyncExternalStore } from "react";
 import { cn } from "cnfast";
 import { ActionSheetIOS, Alert, Platform, View, Text } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import type { ActivityStatus } from "@litter/shared";
+import type { ActivityStatus } from "@pounce/shared";
 import { AgentLogo } from "./agent-logos";
 
 // Shared tokens live in tokens.ts (no circular dep with agent-logos); re-export

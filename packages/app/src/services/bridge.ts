@@ -21,8 +21,8 @@ import type {
   RunImage,
   Session,
   TimelineEvent,
-} from "@litter/shared";
-import { parseUserMessage } from "@litter/transcript";
+} from "@pounce/shared";
+import { parseUserMessage } from "@pounce/transcript";
 import { cachedModels, connection$, firstUserMessages, mergeWorkspace, setAgentCaps, setCachedModels, syncWorkspace, upsertHosts } from "../state/stores";
 import { clearNotify, notifyOnce } from "./notify";
 import { streamTurn } from "./streamTurn";
@@ -112,7 +112,8 @@ async function deviceForHost(hostId: string): Promise<DeviceConfig | null> {
 
 // Same key runtime.ts uses for savePairing/loadPairing (duplicated here rather
 // than imported — runtime.ts imports this module, so importing back would cycle).
-const PAIRING_KEY = "litter.pairing";
+const PAIRING_KEY = "pounce.pairing";
+const LEGACY_PAIRING_KEY = "litter.pairing"; // pre-Pounce-rename key
 
 const effectiveBase = new Map<string, { base: string; until: number }>(); // cfg.url -> resolution
 
@@ -141,7 +142,9 @@ export async function bridgeBase(cfg: BridgeConfig): Promise<string> {
     return cfg.url;
   }
   try {
-    const raw = await SecureStore.getItemAsync(PAIRING_KEY);
+    const raw =
+      (await SecureStore.getItemAsync(PAIRING_KEY)) ??
+      (await SecureStore.getItemAsync(LEGACY_PAIRING_KEY));
     const pairing = raw ? (JSON.parse(raw) as PairPayload) : null;
     if (pairing?.nodeId) {
       const { tunnelAvailable, startTunnel } = await import("./tunnel");

@@ -9,7 +9,7 @@ import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import { useQuery } from "@tanstack/react-query";
 import type { LegendListRef } from "@legendapp/list/react-native";
-import type { PermissionMode, TimelineEvent } from "@litter/shared";
+import type { PermissionMode, TimelineEvent } from "@pounce/shared";
 import { collapseToolResults, Timeline } from "../components/Timeline";
 import { WorkingIndicator } from "../components/WorkingIndicator";
 import { TimelineSkeleton } from "../components/Skeleton";

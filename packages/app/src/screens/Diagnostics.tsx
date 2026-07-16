@@ -10,7 +10,7 @@ import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import type { DoctorReport, PounceConfig } from "@litter/shared";
+import type { DoctorReport, PounceConfig } from "@pounce/shared";
 import { fetchDoctor, fetchHostConfig, saveHostConfig } from "../services/bridge";
 import { useDevices } from "../state/db/hooks";
 import { COLOR } from "../ui";

@@ -7,9 +7,9 @@
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Modal } from "@litter/app/components/AppModal";
-import { COLOR } from "@litter/app/ui";
-import { isUpdaterSupported, setAutoUpdateEnabled } from "@litter/app/services/updater";
+import { Modal } from "@pounce/app/components/AppModal";
+import { COLOR } from "@pounce/app/ui";
+import { isUpdaterSupported, setAutoUpdateEnabled } from "@pounce/app/services/updater";
 
 const ASKED_KEY = "pounce.updateConsentAsked";
 

@@ -7,7 +7,7 @@
  * the app keeps working across daemon upgrades. This is the upgrade-compat seam.
  */
 
-import type { TimelineEvent, WireEnvelope, WirePayload } from "@litter/shared";
+import type { TimelineEvent, WireEnvelope, WirePayload } from "@pounce/shared";
 
 interface TranslateCtx {
   readonly conversationId: string;
@@ -54,7 +54,7 @@ export function translate(
 
     case "ContentBlockDelta":
       // Streaming text delta: the adapter coalesces these into the open
-      // assistant message (see litterAdapter). Emit a partial marker.
+      // assistant message (see pounceAdapter). Emit a partial marker.
       return [
         {
           ...base,

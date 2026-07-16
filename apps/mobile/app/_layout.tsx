@@ -1,13 +1,13 @@
-import "@litter/app/polyfills"; // crypto.getRandomValues for @tanstack/db — must load first
+import "@pounce/app/polyfills"; // crypto.getRandomValues for @tanstack/db — must load first
 import "../global.css";
 import { useEffect } from "react";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { Providers } from "@litter/app/components/Providers";
-import { UpdateBanner } from "@litter/app/components/UpdateBanner";
-import { bootstrap } from "@litter/app/services/runtime";
-import { attachPushNavigation } from "@litter/app/services/push";
-import { initLocalNotifications } from "@litter/app/services/notify";
+import { Providers } from "@pounce/app/components/Providers";
+import { UpdateBanner } from "@pounce/app/components/UpdateBanner";
+import { bootstrap } from "@pounce/app/services/runtime";
+import { attachPushNavigation } from "@pounce/app/services/push";
+import { initLocalNotifications } from "@pounce/app/services/notify";
 
 export default function RootLayout() {
   useEffect(() => {

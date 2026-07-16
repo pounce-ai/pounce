@@ -13,15 +13,12 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "composite": true,
+    "noEmit": true,
     "paths": {
-      "@litter/shared": ["./packages/shared/src/index.ts"],
-      "@litter/runtime": ["./packages/runtime/src/index.ts"],
-      "@litter/ui": ["./packages/ui/src/index.ts"],
-      "@litter/transcript": ["./packages/transcript/src/index.d.ts"]
+      "@pounce/shared": ["./packages/shared/src/index.ts"],
+      "@pounce/runtime": ["./packages/runtime/src/index.ts"],
+      "@pounce/ui": ["./packages/ui/src/index.ts"],
+      "@pounce/transcript": ["./packages/transcript/src/index.d.ts"]
     }
   }
 }

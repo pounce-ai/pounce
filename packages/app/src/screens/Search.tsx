@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LegendList } from "@legendapp/list/react-native";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
-import type { Session } from "@litter/shared";
+import type { Session } from "@pounce/shared";
 import { applyFilters, filters$, rankSession } from "../state/stores";
 import {
   useFavThreadSet,

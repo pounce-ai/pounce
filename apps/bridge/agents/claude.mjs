@@ -15,7 +15,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import { parseUserMessage, stripNoise } from "@litter/transcript";
+import { parseUserMessage, stripNoise } from "@pounce/transcript";
 import { SessionIndex } from "./session-index.mjs";
 import {
   userMessage, thinking, assistantMessage, toolCall, toolResult, systemEvent,

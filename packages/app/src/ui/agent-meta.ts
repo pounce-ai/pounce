@@ -3,7 +3,7 @@
  * lists for each. Capabilities reported by the daemon win; these are sensible
  * fallbacks so controls still appear before a device has synced.
  */
-import type { AgentCapabilities, PermissionMode } from "@litter/shared";
+import type { AgentCapabilities, PermissionMode } from "@pounce/shared";
 
 export type ReasoningEffort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 

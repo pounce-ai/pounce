@@ -30,7 +30,7 @@ import type {
   PairPayload,
   RunControlRequest,
   WireEnvelope,
-} from "@litter/shared";
+} from "@pounce/shared";
 import type {
   ConnectionState,
   SubscribeOptions,

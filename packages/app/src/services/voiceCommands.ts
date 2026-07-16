@@ -6,7 +6,7 @@
  * The STT itself (Whisper/Moonshine via react-native-executorch) feeds
  * transcripts here. Pure + dependency-free so it's unit-testable.
  */
-import type { Device, Repository, Session } from "@litter/shared";
+import type { Device, Repository, Session } from "@pounce/shared";
 
 export interface VoiceContext {
   sessions: Session[];

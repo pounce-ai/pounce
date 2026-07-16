@@ -1,1 +1,1 @@
-export { default } from "@litter/app/screens/Search";
+export { default } from "@pounce/app/screens/Search";

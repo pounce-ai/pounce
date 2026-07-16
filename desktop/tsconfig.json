@@ -22,16 +22,16 @@
       "expo-router": [
         "./src/shims/router.tsx"
       ],
-      "@litter/app/*": [
+      "@pounce/app/*": [
         "../packages/app/src/*"
       ],
-      "@litter/shared": [
+      "@pounce/shared": [
         "../packages/shared/src/index.ts"
       ],
-      "@litter/runtime": [
+      "@pounce/runtime": [
         "../packages/runtime/src/index.ts"
       ],
-      "@litter/transcript": [
+      "@pounce/transcript": [
         "../packages/transcript/src/index.d.ts"
       ],
       "react": [

@@ -6,7 +6,7 @@
  */
 import { useMemo } from "react";
 import { eq, useLiveQuery } from "@tanstack/react-db";
-import type { AgentCapabilities, Device, Host, Repository, Session, TimelineEvent } from "@litter/shared";
+import type { AgentCapabilities, Device, Host, Repository, Session, TimelineEvent } from "@pounce/shared";
 import type { ModelInfo } from "../../services/bridge";
 import {
   agentCaps,

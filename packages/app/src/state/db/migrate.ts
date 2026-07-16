@@ -8,7 +8,7 @@
  * threads, favourites and history after the upgrade. Runs before the first sync,
  * gated on a flag so it never re-imports. `filters`/`user` stay in Legend State.
  */
-import type { AgentCapabilities, Device, Host, Repository, Session } from "@litter/shared";
+import type { AgentCapabilities, Device, Host, Repository, Session } from "@pounce/shared";
 import type { ModelInfo } from "../../services/bridge";
 import { storage as mmkv } from "../../services/persistence";
 import {

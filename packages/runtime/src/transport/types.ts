@@ -6,7 +6,7 @@
  * explored historically via a NitroLitter native module and removed; the seam
  * stays transport-agnostic so another can be added later.)
  *
- * Everything below speaks the *wire* protocol (@litter/shared/protocol). The
+ * Everything below speaks the *wire* protocol (@pounce/shared/protocol). The
  * adapter is responsible for translating to the stable domain model.
  */
 
@@ -24,7 +24,7 @@ import type {
   PairPayload,
   RunControlRequest,
   WireEnvelope,
-} from "@litter/shared";
+} from "@pounce/shared";
 
 export type ConnectionState =
   | "disconnected"

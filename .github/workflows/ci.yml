@@ -30,21 +30,24 @@ jobs:
       - name: Lint (oxlint)
         run: bun run lint
 
-      # Incremental formatting: only enforce oxfmt on files this change touches,
-      # so the pre-existing (unformatted) code isn't reformatted wholesale.
-      - name: Format check (changed files)
+      # Incremental formatting: enforce oxfmt only on NEWLY ADDED files
+      # (--diff-filter=A). Editing a pre-existing (unformatted) file must not
+      # force a wholesale reformat of it — that buries real changes in mechanical
+      # churn. New code is held to the format; legacy code is left until it's
+      # rewritten (or a one-time `oxfmt --write` sweep is run deliberately).
+      - name: Format check (added files)
         run: |
           base="${{ github.event.pull_request.base.sha || github.event.before }}"
           if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
             base="$(git rev-parse HEAD^ 2>/dev/null || git rev-parse HEAD)"
           fi
-          files=$(git diff --name-only --diff-filter=ACMR "$base"...HEAD \
+          files=$(git diff --name-only --diff-filter=A "$base"...HEAD \
             -- '*.ts' '*.tsx' '*.mjs' '*.cjs' '*.js' '*.jsx' | tr '\n' ' ')
           if [ -n "$files" ]; then
-            echo "Checking formatting of changed files:"; echo "$files" | tr ' ' '\n'
+            echo "Checking formatting of added files:"; echo "$files" | tr ' ' '\n'
             bunx oxfmt --check $files
           else
-            echo "No changed source files to format-check."
+            echo "No added source files to format-check."
           fi
 
       - name: Typecheck (workspace)
@@ -62,8 +65,17 @@ jobs:
         with:
           bun-version: latest
       # desktop/ is its own project (own lockfile) and compiles the shared
-      # @litter/app against react-native-macos, so it type-checks it under a
+      # @pounce/app against react-native-macos, so it type-checks it under a
       # different RN flavor than apps/mobile does.
+      #
+      # Root install is required too: the desktop tsconfig doesn't map every
+      # third-party import in `paths`, so when tsc type-checks ../packages/app
+      # source, those bare imports (react-native-safe-area-context, -svg,
+      # @legendapp/list, prism-react-renderer, react/jsx-runtime …) resolve by
+      # walking up from packages/app to the ROOT node_modules — which only the
+      # root install populates.
+      - name: Install (root — resolves packages/app's third-party imports)
+        run: bun install
       - name: Install (desktop)
         run: cd desktop && bun install
       - name: Typecheck

@@ -10,13 +10,13 @@ import { LegendList } from "@legendapp/list/react-native";
 import { useSelector } from "@legendapp/state/react";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import type { Session } from "@litter/shared";
-import { applyFilters, connection$, filters$, needsYou } from "@litter/app/state/stores";
-import { useDevices, useIgnoredSet, useProjectNames, useThreads } from "@litter/app/state/db/hooks";
-import { SessionListSkeleton } from "@litter/app/components/Skeleton";
-import { LiveStrip } from "@litter/app/components/LiveStrip";
-import { FilterButton, FilterSheet } from "@litter/app/components/FilterSheet";
-import { AgentStatusIcon, cn, COLOR, INPUT_TWEAKS, timeAgo } from "@litter/app/ui";
+import type { Session } from "@pounce/shared";
+import { applyFilters, connection$, filters$, needsYou } from "@pounce/app/state/stores";
+import { useDevices, useIgnoredSet, useProjectNames, useThreads } from "@pounce/app/state/db/hooks";
+import { SessionListSkeleton } from "@pounce/app/components/Skeleton";
+import { LiveStrip } from "@pounce/app/components/LiveStrip";
+import { FilterButton, FilterSheet } from "@pounce/app/components/FilterSheet";
+import { AgentStatusIcon, cn, COLOR, INPUT_TWEAKS, timeAgo } from "@pounce/app/ui";
 import { nav$ } from "../shims/router";
 
 type Row =

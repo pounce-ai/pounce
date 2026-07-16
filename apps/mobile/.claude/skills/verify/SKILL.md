@@ -37,7 +37,7 @@ xcrun simctl openurl <SIM> 'pounce://connect?url=http%3A%2F%2F127.0.0.1%3A8123&t
 
 - Screenshots: `xcrun simctl io <SIM> screenshot out.png`.
 - App-side logs: add temporary `console.log` (Metro hot-reloads in ~2s) and grep the metro log; REVERT after.
-- Persisted state: `strings <DataContainer>/Documents/mmkv/litter-next | grep db:<collection>` (threads/recents/syncLog…).
+- Persisted state: `strings <DataContainer>/Documents/mmkv/pounce | grep db:<collection>` (threads/recents/syncLog…).
 - Bridge turns log to its stdout: `[turn] claude resume/exit`.
 
 ## Gotchas

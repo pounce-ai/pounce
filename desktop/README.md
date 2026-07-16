@@ -1,4 +1,4 @@
-# Pounce Desktop (`@litter/desktop`)
+# Pounce Desktop (`@pounce/desktop`)
 
 The desktop client — the same product as `apps/mobile`, built with
 [expo-desktop](https://github.com/shirakaba/expo-desktop) on react-native-macos
@@ -11,15 +11,15 @@ app and you're connected — no separate bridge install, no QR scan.
 ## Architecture: one shared source, thin platform seams
 
 **All screens, components, state, and services live once in
-`packages/app` (`@litter/app`)** and are consumed by both apps:
+`packages/app` (`@pounce/app`)** and are consumed by both apps:
 
-- `apps/mobile` — expo-router route files that re-export `@litter/app/screens/*`,
+- `apps/mobile` — expo-router route files that re-export `@pounce/app/screens/*`,
   plus mobile chrome (motion-tabs layouts) and native config. Expo SDK 57 / RN 0.86.
 - `desktop/` — the master-detail shell (`src/shell/`), an expo-router shim
   (`src/shims/router.tsx`, mapped by Metro), the local-bridge auto-pairing
   service, and native config. Expo SDK 54 / RN 0.81 (the common minor of
   react-native-macos + react-native-windows) — which is why this package sits
-  **outside** the bun workspace and resolves `@litter/*` via Metro instead.
+  **outside** the bun workspace and resolves `@pounce/*` via Metro instead.
 
 Platform divergence uses React Native's platform-file mechanism inside the
 shared package — `.macos.ts` / `.windows.ts` forks (re-exporting a single
@@ -43,7 +43,7 @@ the same code on iOS, Android, macOS, and Windows.
 
 Desktop's `metro.config.js` does three jobs: adds the `macos`/`windows`
 platforms + `react-native` export conditions, maps `expo-router` → the shell
-shim and `@litter/*` → package sources, and re-anchors bare imports from
+shim and `@pounce/*` → package sources, and re-anchors bare imports from
 `../packages` into `desktop/node_modules` so the workspace root's RN 0.86
 never leaks into the 0.81 bundle. Runtime tsconfig-paths are disabled
 (`app.json` → `experiments.tsconfigPaths: false`); the tsconfig `paths` exist

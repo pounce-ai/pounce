@@ -1,6 +1,6 @@
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
-import type { Session } from "@litter/shared";
+import type { Session } from "@pounce/shared";
 import { ACTIVITY_LABEL, AgentChip, BranchChip, cn, timeAgo } from "../ui";
 
 export function SessionCard({

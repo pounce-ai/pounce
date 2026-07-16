@@ -1,13 +1,13 @@
 /**
- * LitterAdapter — the compatibility layer.
+ * PounceAdapter — the compatibility layer.
  *
- * Responsibilities (mirrors the spec's "Litter Compatibility Layer"):
+ * Responsibilities (the daemon compatibility layer):
  *   - isolate the unstable alleycat transport behind one object
  *   - translate wire envelopes -> stable TimelineEvents
  *   - coalesce streaming assistant deltas into a single growing message
  *   - track the seq cursor so reconnects resume exactly (no gaps, no dupes)
  *
- * The app subscribes to {@link LitterAdapter.events} and never sees the wire.
+ * The app subscribes to {@link PounceAdapter.events} and never sees the wire.
  */
 
 import type {
@@ -16,13 +16,13 @@ import type {
   RunControlRequest,
   TimelineEvent,
   WireEnvelope,
-} from "@litter/shared";
+} from "@pounce/shared";
 import type { Transport } from "../transport/types";
 import { translate } from "./translate";
 
 export type TimelineListener = (events: readonly TimelineEvent[]) => void;
 
-export class LitterAdapter {
+export class PounceAdapter {
   #transport: Transport;
   /** Last seq applied per conversation — the resume cursor. */
   #cursors = new Map<string, number>();

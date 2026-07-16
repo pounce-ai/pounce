@@ -1,1 +1,1 @@
-export { default } from "@litter/app/screens/SyncHistory";
+export { default } from "@pounce/app/screens/SyncHistory";

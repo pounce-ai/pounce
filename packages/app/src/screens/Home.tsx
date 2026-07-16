@@ -6,7 +6,7 @@ import { LinearTransition } from "react-native-reanimated";
 import { useObservable, useSelector } from "@legendapp/state/react";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import type { Session } from "@litter/shared";
+import type { Session } from "@pounce/shared";
 import {
   activeFilterCount,
   applyFilters,

@@ -1,23 +1,24 @@
 /**
- * Runtime service — owns the single LitterRuntime instance. Transport
+ * Runtime service — owns the single PounceRuntime instance. Transport
  * selection lives behind the ./transport seam (Iroh-or-HTTP on mobile,
  * HTTP-only on desktop). Pairing payloads go to the secure store, never MMKV.
  */
 import { AppState, Platform } from "react-native";
 import * as SecureStore from "./secureStore";
-import { LitterRuntime } from "@litter/runtime";
-import type { PairPayload } from "@litter/shared";
+import { PounceRuntime } from "@pounce/runtime";
+import type { PairPayload } from "@pounce/shared";
 import { connection$, markDevicesOffline, reconcileDevices } from "../state/stores";
 import { connectBridge, listDeviceConfigs, loadBridgeConfig } from "./bridge";
 import { buildTransport } from "./transport";
 
-const PAIRING_KEY = "litter.pairing";
+const PAIRING_KEY = "pounce.pairing";
+const LEGACY_PAIRING_KEY = "litter.pairing"; // pre-Pounce-rename key
 
-let runtime: LitterRuntime | null = null;
+let runtime: PounceRuntime | null = null;
 
-export async function getRuntime(): Promise<LitterRuntime> {
+export async function getRuntime(): Promise<PounceRuntime> {
   if (runtime) return runtime;
-  runtime = LitterRuntime.withTransport(await buildTransport());
+  runtime = PounceRuntime.withTransport(await buildTransport());
   runtime.onConnectionStateChange((s) => connection$.status.set(s));
   return runtime;
 }
@@ -27,7 +28,9 @@ export async function savePairing(p: PairPayload): Promise<void> {
 }
 
 export async function loadPairing(): Promise<PairPayload | null> {
-  const raw = await SecureStore.getItemAsync(PAIRING_KEY);
+  const raw =
+    (await SecureStore.getItemAsync(PAIRING_KEY)) ??
+    (await SecureStore.getItemAsync(LEGACY_PAIRING_KEY));
   return raw ? (JSON.parse(raw) as PairPayload) : null;
 }
 

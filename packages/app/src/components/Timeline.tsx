@@ -10,7 +10,7 @@ import {
   type TimelineEvent,
   type ToolCallEvent,
   type ToolResultEvent,
-} from "@litter/shared";
+} from "@pounce/shared";
 import { defaultMarked } from "../state/stores";
 import { useThreadMarkers } from "../state/db/hooks";
 import { cn, COLOR } from "../ui";
@@ -21,7 +21,7 @@ import {
   cleanAssistantText,
   isEmptyUserMessage,
   parseUserMessage,
-} from "@litter/transcript";
+} from "@pounce/transcript";
 // collapseToolResults lives in a pure (RN-free) module so it can be unit-tested;
 // imported for use below and re-exported since Session.tsx imports it from here.
 import { collapseToolResults } from "./timelineEvents";

@@ -1,4 +1,4 @@
-# @litter/transcript
+# @pounce/transcript
 
 Normalize coding-agent **session-transcript message bodies** for display.
 
@@ -14,7 +14,7 @@ Framework-agnostic, **zero runtime dependencies**, plain ESM — runs in a bundl
 ## API
 
 ```js
-import { stripNoise, parseUserMessage, isEmptyUserMessage, cleanAssistantText } from "@litter/transcript";
+import { stripNoise, parseUserMessage, isEmptyUserMessage, cleanAssistantText } from "@pounce/transcript";
 
 // Server-side / ingest: remove only zero-value junk, keep presentation tags.
 stripNoise(rawText, "codex"); // → readable text for any client
