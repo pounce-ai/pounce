@@ -4,59 +4,105 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Pounce — Privacy Policy</title>
-<meta name="description" content="Privacy Policy for Pounce. Pounce connects directly to a Bridge on your own machine over your local network; your code and conversations stay on your devices." />
-<link rel="canonical" href="https://peppyhop.github.io/pounce/privacy.html" />
+<meta name="description" content="Privacy Policy for Pounce. Pounce connects directly to the app/Bridge on your own machine; your code and conversations stay on your devices — no Pounce account, no server in the middle." />
+<link rel="canonical" href="https://use-pounce.com/privacy.html" />
 <meta name="robots" content="index, follow" />
-<meta name="theme-color" content="#0b0b0f" />
-<!-- Open Graph -->
+<meta name="theme-color" content="#0b0b0e" />
 <meta property="og:site_name" content="Pounce" />
 <meta property="og:type" content="website" />
-<meta property="og:url" content="https://peppyhop.github.io/pounce/privacy.html" />
+<meta property="og:url" content="https://use-pounce.com/privacy.html" />
 <meta property="og:title" content="Pounce — Privacy Policy" />
-<meta property="og:description" content="Pounce connects directly to a Bridge on your own machine over your local network; your code and conversations stay on your devices." />
-<meta property="og:image" content="https://peppyhop.github.io/pounce/assets/icon.png" />
+<meta property="og:description" content="Pounce connects directly to the app/Bridge on your own machine; your code and conversations stay on your devices." />
+<meta property="og:image" content="https://use-pounce.com/assets/icon.png" />
 <meta property="og:image:alt" content="Pounce" />
-<!-- Twitter -->
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Pounce — Privacy Policy" />
-<meta name="twitter:description" content="Pounce connects directly to a Bridge on your own machine over your local network; your code and conversations stay on your devices." />
-<meta name="twitter:image" content="https://peppyhop.github.io/pounce/assets/icon.png" />
+<meta name="twitter:description" content="Pounce connects directly to the app/Bridge on your own machine; your code and conversations stay on your devices." />
+<meta name="twitter:image" content="https://use-pounce.com/assets/icon.png" />
 <link rel="icon" href="./assets/favicon.png" />
+<link rel="apple-touch-icon" href="./assets/apple-touch-icon.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
-  :root{--bg:#0b0b0f;--fg:#ececf1;--muted:#a1a1ad;--faint:#6c6c78;--accent:#8b5cf6;--border:rgba(255,255,255,.1)}
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--fg);font-family:Inter,system-ui,sans-serif;line-height:1.65;-webkit-font-smoothing:antialiased}
-  .wrap{max-width:760px;margin:0 auto;padding:48px 24px 96px}
-  a{color:var(--accent)}
-  .logo{display:inline-flex;align-items:center;gap:10px;font-family:"Space Grotesk";font-weight:700;font-size:18px;color:var(--fg);text-decoration:none;margin-bottom:40px}
-  .logo img{width:28px;height:28px;border-radius:8px}
-  h1{font-family:"Space Grotesk";font-size:clamp(28px,5vw,40px);margin:0 0 6px}
-  .updated{color:var(--faint);font-size:14px;margin-bottom:36px}
-  h2{font-family:"Space Grotesk";font-size:21px;margin:36px 0 10px}
-  p,li{color:var(--muted);font-size:16px}
-  strong{color:var(--fg)}
-  ul{padding-left:20px}
-  .lead{color:var(--fg);font-size:18px}
-  footer{margin-top:56px;padding-top:24px;border-top:1px solid var(--border);color:var(--faint);font-size:14px}
+  :root{
+    --bg:#0b0b0e; --panel:#121218;
+    --ink:#f5f4ef; --ink-dim:#a7a5b0; --ink-faint:#726f7d;
+    --violet:#7c5cff; --violet-bright:#9d86ff;
+    --line:rgba(245,244,239,.09); --line-2:rgba(245,244,239,.055);
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --disp:"Bricolage Grotesque",-apple-system,system-ui,sans-serif;
+    --body:"Hanken Grotesk",-apple-system,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--ink);font-family:var(--body);line-height:1.68;font-size:17px;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  .bg-grid{position:fixed;inset:0;z-index:-3;background-image:linear-gradient(var(--line-2) 1px,transparent 1px),linear-gradient(90deg,var(--line-2) 1px,transparent 1px);background-size:64px 64px;mask-image:radial-gradient(ellipse 90% 55% at 50% -5%,#000 35%,transparent 78%)}
+  .bg-glow{position:fixed;inset:0;z-index:-2;overflow:hidden;pointer-events:none}
+  .bg-glow i{position:absolute;display:block;width:560px;height:560px;border-radius:50%;filter:blur(120px);background:radial-gradient(circle,rgba(124,92,255,.22),transparent 62%);top:-240px;left:-140px}
+  .grain{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5;mix-blend-mode:overlay;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.42'/%3E%3C/svg%3E")}
+  a{color:var(--violet-bright)}
+  h1,h2{font-family:var(--disp);letter-spacing:-.02em;line-height:1.1;color:var(--ink)}
+
+  nav{position:sticky;top:0;z-index:60;backdrop-filter:blur(16px);background:linear-gradient(180deg,rgba(11,11,14,.82),rgba(11,11,14,.55));border-bottom:1px solid transparent;transition:border-color .3s}
+  nav.scrolled{border-color:var(--line)}
+  .nav-in{max-width:1100px;margin:0 auto;padding:0 26px;display:flex;align-items:center;justify-content:space-between;height:70px}
+  .brand{display:flex;align-items:center;gap:11px;font-family:var(--disp);font-weight:800;font-size:20px;color:var(--ink);text-decoration:none}
+  .brand img{width:30px;height:30px;border-radius:8px;box-shadow:0 0 0 1px var(--line)}
+  .nav-links{display:flex;align-items:center;gap:28px;font-family:var(--mono);font-size:13px;color:var(--ink-dim)}
+  .nav-links a.lnk{color:var(--ink-dim);text-decoration:none}
+  .nav-links a.lnk:hover{color:var(--ink)}
+  .nav-cta{padding:9px 17px;border-radius:10px;background:var(--ink);color:#0b0b0e!important;font-weight:600;font-family:var(--body);text-decoration:none;transition:transform .2s}
+  .nav-cta:hover{transform:translateY(-2px)}
+  @media(max-width:640px){.nav-links a.lnk{display:none}}
+
+  .wrap{max-width:760px;margin:0 auto;padding:56px 24px 96px}
+  .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.06em;color:var(--violet-bright);display:inline-flex;align-items:center;gap:9px}
+  .kicker::before{content:"›";color:var(--ink-faint)}
+  h1{font-size:clamp(30px,5vw,46px);font-weight:800;margin:16px 0 8px}
+  .updated{font-family:var(--mono);color:var(--ink-faint);font-size:13px;margin-bottom:36px}
+  h2{font-size:21px;font-weight:700;margin:40px 0 10px}
+  p,li{color:var(--ink-dim);font-size:16.5px}
+  strong{color:var(--ink);font-weight:600}
+  ul{padding-left:20px;margin-top:8px}
+  li{margin:7px 0}
+  .lead{color:var(--ink);font-size:18.5px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px}
+  a{text-underline-offset:2px}
+  footer{margin-top:60px;padding-top:24px;border-top:1px solid var(--line);font-family:var(--mono);color:var(--ink-faint);font-size:13px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:14px}
+  footer a{color:var(--ink-dim);text-decoration:none}
+  footer a:hover{color:var(--ink)}
 </style>
 </head>
 <body>
+<div class="bg-grid"></div>
+<div class="bg-glow"><i></i></div>
+<div class="grain"></div>
+
+<nav id="nav">
+  <div class="nav-in">
+    <a class="brand" href="./index.html"><img src="./assets/icon.png" alt="Pounce" /> pounce</a>
+    <div class="nav-links">
+      <a class="lnk" href="./index.html">Home</a>
+      <a class="lnk" href="./how-it-works.html">How it works</a>
+      <a class="lnk" href="https://github.com/pounce-ai/pounce" target="_blank" rel="noopener">GitHub</a>
+      <a class="nav-cta" href="https://apps.apple.com/app/id6779601425" target="_blank" rel="noopener">Download</a>
+    </div>
+  </div>
+</nav>
+
 <div class="wrap">
-  <a class="logo" href="./index.html"><img src="./assets/favicon.png" alt="" /> Pounce</a>
+  <span class="kicker">privacy</span>
   <h1>Privacy Policy</h1>
   <div class="updated">Last updated: 30 June 2026</div>
 
-  <p class="lead">Pounce is built to keep your work on your own devices. It connects directly to the Pounce Bridge running on your computer over your local network — there is no Pounce account, and we do not run a server that your code or conversations pass through.</p>
+  <p class="lead">Pounce is built to keep your work on your own devices. It connects directly to the Pounce app or Bridge running on your computer — over your local network, or its own secure peer-to-peer tunnel when you're away. There is no Pounce account, and we do not run a server that your code or conversations pass through.</p>
 
   <h2>Information we do not collect</h2>
   <p>Pounce does not require you to create an account, and we do not collect your name, email, or contacts. Your projects, source code, agent conversations, diffs, and terminal output are exchanged <strong>directly between the app and the Bridge on your machine</strong> — they are not sent to or stored by us.</p>
 
   <h2>Data that stays on your device</h2>
   <ul>
-    <li><strong>Pairing credentials.</strong> When you scan a pairing code, the resulting token is stored in the iOS Keychain on your device and used only to reach your own machine.</li>
+    <li><strong>Pairing credentials.</strong> When you scan a pairing code, the resulting token is stored in the device keychain and used only to reach your own machine.</li>
     <li><strong>Cached session data.</strong> Recently viewed projects and conversations are cached locally so the app opens quickly. You can clear this at any time by deleting the app.</li>
   </ul>
 
@@ -72,7 +118,7 @@
   <p>If you enable push notifications, a device push token is used to alert you when an agent needs your attention. This token identifies your device to the push service only and is not linked to any personal profile.</p>
 
   <h2>Third parties</h2>
-  <p>We do not sell or share your data. Pounce has no third-party analytics or advertising SDKs. Push notifications are delivered through Apple Push Notification service, subject to Apple's terms.</p>
+  <p>We do not sell or share your data. Pounce has no third-party analytics or advertising SDKs. Push notifications are delivered through the Apple Push Notification service, subject to Apple's terms.</p>
 
   <h2>Children</h2>
   <p>Pounce is a developer tool intended for adults and is not directed to children under 13.</p>
@@ -81,9 +127,17 @@
   <p>If this policy changes, we will update this page and the "last updated" date above.</p>
 
   <h2>Contact</h2>
-  <p>Questions about this policy? Open an issue at <a href="https://github.com/peppyhop/pounce">github.com/peppyhop/pounce</a>.</p>
+  <p>Questions about this policy? Open an issue at <a href="https://github.com/pounce-ai/pounce">github.com/pounce-ai/pounce</a>.</p>
 
-  <footer>© 2026 Peppyhop · Pounce</footer>
+  <footer>
+    <span>© 2026 Pounce AI</span>
+    <span><a href="./index.html">Home</a> · <a href="./how-it-works.html">How it works</a></span>
+  </footer>
 </div>
+
+<script>
+  const nav=document.getElementById('nav');
+  addEventListener('scroll',()=>nav.classList.toggle('scrolled',scrollY>10),{passive:true});
+</script>
 </body>
 </html>
