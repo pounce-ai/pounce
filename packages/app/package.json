@@ -8,7 +8,7 @@
     "./*": "./src/*"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "echo 'typechecked by consumers (apps/mobile + desktop) — 39 platform variants + per-app RN version make a standalone tsc unsound'"
   },
   "dependencies": {
     "@litter/shared": "workspace:*",
