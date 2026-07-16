@@ -15,7 +15,10 @@
   "scripts": {
     "build": "bun run --filter './packages/*' build",
     "typecheck": "bun run --filter '*' typecheck",
-    "lint": "bun run --filter '*' lint",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
     "test": "bun run --filter '*' test",
     "mobile": "bun run --filter @litter/mobile start",
     "desktop": "cd desktop && bun run start",
@@ -32,7 +35,9 @@
   },
   "devDependencies": {
     "typescript": "~6.0.3",
-    "@types/node": "^22.7.0"
+    "@types/node": "^22.7.0",
+    "oxlint": "^1.74.0",
+    "oxfmt": "^0.59.0"
   },
   "overrides": {
     "react": "19.2.3",

@@ -11,8 +11,6 @@ apps/tunnel/target
 # regenerates it and autolinks modules/pounce-tunnel like builds 1-16 did.
 apps/mobile/ios
 apps/mobile/android
-bridge-desktop/build
-bridge-desktop/server
 desktop/macos/build
 desktop/windows/build
 desktop/node_modules
