@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Platform, type ColorValue } from "react-native";
+import type { ColorValue } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { AnimatedTabBar } from "@pounce/app/motion-tabs";
@@ -20,7 +20,13 @@ const icon =
 export default function TabsLayout() {
   return (
     <Tabs
-      detachInactiveScreens={Platform.OS !== "ios"}
+      // Detach on iOS too (previously ios kept scenes attached): the software
+      // keyboard opening on the Search tab re-layouts the still-attached,
+      // UNFOCUSED Home scene, and Home's LegendList measure-recalculate cycle
+      // never converges under Fabric's synchronous layout-effect measure — a
+      // fatal max-update-depth that unmounts the whole app. Detached scenes
+      // can't be re-laid-out, so the loop can't start.
+      detachInactiveScreens
       screenOptions={{
         headerShown: false,
         // Instant, flash-free tab switches. "shift"/"fade" cross-fade the

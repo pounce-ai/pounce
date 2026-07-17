@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // eslint-disable-next-line @react-native/no-deprecated-api -- core Clipboard is
 // the only clipboard already inside shipped binaries (OTA-safe).
-import { ActionSheetIOS, Alert, Clipboard, Pressable, Text, View } from "react-native";
+import { ActionSheetIOS, ActivityIndicator, Alert, Clipboard, Pressable, Text, TextInput, View } from "react-native";
 import { KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeIn, FadeOut } from "../components/animation";
@@ -48,7 +48,7 @@ import {
   useThreadMarkers,
   useThreadModel,
 } from "../state/db/hooks";
-import { fetchMessages, fetchUsage, interruptTurn, respondPermission, respondPrompt, sendSessionInput, startInteractive, streamLiveMessage, type ThreadUsage } from "../services/bridge";
+import { fetchMessages, fetchUsage, interruptTurn, respondPermission, respondPrompt, searchMessages, sendSessionInput, startInteractive, streamLiveMessage, type MessageSearchHit, type ThreadUsage } from "../services/bridge";
 import { Ionicons } from "@expo/vector-icons";
 import { ACTIVITY_LABEL, AgentStatusIcon, BranchChip, cn, COLOR, pickSheet } from "../ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "../ui/agent-meta";
@@ -95,7 +95,10 @@ function mergeById(cur: TimelineEvent[], inc: TimelineEvent[]): TimelineEvent[] 
 }
 
 export default function SessionScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // `at` (optional, ISO timestamp) deep-links to a specific message — search
+  // hits pass the matched event's time so we can land on it, not just the
+  // thread — and `q` is the matched term, echoed as a yellow row highlight.
+  const { id, at, q } = useLocalSearchParams<{ id: string; at?: string; q?: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [sending, setSending] = useState(false);
@@ -286,6 +289,113 @@ export default function SessionScreen() {
 
   const jumpTo = useCallback((index: number) => {
     listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.1 });
+  }, []);
+
+  /** Index of the rendered event closest in time to `iso` — search hits are
+   *  located by their message timestamp, not by event id (ctx ids are its
+   *  own). Rows whose text actually CONTAINS the term win over closer rows
+   *  that don't, so the highlight always lands on a term-bearing row even
+   *  when clock skew or collapsed tool results shift the nearest neighbour. */
+  const findNearestIndex = useCallback(
+    (iso: string | null | undefined, term?: string) => {
+      const target = iso ? Date.parse(iso) : Number.NaN;
+      if (Number.isNaN(target)) return -1;
+      const needle = term?.toLowerCase();
+      let best = -1;
+      let bestDiff = Number.POSITIVE_INFINITY;
+      let bestWithTerm = -1;
+      let bestWithTermDiff = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < events.length; i++) {
+        const ev = events[i];
+        const ts = ev.ts ? Date.parse(ev.ts) : Number.NaN;
+        if (Number.isNaN(ts)) continue;
+        const diff = Math.abs(ts - target);
+        if (diff < bestDiff) { bestDiff = diff; best = i; }
+        if (needle && diff < bestWithTermDiff) {
+          const text = "text" in ev ? (ev as { text?: string }).text : undefined;
+          if (text?.toLowerCase().includes(needle)) { bestWithTermDiff = diff; bestWithTerm = i; }
+        }
+      }
+      // A term-bearing row within 2 minutes of the hit beats the raw nearest.
+      return bestWithTerm >= 0 && bestWithTermDiff < 120_000 ? bestWithTerm : best;
+    },
+    [events],
+  );
+
+  // Search-hit deep link: once the FULL history is rendered (the recent-4 page
+  // won't contain an old match), scroll to the event nearest `at` and mark it
+  // with the matched term. Once per mount; the delay lets the list finish its
+  // initial layout first.
+  const didJumpToAt = useRef(false);
+  const [searchHighlight, setSearchHighlight] = useState<{ id: string; term: string } | undefined>();
+  useEffect(() => {
+    if (!at || didJumpToAt.current || !fullQ.data || events.length === 0) return;
+    didJumpToAt.current = true;
+    const best = findNearestIndex(String(at), q ? String(q) : undefined);
+    if (best >= 0) {
+      if (q) setSearchHighlight({ id: events[best].id, term: String(q) });
+      // Repeatedly: the timeline's own open-at-bottom anchoring can land AFTER
+      // the first jump and silently win, and on long threads scrollToIndex
+      // over unmeasured history is approximate — later jumps correct the
+      // estimate as items measure. scrollToIndex is idempotent.
+      setTimeout(() => jumpTo(best), 350);
+      setTimeout(() => jumpTo(best), 1300);
+      setTimeout(() => jumpTo(best), 2800);
+    }
+  }, [at, q, fullQ.data, events, findNearestIndex, jumpTo]);
+
+  // --- In-thread search: header toggle, debounced query against this thread's
+  // history index (event-level hits), prev/next hop with yellow highlight.
+  const [threadSearchOpen, setThreadSearchOpen] = useState(false);
+  const [threadQuery, setThreadQuery] = useState("");
+  const [threadHits, setThreadHits] = useState<MessageSearchHit[]>([]);
+  const [threadHitIdx, setThreadHitIdx] = useState(0);
+  const [threadSearching, setThreadSearching] = useState(false);
+  const threadGen = useRef(0);
+  const goToHit = useCallback(
+    (hits: MessageSearchHit[], idx: number, term: string) => {
+      if (!hits.length) return;
+      const clamped = ((idx % hits.length) + hits.length) % hits.length;
+      setThreadHitIdx(clamped);
+      const ei = findNearestIndex(hits[clamped].timestamp, term);
+      if (ei >= 0) {
+        setSearchHighlight({ id: events[ei].id, term });
+        jumpTo(ei);
+      }
+    },
+    [events, findNearestIndex, jumpTo],
+  );
+  useEffect(() => {
+    const t = threadQuery.trim();
+    const gen = ++threadGen.current;
+    if (!threadSearchOpen || t.length < 3 || !session?.hostId || !id) {
+      setThreadHits([]);
+      setThreadSearching(false);
+      return;
+    }
+    setThreadSearching(true);
+    const timer = setTimeout(async () => {
+      const hits = await searchMessages(t, {
+        thread: id,
+        agent: session.agent,
+        hostId: session.hostId,
+        limit: 50,
+      }).catch(() => []);
+      if (threadGen.current !== gen) return;
+      setThreadHits(hits);
+      setThreadSearching(false);
+      goToHit(hits, 0, t);
+    }, 350);
+    return () => clearTimeout(timer);
+    // goToHit changes with every event refresh; re-running the search then
+    // would spam the bridge for nothing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadSearchOpen, threadQuery, session?.hostId, session?.agent, id]);
+  const closeThreadSearch = useCallback(() => {
+    setThreadSearchOpen(false);
+    setThreadQuery("");
+    setThreadHits([]);
+    setSearchHighlight(undefined);
   }, []);
 
 
@@ -590,28 +700,14 @@ export default function SessionScreen() {
               <ThreadUsageSummary usage={usage} />
             </View>
           </View>
-          {markers.length ? (
-            <Pressable
-              onPress={() => setMarkerSheet(true)}
-              hitSlop={4}
-              className="active:opacity-70 h-7 flex-row items-center gap-1 rounded-full bg-surface-alt px-2"
-            >
-              <Ionicons name="bookmark" size={12} color={COLOR.accent} />
-              <Text className="text-[12px] font-semibold text-fg-muted">{markers.length}</Text>
-            </Pressable>
-          ) : null}
-          {canFavourite ? (
-            <Pressable
-              onPress={() => toggleFavThread(session.id)}
-              className="active:opacity-60 h-9 w-9 items-center justify-center"
-            >
-              <Ionicons
-                name={fav ? "star" : "star-outline"}
-                size={19}
-                color={fav ? COLOR.accent : COLOR.fgMuted}
-              />
-            </Pressable>
-          ) : null}
+          {/* Favourite + markers live in the "…" sheet — the header stays
+              back / title / search / more. */}
+          <Pressable
+            onPress={() => (threadSearchOpen ? closeThreadSearch() : setThreadSearchOpen(true))}
+            className="active:opacity-60 h-9 w-9 items-center justify-center"
+          >
+            <Ionicons name="search" size={18} color={threadSearchOpen ? COLOR.accent : COLOR.fgMuted} />
+          </Pressable>
           <Pressable
             onPress={() => setEnvSheet(true)}
             className="active:opacity-60 h-9 w-9 items-center justify-center"
@@ -623,6 +719,44 @@ export default function SessionScreen() {
             />
           </Pressable>
         </View>
+        {threadSearchOpen ? (
+          <View className="flex-row items-center gap-2 px-4 pb-2.5">
+            <View className="h-9 flex-1 flex-row items-center gap-2 rounded-xl bg-surface-alt px-2.5">
+              <Ionicons name="search" size={13} color={COLOR.fgFaint} />
+              <TextInput
+                value={threadQuery}
+                onChangeText={setThreadQuery}
+                placeholder="Find in this thread…"
+                placeholderTextColor={COLOR.fgFaint}
+                autoFocus
+                autoCapitalize="none"
+                autoCorrect={false}
+                className="h-9 flex-1 text-[14px] text-fg"
+              />
+              {threadSearching ? (
+                <ActivityIndicator size="small" color={COLOR.fgFaint} />
+              ) : threadQuery.trim().length >= 3 ? (
+                <Text className="text-[12px] tabular-nums text-fg-muted">
+                  {threadHits.length ? `${threadHitIdx + 1}/${threadHits.length}` : "0"}
+                </Text>
+              ) : null}
+            </View>
+            <Pressable
+              disabled={!threadHits.length}
+              onPress={() => goToHit(threadHits, threadHitIdx - 1, threadQuery.trim())}
+              className="active:opacity-60 h-9 w-8 items-center justify-center"
+            >
+              <Ionicons name="chevron-up" size={17} color={threadHits.length ? COLOR.fgMuted : COLOR.fgFaint} />
+            </Pressable>
+            <Pressable
+              disabled={!threadHits.length}
+              onPress={() => goToHit(threadHits, threadHitIdx + 1, threadQuery.trim())}
+              className="active:opacity-60 h-9 w-8 items-center justify-center"
+            >
+              <Ionicons name="chevron-down" size={17} color={threadHits.length ? COLOR.fgMuted : COLOR.fgFaint} />
+            </Pressable>
+          </View>
+        ) : null}
       </View>
 
       <View className="flex-1 items-center">
@@ -658,6 +792,7 @@ export default function SessionScreen() {
               cwd={session.cwd}
               sessionId={id!}
               listRef={listRef}
+              highlight={searchHighlight}
               onLongPressEvent={onLongPressEvent}
               onRunCommand={canSteer ? onRunCommand : undefined}
               onAtBottomChange={setAtBottom}
@@ -712,6 +847,10 @@ export default function SessionScreen() {
         session={session}
         running={running}
         sources={sources}
+        fav={fav}
+        onToggleFavourite={canFavourite ? () => toggleFavThread(session.id) : undefined}
+        markerCount={markers.length}
+        onMarkers={() => setMarkerSheet(true)}
         onClose={() => setEnvSheet(false)}
         onStop={() => void stop()}
         onViewChanges={() => router.push(`/changes?id=${session.id}`)}

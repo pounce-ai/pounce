@@ -105,6 +105,7 @@ export const Timeline = memo(function Timeline({
   onRespondPermission,
   onRespondPrompt,
   onSendInput,
+  highlight,
 }: {
   events: TimelineEvent[];
   /** Which agent produced these events — selects the body-cleaning rules. */
@@ -129,6 +130,9 @@ export const Timeline = memo(function Timeline({
   /** Fires as the user scrolls, telling the parent whether the list is pinned to
    *  the bottom — drives the floating "jump to latest" pill. */
   onAtBottomChange?: (atBottom: boolean) => void;
+  /** Search deep-link: mark this event's row so the user sees WHY they landed
+   *  here — yellow accent + the matched term. */
+  highlight?: { id: string; term: string };
 }) {
   // Pair each tool result with its call so the call row renders both as one
   // accordion; the paired result rows are dropped from the list data.
@@ -165,6 +169,7 @@ export const Timeline = memo(function Timeline({
           onRespondPermission={onRespondPermission}
           onRespondPrompt={onRespondPrompt}
           onSendInput={onSendInput}
+          highlightTerm={highlight && item.id === highlight.id ? highlight.term : undefined}
         />
       )}
       // A blended average across the row types (short user bubbles / meta lines
@@ -216,6 +221,7 @@ const Row = memo(function Row({
   onRespondPermission,
   onRespondPrompt,
   onSendInput,
+  highlightTerm,
 }: {
   event: TimelineEvent;
   agent?: string;
@@ -235,6 +241,8 @@ const Row = memo(function Row({
   onRespondPrompt?: (promptId: string, optionIndex: number) => void;
   /** Send raw input to the hosted CLI (free-form replies, Esc). */
   onSendInput?: (data: string) => void;
+  /** Set on the search deep-link target row — yellow accent + matched term. */
+  highlightTerm?: string;
 }) {
   const onLongPress = onLongPressEvent ? () => onLongPressEvent(event) : undefined;
   switch (event.type) {
@@ -244,19 +252,23 @@ const Row = memo(function Row({
       if (isInterrupt(event.text)) return <Meta text="⎿ Interrupted by user" level="warning" />;
       return (
         <Pressable onLongPress={onLongPress} delayLongPress={350}>
-          <UserRow text={event.text} agent={agent} images={event.images} />
+          <SearchHighlight term={highlightTerm}>
+            <UserRow text={event.text} agent={agent} images={event.images} />
+          </SearchHighlight>
         </Pressable>
       );
     case "assistant_message":
       return (
         <Pressable onLongPress={onLongPress} delayLongPress={350}>
-          <AssistantBubble
-            text={event.text}
-            agent={agent}
-            streaming={event.streaming}
-            marked={marked}
-            onRun={onRunCommand}
-          />
+          <SearchHighlight term={highlightTerm}>
+            <AssistantBubble
+              text={event.text}
+              agent={agent}
+              streaming={event.streaming}
+              marked={marked}
+              onRun={onRunCommand}
+            />
+          </SearchHighlight>
         </Pressable>
       );
     case "thinking_started":
@@ -275,11 +287,18 @@ const Row = memo(function Row({
           ? (event.call.input as { plan?: unknown } | undefined)?.plan
           : undefined;
       if (typeof plan === "string" && plan.trim()) return <PlanCard plan={plan} />;
-      if (!batchHeader) return <ToolAccordion event={event} result={pairedResult} cwd={cwd} />;
+      if (!batchHeader)
+        return (
+          <SearchHighlight term={highlightTerm}>
+            <ToolAccordion event={event} result={pairedResult} cwd={cwd} />
+          </SearchHighlight>
+        );
       return (
         <View className="gap-2">
           <Text className="pl-1 text-[12px] text-fg-muted">{batchHeader}</Text>
-          <ToolAccordion event={event} result={pairedResult} cwd={cwd} />
+          <SearchHighlight term={highlightTerm}>
+            <ToolAccordion event={event} result={pairedResult} cwd={cwd} />
+          </SearchHighlight>
         </View>
       );
     }
@@ -820,6 +839,31 @@ function Term({ data, stream }: { data: string; stream: string }) {
       <Text numberOfLines={20} className={cn("font-mono text-[12px]", stream === "stderr" ? "text-danger" : "text-[#d6d6d6]")}>
         {data}
       </Text>
+    </View>
+  );
+}
+
+/** Background accent around the message a search deep-link landed on: soft
+ *  tint, left bar, and a chip naming the matched term — so it's obvious why
+ *  the thread opened scrolled to this spot. No-op without a term. */
+const HIGHLIGHT = "#B3E561";
+function SearchHighlight({ term, children }: { term?: string; children: React.ReactNode }) {
+  if (!term) return <>{children}</>;
+  return (
+    <View
+      style={{
+        backgroundColor: "rgba(179, 229, 97, 0.16)",
+        borderLeftColor: HIGHLIGHT,
+        borderLeftWidth: 3,
+        borderRadius: 10,
+        paddingLeft: 6,
+        paddingVertical: 4,
+      }}
+    >
+      <Text style={{ color: HIGHLIGHT, fontSize: 11, fontWeight: "600", marginBottom: 2 }}>
+        ⚲ matched “{term}”
+      </Text>
+      {children}
     </View>
   );
 }

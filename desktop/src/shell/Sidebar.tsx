@@ -121,6 +121,13 @@ export function Sidebar() {
             placeholderTextColor={COLOR.fgFaint}
             className="flex-1 text-[13px] text-fg"
             style={{ paddingVertical: 0 }}
+            // Enter promotes the sidebar's quick metadata filter into the full
+            // Search modal (message-body search included), seeded with the query.
+            returnKeyType="search"
+            onSubmitEditing={() => {
+              const q = query.trim();
+              if (q) router.push(`/search?q=${encodeURIComponent(q)}`);
+            }}
           />
           {query ? (
             <Pressable onPress={() => setQuery("")} className="active:opacity-60">
@@ -136,6 +143,22 @@ export function Sidebar() {
           <Ionicons name="add" size={18} color="#fff" />
         </Pressable>
       </View>
+
+      {/* Promote the quick metadata filter into full message-body search (the
+          /search modal, seeded). A visible row rather than Enter-to-submit:
+          rn-macos onSubmitEditing is unreliable, and desktop is mouse-first. */}
+      {query.trim() ? (
+        <Pressable
+          onPress={() => router.push(`/search?q=${encodeURIComponent(query.trim())}`)}
+          className="active:opacity-70 mx-3 mb-1 flex-row items-center gap-1.5 rounded-md bg-surface px-2 py-1.5"
+        >
+          <Ionicons name="chatbubbles-outline" size={12} color={COLOR.accent} />
+          <Text numberOfLines={1} className="flex-1 text-[11px] font-medium text-fg-muted">
+            Search messages for “{query.trim()}”
+          </Text>
+          <Ionicons name="chevron-forward" size={11} color={COLOR.fgFaint} />
+        </Pressable>
+      ) : null}
 
       {attention > 0 ? (
         <View className="mx-3 mb-1 flex-row items-center gap-1.5 rounded-md bg-warning/10 px-2 py-1">
