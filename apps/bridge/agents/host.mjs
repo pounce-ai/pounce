@@ -13,6 +13,7 @@ import { HistoryCache, eventBytes } from "./history-cache.mjs";
 import { ClaudeAdapter } from "./claude.mjs";
 import { CodexAdapter } from "./codex.mjs";
 import { OpencodeAdapter } from "./opencode.mjs";
+import { CursorAdapter } from "./cursor.mjs";
 import { acpAvailable, startAcpTurn } from "./acp.mjs";
 import { buildDoctorReport } from "./doctor.mjs";
 
@@ -22,7 +23,7 @@ export function createHost({ version = () => null } = {}) {
   const startedAt = Date.now();
 
   const adapters = new Map();
-  for (const A of [ClaudeAdapter, CodexAdapter, OpencodeAdapter]) {
+  for (const A of [ClaudeAdapter, CodexAdapter, OpencodeAdapter, CursorAdapter]) {
     const a = new A({ turns });
     adapters.set(a.id, a);
     a.onDirty?.((threadId) => history.invalidatePrefix(`${a.id}:${threadId}:`));

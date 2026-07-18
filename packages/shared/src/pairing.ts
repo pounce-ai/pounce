@@ -45,6 +45,7 @@ export interface HostStatus {
 export type AgentId =
   | "claude"
   | "codex"
+  | "cursor"
   | "pi"
   | "amp"
   | "opencode"

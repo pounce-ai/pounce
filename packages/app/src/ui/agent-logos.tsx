@@ -39,6 +39,19 @@ function OpenCodeMark({ size, color }: MarkProps) {
   );
 }
 
+function CursorMark({ size, color }: MarkProps) {
+  // Cursor's isometric cube: three rhombus faces (top / left / right) meeting at
+  // the center, shaded by fillOpacity for a 3D read. Geometric, in the spirit of
+  // the other marks; single-color so it tints cleanly.
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path fill={color} d="M12 2 21 7 12 12 3 7Z" />
+      <Path fill={color} fillOpacity={0.55} d="M3 7 12 12 12 22 3 17Z" />
+      <Path fill={color} fillOpacity={0.8} d="M21 7 21 17 12 22 12 12Z" />
+    </Svg>
+  );
+}
+
 function GrokMark({ size, color }: MarkProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 1024 1024">
@@ -82,6 +95,8 @@ export function AgentLogo({
       return <CodexMark size={size} color={c} />;
     case "opencode":
       return <OpenCodeMark size={size} color={c} />;
+    case "cursor":
+      return <CursorMark size={size} color={c} />;
     case "grok":
       return <GrokMark size={size} color={c} />;
     default:

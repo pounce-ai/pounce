@@ -27,7 +27,7 @@ function whichBin(name) {
 }
 
 /** The CLI binary each agent needs installed to run turns. */
-const AGENT_BIN = { claude: "claude", codex: "codex", opencode: "opencode" };
+const AGENT_BIN = { claude: "claude", codex: "codex", opencode: "opencode", cursor: "cursor-agent" };
 
 function tunnelBinary() {
   const candidates = [
@@ -54,6 +54,9 @@ export async function buildDoctorReport(adapters) {
       try {
         sessionCount = (await a.listThreads()).length;
       } catch {}
+      // Agents that need a signed-in CLI (Cursor) report it; the rest omit it.
+      // "installed but not authenticated" is its own failure mode, like gh.
+      const auth = installed && a.authStatus ? await a.authStatus().catch(() => null) : null;
       return {
         id: a.id,
         name: a.displayName,
@@ -65,6 +68,8 @@ export async function buildDoctorReport(adapters) {
         // pre-fill a "Set path…" field and let a custom setup fix detection).
         bin: bin || null,
         override: bin ? binOverride(bin) : null,
+        // { required, authenticated, account } when the agent needs auth, else null.
+        auth,
       };
     }),
   );

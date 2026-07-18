@@ -18,6 +18,7 @@ export const COLOR = {
 export const AGENT_LABEL: Record<string, string> = {
   claude: "Claude",
   codex: "Codex",
+  cursor: "Cursor",
   opencode: "opencode",
   pi: "Pi",
   amp: "Amp",
@@ -31,6 +32,7 @@ export const AGENT_LABEL: Record<string, string> = {
 export const AGENT_HEX: Record<string, string> = {
   claude: "#D97757",
   codex: "#ECECF1",
+  cursor: "#CBD5E1",
   opencode: "#58A6FF",
   pi: "#3FB950",
   amp: "#D29922",

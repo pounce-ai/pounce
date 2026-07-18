@@ -298,6 +298,10 @@ export function availableAgents(scope: Session[], deviceFilter: string | null): 
   return [...set].sort();
 }
 
+// Pure agent/branch scoping helpers live in a dependency-free leaf so they're
+// unit-testable without the MMKV-backed stores; re-exported here for callers.
+export { availAgentsForDevices, branchesInScope, sortAgents } from "./agentScope";
+
 /** Devices in `scope` given the selected agent (ignores the device filter). */
 export function availableDevices(
   scope: Session[],
