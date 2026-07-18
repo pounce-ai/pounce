@@ -29,6 +29,7 @@
     "bridge:uninstall": "bash scripts/bridge-uninstall.sh",
     "bridge:pack": "bun run scripts/bridge/pack.mjs",
     "bridge:qr": "node apps/bridge/pair.mjs",
+    "cli": "node apps/cli/bin/pounce.mjs",
     "dev:ios": "cd apps/mobile && EXPO_USE_PRECOMPILED_MODULES=0 npx expo run:ios --device",
     "testflight": "cd apps/mobile && npx testflight",
     "publish:ios": "cd apps/mobile && npx eas-cli build --platform ios --profile production --auto-submit"

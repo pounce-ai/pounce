@@ -1,0 +1,70 @@
+name: Release Tunnel Binaries
+
+# Build pounce-tunnel (apps/tunnel) for the platforms the `npx use-pounce` CLI
+# supports and publish them as assets on a `tunnel-v<version>` GitHub release.
+# The CLI's first run downloads pounce-tunnel-<rust-triple>.tar.gz from the
+# newest tunnel-v* release into ~/.pounce/bin/ to enable off-LAN pairing.
+# Manual only — run it whenever apps/tunnel changes (bump the version input).
+#
+# Windows is deliberately absent for now: the bridge supports pounce-tunnel.exe
+# (via POUNCE_TUNNEL_BIN), but nothing ships it yet — the CLI degrades to
+# LAN-only there.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Tunnel release version (e.g. 0.1.0) — becomes tag tunnel-v<version>"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: macos-15
+            target: x86_64-apple-darwin
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        working-directory: apps/tunnel
+        run: |
+          rustup target add ${{ matrix.target }}
+          cargo build --release --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          tar czf pounce-tunnel-${{ matrix.target }}.tar.gz \
+            -C apps/tunnel/target/${{ matrix.target }}/release pounce-tunnel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pounce-tunnel-${{ matrix.target }}
+          path: pounce-tunnel-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "tunnel-v${{ inputs.version }}" \
+            --repo "${{ github.repository }}" \
+            --title "pounce-tunnel ${{ inputs.version }}" \
+            --notes "Iroh p2p tunnel binaries for off-LAN Pounce pairing. Downloaded automatically by \`npx use-pounce\`; or drop the binary for your platform into ~/.pounce/bin/." \
+            --latest=false \
+            pounce-tunnel-*.tar.gz

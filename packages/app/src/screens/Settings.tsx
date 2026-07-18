@@ -31,26 +31,9 @@ import {
   syncLiveData,
 } from "../services/bridge";
 import { savePairing } from "../services/runtime";
+import { type ParsedPairing, pairingHostName, parsePairing } from "../services/pairing";
 import { DeviceSetupCard } from "../components/DeviceSetupCard";
 import { cn, COLOR, DeviceIcon, fmtDuration } from "../ui";
-
-interface Pairing { url: string; token: string }
-
-/** Accept a scanned/pasted pairing code: a `pounce://…?url=&token=` link or
- *  raw `{ "url": …, "token": … }` JSON. */
-function parsePairing(data: string): Pairing | null {
-  try {
-    if (data.startsWith("pounce://")) {
-      const u = new URL(data);
-      const url = u.searchParams.get("url");
-      const token = u.searchParams.get("token");
-      if (url && token) return { url, token };
-    }
-    const j = JSON.parse(data) as Partial<Pairing>;
-    if (j.url && j.token) return { url: j.url, token: j.token };
-  } catch {}
-  return null;
-}
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
@@ -76,11 +59,17 @@ export default function SettingsScreen() {
 
   const live = status === "connected";
 
-  const doSync = async (cfg: Pairing) => {
+  const doSync = async (cfg: ParsedPairing) => {
     setBusy(true);
     try {
       const clean = { url: cfg.url.trim().replace(/\/$/, ""), token: cfg.token.trim() };
       await saveBridgeConfig(clean);
+      // A code that carries the host's tunnel identity pairs from anywhere:
+      // save it BEFORE connecting so bridgeBase() can fall back to the Iroh
+      // tunnel when the LAN address is unreachable (npx-on-a-server flow).
+      if (cfg.nodeId) {
+        await savePairing({ nodeId: cfg.nodeId, token: clean.token, hostName: pairingHostName(cfg), relay: cfg.relay ?? null });
+      }
       const ok = await connectBridge(clean);
       if (!ok) throw new Error("Couldn't reach that computer. Make sure it's on and you're both on the same Wi-Fi.");
       // Also capture the host's direct-sync identity so it works off-Wi-Fi later.
