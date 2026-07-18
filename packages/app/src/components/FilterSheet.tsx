@@ -14,8 +14,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import {
-  agentsInScope,
   activeFilterCount,
+  availAgentsForDevices,
+  availableAgents,
+  branchesInScope,
   CLEARED_FILTERS,
   hasActiveFilter,
   deviceEmoji,
@@ -23,6 +25,7 @@ import {
   filters$,
   isRepoIgnored,
   reposByActivity,
+  sortAgents,
   type StatusBucket,
   toggleRepoIgnore,
 } from "../state/stores";
@@ -108,7 +111,13 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
   const devices = useDevices();
   const rawThreads = useThreads();
   const projectList = useProjects();
-  const agents = useMemo(() => agentsInScope(rawThreads), [rawThreads]);
+  // Offer agents the host reports as available (installed + configured), plus any
+  // that appear in existing threads (so you can still filter old sessions of an
+  // agent that's since been uninstalled). Respects the selected device.
+  const agents = useMemo(
+    () => sortAgents([...availAgentsForDevices(devices, f.device), ...availableAgents(rawThreads, f.device)]),
+    [devices, rawThreads, f.device],
+  );
   const repos = useMemo(
     () => reposByActivity(projectList, rawThreads, { device: f.device, agent: f.agent }),
     [projectList, rawThreads, f.device, f.agent],
@@ -129,10 +138,13 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
     filters$.statuses.set(
       f.statuses.includes(b) ? f.statuses.filter((x) => x !== b) : [...f.statuses, b],
     );
-  const hasBranches = useMemo(
-    () => rawThreads.some((s) => s.branch || s.worktree),
-    [rawThreads],
-  );
+  // Distinct branch/worktree values for the searchable list; the query both
+  // narrows the list and (as before) live-filters the thread list by substring.
+  const branchOptions = useMemo(() => branchesInScope(rawThreads), [rawThreads]);
+  const shownBranches = useMemo(() => {
+    const q = f.branchQuery.trim().toLowerCase();
+    return q ? branchOptions.filter((b) => b.toLowerCase().includes(q)) : branchOptions;
+  }, [branchOptions, f.branchQuery]);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -229,11 +241,19 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
           </View>
         ) : null}
 
-        {/* Branch / worktree — free-text substring match over both, so you can
-            narrow to a feature branch or a specific worktree path. */}
-        {hasBranches ? (
+        {/* Branch / worktree — a searchable list of the distinct branches and
+            worktrees in scope. Typing narrows the list and (as before) live-
+            filters threads by substring; tapping a row pins that exact value. */}
+        {branchOptions.length ? (
           <View className="gap-1.5">
-            <Text className="text-[11px] uppercase tracking-wide text-fg-faint">Branch / worktree</Text>
+            <View className="flex-row items-center justify-between">
+              <Text className="text-[11px] uppercase tracking-wide text-fg-faint">Branch / worktree</Text>
+              {f.branchQuery ? (
+                <Pressable onPress={() => filters$.branchQuery.set("")} className="active:opacity-60">
+                  <Text className="text-[12px] text-fg-muted">Clear</Text>
+                </Pressable>
+              ) : null}
+            </View>
             <View className="h-9 flex-row items-center gap-2 rounded-xl bg-surface-alt px-3">
               <Ionicons name="git-branch-outline" size={14} color={COLOR.fgFaint} />
               <TextInput
@@ -251,6 +271,33 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
                 </Pressable>
               ) : null}
             </View>
+            <ScrollView style={{ maxHeight: 180 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+              {shownBranches.map((b) => {
+                const active = f.branchQuery === b;
+                return (
+                  <Pressable
+                    key={b}
+                    onPress={() => filters$.branchQuery.set(active ? "" : b)}
+                    className="active:bg-surface-hover flex-row items-center gap-2 rounded-lg py-2 pl-1 pr-2"
+                  >
+                    <Ionicons
+                      name={active ? "checkmark-circle" : "git-branch-outline"}
+                      size={16}
+                      color={active ? COLOR.accent : COLOR.fgMuted}
+                    />
+                    <Text
+                      numberOfLines={1}
+                      className={cn("flex-1 text-[14px]", active ? "text-accent" : "text-fg")}
+                    >
+                      {b}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+              {shownBranches.length === 0 ? (
+                <Text className="py-3 text-center text-[13px] text-fg-muted">No branches match.</Text>
+              ) : null}
+            </ScrollView>
           </View>
         ) : null}
 

@@ -4,7 +4,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type { AgentId } from "@pounce/shared";
-import { insertThread, markInteractive, pendingTurns$, reposByActivity } from "../state/stores";
+import {
+  availAgentsForDevices,
+  insertThread,
+  markInteractive,
+  pendingTurns$,
+  reposByActivity,
+  sortAgents,
+} from "../state/stores";
 import { useAgentCaps, useDevices, useProjects, useThreads } from "../state/db/hooks";
 import { Composer, type ComposerSubmit } from "../components/Composer";
 import { FolderBrowser } from "../components/FolderBrowser";
@@ -12,7 +19,9 @@ import { startInteractive } from "../services/bridge";
 import { AgentLogo, agentLabel, cn, COLOR } from "../ui";
 import { effectiveCaps } from "../ui/agent-meta";
 
-const AGENTS: AgentId[] = ["claude", "codex", "opencode"];
+// Fallback order when the selected device hasn't reported its agents yet
+// (offline / first sync). Normally the picker shows the device's available set.
+const DEFAULT_AGENTS: AgentId[] = ["claude", "codex", "cursor", "opencode"];
 
 /** Repo key from an absolute path — mirrors the bridge's `repoInfo` basename. */
 function repoIdForCwd(cwd: string | null): string {
@@ -49,6 +58,23 @@ export default function NewTaskScreen() {
 
   const reportedCaps = useAgentCaps(agent);
   const caps = effectiveCaps(agent, reportedCaps);
+
+  // The agent picker shows only agents the selected device reports as available
+  // (installed + configured). Fall back to all devices' agents, then a default
+  // order, so an offline/not-yet-synced device still offers a choice.
+  const selectedDevice = useMemo(() => devices.find((d) => d.id === hostId), [devices, hostId]);
+  const availAgents = useMemo<AgentId[]>(() => {
+    const own = selectedDevice?.agents ?? [];
+    if (own.length) return sortAgents(own) as AgentId[];
+    const any = availAgentsForDevices(devices, null);
+    return (any.length ? sortAgents(any) : DEFAULT_AGENTS) as AgentId[];
+  }, [selectedDevice, devices]);
+
+  // Keep the selection valid — if the chosen agent isn't available on this
+  // device (e.g. after switching devices), fall back to the first available.
+  useEffect(() => {
+    if (availAgents.length && !availAgents.includes(agent)) setAgent(availAgents[0]);
+  }, [availAgents, agent]);
 
   const folderLabel = useMemo(() => (cwd ? cwd.split("/").pop() || cwd : null), [cwd]);
 
@@ -192,7 +218,7 @@ export default function NewTaskScreen() {
 
         <Field label="Agent">
           <View className="flex-row flex-wrap gap-2">
-            {AGENTS.map((a) => (
+            {availAgents.map((a) => (
               <Pressable
                 key={a}
                 onPress={() => setAgent(a)}
