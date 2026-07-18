@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -10,6 +10,13 @@ const h = vi.hoisted(() => ({ child: null }));
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal();
   return { ...actual, spawn: () => h.child };
+});
+
+// Force "unknown" liveness so getActivity exercises its mtime fallback (the path
+// that's always taken on Windows / when ps·lsof fail); other helpers untouched.
+vi.mock("./env.mjs", async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, liveAgentCwds: () => Promise.resolve(null) };
 });
 
 import {
@@ -213,6 +220,42 @@ it.skipIf(!DatabaseSync)(
       expect(events[2].result.content.text).toContain("foo");
       expect(events[3].text).toBe("There are two files: foo and bar.");
       expect(events.map((e) => e.seq)).toEqual([1, 2, 3, 4]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+// ── getActivity mtime fallback (needs node:sqlite) ────────────────────────────
+it.skipIf(!DatabaseSync)(
+  "getActivity: unknown liveness falls back to the mtime window (fresh → running, stale → completed)",
+  async () => {
+    const rootId = ID(0x0f);
+    const dir = mkdtempSync(path.join(tmpdir(), "cursor-act-"));
+    try {
+      const dbPath = path.join(dir, "store.db");
+      const db = new DatabaseSync(dbPath);
+      db.exec(
+        "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT); CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)",
+      );
+      const meta = { agentId: "chat-a", latestRootBlobId: rootId, createdAt: 1700000000000 };
+      db.prepare("INSERT INTO meta (key, value) VALUES ('0', ?)").run(
+        Buffer.from(JSON.stringify(meta), "utf8").toString("hex"),
+      );
+      db.prepare("INSERT INTO blobs (id, data) VALUES (?, ?)").run(
+        rootId,
+        root([], "file:///tmp/proj"),
+      );
+      db.close();
+
+      const a = new CursorAdapter({ turns: { isRunning: () => false } });
+      a._loc.set("chat-a", dbPath);
+      // Just-written store, liveness unknown → running (the Windows-safe fallback).
+      expect((await a.getActivity("chat-a")).activity).toBe("running");
+      // Backdate the store beyond the window → completed.
+      const old = new Date(Date.now() - 10 * 60_000);
+      utimesSync(dbPath, old, old);
+      expect((await a.getActivity("chat-a")).activity).toBe("completed");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

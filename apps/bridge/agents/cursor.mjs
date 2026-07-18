@@ -66,6 +66,7 @@ export class CursorAdapter {
     this._dirty = new Set();
     this._watcher = null;
     this._watchTimer = null;
+    this._watchDirty = new Set(); // chatIds touched within the current debounce window
     this._loc = new Map(); // chatId -> store.db path (populated by listThreads/locate)
     this._auth = null; // { at, promise } — cached auth probe (see authStatus)
   }
@@ -153,13 +154,20 @@ export class CursorAdapter {
       // changed path names the thread — invalidate precisely, debounced.
       this._watcher = watch(CHATS_DIR, { recursive: true }, (_e, rel) => {
         if (!rel || !path.basename(rel).startsWith("store.db")) return;
-        const chatId = path.basename(path.dirname(rel));
+        // Accumulate every chat touched in the debounce window — a single timer
+        // that closed over one chatId would drop earlier chats when two write
+        // concurrently (the second's clearTimeout cancels the first's flush).
+        this._watchDirty.add(path.basename(path.dirname(rel)));
         clearTimeout(this._watchTimer);
         this._watchTimer = setTimeout(() => {
-          for (const cb of this._dirty) {
-            try {
-              cb(chatId);
-            } catch {}
+          const ids = [...this._watchDirty];
+          this._watchDirty.clear();
+          for (const chatId of ids) {
+            for (const cb of this._dirty) {
+              try {
+                cb(chatId);
+              } catch {}
+            }
           }
         }, 800);
       });
@@ -359,10 +367,14 @@ export class CursorAdapter {
     }
     const live = cwd ? await liveAgentCwds() : null;
     const liveInCwd = cwd && live ? (live.get(BIN)?.has(cwd) ?? false) : null;
+    // `recent` already excludes the confirmed-dead case (liveInCwd === false);
+    // when liveness is unknown (Windows, unparseable cwd, ps/lsof failure) fall
+    // back to the mtime window rather than forcing "completed". Mirrors the
+    // claude/codex adapters.
     const recent =
       liveInCwd !== false &&
       Date.now() - mtimeMs < (liveInCwd ? LIVE_EXTENDED_WINDOW_MS : RUNNING_WINDOW_MS);
-    return { activity: recent && liveInCwd ? "running" : "completed", lastActivityAt };
+    return { activity: recent ? "running" : "completed", lastActivityAt };
   }
 
   listModels() {
