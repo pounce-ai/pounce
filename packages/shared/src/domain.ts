@@ -182,6 +182,13 @@ export interface DoctorAgent {
   readonly bin?: string | null;
   /** The user's current pinned absolute path for this binary, if any. */
   readonly override?: string | null;
+  /** Auth state for agents whose CLI must be signed in to run turns (Cursor);
+   *  null/omitted when the agent needs no auth. `account` names who's signed in. */
+  readonly auth?: {
+    readonly required: boolean;
+    readonly authenticated: boolean;
+    readonly account?: string | null;
+  } | null;
 }
 
 /** User-set overrides for custom setups (persisted at ~/.pounce/config.json). */

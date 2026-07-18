@@ -95,7 +95,7 @@ function runCollect(cmd, args, { env, maxBytes = Infinity } = {}) {
 }
 
 /** Agent CLIs whose live processes we track for activity judgment. */
-const AGENT_BINS = new Set(["claude", "codex", "opencode"]);
+const AGENT_BINS = new Set(["claude", "codex", "opencode", "cursor-agent"]);
 let liveCwdsCache = { at: 0, promise: null };
 
 /**

@@ -24,7 +24,7 @@ export interface VoiceResult {
 }
 
 const AGENT_LABEL: Record<string, string> = {
-  claude: "Claude", codex: "Codex", opencode: "opencode", grok: "Grok",
+  claude: "Claude", codex: "Codex", cursor: "Cursor", opencode: "opencode", grok: "Grok",
   pi: "Pi", amp: "Amp", droid: "Droid", devin: "Devin", hermes: "Hermes",
 };
 

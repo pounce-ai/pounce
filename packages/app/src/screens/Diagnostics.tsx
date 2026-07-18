@@ -252,31 +252,38 @@ export default function DiagnosticsScreen() {
             // warning instead of a hard "not installed" — otherwise it reads as a
             // contradiction with the agent appearing in the filter list.
             const historyOnly = !a.installed && a.sessionCount > 0;
+            // Installed but its CLI isn't signed in (Cursor needs `cursor-agent
+            // login` / CURSOR_API_KEY) — turns won't run, so flag it like gh.
+            const needsAuth = !!a.auth?.required && a.auth.authenticated === false;
             return (
               <Row
                 key={a.id}
-                ok={a.installed}
+                ok={a.installed && !needsAuth}
                 title={a.name}
                 detail={
-                  a.installed
-                    ? a.sessionCount
-                      ? `${a.sessionCount} sessions`
-                      : "no sessions"
-                    : historyOnly
+                  !a.installed
+                    ? historyOnly
                       ? `${a.sessionCount} sessions · history only`
                       : undefined
+                    : needsAuth
+                      ? "not signed in"
+                      : a.sessionCount
+                        ? `${a.sessionCount} sessions`
+                        : "no sessions"
                 }
-                warn={historyOnly || (a.installed && a.sessionCount === 0)}
+                warn={needsAuth || historyOnly || (a.installed && a.sessionCount === 0)}
                 hint={
                   historyOnly
                     ? `${a.name}'s past sessions are here (and appear in filters), but its CLI wasn't found on PATH — so you can browse them, not start new turns. Install the CLI, or set its path below if it's installed somewhere custom.`
                     : !a.installed
                       ? `${a.name} isn't installed (or wasn't found on PATH). Install its CLI — or if it's installed somewhere custom, set its path below.`
-                      : a.sessionCount === 0
-                        ? `Installed, but no conversations yet — start a task in Pounce or run it once in a terminal.`
-                        : override
-                          ? `Using your custom path.`
-                          : undefined
+                      : needsAuth
+                        ? `${a.name} is installed but not signed in — run \`${a.bin ?? a.id} login\` on this machine (or set CURSOR_API_KEY). New turns won't run until you sign in.`
+                        : a.sessionCount === 0
+                          ? `Installed, but no conversations yet — start a task in Pounce or run it once in a terminal.`
+                          : override
+                            ? `Using your custom path.`
+                            : undefined
                 }
                 alwaysHint={!!override}
               >
