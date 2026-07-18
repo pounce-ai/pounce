@@ -821,6 +821,42 @@ function send(res, code, body) {
 let lastClientSeen = 0; // updated on every authed app request — a liveness signal
 let PAIR = null;        // { ip, port, pairUrl, deepLink } — set once we're listening
 
+/** Whether the machine-wide tunnel identity belongs to THIS bridge. It always
+ *  targets the default-port bridge (see ensureTunnel's singleton guard), so a
+ *  dev bridge on another port must never advertise it — a phone dialing that
+ *  node id would reach the default bridge, not this one. */
+function tunnelEligible() {
+  return PORT === DEFAULT_PORT || process.env.POUNCE_TUNNEL === "1";
+}
+
+/** The tunnel's Iroh identity, written to ~/.pounce/tunnel.json by
+ *  `pounce-tunnel serve` at startup. The identity key (~/.pounce/tunnel.key)
+ *  persists, so the nodeId is stable across restarts — a stale file from a
+ *  previous run still names the right endpoint. Null until a tunnel has run. */
+function tunnelInfo() {
+  try {
+    const info = JSON.parse(readFileSync(path.join(os.homedir(), ".pounce", "tunnel.json"), "utf8"));
+    return info?.nodeId ? { nodeId: info.nodeId, relay: info.relay || null } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The pairing deep link, computed fresh so it picks up the tunnel identity
+ *  whenever it's known: scanning it then works from any network, not just the
+ *  LAN — the app saves the node/relay and dials over Iroh when the LAN URL is
+ *  unreachable. */
+function pairDeepLink() {
+  if (!PAIR) return null;
+  let link = `pounce://connect?url=${encodeURIComponent(PAIR.pairUrl)}&token=${encodeURIComponent(TOKEN)}`;
+  const t = tunnelEligible() ? tunnelInfo() : null;
+  if (t) {
+    link += `&node=${encodeURIComponent(t.nodeId)}&host=${encodeURIComponent(os.hostname().replace(/\.local$/, ""))}`;
+    if (t.relay) link += `&relay=${encodeURIComponent(t.relay)}`;
+  }
+  return link;
+}
+
 /** Only the machine running the bridge may read the UI surface (it leaks the token). */
 function isLoopback(req) {
   const a = req.socket.remoteAddress || "";
@@ -926,8 +962,9 @@ const server = http.createServer(async (req, res) => {
       return res.end(UI_HTML);
     }
     if (url.pathname === "/qr.svg") {
-      const svg = PAIR
-        ? await QRCode.toString(PAIR.deepLink, { type: "svg", margin: 1 })
+      const link = pairDeepLink();
+      const svg = link
+        ? await QRCode.toString(link, { type: "svg", margin: 1 })
         : "<svg xmlns='http://www.w3.org/2000/svg'/>";
       res.writeHead(200, { "content-type": "image/svg+xml", "cache-control": "no-store" });
       return res.end(svg);
@@ -935,6 +972,8 @@ const server = http.createServer(async (req, res) => {
     const daemon = await status().catch(() => null);
     return send(res, 200, {
       ...(PAIR || {}),
+      deepLink: pairDeepLink(),
+      tunnel: tunnelInfo(),
       token: TOKEN,
       appVersion: APP_VERSION,
       daemonOk: !!(daemon && daemon.pid),
@@ -1137,16 +1176,23 @@ const server = http.createServer(async (req, res) => {
       // PairPayload for off-LAN access: pounce-tunnel's Iroh identity (written
       // to ~/.pounce/tunnel.json at its startup) + this bridge's token. The
       // phone dials the tunnel by node id and speaks this same HTTP API.
-      try {
-        const info = JSON.parse(readFileSync(path.join(os.homedir(), ".pounce", "tunnel.json"), "utf8"));
-        return send(res, 200, {
-          pairing: info?.nodeId
-            ? { nodeId: info.nodeId, token: TOKEN, hostName: os.hostname().replace(/\.local$/, ""), relay: info.relay || null }
-            : null,
-        });
-      } catch {
-        return send(res, 200, { pairing: null, error: "tunnel not running" });
-      }
+      const info = tunnelEligible() ? tunnelInfo() : null;
+      return send(res, 200, info
+        ? { pairing: { nodeId: info.nodeId, token: TOKEN, hostName: os.hostname().replace(/\.local$/, ""), relay: info.relay } }
+        : { pairing: null, error: "tunnel not running" });
+    }
+    if (url.pathname === "/v1/tunnel/ensure") {
+      // (Re)spawn pounce-tunnel if a binary is available and it isn't running —
+      // the CLI calls this after dropping a freshly downloaded binary into
+      // ~/.pounce/bin so an already-running bridge picks it up without a
+      // restart. Idempotent; also the poll target for "is off-LAN ready yet".
+      // `eligible` mirrors ensureTunnel's singleton guard: the machine-wide
+      // tunnel identity targets the default-port bridge only, so a dev bridge
+      // on another port must not advertise it (the QR would route the phone to
+      // the wrong bridge).
+      ensureTunnel();
+      const eligible = tunnelEligible();
+      return send(res, 200, { eligible, running: !!tunnelChild, binary: tunnelBinary(), tunnel: eligible ? tunnelInfo() : null });
     }
     if (url.pathname === "/v1/git/changes") {
       const cwd = url.searchParams.get("cwd");
@@ -1345,8 +1391,12 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
     server.listen(port, "0.0.0.0", () => {
       const ip = localIp();
       const pairUrl = `http://${ip || "localhost"}:${port}`;
-      const deepLink = `pounce://connect?url=${encodeURIComponent(pairUrl)}&token=${encodeURIComponent(TOKEN)}`;
-      PAIR = { ip: ip || "localhost", port, pairUrl, deepLink };
+      PAIR = { ip: ip || "localhost", port, pairUrl };
+      // The tunnel identity is stable (persistent key), so a tunnel.json from a
+      // previous run already names this host — the boot QR is remote-ready on
+      // every run after the first.
+      const deepLink = pairDeepLink();
+      PAIR.deepLink = deepLink;
       if (!quiet) {
         console.log(`Pounce Bridge listening on ${pairUrl}`);
         console.log(`  token: ${TOKEN}`);

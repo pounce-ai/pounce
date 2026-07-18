@@ -1,0 +1,52 @@
+{
+  "name": "use-pounce",
+  "version": "0.1.0",
+  "description": "Pair your phone with this machine in one command: npx use-pounce starts the Pounce bridge in the background and prints a QR to scan. Works over SSH — pairing rides an iroh p2p tunnel, no port-forwarding.",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "coding-agents",
+    "cursor",
+    "iroh",
+    "pounce",
+    "qr",
+    "remote",
+    "ssh"
+  ],
+  "homepage": "https://use-pounce.com",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pounce-ai/pounce.git",
+    "directory": "apps/cli"
+  },
+  "bin": {
+    "pounce": "./bin/pounce.mjs"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "README.md"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "bun scripts/build.mjs",
+    "prepack": "bun scripts/build.mjs",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "^0.58.1",
+    "@agentclientprotocol/codex-acp": "^1.1.2",
+    "@agentclientprotocol/sdk": "^1.2.1",
+    "@wterm/core": "^0.3.0",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
+    "zigpty": "^0.2.1"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
