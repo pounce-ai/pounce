@@ -8,7 +8,8 @@
     "pounce-bridge": "./server.mjs"
   },
   "scripts": {
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "^0.58.1",

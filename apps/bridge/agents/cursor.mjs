@@ -21,6 +21,7 @@
 import { existsSync, readdirSync, statSync, watch } from "node:fs";
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -32,6 +33,11 @@ import {
   systemEvent,
 } from "./events.mjs";
 import { agentEnv, binVersion, binPath, liveAgentCwds } from "./env.mjs";
+
+// node:sqlite loaded via createRequire (native Node resolution): a plain
+// `import("node:sqlite")` is rewritten by vite-node under tests and fails on
+// this newer builtin. Works identically in production.
+const nodeRequire = createRequire(import.meta.url);
 
 const BIN = "cursor-agent";
 const CHATS_DIR = path.join(os.homedir(), ".cursor", "chats");
@@ -125,10 +131,7 @@ export class CursorAdapter {
         resolve(null);
       });
     });
-    if (out == null) return { required: true, authenticated: false, account: null };
-    const authenticated = /logged in/i.test(out) && !/not logged in/i.test(out);
-    const account = (out.match(/logged in as\s+(\S+)/i) || [])[1] || null;
-    return { required: true, authenticated, account };
+    return parseAuthStatus(out);
   }
 
   /** Lazily load node:sqlite once; null when the runtime lacks it (history off,
@@ -136,7 +139,7 @@ export class CursorAdapter {
   async _sqliteMod() {
     if (this._sqlite !== undefined) return this._sqlite;
     try {
-      this._sqlite = (await import("node:sqlite")).DatabaseSync;
+      this._sqlite = nodeRequire("node:sqlite").DatabaseSync;
     } catch {
       this._sqlite = null;
     }
@@ -653,7 +656,7 @@ function getBlob(db, id) {
  * inside other fields' chunks, which we skip over wholesale — so field 1 stays
  * exactly the ordered message list.
  */
-function scanRoot(buf) {
+export function scanRoot(buf) {
   const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
   const ids = [];
   let cwd = null;
@@ -724,14 +727,14 @@ const partsText = (content) =>
 
 /** Pull the inner text of a <user_query>…</user_query> envelope, else the whole
  *  (trimmed) text — mirrors codex's injected-context stripping. */
-function userQueryText(text) {
+export function userQueryText(text) {
   if (!text) return "";
   const m = text.match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/i);
   return (m ? m[1] : text).trim();
 }
 
 /** Shape a stored tool-call part → the app's {name, input, status}. */
-function shapeCall(p) {
+export function shapeCall(p) {
   const name = p.toolName || "tool";
   const args = p.args || {};
   if (name === "Shell" || name === "shell") {
@@ -741,20 +744,20 @@ function shapeCall(p) {
 }
 
 /** A stored tool-result part → display text. */
-function resultText(p) {
+export function resultText(p) {
   if (typeof p.result === "string") return p.result;
   const exp = asArr(p.experimental_content).find((c) => c?.type === "text");
   if (exp?.text) return exp.text;
   return p.result == null ? "" : JSON.stringify(p.result);
 }
 
-function isErrorResult(p) {
+export function isErrorResult(p) {
   const hl = p.providerOptions?.cursor?.highLevelToolCallResult;
   return !!hl?.isError;
 }
 
 /** A live-stream tool_call.<kind>ToolCall → {name, input, result, isError}. */
-function shapeStreamCall(call) {
+export function shapeStreamCall(call) {
   const key = Object.keys(call).find((k) => k.endsWith("ToolCall"));
   const tc = (key && call[key]) || {};
   const args = tc.args || {};
@@ -774,6 +777,16 @@ function shapeStreamCall(call) {
     }
   }
   return { name, input, result, isError };
+}
+
+/** Parse `cursor-agent status` stdout → { required, authenticated, account }.
+ *  Null input (spawn failed) reads as not-authenticated. Note "Not logged in"
+ *  contains "logged in", so the negative guard must win. */
+export function parseAuthStatus(out) {
+  if (out == null) return { required: true, authenticated: false, account: null };
+  const authenticated = /logged in/i.test(out) && !/not logged in/i.test(out);
+  const account = (out.match(/logged in as\s+(\S+)/i) || [])[1] || null;
+  return { required: true, authenticated, account };
 }
 
 function defaultModels() {
