@@ -27,10 +27,15 @@ const REPO = path.resolve(HERE, "..", "..");
 const ENTRY = path.join(REPO, "apps/bridge/bridge-main.mjs");
 
 const argv = process.argv.slice(2);
+// Accepts both `--name=value` and `--name value`; a bare `--name` (no following
+// value, e.g. --minify) is a boolean `true`.
 const arg = (name) => {
-  const hit = argv.find((a) => a === `--${name}` || a.startsWith(`--${name}=`));
-  if (!hit) return undefined;
-  return hit.includes("=") ? hit.slice(hit.indexOf("=") + 1) : true;
+  const i = argv.findIndex((a) => a === `--${name}` || a.startsWith(`--${name}=`));
+  if (i === -1) return undefined;
+  const a = argv[i];
+  if (a.includes("=")) return a.slice(a.indexOf("=") + 1);
+  const next = argv[i + 1];
+  return next !== undefined && !next.startsWith("--") ? next : true;
 };
 
 const target = arg("target") || "bun";
