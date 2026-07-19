@@ -973,7 +973,7 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, {
       ...(PAIR || {}),
       deepLink: pairDeepLink(),
-      tunnel: tunnelInfo(),
+      tunnel: tunnelEligible() ? tunnelInfo() : null,
       token: TOKEN,
       appVersion: APP_VERSION,
       daemonOk: !!(daemon && daemon.pid),

@@ -204,7 +204,7 @@ async function ensureTunnelBinary(opts) {
       }
       if (!assetUrl) return { skipped: `no ${wanted} on any tunnel-v* release yet` };
     }
-    process.stdout.write(dim(`  downloading pounce-tunnel (${triple})…\n`));
+    process.stdout.write(dim(`  downloading the remote-access component (${triple})…\n`));
     const res = await fetch(assetUrl, { signal: AbortSignal.timeout(120_000) });
     if (!res.ok) throw new Error(`download -> ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
@@ -300,11 +300,17 @@ async function waitForPhone(port) {
 }
 
 // --- commands -----------------------------------------------------------------
+function printPairing(pairUrl, token, tunnel) {
+  const link = deepLink({ pairUrl, token, tunnel });
+  console.log(
+    `\n  ${bold("Scan with the Pounce app")} ${dim("(Settings → Scan QR)")} ${bold("or your camera:")}\n`,
+  );
+  qrcode.generate(link, { small: true });
+  console.log(`\n  ${dim("or open on the phone:")}\n  ${dim(link)}\n`);
+}
+
 async function cmdUp(opts, { wait }) {
   console.log(`\n${bold("🐾 Pounce")} ${dim(`v${PKG.version}`)} — pair your phone\n`);
-
-  // Tunnel binary first: a bridge spawned after it exists picks it up itself.
-  const tunnelState = await ensureTunnelBinary(opts);
 
   let reused = false;
   let pid = null;
@@ -328,27 +334,44 @@ async function cmdUp(opts, { wait }) {
     `  ${dim("bridge")}  ${pairUrl}  ${dim(reused ? "(already running)" : `(started · pid ${pid} · logs: pounce logs)`)}`,
   );
 
-  let tunnel = null;
-  if (tunnelState.skipped) {
-    console.log(
-      `  ${dim("tunnel")}  ${yellow("off")} — ${tunnelState.skipped}; QR pairs on this Wi-Fi only`,
-    );
-  } else {
-    const r = await waitForTunnel(opts.port, token);
-    tunnel = r.tunnel;
-    console.log(
-      tunnel
-        ? `  ${dim("tunnel")}  ${green("ready")} — pairs from any network ${dim(`(iroh ${tunnel.nodeId.slice(0, 8)}…)`)}`
-        : `  ${dim("tunnel")}  ${yellow("off")} — ${r.why}; QR pairs on this Wi-Fi only`,
-    );
+  // ONE code, shown as fast as possible. The remote identity is stable across
+  // restarts, so on any machine that has run before /ui already carries it and
+  // the QR is remote-capable instantly. Only a machine's very first run holds
+  // the QR briefly while remote access is minted — never a second code; if
+  // remote isn't ready in time, the LAN code still upgrades the phone to
+  // remote automatically after it pairs (the app captures /v1/pair on connect).
+  let tunnel = ui.tunnel?.nodeId ? ui.tunnel : null;
+  let remoteNote = null;
+  if (!tunnel && !opts.lan) {
+    console.log(`  ${dim("Setting up remote access… (first run only — takes a few seconds)")}`);
+    const state = await ensureTunnelBinary(opts);
+    if (state.skipped) {
+      remoteNote = `${yellow("!")} Pairs over your Wi-Fi for now ${dim(`(remote access unavailable: ${state.skipped})`)}`;
+    } else {
+      tunnel = (await waitForTunnel(opts.port, token)).tunnel;
+      if (!tunnel) {
+        remoteNote = `${yellow("!")} Pairs over your Wi-Fi for now — remote access is still warming up and will switch on automatically after you pair`;
+      }
+    }
   }
+  printPairing(pairUrl, token, tunnel);
 
-  const link = deepLink({ pairUrl, token, tunnel });
-  console.log(
-    `\n  ${bold("Scan with the Pounce app")} ${dim("(Settings → Scan QR)")} ${bold("or your camera:")}\n`,
-  );
-  qrcode.generate(link, { small: true });
-  console.log(`\n  ${dim("or open on the phone:")}\n  ${dim(link)}\n`);
+  if (opts.lan) {
+    console.log(
+      `  ${dim("Wi-Fi-only mode (--lan): scan while on the same network as this machine")}`,
+    );
+  } else if (tunnel) {
+    // Confirm the remote link quietly; the code on screen never changes (the
+    // identity is stable) — this only decides which status line to show.
+    const r = await waitForTunnel(opts.port, token, { timeoutMs: 12_000 });
+    console.log(
+      r.tunnel
+        ? `  ${green("✓")} Works from anywhere — Wi-Fi at home, an encrypted tunnel everywhere else`
+        : `  ${yellow("!")} Pairs over your Wi-Fi for now — the remote link is reconnecting in the background`,
+    );
+  } else if (remoteNote) {
+    console.log(`  ${remoteNote}`);
+  }
 
   if (!wait) return;
   console.log(
