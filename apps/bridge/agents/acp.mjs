@@ -62,6 +62,12 @@ function spawnSpec(agent) {
   const a = ADAPTERS[agent];
   if (!a) return null;
   if (a.pkg) {
+    // Compiled single-file bridge (no node/node_modules on the host): re-invoke
+    // ourselves in adapter mode. bridge-main.mjs routes `--acp-adapter <agent>`
+    // to the ACP adapter embedded in the binary (scripts/bridge/compile.mjs).
+    if (process.env.POUNCE_COMPILED === "1") {
+      return { command: process.execPath, args: ["--acp-adapter", agent] };
+    }
     // Prefer the adapter bundled beside this launcher (the packaged desktop app
     // has no node_modules); fall back to node_modules resolution in dev.
     const bundled = new URL(`./adapters/${a.bundle}.mjs`, import.meta.url).pathname;

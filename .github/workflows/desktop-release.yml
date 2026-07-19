@@ -49,10 +49,49 @@ jobs:
           path: dist/pounce-bridge.zip
           if-no-files-found: error
 
+  # Self-contained bridge (bun --compile) — one binary per macOS arch, built on a
+  # NATIVE-arch runner so the zigpty prebuild Bun embeds matches the slice. The
+  # desktop job lipo-fuses these into a universal binary and bundles it into the
+  # .app, so the app needs no host Node (this is the Intel-Mac fix).
+  bridge-macos:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-13
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - name: Compile bridge (${{ matrix.arch }})
+        run: bun run scripts/bridge/compile.mjs --outfile "$RUNNER_TEMP/pounce-bridge-${{ matrix.arch }}"
+      - name: Smoke-test — boots with no Node
+        run: |
+          POUNCE_NO_CTX_INSTALL=1 BRIDGE_PORT=8137 "$RUNNER_TEMP/pounce-bridge-${{ matrix.arch }}" > /tmp/bridge-smoke.log 2>&1 &
+          BP=$!
+          sleep 4
+          if grep -q "listening" /tmp/bridge-smoke.log; then
+            echo "✓ bridge booted:"; head -3 /tmp/bridge-smoke.log
+          else
+            echo "::error::bridge did not boot"; cat /tmp/bridge-smoke.log; kill $BP 2>/dev/null; exit 1
+          fi
+          kill $BP 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bridge-macos-${{ matrix.arch }}
+          path: ${{ runner.temp }}/pounce-bridge-${{ matrix.arch }}
+          if-no-files-found: error
+
   # Signed + notarized macOS app → DMG + Sparkle appcast.
   # macos-15 for a modern Xcode toolchain — react-native-macos's Podfile requires
   # Xcode >= 16.1 (macos-14 runners ship 15.x and `pod install` bails).
   desktop:
+    needs: bridge-macos
     runs-on: macos-15
     outputs:
       version: ${{ steps.ver.outputs.version }}
@@ -121,6 +160,26 @@ jobs:
       - name: pod install
         working-directory: desktop/macos
         run: pod install
+
+      # Fuse the per-arch bridge binaries into one universal Mach-O and hand its
+      # path to the Xcode "Bundle Pounce Bridge" phase via POUNCE_BRIDGE_BIN
+      # (else the phase would compile a runner-arch-only binary). lipo preserves
+      # each slice's embedded Bun payload — verified locally.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bridge-macos-*
+          path: bridge-artifacts
+      - name: Fuse universal bridge
+        run: |
+          OUT="$RUNNER_TEMP/bridge/pounce-bridge"
+          mkdir -p "$(dirname "$OUT")"
+          lipo -create \
+            bridge-artifacts/bridge-macos-arm64/pounce-bridge-arm64 \
+            bridge-artifacts/bridge-macos-x64/pounce-bridge-x64 \
+            -output "$OUT"
+          chmod +x "$OUT"
+          echo "universal bridge: $(lipo -archs "$OUT")"
+          echo "POUNCE_BRIDGE_BIN=$OUT" >> "$GITHUB_ENV"
 
       - name: Read app version
         id: ver

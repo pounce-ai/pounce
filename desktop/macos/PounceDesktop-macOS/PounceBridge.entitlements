@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- Entitlements for the embedded bridge executable (Resources/bridge/
+         pounce-bridge), a bun-compiled binary signed as a nested Mach-O by
+         scripts/desktop/release.sh. It is NOT the app's entitlements.
+
+         Bun runs JavaScriptCore (a JIT) and, at runtime, extracts embedded
+         native code — zigpty's .node and the claude-agent-sdk's vendored CLI —
+         from $bunfs into a temp dir, then loads/spawns it. Under the hardened
+         runtime (notarized Release), that requires:
+           • allow-jit / allow-unsigned-executable-memory — for the JIT, and
+           • disable-library-validation — to dlopen the runtime-extracted .node,
+             which isn't signed by our Team ID.
+         Without these the notarized bridge crashes on launch (part of why the
+         app failed on Intel once it stopped riding the host's own signed node). -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>

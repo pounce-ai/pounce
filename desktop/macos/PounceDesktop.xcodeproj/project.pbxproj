@@ -363,16 +363,17 @@
 			files = (
 			);
 			inputPaths = (
-				"$(SRCROOT)/../../apps/bridge/desktop-launcher.mjs",
+				"$(SRCROOT)/../../apps/bridge/bridge-main.mjs",
 				"$(SRCROOT)/../../apps/bridge/server.mjs",
+				"$(SRCROOT)/../../scripts/bridge/compile.mjs",
 			);
 			name = "Bundle Pounce Bridge";
 			outputPaths = (
-				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/bridge/launcher.mjs",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/bridge/pounce-bridge",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Bundle the Pounce bridge launcher (daemon bootstrap + server.mjs + deps)\n# into the app's Resources so the desktop app can run it at launch.\nset -u\nBRIDGE_SRC=\"$SRCROOT/../../apps/bridge/desktop-launcher.mjs\"\nOUT_DIR=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/bridge\"\nBUN_BIN=\"$(command -v bun || true)\"\n[ -x \"$BUN_BIN\" ] || BUN_BIN=\"$HOME/.bun/bin/bun\"\nif [ -f \"$BRIDGE_SRC\" ] && [ -x \"$BUN_BIN\" ]; then\n  mkdir -p \"$OUT_DIR\"\n  \"$BUN_BIN\" build \"$BRIDGE_SRC\" --target=node --external zigpty --outfile \"$OUT_DIR/launcher.mjs\"\n  # ACP adapters — bundled next to the launcher so the embedded bridge can spawn\n  # them for ACP live turns (the app has no node_modules at runtime).\n  for pkg in claude-agent-acp codex-acp; do\n    ENTRY=\"$SRCROOT/../../node_modules/@agentclientprotocol/$pkg/dist/index.js\"\n    if [ -f \"$ENTRY\" ]; then\n      mkdir -p \"$OUT_DIR/adapters\"\n      \"$BUN_BIN\" build \"$ENTRY\" --target=node --outfile \"$OUT_DIR/adapters/$pkg.mjs\"\n    fi\n  done\n  # The claude adapter dynamically imports @anthropic-ai/claude-agent-sdk (the\n  # bundler can't follow it) — ship the package beside the bundle so the runtime\n  # import resolves. It's dependency-free and self-contained.\n  SDK_SRC=\"$SRCROOT/../../node_modules/@anthropic-ai/claude-agent-sdk\"\n  if [ -d \"$SDK_SRC\" ]; then\n    mkdir -p \"$OUT_DIR/adapters/node_modules/@anthropic-ai\"\n    rm -rf \"$OUT_DIR/adapters/node_modules/@anthropic-ai/claude-agent-sdk\"\n    cp -R \"$SDK_SRC\" \"$OUT_DIR/adapters/node_modules/@anthropic-ai/\"\n  fi\n  # zigpty — native PTY host for interactive (answerable) sessions. Kept external\n  # in the launcher bundle (native .node), so ship it as a sibling package.\n  ZIGPTY_SRC=\"$SRCROOT/../../node_modules/zigpty\"\n  if [ -d \"$ZIGPTY_SRC\" ]; then\n    mkdir -p \"$OUT_DIR/node_modules\"\n    rm -rf \"$OUT_DIR/node_modules/zigpty\"\n    cp -R \"$ZIGPTY_SRC\" \"$OUT_DIR/node_modules/\"\n  fi\nelse\n  echo \"warning: Pounce bridge not bundled (bun or $BRIDGE_SRC missing)\"\nfi\n";
+			shellScript = "# Bundle the Pounce bridge as a self-contained executable (bun --compile) into\n# the app's Resources. It embeds its own JS runtime, zigpty, and the ACP adapters,\n# so the app needs NO host Node - the thing that broke it on Intel Macs (the old\n# path probed for 'node' and gave up when none was installed).\nset -u\nOUT_DIR=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/bridge\"\nmkdir -p \"$OUT_DIR\"\nDEST=\"$OUT_DIR/pounce-bridge\"\n# CI builds a universal (arm64+x86_64) binary on matching-arch runners and passes\n# it via POUNCE_BRIDGE_BIN; a local dev build compiles a host-arch binary here.\nif [ -n \"${POUNCE_BRIDGE_BIN:-}\" ] && [ -f \"$POUNCE_BRIDGE_BIN\" ]; then\n  echo \"Using prebuilt bridge: $POUNCE_BRIDGE_BIN\"\n  cp -f \"$POUNCE_BRIDGE_BIN\" \"$DEST\"\nelse\n  BUN_BIN=\"$(command -v bun || true)\"\n  [ -x \"$BUN_BIN\" ] || BUN_BIN=\"$HOME/.bun/bin/bun\"\n  if [ -x \"$BUN_BIN\" ]; then\n    \"$BUN_BIN\" run \"$SRCROOT/../../scripts/bridge/compile.mjs\" --outfile \"$DEST\"\n  else\n    echo \"warning: Pounce bridge not bundled (bun not found and no POUNCE_BRIDGE_BIN)\"\n  fi\nfi\n[ -f \"$DEST\" ] && chmod +x \"$DEST\"\n";
 		};
 		FFF03E617B52FF7D8C095BB5 /* [Expo] Configure project */ = {
 			isa = PBXShellScriptBuildPhase;

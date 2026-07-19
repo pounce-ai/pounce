@@ -13,42 +13,36 @@
 @property (nonatomic, strong) NSStatusItem *statusItem;
 @end
 
-// The Pounce bridge (apps/bridge/server.mjs, bundled into Resources/bridge by
-// the "Bundle Pounce Bridge" build phase) runs as a child process for the
-// app's lifetime. If a bridge is already listening on the port (CLI or the
-// tray app), the child notices EADDRINUSE and exits; the app then talks to
-// the existing instance — either way 127.0.0.1:8099 serves the app.
+// The Pounce bridge — a self-contained executable (built from apps/bridge via
+// `bun build --compile`; see scripts/bridge/compile.mjs) bundled into
+// Resources/bridge by the "Bundle Pounce Bridge" build phase — runs as a child
+// process for the app's lifetime. It embeds its own JS runtime, zigpty's native
+// PTY addon, and the ACP adapters, so it needs NO host Node: that's what makes
+// the app work on Intel Macs and machines without Node installed (the old path
+// probed for `node` and died with "no working node found" when none existed).
+// If a bridge is already listening on the port (CLI or the tray app), the child
+// notices EADDRINUSE and exits; the app then talks to the existing instance —
+// either way 127.0.0.1:8099 serves the app.
 static NSTask *gBridgeTask = nil;
 
 static void PounceStartBridge(void)
 {
-  NSString *server = [[NSBundle mainBundle] pathForResource:@"launcher"
-                                                     ofType:@"mjs"
-                                                inDirectory:@"bridge"];
-  if (server == nil) {
-    NSLog(@"[bridge] launcher.mjs not bundled; expecting an external bridge on 8099");
+  NSString *bin = [[NSBundle mainBundle] pathForResource:@"pounce-bridge"
+                                                  ofType:nil
+                                             inDirectory:@"bridge"];
+  if (bin == nil) {
+    NSLog(@"[bridge] pounce-bridge not bundled; expecting an external bridge on 8099");
     return;
   }
   NSTask *task = [NSTask new];
-  // Find a *working* node: login shells miss version managers initialized in
-  // .zshrc (fnm/nvm), and a half-upgraded Homebrew node can fail dyld — so
-  // probe candidates with `--version` and use the first that actually runs.
-  task.executableURL = [NSURL fileURLWithPath:@"/bin/sh"];
-  NSString *script = [NSString stringWithFormat:
-    @"candidates=\"$(command -v node 2>/dev/null) "
-    @"$(ls -1dr \"$HOME\"/.local/share/fnm/node-versions/*/installation/bin/node 2>/dev/null) "
-    @"$(ls -1dr \"$HOME\"/.nvm/versions/node/*/bin/node 2>/dev/null) "
-    @"/opt/homebrew/bin/node /usr/local/bin/node\"; "
-    @"for n in $candidates; do "
-    @"  [ -x \"$n\" ] && \"$n\" --version >/dev/null 2>&1 && exec \"$n\" \"%@\"; "
-    @"done; "
-    @"echo '[bridge] no working node found' >&2; exit 127", server];
-  task.arguments = @[ @"-c", script ];
+  // No args → bridge mode (argv routing lives in apps/bridge/bridge-main.mjs).
+  task.executableURL = [NSURL fileURLWithPath:bin];
+  task.arguments = @[];
   NSMutableDictionary *env = [[NSProcessInfo processInfo].environment mutableCopy];
   if (env[@"BRIDGE_PORT"] == nil) env[@"BRIDGE_PORT"] = @"8099";
   // Drive Pounce-initiated live turns over ACP (richer tool status, plans,
-  // permission prompts) using the adapters bundled in Resources/bridge/adapters.
-  // The runner falls back to the stream-json path if an adapter isn't available.
+  // permission prompts) using the adapters embedded in the bridge binary (it
+  // self-dispatches `--acp-adapter <agent>`). Falls back to the stream-json path.
   if (env[@"BRIDGE_ACP"] == nil) env[@"BRIDGE_ACP"] = @"1";
   task.environment = env;
   task.terminationHandler = ^(NSTask *t) {
