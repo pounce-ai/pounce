@@ -21,7 +21,7 @@
     "directory": "apps/cli"
   },
   "bin": {
-    "pounce": "./bin/pounce.mjs"
+    "pounce": "bin/pounce.mjs"
   },
   "files": [
     "bin",
