@@ -43,8 +43,10 @@ const minify = !!arg("minify");
 // Windows executables need the .exe suffix; default names encode the target so a
 // matrix build can drop them side by side.
 const isWin = String(target).includes("windows");
-const defaultName = target === "bun" ? "pounce-bridge" : `pounce-bridge-${String(target).replace(/^bun-/, "")}`;
-const outfile = arg("outfile") || path.join(REPO, "dist", "bridge", isWin ? `${defaultName}.exe` : defaultName);
+const defaultName =
+  target === "bun" ? "pounce-bridge" : `pounce-bridge-${String(target).replace(/^bun-/, "")}`;
+const outfile =
+  arg("outfile") || path.join(REPO, "dist", "bridge", isWin ? `${defaultName}.exe` : defaultName);
 
 mkdirSync(path.dirname(outfile), { recursive: true });
 
@@ -59,7 +61,9 @@ const buildArgs = [
   outfile,
 ];
 
-process.stdout.write(`\n▸ Compiling bridge → ${path.relative(process.cwd(), outfile) || outfile}  (target: ${target})\n`);
+process.stdout.write(
+  `\n▸ Compiling bridge → ${path.relative(process.cwd(), outfile) || outfile}  (target: ${target})\n`,
+);
 execFileSync(bun, buildArgs, { stdio: "inherit", cwd: REPO });
 
 const mb = (statSync(outfile).size / (1024 * 1024)).toFixed(0);
