@@ -1,30 +1,29 @@
-<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>How Pounce works — connect your computer in 2 minutes</title>
-<meta name="description" content="Pounce is a remote control for the coding agents already running on your computer. Install the desktop app (Mac) or the headless Bridge (Windows/Linux), scan one QR, and steer Claude, Codex & opencode from your phone. Here's the whole setup." />
+<meta name="description" content="Pounce is a remote control for the coding agents already running on your computer. Install the desktop app (Mac), the headless Bridge, or run npx use-pounce, scan one QR, and steer Claude, Codex, Cursor & opencode from your phone. Here's the whole setup." />
 <link rel="canonical" href="https://use-pounce.com/how-it-works.html" />
 <meta name="robots" content="index, follow" />
 <meta property="og:site_name" content="Pounce" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="https://use-pounce.com/how-it-works.html" />
 <meta property="og:title" content="How Pounce works — set up in 2 minutes" />
-<meta property="og:description" content="Run the desktop app or Bridge on your computer, scan one QR with your phone, and your coding agents show up. A visual, step-by-step walkthrough." />
+<meta property="og:description" content="Run the desktop app, the Bridge, or npx use-pounce on your computer, scan one QR with your phone, and your coding agents show up. A visual, step-by-step walkthrough." />
 <meta property="og:image" content="https://use-pounce.com/assets/icon.png" />
 <meta property="og:image:alt" content="How Pounce works — connect your computer in 2 minutes" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="How Pounce works — set up in 2 minutes" />
-<meta name="twitter:description" content="Run the desktop app or Bridge on your computer, scan one QR with your phone, and your coding agents show up." />
+<meta name="twitter:description" content="Run the desktop app, the Bridge, or npx use-pounce on your computer, scan one QR with your phone, and your coding agents show up." />
 <meta name="twitter:image" content="https://use-pounce.com/assets/icon.png" />
 <meta name="theme-color" content="#0b0b0e" />
-<link rel="icon" href="./assets/favicon.png" />
-<link rel="apple-touch-icon" href="./assets/apple-touch-icon.png" />
+<link rel="icon" href="/assets/favicon.png" />
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-<style>
+<style is:global>
   :root{
     --bg:#0b0b0e; --bg-2:#0e0e13; --panel:#121218; --panel-2:#16161d;
     --ink:#f5f4ef; --ink-dim:#a7a5b0; --ink-faint:#726f7d;
@@ -53,6 +52,7 @@
   h1,h2,h3{font-family:var(--disp);font-weight:700;letter-spacing:-.02em;line-height:1.06}
   .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.06em;color:var(--violet-bright);display:inline-flex;align-items:center;gap:9px}
   .kicker::before{content:"›";color:var(--ink-faint)}
+  .mono{font-family:var(--mono)}
 
   /* nav */
   nav{position:sticky;top:0;z-index:60;backdrop-filter:blur(16px);
@@ -215,10 +215,11 @@
 
 <nav id="nav">
   <div class="wrap nav-in">
-    <a class="brand" href="./index.html"><img src="./assets/icon.png" alt="Pounce" /> pounce</a>
+    <a class="brand" href="/"><img src="/assets/icon.png" alt="Pounce" /> pounce</a>
     <div class="nav-links">
-      <a class="lnk" href="./index.html">Home</a>
-      <a class="lnk" href="./index.html#features">Features</a>
+      <a class="lnk" href="/">Home</a>
+      <a class="lnk" href="/docs/getting-started">Docs</a>
+      <a class="lnk" href="/changelog">Changelog</a>
       <a class="lnk" href="https://github.com/pounce-ai/pounce" target="_blank" rel="noopener">GitHub</a>
       <a class="nav-cta" href="https://apps.apple.com/app/id6779601425" target="_blank" rel="noopener">Download</a>
     </div>
@@ -232,8 +233,8 @@
   <p class="fine">No account · no Pounce server in the middle · your code and conversations stay on your devices.</p>
 
   <div class="needs">
-    <div class="need"><span class="ic">🖥️</span><div><h4>A computer</h4><p>Your Mac, Windows, or Linux machine running coding agents like Claude, Codex, or opencode.</p></div></div>
-    <div class="need"><span class="ic">📱</span><div><h4>The Pounce app</h4><p>On your iPhone (live on the App Store) — Android soon. It's the remote: it shows every agent and lets you steer them.</p></div></div>
+    <div class="need"><span class="ic">🖥️</span><div><h4>A computer</h4><p>Your Mac, Windows, or Linux machine running coding agents like Claude, Codex, Cursor, or opencode.</p></div></div>
+    <div class="need"><span class="ic">📱</span><div><h4>The Pounce app</h4><p>On your iPhone (live on the App Store) — Android is in testing on Google Play. It's the remote: it shows every agent and lets you steer them.</p></div></div>
     <div class="need"><span class="ic">📶</span><div><h4>A network path</h4><p>Same Wi-Fi just works. Away from home, Pounce's own secure tunnel connects you — same QR, nothing to set up.</p></div></div>
   </div>
 </header>
@@ -247,10 +248,10 @@
         <div class="step-num">1</div>
         <h3>Install it on your computer</h3>
         <p>On a <b>Mac</b>, download the <b>Pounce desktop app</b>. On <b>Windows or Linux</b>, run the headless <b>Bridge</b>. Either one hosts the coding agents on that machine automatically — no terminal, no config files.</p>
-        <div class="tip"><span>💡</span><span>The desktop app (or Bridge) is what your phone talks to. Keep it running while you want access — quit it any time to go fully offline.</span></div>
+        <div class="tip"><span>⌨️</span><span>Terminal person? <b class="mono">npx use-pounce</b> does the same in one line — it even works over <b>SSH</b>, so you can pair a server you never sit in front of.</span></div>
       </div>
       <div class="step-visual">
-        <figure class="mac"><img src="./assets/desktop-app.png" alt="The Pounce desktop app on macOS — hosting the coding agents on this machine, ready to pair" /></figure>
+        <figure class="mac"><img src="/assets/desktop-app.png" alt="The Pounce desktop app on macOS — hosting the coding agents on this machine, ready to pair" /></figure>
       </div>
     </div>
 
@@ -268,7 +269,7 @@
           <div class="bridge">
             <div style="display:flex;align-items:center;gap:8px"><span class="paw">🐾</span><span class="bt">Pounce</span></div>
             <p class="sub">Scan with your phone to connect</p>
-            <div class="qrwrap"><img src="./assets/pair-qr.svg" alt="Pounce pairing QR code" /></div>
+            <div class="qrwrap"><img src="/assets/pair-qr.svg" alt="Pounce pairing QR code" /></div>
             <div class="addr">pounce · Dirghas-Mac-mini</div>
             <div class="status"><span class="sdot"></span><span>Waiting for your phone…</span></div>
             <p class="hint">Open Pounce on your phone → Sync a device → Scan this code.</p>
@@ -294,7 +295,7 @@
               <div class="vf">
                 <span class="br tl2"></span><span class="br tr2"></span><span class="br bl2"></span><span class="br br2"></span>
                 <span class="scan-line"></span>
-                <img src="./assets/pair-qr.svg" alt="Scanning the pairing QR" />
+                <img src="/assets/pair-qr.svg" alt="Scanning the pairing QR" />
               </div>
               <div class="scan-foot">Pairing with <b>Dirghas-Mac-mini</b>…</div>
             </div>
@@ -314,7 +315,7 @@
       <div class="step-visual phone-stage">
         <div class="phone-glow"></div>
         <div class="phone">
-          <div class="screen"><img src="./assets/shot-home.png" alt="Pounce home — every coding agent across all your machines, on one screen" /></div>
+          <div class="screen"><img src="/assets/shot-home.png" alt="Pounce home — every coding agent across all your machines, on one screen" /></div>
         </div>
       </div>
     </div>
@@ -331,9 +332,9 @@
       <p class="sec-lead">Watch agents work live, filter to what needs you, review the diff, and ship — without going back to your desk.</p>
     </div>
     <div class="shots">
-      <figure class="reveal"><div class="device"><img src="./assets/shot-session.png" alt="Live agent session streaming in real time" /></div><figcaption><b>Watch it work.</b> Reasoning &amp; tools, live.</figcaption></figure>
-      <figure class="reveal"><div class="device"><img src="./assets/shot-filters.png" alt="Filter the fleet by device, agent, status, branch or project" /></div><figcaption><b>Filter the fleet.</b> By device, agent or branch.</figcaption></figure>
-      <figure class="reveal"><div class="device"><img src="./assets/shot-changes.png" alt="Review the diff and open a PR from your phone" /></div><figcaption><b>Review &amp; ship.</b> Commit, push, open a PR.</figcaption></figure>
+      <figure class="reveal"><div class="device"><img src="/assets/shot-session.png" alt="Live agent session streaming in real time" /></div><figcaption><b>Watch it work.</b> Reasoning &amp; tools, live.</figcaption></figure>
+      <figure class="reveal"><div class="device"><img src="/assets/shot-filters.png" alt="Filter the fleet by device, agent, status, branch or project" /></div><figcaption><b>Filter the fleet.</b> By device, agent or branch.</figcaption></figure>
+      <figure class="reveal"><div class="device"><img src="/assets/shot-changes.png" alt="Review the diff and open a PR from your phone" /></div><figcaption><b>Review &amp; ship.</b> Commit, push, open a PR.</figcaption></figure>
     </div>
   </div>
 </section>
@@ -351,9 +352,9 @@
       <div class="flow-link"><span>same Wi-Fi</span><span class="ln"></span><span>or Pounce tunnel</span></div>
       <div class="node"><div class="nic">🐾</div><div class="nt">The app / Bridge</div><div class="nm">runs on your computer</div></div>
       <div class="flow-link"><span>localhost</span><span class="ln"></span><span>on-device</span></div>
-      <div class="node"><div class="nic">🤖</div><div class="nt">Your agents</div><div class="nm">Claude · Codex · opencode</div></div>
+      <div class="node"><div class="nic">🤖</div><div class="nt">Your agents</div><div class="nm">Claude · Codex · Cursor · opencode</div></div>
     </div>
-    <p class="flow-note"><b>No Pounce cloud.</b> Your code, diffs and conversations never pass through us — read the <a href="./privacy.html">privacy policy</a>.</p>
+    <p class="flow-note"><b>No Pounce cloud.</b> Your code, diffs and conversations never pass through us — read the <a href="/privacy">privacy policy</a>.</p>
   </div>
 </section>
 
@@ -365,10 +366,10 @@
       <h2 class="sec-title">Common questions</h2>
     </div>
     <div class="faq">
-      <div class="qa reveal"><h4>Which do I install — app or Bridge?</h4><p>On a Mac, the <b>Pounce desktop app</b> (a signed DMG). On Windows or Linux, the headless <b>Bridge</b> bundle. Both do the same job: host your agents and show a pairing QR. <a href="https://github.com/pounce-ai/pounce/releases/latest" target="_blank" rel="noopener">Get them here.</a></p></div>
-      <div class="qa reveal"><h4>Phone and computer on different networks?</h4><p>Nothing to configure. Pounce opens its <b>own secure peer-to-peer tunnel</b> — pair once with the same QR and your phone reaches your machine over the internet. No VPN, no port-forwarding. (Same Wi-Fi is used automatically when you're home.)</p></div>
+      <div class="qa reveal"><h4>Which do I install — app, Bridge, or CLI?</h4><p>On a Mac, the <b>Pounce desktop app</b> (a signed DMG). On Windows or Linux, the headless <b>Bridge</b> bundle. Or run <b>npx use-pounce</b> in any terminal — all three do the same job: host your agents and show a pairing QR. <a href="https://github.com/pounce-ai/pounce/releases/latest" target="_blank" rel="noopener">Get them here.</a></p></div>
+      <div class="qa reveal"><h4>Phone and computer on different networks?</h4><p>Nothing to configure. Pounce opens its <b>own secure peer-to-peer tunnel</b> — pair once with the same QR and your phone reaches your machine over the internet. You can even <b>ssh</b> into a server, run <b>npx use-pounce</b> there, and pair it from anywhere. No VPN, no port-forwarding.</p></div>
       <div class="qa reveal"><h4>Is the connection secure?</h4><p>Each machine pairs with its own private token, and off-network access uses a direct peer-to-peer identity to reach home. There's no shared cloud inbox for your sessions.</p></div>
-      <div class="qa reveal"><h4>What can it actually do?</h4><p>Stream every agent live, reply or redirect, approve permission prompts, and review diffs — then commit, push, or open a PR, all from the phone.</p></div>
+      <div class="qa reveal"><h4>What can it actually do?</h4><p>Stream every agent live, reply or redirect, approve permission prompts, and review diffs — then commit, push, or open a PR, all from the phone. See the <a href="/docs/getting-started">docs</a> for the full tour.</p></div>
     </div>
   </div>
 </section>
@@ -396,17 +397,19 @@
 
 <footer>
   <div class="wrap foot-in">
-    <a class="brand" href="./index.html" style="font-size:18px"><img src="./assets/favicon.png" alt="" style="width:26px;height:26px" /> pounce</a>
+    <a class="brand" href="/" style="font-size:18px"><img src="/assets/favicon.png" alt="" style="width:26px;height:26px" /> pounce</a>
     <div class="foot-links">
-      <a href="./index.html">Home</a>
+      <a href="/">Home</a>
+      <a href="/docs/getting-started">Docs</a>
+      <a href="/changelog">Changelog</a>
       <a href="https://github.com/pounce-ai/pounce" target="_blank" rel="noopener">GitHub</a>
-      <a href="./privacy.html">Privacy</a>
+      <a href="/privacy">Privacy</a>
     </div>
     <div class="foot-c">© 2026 Pounce AI</div>
   </div>
 </footer>
 
-<script>
+<script is:inline>
   const nav=document.getElementById('nav');
   addEventListener('scroll',()=>nav.classList.toggle('scrolled',scrollY>10),{passive:true});
   const io=new IntersectionObserver((es)=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.12});

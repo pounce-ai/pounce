@@ -1,0 +1,62 @@
+/* Pounce brand theme for Starlight — mission-control: Bricolage Grotesque display,
+   JetBrains Mono chrome, Hanken Grotesk body, warm near-black, violet signal accent. */
+@import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+:root {
+  --sl-font: "Hanken Grotesk", -apple-system, system-ui, sans-serif;
+  --sl-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Dark (default brand look) */
+:root[data-theme="dark"] {
+  --sl-color-accent-low: #2a2050;
+  --sl-color-accent: #7c5cff;
+  --sl-color-accent-high: #c7b9ff;
+  --sl-color-white: #f5f4ef;
+  --sl-color-gray-1: #e8e6e0;
+  --sl-color-gray-2: #a7a5b0;
+  --sl-color-gray-3: #86838f;
+  --sl-color-gray-4: #565361;
+  --sl-color-gray-5: #2e2c36;
+  --sl-color-gray-6: #16161d;
+  --sl-color-black: #0b0b0e;
+  --sl-color-bg: #0b0b0e;
+  --sl-color-bg-nav: #0e0e13;
+  --sl-color-bg-sidebar: #0e0e13;
+  --sl-color-hairline: rgba(245, 244, 239, 0.09);
+  --sl-color-hairline-light: rgba(245, 244, 239, 0.055);
+}
+
+/* Light */
+:root[data-theme="light"] {
+  --sl-color-accent-low: #e6dfff;
+  --sl-color-accent: #5b3ff0;
+  --sl-color-accent-high: #35247d;
+  --sl-color-white: #17151d;
+  --sl-color-gray-1: #24222c;
+  --sl-color-gray-2: #45424f;
+  --sl-color-gray-3: #6e6b79;
+  --sl-color-gray-4: #a3a0ac;
+  --sl-color-gray-5: #d6d4dc;
+  --sl-color-gray-6: #efeef2;
+  --sl-color-gray-7: #f8f7fa;
+  --sl-color-black: #fdfcfa;
+  --sl-color-bg: #fdfcfa;
+}
+
+/* Display face for headings + site title */
+h1,
+h2,
+h3,
+h4,
+.site-title {
+  font-family: "Bricolage Grotesque", var(--sl-font);
+  letter-spacing: -0.02em;
+}
+
+/* Mono chrome details, matching the marketing pages */
+.sidebar-content .large,
+starlight-menu-button,
+.right-sidebar h2 {
+  font-family: var(--sl-font-mono);
+}

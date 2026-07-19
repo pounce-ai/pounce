@@ -1,10 +1,9 @@
-<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Pounce — control your coding agents from your phone</title>
-<meta name="description" content="Pounce puts Claude, Codex & opencode in your pocket. Watch every agent work in real time across all your machines, steer by voice, review the diff, and ship — one-handed. iOS live on the App Store." />
+<meta name="description" content="Pounce puts Claude, Codex, Cursor & opencode in your pocket. Run npx use-pounce, scan one QR, and watch every agent work in real time across all your machines — steer by voice, review the diff, and ship. iOS live on the App Store." />
 <link rel="canonical" href="https://use-pounce.com/" />
 <meta name="robots" content="index, follow" />
 <!-- Open Graph -->
@@ -12,21 +11,21 @@
 <meta property="og:type" content="website" />
 <meta property="og:url" content="https://use-pounce.com/" />
 <meta property="og:title" content="Pounce — your coding agents, in your pocket" />
-<meta property="og:description" content="Watch Claude, Codex & opencode work in real time across every machine you own, steer by voice, and ship from your phone. Now live on the App Store." />
+<meta property="og:description" content="Watch Claude, Codex, Cursor & opencode work in real time across every machine you own, steer by voice, and ship from your phone. Now live on the App Store." />
 <meta property="og:image" content="https://use-pounce.com/assets/icon.png" />
 <meta property="og:image:alt" content="Pounce — control your coding agents from your phone" />
 <!-- Twitter -->
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Pounce — your coding agents, in your pocket" />
-<meta name="twitter:description" content="Watch Claude, Codex & opencode work in real time across every machine you own, steer by voice, and ship from your phone. Now live on the App Store." />
+<meta name="twitter:description" content="Watch Claude, Codex, Cursor & opencode work in real time across every machine you own, steer by voice, and ship from your phone. Now live on the App Store." />
 <meta name="twitter:image" content="https://use-pounce.com/assets/icon.png" />
 <meta name="theme-color" content="#0b0b0e" />
-<link rel="icon" href="./assets/favicon.png" />
-<link rel="apple-touch-icon" href="./assets/apple-touch-icon.png" />
+<link rel="icon" href="/assets/favicon.png" />
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-<style>
+<style is:global>
   :root{
     --bg:#0b0b0e; --bg-2:#0e0e13; --panel:#121218; --panel-2:#16161d;
     --ink:#f5f4ef; --ink-dim:#a7a5b0; --ink-faint:#726f7d;
@@ -114,6 +113,22 @@
     letter-spacing:.05em;background:var(--panel-2);border:1px solid var(--line);color:var(--ink-dim);
     padding:2px 7px;border-radius:999px}
 
+  /* npx one-liner chip */
+  .npx-row{margin-top:16px;display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+  .npx{display:inline-flex;align-items:center;gap:10px;padding:11px 16px;border-radius:12px;cursor:pointer;
+    border:1px solid rgba(124,92,255,.4);background:rgba(124,92,255,.08);color:var(--ink);
+    font-family:var(--mono);font-size:14.5px;transition:border-color .2s,background .2s,transform .2s;position:relative}
+  .npx:hover{border-color:var(--violet-bright);background:rgba(124,92,255,.14);transform:translateY(-2px)}
+  .npx .ps{color:var(--ink-faint)}
+  .npx .cmd{font-weight:500}
+  .npx .cp{width:15px;height:15px;color:var(--ink-faint)}
+  .npx:hover .cp{color:var(--violet-bright)}
+  .npx .copied{position:absolute;top:-9px;right:-6px;font-size:9.5px;letter-spacing:.05em;color:var(--signal);
+    background:var(--panel-2);border:1px solid rgba(79,230,164,.35);border-radius:999px;padding:2px 8px;
+    opacity:0;transform:translateY(3px);transition:opacity .25s,transform .25s;pointer-events:none}
+  .npx.ok .copied{opacity:1;transform:none}
+  .npx-note{font-family:var(--mono);font-size:12px;color:var(--ink-faint)}
+
   .trust{margin-top:26px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;
     font-family:var(--mono);font-size:12.5px;color:var(--ink-faint)}
   .trust .chip{padding:5px 11px;border:1px solid var(--line);border-radius:8px;color:var(--ink-dim);background:var(--panel)}
@@ -177,6 +192,28 @@
   .sec-head.center{max-width:680px;margin-inline:auto;text-align:center}
   .sec-title{font-size:clamp(30px,4.4vw,48px);font-weight:700;margin-top:14px}
   .sec-lead{color:var(--ink-dim);font-size:18px;margin-top:16px}
+
+  /* ---- npx cli band ---- */
+  #cli{padding:56px 0 0}
+  .cli-band{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center;
+    border:1px solid var(--line);border-radius:26px;padding:44px 42px;
+    background:radial-gradient(120% 140% at 0% 0%,rgba(124,92,255,.10),transparent 55%),linear-gradient(180deg,var(--panel),var(--bg-2))}
+  @media(max-width:900px){.cli-band{grid-template-columns:1fr;gap:32px;padding:32px 24px}}
+  .cli-band .sec-lead{font-size:16.5px}
+  .cli-band .sec-lead b{color:var(--ink);font-weight:600}
+  .term{border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,.12);background:#0a0a10;
+    box-shadow:0 34px 80px -30px rgba(0,0,0,.85);font-family:var(--mono);font-size:13.5px}
+  .term-bar{height:36px;background:#15151c;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;padding:0 14px;gap:8px}
+  .term-bar .tl{width:11px;height:11px;border-radius:50%}
+  .term-bar .tl.r{background:#ff5f57}.term-bar .tl.y{background:#febc2e}.term-bar .tl.g{background:#28c840}
+  .term-bar .term-t{flex:1;text-align:center;font-size:11.5px;color:var(--ink-faint);margin-right:44px}
+  .term-body{padding:20px 22px 24px;display:flex;flex-direction:column;gap:10px}
+  .term-body .tline{color:var(--ink)}
+  .term-body .tline .ps{color:var(--ink-faint);margin-right:8px}
+  .term-body .tline.ok{color:var(--signal)}
+  .term-body .tline.dim{color:var(--ink-dim)}
+  .term-qr{align-self:flex-start;background:#fff;border-radius:10px;padding:9px;margin:6px 0 2px}
+  .term-qr img{display:block;width:118px;height:118px;image-rendering:pixelated}
 
   /* ---- platforms band ---- */
   .platforms{margin-top:48px;display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
@@ -266,11 +303,12 @@
 
 <nav id="nav">
   <div class="wrap nav-in">
-    <a class="brand" href="#top"><img src="./assets/icon.png" alt="Pounce" /> pounce</a>
+    <a class="brand" href="#top"><img src="/assets/icon.png" alt="Pounce" /> pounce</a>
     <div class="nav-links">
-      <a class="lnk" href="#platforms">Get it</a>
       <a class="lnk" href="#features">Features</a>
-      <a class="lnk" href="./how-it-works.html">How it works</a>
+      <a class="lnk" href="/docs/getting-started">Docs</a>
+      <a class="lnk" href="/how-it-works">How it works</a>
+      <a class="lnk" href="/changelog">Changelog</a>
       <a class="lnk" href="https://github.com/pounce-ai/pounce" target="_blank" rel="noopener">GitHub</a>
       <span class="nav-live"><span class="led"></span>iOS&nbsp;live</span>
       <a class="nav-cta" href="https://apps.apple.com/app/id6779601425" target="_blank" rel="noopener">Download</a>
@@ -285,7 +323,7 @@
       <span class="lead-line">Your coding agents,</span>
       <em>in your pocket.</em>
     </h1>
-    <p class="sub">Pounce puts <b>Claude, Codex &amp; opencode</b> in one place — every agent, on every machine you own. Watch them work in real time, jump in by voice, review the diff, and ship. All from your phone.</p>
+    <p class="sub">Pounce puts <b>Claude, Codex, Cursor &amp; opencode</b> in one place — every agent, on every machine you own. Watch them work in real time, jump in by voice, review the diff, and ship. All from your phone.</p>
     <div class="cta-row">
       <a class="btn btn--app" href="https://apps.apple.com/app/id6779601425" target="_blank" rel="noopener" aria-label="Download Pounce on the App Store">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.37 1.43c.07 1.06-.32 2.09-1 2.86-.71.79-1.86 1.4-2.98 1.31-.09-1.03.39-2.1 1.04-2.78.72-.78 1.97-1.36 2.94-1.39zM20.5 17.2c-.55 1.27-.82 1.84-1.53 2.96-.99 1.56-2.39 3.51-4.12 3.52-1.54.01-1.94-1-4.03-.99-2.09.01-2.53 1.01-4.07.99-1.73-.02-3.05-1.78-4.04-3.34C-.04 16.46-.34 11.34 1.36 8.62c1.2-1.93 3.1-3.06 4.89-3.06 1.82 0 2.96 1 4.46 1 1.46 0 2.35-1 4.46-1 1.59 0 3.28.87 4.48 2.37-3.94 2.16-3.3 7.78.85 9.27z"/></svg>
@@ -296,10 +334,19 @@
         <span class="t"><small class="acc">macOS · Windows · Linux</small><span>Get the Bridge</span></span>
       </a>
     </div>
+    <div class="npx-row">
+      <button class="npx" id="npx-copy" type="button" aria-label="Copy npx use-pounce to the clipboard">
+        <span class="ps">$</span><span class="cmd">npx use-pounce</span>
+        <svg class="cp" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+        <span class="copied">copied</span>
+      </button>
+      <span class="npx-note">already at a terminal? one command — even over SSH</span>
+    </div>
     <div class="trust">
       <span>Works with</span>
       <span class="chip">Claude</span>
       <span class="chip">Codex</span>
+      <span class="chip">Cursor</span>
       <span class="chip">opencode</span>
       <span class="sep">/</span>
       <span>Pair in one QR scan</span>
@@ -311,19 +358,19 @@
   <div class="stage">
     <div class="showcase">
       <figure class="mac">
-        <img src="./assets/desktop-app.png" alt="Pounce desktop app — your whole agent fleet across every machine, in one window on macOS" />
+        <img src="/assets/desktop-app.png" alt="Pounce desktop app — your whole agent fleet across every machine, in one window on macOS" />
       </figure>
       <div class="phone phone--float">
         <div class="screen" id="reel"
              data-frames='[
-               {"img":"./assets/shot-home.png","no":"01 / fleet","cap":"Your whole fleet, one screen","sub":"Every agent, every machine — sorted by what needs you."},
-               {"img":"./assets/shot-session.png","no":"02 / live","cap":"Watch it think, live","sub":"Reasoning, tool calls, diffs — streaming in real time."},
-               {"img":"./assets/shot-filters.png","no":"03 / triage","cap":"Filter to what matters","sub":"By device, agent, status, branch, or project."},
-               {"img":"./assets/shot-changes.png","no":"04 / ship","cap":"Review &amp; ship","sub":"See the diff. Commit, push, open a PR — from your phone."}
+               {"img":"/assets/shot-home.png","no":"01 / fleet","cap":"Your whole fleet, one screen","sub":"Every agent, every machine — sorted by what needs you."},
+               {"img":"/assets/shot-session.png","no":"02 / live","cap":"Watch it think, live","sub":"Reasoning, tool calls, diffs — streaming in real time."},
+               {"img":"/assets/shot-filters.png","no":"03 / triage","cap":"Filter to what matters","sub":"By device, agent, status, branch, or project."},
+               {"img":"/assets/shot-changes.png","no":"04 / ship","cap":"Review &amp; ship","sub":"See the diff. Commit, push, open a PR — from your phone."}
              ]'>
           <img class="frame" alt="Pounce app screen" />
           <img class="frame" alt="" aria-hidden="true" />
-          <video id="reel-video" muted loop playsinline preload="none" poster="./assets/screen-home.png"></video>
+          <video id="reel-video" muted loop playsinline preload="none" poster="/assets/screen-home.png"></video>
         </div>
       </div>
     </div>
@@ -335,6 +382,29 @@
     </div>
   </div>
 </header>
+
+<!-- npx one-liner -->
+<section id="cli">
+  <div class="wrap">
+    <div class="cli-band reveal">
+      <div class="cli-copy">
+        <span class="kicker">fastest way in</span>
+        <h2 class="sec-title" style="font-size:clamp(26px,3.6vw,40px)">One command. Any machine.</h2>
+        <p class="sec-lead">Run <b>npx use-pounce</b> on your laptop — or over <b>SSH</b> on a server across the world. It starts the Bridge in the background, prints a QR right in your terminal, and waits for your scan. Works from anywhere: no VPN, no port-forwarding, nothing else to set up.</p>
+      </div>
+      <div class="term" aria-label="Terminal showing npx use-pounce printing a pairing QR">
+        <div class="term-bar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span><span class="term-t">any terminal · even over ssh</span></div>
+        <div class="term-body">
+          <div class="tline"><span class="ps">$</span>npx use-pounce</div>
+          <div class="tline dim">Pounce is up on this machine.</div>
+          <div class="term-qr"><img src="/assets/pair-qr.svg" alt="Sample pairing QR code" /></div>
+          <div class="tline ok">✓ Works from anywhere</div>
+          <div class="tline dim">Scan with the Pounce app — or your camera.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
 
 <!-- platforms -->
 <section id="platforms">
@@ -355,8 +425,8 @@
       <div class="plat reveal" aria-disabled="true">
         <div class="pic"><svg viewBox="0 0 24 24"><path fill="#4fe6a4" d="M6 9v7a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9H6zm-3 0v6a1.5 1.5 0 0 0 3 0V9a1.5 1.5 0 0 0-3 0zm15 0v6a1.5 1.5 0 0 0 3 0V9a1.5 1.5 0 0 0-3 0zM9 21.5A1.5 1.5 0 0 0 10.5 23h.5v-4H9v2.5zm4 0A1.5 1.5 0 0 0 14.5 23h.5v-4h-2v2.5zM7.7 6.3l-.9-1.6a.3.3 0 0 1 .5-.3l.95 1.65A6.7 6.7 0 0 1 12 5c1.35 0 2.6.35 3.7.95l.95-1.65a.3.3 0 1 1 .5.3l-.9 1.6A5.7 5.7 0 0 1 18 8H6a5.7 5.7 0 0 1 1.7-1.7zM9.5 7a.6.6 0 1 0 0-1.2.6.6 0 0 0 0 1.2zm5 0a.6.6 0 1 0 0-1.2.6.6 0 0 0 0 1.2z"/></svg></div>
         <h3>Android</h3>
-        <p>Same remote, coming to Google Play. Build the Bridge now — you'll be ready on day one.</p>
-        <span class="state wait">◷ Coming soon</span>
+        <p>Same remote, in testing on Google Play now. Public release soon.</p>
+        <span class="state wait">◷ In testing</span>
       </div>
       <a class="plat reveal" href="https://github.com/pounce-ai/pounce/releases/latest" target="_blank" rel="noopener">
         <span class="arr">↗</span>
@@ -369,7 +439,7 @@
         <span class="arr">↗</span>
         <div class="pic"><svg viewBox="0 0 24 24" fill="var(--violet-bright)"><path d="M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm0 2v8h16V7H4zm3 11h10v2H7v-2z"/></svg></div>
         <h3>Windows · Linux</h3>
-        <p>The headless Bridge bundle. Unzip, run the installer, pair from your phone.</p>
+        <p><span class="mono">npx use-pounce</span> in a terminal — or the headless Bridge bundle. Pair from your phone.</p>
         <span class="state get"><span>▸</span>Get the Bridge</span>
       </a>
     </div>
@@ -389,7 +459,7 @@
       <div class="feat reveal"><div class="fn">02 · voice</div><h3>Hold to talk</h3><p>Press and speak. Pounce transcribes on-device and runs it — navigate, filter, or fire off a new task.</p></div>
       <div class="feat reveal"><div class="fn">03 · fleet</div><h3>Multi-device fleet</h3><p>Every machine you pair shows up in one list. Filter by device or agent; jump between them instantly.</p></div>
       <div class="feat reveal"><div class="fn">04 · triage</div><h3>“Needs you” first</h3><p>Threads waiting on your input float to the top, so you always know where to look — and nothing stalls.</p></div>
-      <div class="feat reveal"><div class="fn">05 · secure</div><h3>One-scan pairing</h3><p>Scan a QR once. A per-machine token keeps the link private, with a direct identity to reach home later.</p></div>
+      <div class="feat reveal"><div class="fn">05 · anywhere</div><h3>Pair once, reach it anywhere</h3><p>Scan a QR once — even over SSH to a faraway server. Pounce's own secure tunnel finds your machine from any network, no VPN.</p></div>
       <div class="feat reveal"><div class="fn">06 · ship</div><h3>Review &amp; ship</h3><p>See the diff, commit, push, open a PR — finish the job from your phone without breaking flow.</p></div>
     </div>
   </div>
@@ -404,10 +474,10 @@
       <p class="sec-lead">From a glanceable fleet to a live agent thread to a one-tap PR.</p>
     </div>
     <div class="gallery">
-      <figure class="shot-fig reveal"><div class="device"><img src="./assets/shot-home.png" alt="Pounce home — all your coding agents across every machine, sorted by what needs you" /></div><figcaption><b>Fleet</b> · one screen</figcaption></figure>
-      <figure class="shot-fig reveal"><div class="device"><img src="./assets/shot-session.png" alt="Live agent session — reasoning, tool calls and diffs streaming in real time" /></div><figcaption><b>Live session</b> · in real time</figcaption></figure>
-      <figure class="shot-fig reveal"><div class="device"><img src="./assets/shot-filters.png" alt="Filter the fleet by device, agent, status, branch or project" /></div><figcaption><b>Filters</b> · find anything</figcaption></figure>
-      <figure class="shot-fig reveal"><div class="device"><img src="./assets/shot-changes.png" alt="Review the diff and commit, push, or open a PR straight from your phone" /></div><figcaption><b>Ship</b> · diff &amp; PR</figcaption></figure>
+      <figure class="shot-fig reveal"><div class="device"><img src="/assets/shot-home.png" alt="Pounce home — all your coding agents across every machine, sorted by what needs you" /></div><figcaption><b>Fleet</b> · one screen</figcaption></figure>
+      <figure class="shot-fig reveal"><div class="device"><img src="/assets/shot-session.png" alt="Live agent session — reasoning, tool calls and diffs streaming in real time" /></div><figcaption><b>Live session</b> · in real time</figcaption></figure>
+      <figure class="shot-fig reveal"><div class="device"><img src="/assets/shot-filters.png" alt="Filter the fleet by device, agent, status, branch or project" /></div><figcaption><b>Filters</b> · find anything</figcaption></figure>
+      <figure class="shot-fig reveal"><div class="device"><img src="/assets/shot-changes.png" alt="Review the diff and commit, push, or open a PR straight from your phone" /></div><figcaption><b>Ship</b> · diff &amp; PR</figcaption></figure>
     </div>
   </div>
 </section>
@@ -422,12 +492,12 @@
     <div class="steps">
       <div class="step reveal">
         <h3>Install on your computer</h3>
-        <p>On a <b>Mac</b>, download the Pounce desktop app. On <b>Windows or Linux</b>, run the headless Bridge. Either one starts your agent host and shows a QR — no terminal, no config.</p>
+        <p>On a <b>Mac</b>, download the Pounce desktop app. On <b>Windows or Linux</b>, run the headless Bridge. Prefer a terminal? <b class="mono">npx use-pounce</b> does it in one line. Every path starts your agent host and shows a QR.</p>
         <svg class="wire" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 11h13m0 0-4-4m4 4-4 4"/></svg>
       </div>
       <div class="step reveal">
         <h3>Scan the QR</h3>
-        <p>Open Pounce on your phone, tap Sync, and point the camera at the code in the desktop app (or Bridge) window. That's the whole setup.</p>
+        <p>Open Pounce on your phone, tap Sync, and point the camera at the code in the desktop app (or your terminal). That's the whole setup.</p>
         <svg class="wire" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 11h13m0 0-4-4m4 4-4 4"/></svg>
       </div>
       <div class="step reveal">
@@ -436,7 +506,7 @@
       </div>
     </div>
     <div class="reveal" style="margin-top:34px">
-      <a class="btn btn--ghost" href="./how-it-works.html" style="display:inline-flex">
+      <a class="btn btn--ghost" href="/how-it-works" style="display:inline-flex">
         <span class="t"><span>See the full walkthrough →</span></span>
       </a>
     </div>
@@ -466,18 +536,20 @@
 
 <footer>
   <div class="wrap foot-in">
-    <a class="brand" href="#top" style="font-size:18px"><img src="./assets/favicon.png" alt="" style="width:26px;height:26px" /> pounce</a>
+    <a class="brand" href="#top" style="font-size:18px"><img src="/assets/favicon.png" alt="" style="width:26px;height:26px" /> pounce</a>
     <div class="foot-links">
+      <a href="/docs/getting-started">Docs</a>
+      <a href="/changelog">Changelog</a>
       <a href="https://github.com/pounce-ai/pounce" target="_blank" rel="noopener">GitHub</a>
       <a href="https://github.com/pounce-ai/pounce/releases/latest" target="_blank" rel="noopener">Bridge</a>
-      <a href="./how-it-works.html">How it works</a>
-      <a href="./privacy.html">Privacy</a>
+      <a href="/how-it-works">How it works</a>
+      <a href="/privacy">Privacy</a>
     </div>
     <div class="foot-c">© 2026 Pounce AI</div>
   </div>
 </footer>
 
-<script>
+<script is:inline>
   // sticky nav border
   const nav=document.getElementById('nav');
   addEventListener('scroll',()=>nav.classList.toggle('scrolled',scrollY>10),{passive:true});
@@ -485,6 +557,19 @@
   // reveal on scroll
   const io=new IntersectionObserver((es)=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.12});
   document.querySelectorAll('.reveal').forEach((el,i)=>{el.style.transitionDelay=(i%3*70)+'ms';io.observe(el)});
+
+  // npx copy chip
+  (function(){
+    const b=document.getElementById('npx-copy');
+    if(!b) return;
+    let t=null;
+    b.addEventListener('click',()=>{
+      navigator.clipboard.writeText('npx use-pounce').then(()=>{
+        b.classList.add('ok');
+        clearTimeout(t); t=setTimeout(()=>b.classList.remove('ok'),1600);
+      }).catch(()=>{});
+    });
+  })();
 
   // ---- demo reel: cycle real app screens like a product video ----
   (function(){
@@ -525,13 +610,13 @@
     // pause on hover / when tab hidden
     reel.addEventListener('mouseenter',()=>{paused=true;clearTimeout(timer);});
     reel.addEventListener('mouseleave',()=>{paused=false;schedule();});
-    document.addEventListener('visibilitychange',()=>{paused=document.hidden;paused?clearTimeout(timer):schedule();});
+    document.addEventListener('visibilitychange',()=>{paused=document.hidden;if(paused){clearTimeout(timer);}else{schedule();}});
 
     // ---- auto-upgrade to a real recording if assets/demo.mp4 is present ----
-    fetch('./assets/demo.mp4',{method:'HEAD'}).then(r=>{
+    fetch('/assets/demo.mp4',{method:'HEAD'}).then(r=>{
       if(!r.ok) return;
       const v=document.getElementById('reel-video');
-      v.src='./assets/demo.mp4'; v.style.display='block';
+      v.src='/assets/demo.mp4'; v.style.display='block';
       imgs.forEach(im=>im.style.display='none');
       barsWrap.style.display='none';
       clearTimeout(timer);
