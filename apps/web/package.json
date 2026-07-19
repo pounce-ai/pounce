@@ -1,0 +1,26 @@
+{
+  "name": "@pounce/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "use-pounce.com — landing pages, docs, and changelog (Astro + Starlight, deployed to Cloudflare via Alchemy)",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "typecheck": "astro sync && tsc --noEmit -p tsconfig.json",
+    "deploy": "alchemy deploy"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.41.3",
+    "astro": "^7.1.1",
+    "sharp": "^0.35.3"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "^4.0.0-beta.99",
+    "@effect/platform-node": "^4.0.0-beta.99",
+    "alchemy": "^2.0.0-beta.63",
+    "effect": "^4.0.0-beta.99",
+    "typescript": "^7.0.2"
+  }
+}

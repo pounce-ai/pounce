@@ -26,7 +26,7 @@ server, the shared packages, and the landing page.
 | `apps/bridge` | The **bridge server** (`server.mjs`) — the native agent host + LAN HTTP surface the apps talk to |
 | `desktop` | The **Pounce desktop app** (expo‑desktop → react‑native‑macos / windows) — the full app UI with the bridge embedded |
 | `packages/{shared,runtime,ui}` | Shared types, runtime/transport, and UI primitives |
-| `docs/` | The landing page — served at [use-pounce.com](https://use-pounce.com/) via GitHub Pages (custom domain in `docs/CNAME`) |
+| `apps/web` | The website — landing pages, docs & changelog at [use-pounce.com](https://use-pounce.com/) (Astro + Starlight, deployed to Cloudflare via Alchemy — see `apps/web/alchemy.run.ts`) |
 | `scripts/` | Release + host install helpers |
 
 ## How it works

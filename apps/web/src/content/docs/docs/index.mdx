@@ -1,0 +1,66 @@
+---
+title: What is Pounce?
+description: Pounce is a remote control for the coding agents running on your own machines — Claude Code, Codex, Cursor & opencode, all from your phone.
+---
+
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+Pounce puts the coding agents running on your computers — **Claude Code, Codex,
+Cursor, and opencode** — on your phone. Watch them work in real time, reply by
+voice, answer their questions, review diffs, and ship, from anywhere.
+
+It has three parts:
+
+- **The phone app** — the remote. It shows every agent session across every
+  machine you've paired, sorted by what needs your attention.
+- **The Bridge** — a small program on your computer that hosts your agents and
+  talks to the phone. It's built into the desktop app, bundled for
+  Windows/Linux, and one `npx use-pounce` away in any terminal.
+- **Nothing in the middle** — the app talks directly to your machine over
+  Wi-Fi, or through Pounce's own secure peer-to-peer tunnel when you're away.
+  There's no account and no Pounce server relaying your code.
+
+## Start here
+
+<CardGrid>
+  <LinkCard
+    title="Getting started"
+    description="One command, one QR scan — about two minutes."
+    href="/docs/getting-started"
+  />
+  <LinkCard
+    title="Install"
+    description="iPhone, Android, macOS app, Windows/Linux Bridge, CLI."
+    href="/docs/install"
+  />
+  <LinkCard
+    title="Supported agents"
+    description="Claude Code, Codex, Cursor, opencode — what works."
+    href="/docs/agents"
+  />
+  <LinkCard
+    title="Away from home"
+    description="How Pounce reaches your machine from anywhere — including over SSH."
+    href="/docs/remote-access"
+  />
+</CardGrid>
+
+## The loop
+
+<CardGrid>
+  <Card title="Watch it think" icon="seti:pipeline">
+    Reasoning, tool calls, and edits stream to your phone token by token — exactly what you'd see at
+    the terminal.
+  </Card>
+  <Card title="Jump in" icon="comment">
+    Reply, redirect, or answer permission prompts the moment an agent needs you. Hold to talk and
+    steer by voice.
+  </Card>
+  <Card title="Review & ship" icon="approve-check">
+    See the diff, commit, push, and open a PR without going back to your desk.
+  </Card>
+  <Card title="Run a fleet" icon="laptop">
+    Pair every machine you own. Filter by device, agent, status, branch, or project — and search
+    across all of it.
+  </Card>
+</CardGrid>
