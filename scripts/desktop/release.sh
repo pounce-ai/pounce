@@ -32,10 +32,15 @@ set -euo pipefail
 DIR="$(cd "$(dirname "$APP")" && pwd)"
 OUT_DMG="${OUT_DMG:-$DIR/Pounce.dmg}"
 APPCAST_OUT="${APPCAST_OUT:-$DIR/appcast.xml}"
+# Entitlements for the embedded bun-compiled bridge (JIT + library-validation);
+# defaults to the file beside the app's entitlements.
+BRIDGE_ENTITLEMENTS="${BRIDGE_ENTITLEMENTS:-$(dirname "$ENTITLEMENTS")/PounceBridge.entitlements}"
 # --keychain only when SIGN_KEYCHAIN is set. Unquoted ${VAR:+…} is safe here —
 # a keychain name has no spaces — and avoids empty-array expansion, which trips
 # `set -u` on macOS's bash 3.2.
 sign() { codesign --force --options runtime --timestamp ${SIGN_KEYCHAIN:+--keychain "$SIGN_KEYCHAIN"} -s "$SIGN_IDENTITY" "$@"; }
+# Like sign(), but with the bridge's JIT/library-validation entitlements.
+sign_bridge() { codesign --force --options runtime --timestamp ${SIGN_KEYCHAIN:+--keychain "$SIGN_KEYCHAIN"} --entitlements "$BRIDGE_ENTITLEMENTS" -s "$SIGN_IDENTITY" "$@"; }
 
 echo "▸ Signing inside-out with: $SIGN_IDENTITY"
 SP="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
@@ -49,12 +54,18 @@ if [ -d "$SP" ]; then
   sign "$APP/Contents/Frameworks/Sparkle.framework"
 fi
 [ -d "$APP/Contents/Frameworks/hermes.framework" ] && sign "$APP/Contents/Frameworks/hermes.framework"
-# The embedded bridge ships native N-API binaries (zigpty's PTY .node, and any
-# the agent SDK carries) under Resources/bridge. Notarization rejects the app
-# unless every Mach-O is hardened-runtime signed, so sign them inside-out here.
-# The non-macOS prebuilds (linux/win .node = ELF/PE) aren't Mach-O — skip them.
+# The embedded bridge is a bun-compiled Mach-O executable (Resources/bridge/
+# pounce-bridge). Notarization rejects the app unless every Mach-O is
+# hardened-runtime signed, and the bridge additionally needs JIT /
+# library-validation entitlements — so sign it with sign_bridge().
 BRIDGE_DIR="$APP/Contents/Resources/bridge"
 if [ -d "$BRIDGE_DIR" ]; then
+  if [ -f "$BRIDGE_DIR/pounce-bridge" ]; then
+    [ -f "$BRIDGE_ENTITLEMENTS" ] || { echo "error: bridge entitlements not found: $BRIDGE_ENTITLEMENTS" >&2; exit 1; }
+    sign_bridge "$BRIDGE_DIR/pounce-bridge"
+  fi
+  # Defensive: any other nested Mach-O (a loose .node/.dylib a future build might
+  # ship). Non-macOS prebuilds (linux/win .node = ELF/PE) aren't Mach-O — skip.
   while IFS= read -r -d '' bin; do
     if file "$bin" | grep -q "Mach-O"; then sign "$bin"; fi
   done < <(find "$BRIDGE_DIR" -type f \( -name "*.node" -o -name "*.dylib" \) -print0)
