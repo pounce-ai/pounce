@@ -176,6 +176,33 @@ export function isThreadInteractive(threadId: string): boolean {
   return !!interactiveThreads$[threadId].get();
 }
 
+/** The interactive prompt a thread is currently blocked on, as last seen by the
+ *  message poll — drives the auto-presented prompt form sheet. Transient (never
+ *  persisted): on relaunch the poll re-detects a still-open prompt within one
+ *  cycle, and a stale entry would present a sheet for a prompt long resolved. */
+export interface PendingPrompt {
+  readonly promptId: string;
+  readonly title: string;
+  readonly kind: string; // "trust" | "permission" | "plan" | "prompt"
+  readonly options: readonly { readonly label: string }[];
+  readonly highlighted: number;
+  readonly multiSelect: boolean;
+  readonly hostId: string;
+  readonly threadId: string;
+}
+
+export const pendingPrompts$ = observable<Record<string, PendingPrompt | undefined>>({});
+
+export function setPendingPrompt(p: PendingPrompt): void {
+  // Same promptId → same prompt still on screen; don't churn subscribers.
+  if (pendingPrompts$[p.threadId].peek()?.promptId === p.promptId) return;
+  pendingPrompts$[p.threadId].set(p);
+}
+
+export function clearPendingPrompt(threadId: string): void {
+  if (pendingPrompts$[threadId].peek()) pendingPrompts$[threadId].delete();
+}
+
 persist(filters$, "filters"); // remember the user's last filter selection
 persist(user$, "user");
 persist(sources$, "sources");

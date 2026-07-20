@@ -444,6 +444,7 @@ async function streamThreads(sink) {
       for (const t of page) {
         t.activity = t.isLive ? "idle" : "completed";
         t.lastActivityAt = t.createdAt;
+        flagAwaitingPrompt(t);
       }
       await resolveWorktreeRepos(page);
       await sink(page);
@@ -475,6 +476,7 @@ async function getThreads(fresh = false) {
     for (const t of threads) {
       t.activity = t.isLive ? "idle" : "completed";
       t.lastActivityAt = t.createdAt;
+      flagAwaitingPrompt(t);
     }
 
     // Enrich live threads with real activity from their turn history in the
@@ -487,6 +489,14 @@ async function getThreads(fresh = false) {
   });
 }
 
+/** A PTY-hosted session blocked on an interactive prompt (trust / permission /
+ *  plan / question) is "awaiting_input", whatever its transcript says — the
+ *  turn looks idle on disk while the CLI sits on a menu. This is what lets the
+ *  app rank the thread "needs you" and alert instead of showing it idle. */
+function flagAwaitingPrompt(t) {
+  if (pendingPrompt(t.id)) t.activity = "awaiting_input";
+}
+
 let enrichInFlight = false;
 function enrichThreadActivity(threads) {
   if (enrichInFlight) return;
@@ -497,6 +507,7 @@ function enrichThreadActivity(threads) {
       const a = await threadActivity(t.agent, t.id);
       if (a.activity) t.activity = a.activity;
       if (a.lastActivityAt) t.lastActivityAt = a.lastActivityAt;
+      flagAwaitingPrompt(t); // a pending prompt outranks transcript-derived state
     } catch {}
   }).finally(() => { enrichInFlight = false; });
 }
@@ -782,6 +793,7 @@ async function watchTick() {
         let note = null;
         if (cur === "completed" && prev === "running") note = { title: "✅ Task done", body: label };
         else if (cur === "failed") note = { title: "❌ Task failed", body: label };
+        else if (cur === "awaiting_input") note = { title: "🔔 Waiting on you", body: label };
         if (!note) continue;
         for (const to of pushTokens) {
           messages.push({

@@ -46,15 +46,34 @@ export async function notifyOnce(
   title: string,
   body: string,
   cooldownMs = 10 * 60_000,
+  data?: Record<string, unknown>,
 ): Promise<void> {
   const now = Date.now();
   if (now - (lastFired.get(key) ?? 0) < cooldownMs) return;
   lastFired.set(key, now);
   try {
     await initLocalNotifications();
-    await Notifications.scheduleNotificationAsync({ content: { title, body }, trigger: null });
+    await Notifications.scheduleNotificationAsync({ content: { title, body, data }, trigger: null });
   } catch {
     lastFired.delete(key); // let a real retry through once the module lands
+  }
+}
+
+/**
+ * Route notification taps: `cb` gets the notification's `data` payload (e.g.
+ * `{ url: "/session/…" }` for deep-link navigation). Returns a detach fn.
+ */
+export function attachNotificationTapHandler(
+  cb: (data: Record<string, unknown>) => void,
+): () => void {
+  try {
+    const sub = Notifications.addNotificationResponseReceivedListener((resp) => {
+      const data = resp.notification.request.content.data;
+      if (data && typeof data === "object") cb(data as Record<string, unknown>);
+    });
+    return () => sub.remove();
+  } catch {
+    return () => {}; // native module not in this build yet
   }
 }
 
