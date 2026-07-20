@@ -25,6 +25,7 @@ import type {
 import { parseUserMessage } from "@pounce/transcript";
 import { cachedModels, connection$, firstUserMessages, mergeWorkspace, setAgentCaps, setCachedModels, syncWorkspace, upsertHosts } from "../state/stores";
 import { clearNotify, notifyOnce } from "./notify";
+import { alertAwaitingSessions } from "./promptAlerts";
 import { streamTurn } from "./streamTurn";
 
 const BRIDGE_KEY = "pounce.bridge";
@@ -433,6 +434,7 @@ export async function syncLiveDataStreaming(): Promise<{ repos: number; sessions
   const { repos, sessions } = buildWorkspace(threadsByDevice, now, firstMsg);
   syncWorkspace({ repos, sessions, devices }, { syncedHostIds });
   flagDaemonHealth(daemonDown);
+  alertAwaitingSessions(sessions);
   const warmed = new Set<string>();
   for (const s of Object.values(sessions)) {
     const key = `${s.hostId}:${s.agent}`;
@@ -552,6 +554,7 @@ export async function syncLiveData(
   // syncWorkspace records the per-repo diff into Sync history before swapping.
   syncWorkspace({ repos, sessions, devices }, { syncedHostIds });
   flagDaemonHealth(daemonDown);
+  alertAwaitingSessions(sessions);
   // Warm the model catalog for each device+agent in the background, so opening
   // the model picker later is instant. Fire-and-forget; throttled per key.
   const warmed = new Set<string>();

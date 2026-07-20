@@ -13,9 +13,17 @@ export async function notifyOnce(
   _title: string,
   _body: string,
   _cooldownMs = 10 * 60_000,
+  _data?: Record<string, unknown>,
 ): Promise<void> {
   // no-op — desktop is usually the machine the agents run on
 }
 
 /** Forget a key so its next occurrence notifies immediately (condition cleared). */
 export function clearNotify(_key: string): void {}
+
+/** No taps to route on desktop — returns an inert detach fn. */
+export function attachNotificationTapHandler(
+  _cb: (data: Record<string, unknown>) => void,
+): () => void {
+  return () => {};
+}

@@ -24,16 +24,19 @@ import {
   addSources,
   cachedModels,
   capsFor,
+  clearPendingPrompt,
   connection$,
   defaultMarked,
   isMarked,
   isThreadInteractive,
   markOpened,
   modelForThread,
+  pendingPrompts$,
   pendingTurns$,
   rekeyThread,
   removeSource,
   saveThreadMessages,
+  setPendingPrompt,
   setThreadModel,
   sources$,
   toggleFavThread,
@@ -158,8 +161,14 @@ export default function SessionScreen() {
   // gap). While such a thread is active — but NOT while we're the one streaming,
   // which would clobber live events — poll the recent turns fast so mirrored
   // activity shows near-real-time like the terminal does.
+  // awaiting_input polls fast too: a thread blocked on an interactive prompt
+  // looks idle in its transcript, and without the fast poll the synthesized
+  // prompt_request (and its clearing, once answered anywhere) lags a full sync.
   const mirroredRunning =
-    (session?.activity === "running" || session?.activity === "streaming") && !sending;
+    (session?.activity === "running" ||
+      session?.activity === "streaming" ||
+      session?.activity === "awaiting_input") &&
+    !sending;
   const recentQ = useQuery({
     queryKey: ["messages", host, agent, tid, "recent"],
     queryFn: () => fetchMessages(host!, agent!, tid!, { limit: 4 }),
@@ -212,6 +221,50 @@ export default function SessionScreen() {
       if (tid) saveThreadMessages(tid, ev);
     }
   }, [recentQ.data, fullQ.data, tid]);
+
+  // Track the interactive prompt this thread is blocked on. The bridge appends
+  // a synthesized prompt_request as the LAST event while (and only while) a
+  // prompt is on the hosted CLI's screen, so presence in the freshest fetch is
+  // the pending signal — the merged render list can't be used (merges never
+  // remove). Feeds pendingPrompts$, which auto-presents the form sheet below.
+  const freshest =
+    recentQ.dataUpdatedAt >= fullQ.dataUpdatedAt ? recentQ.data : fullQ.data;
+  useEffect(() => {
+    if (!live || !tid || !host || !freshest) return;
+    const last = freshest[freshest.length - 1];
+    if (last?.type === "prompt_request") {
+      setPendingPrompt({
+        promptId: last.promptId,
+        title: last.title,
+        kind: last.kind,
+        options: last.options,
+        highlighted: last.highlighted,
+        multiSelect: last.multiSelect,
+        hostId: host,
+        threadId: tid,
+      });
+    } else {
+      // Only the host that surfaced the prompt may clear it. A second paired
+      // bridge on the same machine reads the same transcript but hosts no PTY,
+      // so its fetches never carry the synthesized prompt_request — letting it
+      // clear here dismissed the sheet while the prompt was still blocking.
+      const cur = pendingPrompts$[tid].peek();
+      if (!cur || cur.hostId === host) clearPendingPrompt(tid);
+    }
+  }, [freshest, live, tid, host]);
+
+  // Auto-present the prompt form sheet (a native formSheet route) once per
+  // promptId — the answer round-trip can leave the same prompt on screen for a
+  // poll or two, and re-pushing would stack sheets. Mobile-only: desktop uses
+  // its own navigator (no expo-router routes) and keeps the inline card.
+  const pendingPrompt = useSelector(() => pendingPrompts$[id!].get());
+  const presentedPromptRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (DESKTOP || !pendingPrompt) return;
+    if (presentedPromptRef.current === pendingPrompt.promptId) return;
+    presentedPromptRef.current = pendingPrompt.promptId;
+    router.push(`/prompt/${id}`);
+  }, [pendingPrompt, id, router]);
 
   // Loading only until *something* is renderable; failed only if we have nothing
   // and the full fetch errored (a failed recent still falls through to full).

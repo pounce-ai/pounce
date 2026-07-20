@@ -1,5 +1,5 @@
 import { memo, useMemo, useState } from "react";
-import { Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { LegendList, type LegendListRef, useViewability } from "@legendapp/list/react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -15,6 +15,7 @@ import { defaultMarked } from "../state/stores";
 import { useThreadMarkers } from "../state/db/hooks";
 import { cn, COLOR } from "../ui";
 import { MessageMarkdown } from "../components/MessageMarkdown";
+import { PromptForm } from "../components/PromptForm";
 import { DiffBlock, HlText } from "../components/CodeHighlight";
 import { Modal } from "../components/AppModal";
 import {
@@ -426,20 +427,12 @@ function PermissionCard({
   );
 }
 
-/** Header copy + icon per prompt kind — cosmetic only. */
-const PROMPT_KIND: Record<string, { label: string; icon: keyof typeof Ionicons.glyphMap }> = {
-  trust: { label: "Trust folder", icon: "shield-checkmark-outline" },
-  permission: { label: "Permission", icon: "key-outline" },
-  plan: { label: "Plan", icon: "map-outline" },
-  prompt: { label: "Question", icon: "help-circle-outline" },
-};
-
 /**
  * A generic interactive prompt — trust-folder, tool permission, plan approval,
  * AskUserQuestion, any on-screen menu. The bridge detects it from the terminal
- * screen (agent-agnostic), so this ONE card answers them all: pick an option and
- * Confirm (the host moves the highlight there and presses Enter), or type a
- * free-form reply. Locks to a summary once answered. Mirrors PermissionCard.
+ * screen (agent-agnostic), so this ONE card answers them all. The body is the
+ * shared PromptForm (also presented as the auto-opening form sheet); this is
+ * just its inline-timeline chrome. Mirrors PermissionCard.
  */
 function PromptCard({
   event,
@@ -450,85 +443,9 @@ function PromptCard({
   onRespond?: (promptId: string, optionIndex: number) => void;
   onSendInput?: (data: string) => void;
 }) {
-  const [selected, setSelected] = useState<number>(event.highlighted ?? 0);
-  const [submitted, setSubmitted] = useState<string | null>(null);
-  const [typing, setTyping] = useState(false);
-  const [text, setText] = useState("");
-  const meta = PROMPT_KIND[event.kind] ?? PROMPT_KIND.prompt;
-
-  const confirm = () => {
-    if (submitted) return;
-    setSubmitted(event.options[selected]?.label ?? "answered");
-    onRespond?.(event.promptId, selected);
-  };
-  const sendText = () => {
-    if (submitted || !text.trim()) return;
-    setSubmitted(`“${text.trim()}”`);
-    onSendInput?.(text + "\r");
-  };
-
   return (
-    <View className="gap-3 rounded-xl border border-accent/40 bg-accent/5 p-3">
-      <View className="flex-row items-center gap-1.5">
-        <Ionicons name={meta.icon} size={14} color={COLOR.accent} />
-        <Text className="text-[12px] font-semibold uppercase tracking-wide text-accent">{meta.label}</Text>
-      </View>
-
-      {event.title ? <Text className="text-[13px] font-medium text-fg">{event.title}</Text> : null}
-
-      {submitted ? (
-        <Text className="text-[12px] font-medium text-fg-muted">Answered: {submitted}</Text>
-      ) : typing ? (
-        <View className="gap-2">
-          <TextInput
-            value={text}
-            onChangeText={setText}
-            autoFocus
-            placeholder="Type a reply…"
-            placeholderTextColor={COLOR.fgFaint}
-            onSubmitEditing={sendText}
-            returnKeyType="send"
-            className="min-h-[40px] rounded-lg border border-border bg-surface px-3 py-2 text-[13px] text-fg"
-          />
-          <View className="flex-row gap-2">
-            <Pressable onPress={() => setTyping(false)} className="active:opacity-80 h-9 flex-1 items-center justify-center rounded-lg bg-surface-alt">
-              <Text className="text-[13px] text-fg-muted">Back to options</Text>
-            </Pressable>
-            <Pressable onPress={sendText} disabled={!text.trim()} className={cn("active:opacity-90 h-9 flex-1 items-center justify-center rounded-lg", text.trim() ? "bg-accent" : "bg-surface-alt")}>
-              <Text className={cn("text-[13px] font-semibold", text.trim() ? "text-white" : "text-fg-faint")}>Send</Text>
-            </Pressable>
-          </View>
-        </View>
-      ) : (
-        <>
-          <View className="gap-1.5">
-            {event.options.map((o, oi) => {
-              const on = selected === oi;
-              return (
-                <Pressable
-                  key={oi}
-                  onPress={() => setSelected(oi)}
-                  className={cn(
-                    "active:opacity-80 flex-row items-center gap-2 rounded-lg border p-2.5",
-                    on ? "border-accent bg-accent/15" : "border-border bg-surface",
-                  )}
-                >
-                  <Ionicons name={on ? "radio-button-on" : "radio-button-off"} size={16} color={on ? COLOR.accent : COLOR.fgFaint} />
-                  <Text className={cn("flex-1 text-[13px] font-medium", on ? "text-accent" : "text-fg")}>{o.label}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <Pressable onPress={confirm} className="active:opacity-90 h-10 items-center justify-center rounded-lg bg-accent">
-            <Text className="text-[13px] font-semibold text-white">Confirm</Text>
-          </Pressable>
-          {onSendInput ? (
-            <Pressable onPress={() => setTyping(true)} className="active:opacity-70 items-center">
-              <Text className="text-[12px] text-fg-muted">Type a reply instead</Text>
-            </Pressable>
-          ) : null}
-        </>
-      )}
+    <View className="rounded-xl border border-accent/40 bg-accent/5 p-3">
+      <PromptForm prompt={event} onRespond={onRespond} onSendInput={onSendInput} />
     </View>
   );
 }
