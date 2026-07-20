@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
 import { PounceIcon } from "../ui/native/Icon";
+import { VideoPlayer } from "../ui/native/VideoPlayer";
 import {
   assertNeverEvent,
   type MessageImage,
@@ -549,33 +550,60 @@ function PlanCard({ plan }: { plan: string }) {
 
 const THUMB = 128;
 
+/** Video attachments by mediaType, with an extension fallback for transcript
+ *  events that only carry a path/uri. */
+function isVideo(att: MessageImage): boolean {
+  if (att.mediaType?.startsWith("video/")) return true;
+  return /\.(mov|mp4|m4v|webm|avi|mkv)(\?|$)/i.test(att.uri ?? "");
+}
+
 /**
- * Attached images as right-aligned thumbnails; tap opens a full-size lightbox.
+ * Attached media as right-aligned thumbnails; tap opens a full-size lightbox
+ * (image viewer, or the native video player for video attachments).
  * Thumbnails render as soon as their row mounts — the list's virtualization
  * already bounds mounted rows, and the old useViewability gate never fired for
  * rows that mounted already-visible (perma-gray thumbnails).
  */
 function InlineImages({ images, eager }: { images: readonly MessageImage[]; eager?: boolean }) {
-  const [preview, setPreview] = useState<string | null>(null);
+  const [preview, setPreview] = useState<MessageImage | null>(null);
   const shown = images.filter((i) => i.uri);
   if (!shown.length) return null;
   return (
     <View style={[s.imagesRow, eager ? s.justifyStart : s.justifyEnd]}>
-      {shown.map((img) => (
-        <LazyImage key={img.uri} uri={img.uri!} onPress={() => setPreview(img.uri!)} />
-      ))}
+      {shown.map((att) =>
+        isVideo(att) ? (
+          <VideoTile key={att.uri} onPress={() => setPreview(att)} />
+        ) : (
+          <LazyImage key={att.uri} uri={att.uri!} onPress={() => setPreview(att)} />
+        ),
+      )}
       <Modal visible={!!preview} transparent animationType="fade" onRequestClose={() => setPreview(null)}>
         <Pressable
           onPress={() => setPreview(null)}
           style={[StyleSheet.absoluteFill, s.centerContent]}
         >
           <View style={[StyleSheet.absoluteFill, s.lightboxScrim]} />
-          {preview ? (
-            <Image source={{ uri: preview }} style={{ width: "94%", height: "84%" }} resizeMode="contain" />
+          {preview && isVideo(preview) ? (
+            <VideoPlayer uri={preview.uri!} style={s.lightboxMedia} />
+          ) : preview ? (
+            <Image source={{ uri: preview.uri! }} style={s.lightboxMedia} resizeMode="contain" />
           ) : null}
         </Pressable>
       </Modal>
     </View>
+  );
+}
+
+/** A video attachment as a dark tile with a play glyph — no frame extraction
+ *  (thumbnailing would need the player); the lightbox does the real playback. */
+function VideoTile({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [s.thumb, s.videoTile, pressed && s.pressed80]}
+    >
+      <PounceIcon name="play" size={26} color="#fff" />
+    </Pressable>
   );
 }
 
@@ -939,6 +967,8 @@ const s = StyleSheet.create({
   thumbPlaceholder: { borderWidth: 1, borderColor: T.border, backgroundColor: T.surfaceAlt },
   thumbBrokenWrap: { alignItems: "center", justifyContent: "center", gap: 4 },
   thumbBrokenLabel: { fontSize: 10, color: T.fgFaint },
+  videoTile: { backgroundColor: "#000", alignItems: "center", justifyContent: "center" },
+  lightboxMedia: { width: "94%", height: "84%" },
   commandChip: {
     maxWidth: "86%",
     flexDirection: "row",

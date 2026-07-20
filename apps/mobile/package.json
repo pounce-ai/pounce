@@ -45,6 +45,7 @@
     "expo-status-bar": "~57.0.0",
     "expo-symbols": "~57.0.0",
     "expo-updates": "~57.0.6",
+    "expo-video": "~57.0.1",
     "expo-web-browser": "~57.0.0",
     "katex": "^0.16.11",
     "prism-react-renderer": "^2.4.1",

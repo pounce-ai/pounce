@@ -40,6 +40,7 @@
     },
     "plugins": [
       "expo-router",
+      "./plugins/withPrecompiledOff",
       "expo-secure-store",
       [
         "expo-sqlite",
@@ -65,7 +66,8 @@
       ],
       "expo-status-bar",
       "react-native-enriched-markdown",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true,
