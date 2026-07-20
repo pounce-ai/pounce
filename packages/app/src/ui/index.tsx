@@ -1,9 +1,21 @@
-import { type ComponentProps, useEffect, useSyncExternalStore } from "react";
-import { cn } from "cnfast";
-import { ActionSheetIOS, Alert, Platform, View, Text } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { useSyncExternalStore } from "react";
+import {
+  ActionSheetIOS,
+  Alert,
+  Platform,
+  StyleSheet,
+  View,
+  Text,
+  type ColorValue,
+  type StyleProp,
+  type TextStyle,
+  type ViewStyle,
+} from "react-native";
+import { PounceIcon } from "./native/Icon";
+import type { IoniconName } from "./native/icon-map";
 import type { ActivityStatus } from "@pounce/shared";
 import { AgentLogo } from "./agent-logos";
+import { T } from "./theme";
 
 // Shared tokens live in tokens.ts (no circular dep with agent-logos); re-export
 // them here so call sites keep importing everything from "../ui".
@@ -12,10 +24,6 @@ import { AGENT_HEX, agentLabel, COLOR } from "./tokens";
 
 /** Real brand logos for agents (Claude, Codex, OpenCode, Grok, …). */
 export { AgentLogo };
-
-/** Merge Tailwind classes (Uniwind doesn't dedupe). cnfast is a drop-in for the
- *  clsx+tailwind-merge combo — byte-identical output, ~3.8x faster. */
-export { cn };
 
 /**
  * Extra TextInput props for the desktop platforms. react-native-macos draws a
@@ -29,15 +37,6 @@ export const INPUT_TWEAKS: Record<string, unknown> =
 
 /** True on the desktop platforms (macOS/Windows) — for tiny layout forks. */
 export const IS_DESKTOP = Platform.OS === "macos" || Platform.OS === "windows";
-
-/**
- * Height classes for a single-line TextInput. react-native-macos top-aligns
- * text (and placeholders) inside a fixed-height field, so on desktop the input
- * keeps its intrinsic height — centered by the row's items-center — and the
- * fixed height belongs on the CONTAINER row instead. Mobile keeps the height
- * on the input for the full-height tap target.
- */
-export const inputH = (h: string): string => (IS_DESKTOP ? "py-0" : h);
 
 /** Compact duration bucket: 45s / 12m / 3h / 6d (floored). */
 export function fmtDuration(secs: number): string {
@@ -64,7 +63,6 @@ export const ACTIVITY_LABEL: Record<ActivityStatus, string> = {
   queued: "Queued",
 };
 
-type IoniconName = ComponentProps<typeof Ionicons>["name"];
 
 /** Platform picker: NSAlert buttons on desktop, an action sheet on mobile. */
 export function pickSheet(title: string, labels: string[], onPick: (i: number) => void): void {
@@ -99,7 +97,7 @@ export function DeviceIcon({
   emoji,
 }: {
   name: string;
-  color: string;
+  color: ColorValue;
   size?: number;
   /** When set, replaces the inferred device glyph with the user's emoji. */
   emoji?: string;
@@ -111,7 +109,7 @@ export function DeviceIcon({
       </Text>
     );
   }
-  return <Ionicons name={deviceIconName(name)} size={size} color={color} />;
+  return <PounceIcon name={deviceIconName(name)} size={size} color={color} />;
 }
 
 /** Agent identity: real brand logo + name. The single, uniform way to show an
@@ -127,13 +125,13 @@ export function AgentChip({
   activity?: ActivityStatus;
 }) {
   return (
-    <View className="flex-row items-center gap-1.5">
+    <View style={s.agentChip}>
       {activity ? (
         <AgentStatusIcon agent={agent} activity={activity} size={size} />
       ) : (
         <AgentLogo agent={agent} size={size} />
       )}
-      <Text className="text-[12px] font-medium text-fg-muted">{agentLabel(agent)}</Text>
+      <Text style={s.agentChipLabel}>{agentLabel(agent)}</Text>
     </View>
   );
 }
@@ -142,8 +140,8 @@ export function AgentChip({
  *  cycle runs forward then back so it breathes instead of snapping.
  *  U+FE0E forces text presentation: bare ✳ (and friends) otherwise render as
  *  their emoji variant on iOS — a green square that ignores the text color. */
-const T = "\uFE0E";
-const THINKING_GLYPHS = [`·${T}`, `✢${T}`, `✳${T}`, `✶${T}`, `✽${T}`, `✶${T}`, `✳${T}`, `✢${T}`];
+const VS = "\uFE0E";
+const THINKING_GLYPHS = [`·${VS}`, `✢${VS}`, `✳${VS}`, `✶${VS}`, `✽${VS}`, `✶${VS}`, `✳${VS}`, `✢${VS}`];
 const THINKING_FRAME_MS = 160;
 
 // One shared ticker for every animating icon: N running threads would
@@ -194,7 +192,7 @@ export function AgentStatusIcon({
 
   if (active) {
     return (
-      <View style={{ width: size, height: size }} className="items-center justify-center">
+      <View style={[s.center, { width: size, height: size }]}>
         <Text
           allowFontScaling={false}
           style={{
@@ -216,10 +214,9 @@ export function AgentStatusIcon({
       <AgentLogo agent={agent} size={size} />
       {activity === "completed" ? (
         <View
-          className="absolute items-center justify-center rounded-full bg-bg-elevated"
-          style={{ right: -badge * 0.35, bottom: -badge * 0.3, width: badge, height: badge }}
+          style={[s.lockBadge, { right: -badge * 0.35, bottom: -badge * 0.3, width: badge, height: badge }]}
         >
-          <Ionicons name="lock-closed" size={badge * 0.68} color={COLOR.fgMuted} />
+          <PounceIcon name="lock-closed" size={badge * 0.68} color={COLOR.fgMuted} />
         </View>
       ) : null}
     </View>
@@ -234,18 +231,18 @@ export function BranchChip({
   worktree,
   size = 11,
   color = COLOR.fgMuted,
-  className,
+  style,
 }: {
   branch: string;
   worktree?: string | null;
   size?: number;
-  color?: string;
-  className?: string;
+  color?: ColorValue;
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <View className={cn("flex-row items-center gap-1", className)}>
-      <Ionicons name={worktree ? "git-network-outline" : "git-branch-outline"} size={size} color={color} />
-      <Text numberOfLines={1} style={{ color, fontSize: size + 1 }} className="shrink font-mono">
+    <View style={[s.branchChip, style]}>
+      <PounceIcon name={worktree ? "git-network-outline" : "git-branch-outline"} size={size} color={color} />
+      <Text numberOfLines={1} style={[s.branchText, { color, fontSize: size + 1 }]}>
         {branch}
       </Text>
     </View>
@@ -254,16 +251,37 @@ export function BranchChip({
 
 /** Git/merge-readiness chip — axis B. */
 export function MergeChip({ state }: { state: "ready" | "conflicts" | "uncommitted" | "clean" }) {
-  const map = {
-    ready: ["Ready to merge", "text-success bg-success/10"],
-    conflicts: ["Conflicts", "text-danger bg-danger/10"],
-    uncommitted: ["Uncommitted", "text-info bg-info/10"],
-    clean: ["No changes", "text-fg-faint bg-surface-alt"],
-  } as const;
-  const [label, cls] = map[state];
+  const map: Record<"ready" | "conflicts" | "uncommitted" | "clean", [string, TextStyle]> = {
+    ready: ["Ready to merge", s.mergeReady],
+    conflicts: ["Conflicts", s.mergeConflicts],
+    uncommitted: ["Uncommitted", s.mergeUncommitted],
+    clean: ["No changes", s.mergeClean],
+  };
+  const [label, style] = map[state];
   return (
-    <Text className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", cls)}>
+    <Text style={[s.mergeChip, style]}>
       {label}
     </Text>
   );
 }
+
+const s = StyleSheet.create({
+  agentChip: { flexDirection: "row", alignItems: "center", gap: 6 },
+  agentChipLabel: { fontSize: 12, fontWeight: "500", color: T.fgMuted },
+  center: { alignItems: "center", justifyContent: "center" },
+  lockBadge: {
+    position: "absolute",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+    backgroundColor: T.bgElevated,
+  },
+  branchChip: { flexDirection: "row", alignItems: "center", gap: 4 },
+  branchText: { flexShrink: 1, fontFamily: "JetBrainsMono" },
+  mergeChip: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2, fontSize: 11, fontWeight: "500" },
+  // status colors at 10% — no /10 tokens in T; literals from the status hexes.
+  mergeReady: { color: T.success, backgroundColor: "rgba(63, 185, 80, 0.1)" },
+  mergeConflicts: { color: T.danger, backgroundColor: "rgba(248, 81, 73, 0.1)" },
+  mergeUncommitted: { color: T.info, backgroundColor: "rgba(88, 166, 255, 0.1)" },
+  mergeClean: { color: T.fgFaint, backgroundColor: T.surfaceAlt },
+});

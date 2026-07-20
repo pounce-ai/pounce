@@ -6,15 +6,16 @@
  * the terminal, another device) dismisses it.
  */
 import { useEffect, useRef } from "react";
-import { Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
-import { Ionicons } from "@expo/vector-icons";
+import { PounceIcon } from "../ui/native/Icon";
 import { PromptForm } from "../components/PromptForm";
 import { respondPrompt, sendSessionInput } from "../services/bridge";
 import { clearPendingPrompt, pendingPrompts$ } from "../state/stores";
 import { useThread } from "../state/db/hooks";
 import { COLOR } from "../ui";
+import { T } from "../ui/theme";
 
 export default function PromptSheetScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -42,11 +43,11 @@ export default function PromptSheetScreen() {
   };
 
   return (
-    <View className="bg-bg-elevated px-5 pb-10 pt-4">
-      <View className="mb-4 items-center">
-        <View className="mb-3 h-1 w-9 rounded-full bg-border" />
+    <View style={s.root}>
+      <View style={s.header}>
+        <View style={s.grabber} />
         {session ? (
-          <Text numberOfLines={1} className="text-[12px] text-fg-muted">
+          <Text numberOfLines={1} style={s.title}>
             {session.title}
           </Text>
         ) : null}
@@ -63,11 +64,31 @@ export default function PromptSheetScreen() {
           onAnswered={done}
         />
       ) : (
-        <View className="flex-row items-center justify-center gap-2 py-6">
-          <Ionicons name="checkmark-circle-outline" size={18} color={COLOR.fgMuted} />
-          <Text className="text-[13px] text-fg-muted">This prompt was already answered.</Text>
+        <View style={s.resolvedRow}>
+          <PounceIcon name="checkmark-circle-outline" size={18} color={COLOR.fgMuted} />
+          <Text style={s.resolvedText}>This prompt was already answered.</Text>
         </View>
       )}
     </View>
   );
 }
+
+const s = StyleSheet.create({
+  root: {
+    backgroundColor: T.bgElevated,
+    paddingHorizontal: 20,
+    paddingBottom: 40,
+    paddingTop: 16,
+  },
+  header: { marginBottom: 16, alignItems: "center" },
+  grabber: { marginBottom: 12, height: 4, width: 36, borderRadius: 999, backgroundColor: T.border },
+  title: { fontSize: 12, color: T.fgMuted },
+  resolvedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 24,
+  },
+  resolvedText: { fontSize: 13, color: T.fgMuted },
+});

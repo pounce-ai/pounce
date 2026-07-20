@@ -271,10 +271,14 @@ export function statusBucket(s: Session): StatusBucket {
 
 /** A message is marked by default if it carries prose — and an interactive
  *  prompt (trust / permission / plan / question) is ALWAYS marked, so a prompt
- *  the agent is blocked on is a jump-to point you can always find. */
+ *  the agent is blocked on is a jump-to point you can always find.
+ *  "[Request interrupted by user]" is a CLI-written artifact, not something
+ *  the user said — never a marker. */
 export function defaultMarked(ev: TimelineEvent, agent?: string): boolean {
   if (ev.type === "prompt_request") return true;
-  return ev.type === "user_message" && parseUserMessage(ev.text, agent).text.trim().length > 0;
+  if (ev.type !== "user_message") return false;
+  if (/^\s*\[Request interrupted by user/i.test(ev.text)) return false;
+  return parseUserMessage(ev.text, agent).text.trim().length > 0;
 }
 
 export interface FilterContext {

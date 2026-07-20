@@ -1,7 +1,8 @@
 import { useEffect } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import { T } from "../ui/theme";
 
 /**
  * Full-screen QR scanner. Lives in its own module so it's only loaded
@@ -24,37 +25,75 @@ export default function QrScanner({
 
   if (!permission?.granted) {
     return (
-      <View className="flex-1 items-center justify-center bg-bg px-8" style={{ paddingTop: insets.top }}>
-        <Text className="text-center text-[15px] font-semibold text-fg">Camera access needed</Text>
-        <Text className="mt-1 text-center text-[13px] text-fg-muted">Allow the camera to scan a pairing code.</Text>
-        <Pressable onPress={() => void requestPermission()} className="active:opacity-90 mt-5 rounded-xl bg-accent px-5 py-2.5">
-          <Text className="text-[14px] font-semibold text-white">Allow camera</Text>
+      <View style={[s.permission, { paddingTop: insets.top }]}>
+        <Text style={s.permissionTitle}>Camera access needed</Text>
+        <Text style={s.permissionBody}>Allow the camera to scan a pairing code.</Text>
+        <Pressable onPress={() => void requestPermission()} style={({ pressed }) => [s.allowBtn, pressed && s.pressed90]}>
+          <Text style={s.allowText}>Allow camera</Text>
         </Pressable>
-        <Pressable onPress={onCancel} className="active:opacity-60 mt-3">
-          <Text className="text-[14px] text-fg-muted">Cancel</Text>
+        <Pressable onPress={onCancel} style={({ pressed }) => [s.cancelLink, pressed && s.pressed60]}>
+          <Text style={s.cancelLinkText}>Cancel</Text>
         </Pressable>
       </View>
     );
   }
 
   return (
-    <View className="flex-1 bg-black">
+    <View style={s.camera}>
       <CameraView
         style={{ flex: 1 }}
         facing="back"
         barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
         onBarcodeScanned={({ data }) => onScan(data)}
       />
-      <View style={{ paddingTop: insets.top + 8 }} className="absolute inset-x-0 top-0 items-center">
-        <Text className="text-[15px] font-medium text-white">Point at the pairing code</Text>
+      <View style={[s.hint, { paddingTop: insets.top + 8 }]}>
+        <Text style={s.hintText}>Point at the pairing code</Text>
       </View>
       <Pressable
         onPress={onCancel}
-        style={{ bottom: insets.bottom + 28 }}
-        className="active:opacity-80 absolute self-center rounded-full bg-white/15 px-6 py-3"
+        style={({ pressed }) => [s.cancelBtn, { bottom: insets.bottom + 28 }, pressed && s.pressed80]}
       >
-        <Text className="text-[15px] font-semibold text-white">Cancel</Text>
+        <Text style={s.cancelBtnText}>Cancel</Text>
       </Pressable>
     </View>
   );
 }
+
+// Overlay text/chrome sits on live camera video, so it stays literal white/black
+// regardless of the system appearance.
+const s = StyleSheet.create({
+  permission: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: T.bg,
+    paddingHorizontal: 32,
+  },
+  permissionTitle: { textAlign: "center", fontSize: 15, fontWeight: "600", color: T.fg },
+  permissionBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: T.fgMuted },
+  allowBtn: {
+    marginTop: 20,
+    borderRadius: 12,
+    backgroundColor: T.accent,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  allowText: { fontSize: 14, fontWeight: "600", color: T.onAccent },
+  cancelLink: { marginTop: 12 },
+  cancelLinkText: { fontSize: 14, color: T.fgMuted },
+  camera: { flex: 1, backgroundColor: "#000" },
+  hint: { position: "absolute", left: 0, right: 0, top: 0, alignItems: "center" },
+  hintText: { fontSize: 15, fontWeight: "500", color: "#fff" },
+  cancelBtn: {
+    position: "absolute",
+    alignSelf: "center",
+    borderRadius: 999,
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+  },
+  cancelBtnText: { fontSize: 15, fontWeight: "600", color: "#fff" },
+  pressed60: { opacity: 0.6 },
+  pressed80: { opacity: 0.8 },
+  pressed90: { opacity: 0.9 },
+});

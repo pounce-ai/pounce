@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -8,6 +8,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { Skeleton } from "boneyard-js/native";
+import { T } from "../ui/theme";
 
 /**
  * A static card-shaped template. Boneyard renders it, snapshots the native
@@ -16,18 +17,18 @@ import { Skeleton } from "boneyard-js/native";
  */
 function CardTemplate() {
   return (
-    <View className="rounded-2xl border border-border bg-surface p-3.5">
-      <View className="flex-row items-center gap-2">
+    <View style={s.card}>
+      <View style={s.titleRow}>
         <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: "#777" }} />
-        <Text className="flex-1 text-[15px] font-semibold text-fg" numberOfLines={1}>
+        <Text style={s.title} numberOfLines={1}>
           Refactor the auth flow
         </Text>
         <View style={{ width: 50, height: 18, borderRadius: 9, backgroundColor: "#777" }} />
       </View>
-      <Text className="mt-1.5 text-[12px] text-fg-muted">mac-mini · api · feat/oauth-refresh</Text>
-      <View className="mt-2 flex-row items-center justify-between">
-        <Text className="text-[11px] text-fg-muted">awaiting input</Text>
-        <Text className="text-[11px] text-fg-faint">2m</Text>
+      <Text style={s.meta}>mac-mini · api · feat/oauth-refresh</Text>
+      <View style={s.footerRow}>
+        <Text style={s.footerLeft}>awaiting input</Text>
+        <Text style={s.footerRight}>2m</Text>
       </View>
     </View>
   );
@@ -45,7 +46,7 @@ export function SessionCardSkeleton() {
 /** A stack of skeleton cards for the initial load. */
 export function SessionListSkeleton({ count = 5 }: { count?: number }) {
   return (
-    <View className="gap-2.5 px-4 pt-1.5" pointerEvents="none">
+    <View style={s.list} pointerEvents="none">
       {Array.from({ length: count }).map((_, i) => (
         <SessionCardSkeleton key={i} />
       ))}
@@ -91,7 +92,7 @@ export function TimelineSkeleton() {
   // the bones to the bottom and fill upward — otherwise they cluster at the top
   // over an empty black chat area.
   return (
-    <Animated.View style={style} className="flex-1 justify-end gap-3 px-3 pb-3 pt-3" pointerEvents="none">
+    <Animated.View style={[style, s.timeline]} pointerEvents="none">
       <BubbleBone user lines={1} />
       <BubbleBone user={false} lines={2} />
       <BubbleBone user lines={2} />
@@ -104,3 +105,28 @@ export function TimelineSkeleton() {
     </Animated.View>
   );
 }
+
+const s = StyleSheet.create({
+  card: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: T.border,
+    backgroundColor: T.surface,
+    padding: 14,
+  },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  title: { flex: 1, fontSize: 15, fontWeight: "600", color: T.fg },
+  meta: { marginTop: 6, fontSize: 12, color: T.fgMuted },
+  footerRow: { marginTop: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  footerLeft: { fontSize: 11, color: T.fgMuted },
+  footerRight: { fontSize: 11, color: T.fgFaint },
+  list: { gap: 10, paddingHorizontal: 16, paddingTop: 6 },
+  timeline: {
+    flex: 1,
+    justifyContent: "flex-end",
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    paddingTop: 12,
+  },
+});

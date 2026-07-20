@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // eslint-disable-next-line @react-native/no-deprecated-api -- core Clipboard is
 // the only clipboard already inside shipped binaries (OTA-safe).
-import { ActionSheetIOS, ActivityIndicator, Alert, Clipboard, Pressable, Text, TextInput, View } from "react-native";
-import { KeyboardAvoidingView, Platform } from "react-native";
+import { ActionSheetIOS, ActivityIndicator, Alert, Clipboard, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Platform } from "react-native";
+import { KeyboardAvoidingView } from "../components/kav";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeIn, FadeOut } from "../components/animation";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
@@ -51,9 +52,10 @@ import {
   useThreadMarkers,
   useThreadModel,
 } from "../state/db/hooks";
-import { fetchMessages, fetchUsage, interruptTurn, respondPermission, respondPrompt, searchMessages, sendSessionInput, startInteractive, streamLiveMessage, type MessageSearchHit, type ThreadUsage } from "../services/bridge";
-import { Ionicons } from "@expo/vector-icons";
-import { ACTIVITY_LABEL, AgentStatusIcon, BranchChip, cn, COLOR, pickSheet } from "../ui";
+import { diffTotals, fetchGitChanges, fetchMessages, fetchUsage, interruptTurn, respondPermission, respondPrompt, searchMessages, sendSessionInput, startInteractive, streamLiveMessage, type MessageSearchHit, type ThreadUsage } from "../services/bridge";
+import { PounceIcon } from "../ui/native/Icon";
+import { ACTIVITY_LABEL, AgentStatusIcon, BranchChip, COLOR, pickSheet } from "../ui";
+import { T } from "../ui/theme";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "../ui/agent-meta";
 
 /** Desktop renders this screen in a wide pane: pickers use Alert instead of
@@ -144,6 +146,12 @@ export default function SessionScreen() {
   // Whether the timeline is pinned to the newest message — drives the floating
   // "jump to latest" pill that shows when the user has scrolled up.
   const [atBottom, setAtBottom] = useState(true);
+  // ChatGPT-style send anchor: the id of the just-sent (optimistic) user
+  // message. While set, Timeline scrolls it to the TOP of the viewport, shows
+  // a footer spacer for the reply to stream into, and suspends pin-to-tail.
+  // Set on submit; cleared when the turn completes (running → false) or when
+  // the user taps the Latest pill. null = today's pinned-to-tail behaviour.
+  const [anchorId, setAnchorId] = useState<string | null>(null);
 
   // Thread history via react-query. `recent` (last 4 turns) paints instantly;
   // `full` is gated on `recent` settling, then backfills the whole history. This
@@ -491,6 +499,9 @@ export default function SessionScreen() {
         type: "user_message",
         text: s.text || (s.images.length ? "🖼️ Image" : ""),
       };
+      // Anchor the timeline to this message: it scrolls to the viewport top
+      // and the reply streams into the spacer below (see Timeline.anchorToId).
+      setAnchorId(optimistic.id);
       // Interactive thread: drive the hosted PTY (the bridge reuses its live PTY
       // or `--resume`s the SAME session) so prompts stay answerable and no new
       // session is spawned. PTY turns don't stream over SSE, so echo the message
@@ -674,8 +685,8 @@ export default function SessionScreen() {
 
   if (!session) {
     return (
-      <View className="flex-1 items-center justify-center bg-bg">
-        <Text className="text-fg-muted">Session not found.</Text>
+      <View style={s.notFound}>
+        <Text style={s.notFoundText}>Session not found.</Text>
       </View>
     );
   }
@@ -683,6 +694,24 @@ export default function SessionScreen() {
   const canSteer = session.isLive;
   const caps = effectiveCaps(session.agent, reportedCaps);
   const running = sending || session.activity === "running" || session.activity === "streaming";
+
+  // Working-tree +/- totals for the composer's diff shortcut. Refreshed when
+  // a turn starts/ends (`running` flips) — that's when the working tree moves.
+  const [diffStat, setDiffStat] = useState<{ add: number; del: number } | null>(null);
+  useEffect(() => {
+    if (!session.cwd) return;
+    let cancelled = false;
+    fetchGitChanges(session.hostId, session.cwd)
+      .then((g) => { if (!cancelled) setDiffStat(diffTotals(g.files)); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [session.hostId, session.cwd, running]);
+  // Send-anchor lifecycle end: once the turn completes, drop the anchor —
+  // Timeline removes its spacer and restores maintainScrollAtEnd, whose own
+  // near-end gate keeps a scrolled-up reader in place (no yank, no jump).
+  useEffect(() => {
+    if (!running) setAnchorId(null);
+  }, [running]);
   // The synced thread record lags live turns (short turns never re-sync), so
   // the header trusts the screen's own in-flight state over session.activity.
   const headerActivity = running ? ("running" as const) : session.activity;
@@ -724,31 +753,33 @@ export default function SessionScreen() {
 
   return (
     <KeyboardAvoidingView
-      className="flex-1 bg-bg"
+      style={s.root}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={0}
     >
       <Stack.Screen options={{ headerShown: false }} />
       {/* Desktop: the whole pane is a drop target — dragging files/folders from
           Finder adds them as sources. No-op wrapper on mobile. */}
-      <DropZone className="flex-1" onDropFiles={onDropFiles}>
+      <DropZone style={{ flex: 1 }} onDropFiles={onDropFiles}>
       {/* Header */}
-      <View style={{ paddingTop: insets.top }} className="border-b border-border bg-bg-elevated">
-        <View className="flex-row items-center gap-2 px-3 pb-2.5 pt-1">
+      <View style={[s.header, { paddingTop: insets.top }]}>
+        <View style={s.headerRow}>
           {/* Desktop's sidebar is always visible — a back button has nothing
               to go back to, so it's mobile-only. */}
           {!DESKTOP ? (
-            <Pressable onPress={() => router.back()} className="active:opacity-60 h-9 w-9 items-center justify-center">
-              <Text className="text-[22px] text-fg">‹</Text>
+            <Pressable onPress={() => router.back()} style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}>
+              <Text style={s.backGlyph}>‹</Text>
             </Pressable>
           ) : null}
           <AgentStatusIcon agent={session.agent} activity={headerActivity} size={18} />
-          <View className="flex-1">
-            <Text numberOfLines={1} className="text-[15px] font-semibold text-fg">{session.title}</Text>
-            <View className="mt-0.5 flex-row items-center gap-2">
-              <Text className="text-[12px] text-fg-muted">{ACTIVITY_LABEL[headerActivity]}</Text>
+          <View style={s.flex1}>
+            <Text numberOfLines={1} style={s.headerTitle}>{session.title}</Text>
+            <View style={s.headerSubRow}>
+              <Text style={s.activityLabel}>{ACTIVITY_LABEL[headerActivity]}</Text>
               {session.branch ? (
-                <BranchChip branch={session.branch} worktree={session.worktree} size={10} color={COLOR.fgFaint} className="shrink" />
+                <View style={s.shrink}>
+                  <BranchChip branch={session.branch} worktree={session.worktree} size={10} color={COLOR.fgFaint} />
+                </View>
               ) : null}
               <ThreadUsageSummary usage={usage} />
             </View>
@@ -757,15 +788,15 @@ export default function SessionScreen() {
               back / title / search / more. */}
           <Pressable
             onPress={() => (threadSearchOpen ? closeThreadSearch() : setThreadSearchOpen(true))}
-            className="active:opacity-60 h-9 w-9 items-center justify-center"
+            style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
           >
-            <Ionicons name="search" size={18} color={threadSearchOpen ? COLOR.accent : COLOR.fgMuted} />
+            <PounceIcon name="search" size={18} color={threadSearchOpen ? COLOR.accent : COLOR.fgMuted} />
           </Pressable>
           <Pressable
             onPress={() => setEnvSheet(true)}
-            className="active:opacity-60 h-9 w-9 items-center justify-center"
+            style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
           >
-            <Ionicons
+            <PounceIcon
               name="ellipsis-horizontal"
               size={20}
               color={running ? COLOR.danger : COLOR.fgMuted}
@@ -773,9 +804,9 @@ export default function SessionScreen() {
           </Pressable>
         </View>
         {threadSearchOpen ? (
-          <View className="flex-row items-center gap-2 px-4 pb-2.5">
-            <View className="h-9 flex-1 flex-row items-center gap-2 rounded-xl bg-surface-alt px-2.5">
-              <Ionicons name="search" size={13} color={COLOR.fgFaint} />
+          <View style={s.searchRow}>
+            <View style={s.searchField}>
+              <PounceIcon name="search" size={13} color={COLOR.fgFaint} />
               <TextInput
                 value={threadQuery}
                 onChangeText={setThreadQuery}
@@ -784,12 +815,12 @@ export default function SessionScreen() {
                 autoFocus
                 autoCapitalize="none"
                 autoCorrect={false}
-                className="h-9 flex-1 text-[14px] text-fg"
+                style={s.searchInput}
               />
               {threadSearching ? (
                 <ActivityIndicator size="small" color={COLOR.fgFaint} />
               ) : threadQuery.trim().length >= 3 ? (
-                <Text className="text-[12px] tabular-nums text-fg-muted">
+                <Text style={s.hitCount}>
                   {threadHits.length ? `${threadHitIdx + 1}/${threadHits.length}` : "0"}
                 </Text>
               ) : null}
@@ -797,48 +828,48 @@ export default function SessionScreen() {
             <Pressable
               disabled={!threadHits.length}
               onPress={() => goToHit(threadHits, threadHitIdx - 1, threadQuery.trim())}
-              className="active:opacity-60 h-9 w-8 items-center justify-center"
+              style={({ pressed }) => [s.hitBtn, pressed && s.pressed60]}
             >
-              <Ionicons name="chevron-up" size={17} color={threadHits.length ? COLOR.fgMuted : COLOR.fgFaint} />
+              <PounceIcon name="chevron-up" size={17} color={threadHits.length ? COLOR.fgMuted : COLOR.fgFaint} />
             </Pressable>
             <Pressable
               disabled={!threadHits.length}
               onPress={() => goToHit(threadHits, threadHitIdx + 1, threadQuery.trim())}
-              className="active:opacity-60 h-9 w-8 items-center justify-center"
+              style={({ pressed }) => [s.hitBtn, pressed && s.pressed60]}
             >
-              <Ionicons name="chevron-down" size={17} color={threadHits.length ? COLOR.fgMuted : COLOR.fgFaint} />
+              <PounceIcon name="chevron-down" size={17} color={threadHits.length ? COLOR.fgMuted : COLOR.fgFaint} />
             </Pressable>
           </View>
         ) : null}
       </View>
 
-      <View className="flex-1 items-center">
+      <View style={s.transcriptArea}>
         {/* One readable column for every transcript-area state. Desktop:
             proportional (92% of the pane, capped) so the chat adapts to the
             window; mobile: full width, unchanged. */}
-        <View style={DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }} className="flex-1">
+        <View style={[s.flex1, DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }]}>
         {loading && events.length === 0 ? (
           <TimelineSkeleton />
         ) : live && failed && events.length === 0 ? (
-          <View className="flex-1 items-center justify-center px-8">
-            <Ionicons name="cloud-offline-outline" size={34} color={COLOR.fgFaint} />
-            <Text className="mt-3 text-center text-[15px] font-semibold text-fg">Couldn't load this conversation</Text>
-            <Text className="mt-1 text-center text-[13px] text-fg-muted">
+          <View style={s.emptyWrap}>
+            <PounceIcon name="cloud-offline-outline" size={34} color={COLOR.fgFaint} />
+            <Text style={s.emptyTitle}>Couldn't load this conversation</Text>
+            <Text style={s.emptyBody}>
               Make sure {session.host || "your computer"} is awake and the Pounce Bridge is running on the same Wi‑Fi.
             </Text>
-            <Pressable onPress={retry} className="active:opacity-80 mt-5 rounded-full bg-accent px-5 py-2.5">
-              <Text className="text-[14px] font-semibold text-white">Retry</Text>
+            <Pressable onPress={retry} style={({ pressed }) => [s.retryBtn, pressed && s.pressed80]}>
+              <Text style={s.retryLabel}>Retry</Text>
             </Pressable>
           </View>
         ) : events.length === 0 ? (
-          <View className="flex-1 items-center justify-center px-8">
-            <Text className="text-[34px]">💬</Text>
-            <Text className="mt-3 text-center text-[15px] font-semibold text-fg">No messages yet</Text>
-            <Text className="mt-1 text-center text-[13px] text-fg-muted">Send a message below to get this thread going.</Text>
+          <View style={s.emptyWrap}>
+            <Text style={s.emptyEmoji}>💬</Text>
+            <Text style={s.emptyTitle}>No messages yet</Text>
+            <Text style={s.emptyBody}>Send a message below to get this thread going.</Text>
           </View>
         ) : (
           // Fade the history in so it doesn't snap in after the skeleton.
-          <Animated.View className="flex-1" entering={FadeIn.duration(260)}>
+          <Animated.View style={s.flex1} entering={FadeIn.duration(260)}>
             <Timeline
               events={rawEvents}
               agent={session.agent}
@@ -846,6 +877,7 @@ export default function SessionScreen() {
               sessionId={id!}
               listRef={listRef}
               highlight={searchHighlight}
+              anchorToId={anchorId}
               onLongPressEvent={onLongPressEvent}
               onRunCommand={canSteer ? onRunCommand : undefined}
               onAtBottomChange={setAtBottom}
@@ -866,19 +898,20 @@ export default function SessionScreen() {
                 entering={FadeIn.duration(150)}
                 exiting={FadeOut.duration(120)}
                 pointerEvents="box-none"
-                className="absolute bottom-3 self-center"
-                style={{ left: 0, right: 0, alignItems: "center" }}
+                style={s.jumpWrap}
               >
                 <Pressable
                   onPress={() => {
+                    // Tapping = give up the send anchor: the spacer drops and
+                    // pin-to-tail resumes for the rest of the turn.
+                    setAnchorId(null);
                     listRef.current?.scrollToEnd({ animated: true });
                     setAtBottom(true);
                   }}
-                  className="active:opacity-80 flex-row items-center gap-1.5 rounded-full border border-border bg-bg-elevated px-3.5 py-2"
-                  style={{ shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 4 }}
+                  style={({ pressed }) => [s.jumpPill, pressed && s.pressed80]}
                 >
-                  <Ionicons name="arrow-down" size={15} color={COLOR.accent} />
-                  <Text className="text-[13px] font-semibold text-accent">Latest</Text>
+                  <PounceIcon name="arrow-down" size={15} color={COLOR.accent} />
+                  <Text style={s.jumpLabel}>Latest</Text>
                 </Pressable>
               </Animated.View>
             ) : null}
@@ -902,8 +935,6 @@ export default function SessionScreen() {
         sources={sources}
         fav={fav}
         onToggleFavourite={canFavourite ? () => toggleFavThread(session.id) : undefined}
-        markerCount={markers.length}
-        onMarkers={() => setMarkerSheet(true)}
         onClose={() => setEnvSheet(false)}
         onStop={() => void stop()}
         onViewChanges={() => router.push(`/changes?id=${session.id}`)}
@@ -946,35 +977,36 @@ export default function SessionScreen() {
           );
         }}
         effort={canSteer && showEffort ? { label: effortLabel, onPress: openEffort } : null}
+        mode={canSteer && showMode ? { label: modeLabel, onPress: openMode } : null}
         onClose={() => setModelSheet(false)}
       />
 
       {/* Composer (model·effort, mode, mic and send now live inside its card) —
           same adaptive column as the transcript so they stay aligned. */}
-      <View style={{ paddingBottom: insets.bottom + 8 }} className="items-center bg-bg-elevated px-3 pt-2">
+      <View style={[s.composerBar, { paddingBottom: insets.bottom + 8 }]}>
         <View style={DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }}>
         {!canSteer ? (
-          <Text className="px-1 pb-2 text-[12px] text-fg-faint">
+          <Text style={s.archivedNote}>
             Archived session — worktree was removed. Read-only.
           </Text>
         ) : null}
         {queued.length > 0 ? (
-          <View className="mb-2 gap-1.5">
+          <View style={s.queuedWrap}>
             {queued.map((q, i) => (
               <View
                 key={i}
-                className="flex-row items-center gap-2 rounded-xl border border-border bg-surface-alt px-3 py-2"
+                style={s.queuedRow}
               >
-                <Ionicons name="time-outline" size={13} color={COLOR.fgFaint} />
-                <Text numberOfLines={1} className="flex-1 text-[12px] text-fg-muted">
+                <PounceIcon name="time-outline" size={13} color={COLOR.fgFaint} />
+                <Text numberOfLines={1} style={s.queuedText}>
                   {q.text || (q.images.length ? "🖼️ Image" : "")}
                 </Text>
                 <Pressable onPress={() => cancelQueued(i)} hitSlop={8}>
-                  <Ionicons name="close" size={14} color={COLOR.fgMuted} />
+                  <PounceIcon name="close" size={14} color={COLOR.fgMuted} />
                 </Pressable>
               </View>
             ))}
-            <Text className="px-1 text-[11px] text-fg-faint">Queued — sends after the current reply</Text>
+            <Text style={s.queuedHint}>Queued — sends after the current reply</Text>
           </View>
         ) : null}
         <Composer
@@ -988,8 +1020,17 @@ export default function SessionScreen() {
           cwd={session.cwd}
           onSubmit={onSubmit}
           onStop={stop}
+          onViewChanges={() => router.push(`/changes?id=${session.id}`)}
+          diffStat={diffStat}
           model={live && !!session.cwd ? { label: modelPillLabel, onPress: () => setModelSheet(true) } : null}
-          mode={canSteer && showMode ? { label: modeLabel, active: activeMode !== "default", onPress: openMode } : null}
+          // Mode lives in the Model sheet now; the pill only appears as a
+          // fallback when there's no model pill to reach that sheet through.
+          mode={
+            canSteer && showMode && !(live && !!session.cwd)
+              ? { label: modeLabel, active: activeMode !== "default", onPress: openMode }
+              : null
+          }
+          markers={markers.length ? { count: markers.length, onPress: () => setMarkerSheet(true) } : null}
         />
         </View>
       </View>
@@ -997,3 +1038,90 @@ export default function SessionScreen() {
     </KeyboardAvoidingView>
   );
 }
+
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: T.bg },
+  flex1: { flex: 1 },
+  shrink: { flexShrink: 1 },
+  pressed60: { opacity: 0.6 },
+  pressed80: { opacity: 0.8 },
+  notFound: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: T.bg },
+  notFoundText: { color: T.fgMuted },
+  header: { borderBottomWidth: 1, borderColor: T.border, backgroundColor: T.bgElevated },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+    paddingTop: 4,
+  },
+  iconBtn: { height: 36, width: 36, alignItems: "center", justifyContent: "center" },
+  backGlyph: { fontSize: 22, color: T.fg },
+  headerTitle: { fontSize: 15, fontWeight: "600", color: T.fg },
+  headerSubRow: { marginTop: 2, flexDirection: "row", alignItems: "center", gap: 8 },
+  activityLabel: { fontSize: 12, color: T.fgMuted },
+  searchRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingBottom: 10 },
+  searchField: {
+    height: 36,
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 12,
+    backgroundColor: T.surfaceAlt,
+    paddingHorizontal: 10,
+  },
+  searchInput: { height: 36, flex: 1, fontSize: 14, color: T.fg },
+  hitCount: { fontSize: 12, fontVariant: ["tabular-nums"], color: T.fgMuted },
+  hitBtn: { height: 36, width: 32, alignItems: "center", justifyContent: "center" },
+  transcriptArea: { flex: 1, alignItems: "center" },
+  emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
+  emptyEmoji: { fontSize: 34 },
+  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: T.fg },
+  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: T.fgMuted },
+  retryBtn: {
+    marginTop: 20,
+    borderRadius: 999,
+    backgroundColor: T.accent,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  retryLabel: { fontSize: 14, fontWeight: "600", color: T.onAccent },
+  jumpWrap: { position: "absolute", bottom: 12, left: 0, right: 0, alignItems: "center" },
+  jumpPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: T.border,
+    backgroundColor: T.bgElevated,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
+  },
+  jumpLabel: { fontSize: 13, fontWeight: "600", color: T.accent },
+  // Transparent, borderless bar — the Composer's floating glass pill carries
+  // its own margins and chrome now.
+  composerBar: { alignItems: "center", paddingTop: 8 },
+  archivedNote: { paddingHorizontal: 16, paddingBottom: 8, fontSize: 12, color: T.fgFaint },
+  queuedWrap: { marginHorizontal: 12, marginBottom: 8, gap: 6 },
+  queuedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: T.border,
+    backgroundColor: T.surfaceAlt,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  queuedText: { flex: 1, fontSize: 12, color: T.fgMuted },
+  queuedHint: { paddingHorizontal: 4, fontSize: 11, color: T.fgFaint },
+});

@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Linking, Pressable, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import { PounceIcon } from "../ui/native/Icon";
+import type { IoniconName } from "../ui/native/icon-map";
 import {
   diffTotals,
   fetchGitChanges,
@@ -20,7 +30,8 @@ import { extOf } from "../components/diffPatch";
 import { seenFiles$, setSeenFile } from "../state/stores";
 import { useSelector } from "@legendapp/state/react";
 import { useThread } from "../state/db/hooks";
-import { cn, COLOR, IS_DESKTOP, pickSheet } from "../ui";
+import { COLOR, IS_DESKTOP, pickSheet } from "../ui";
+import { T } from "../ui/theme";
 
 /** Branches where committing directly is almost never intended. */
 const isMainBranch = (b: string | null | undefined) => b === "main" || b === "master";
@@ -207,41 +218,42 @@ export default function ChangesScreen() {
 
   return (
     <KeyboardAvoidingView
-      className="flex-1 bg-bg"
       behavior={Platform.OS === "ios" ? "padding" : undefined}
-      style={{ paddingTop: insets.top + 6 }}
+      // Sheet presentation on mobile: the sheet's top edge already clears the
+      // status bar, so window insets would just paint a blank band.
+      style={[s.root, { paddingTop: IS_DESKTOP ? insets.top + 6 : 6 }]}
     >
       {/* Header */}
-      <View className="flex-row items-center gap-2 px-3 pb-2">
-        <Pressable onPress={() => router.back()} className="active:opacity-60 h-9 w-9 items-center justify-center">
-          <Ionicons name="chevron-down" size={22} color={COLOR.fg} />
+      <View style={s.header}>
+        <Pressable onPress={() => router.back()} style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}>
+          <PounceIcon name="chevron-down" size={22} color={COLOR.fg} />
         </Pressable>
-        <View className="min-w-0 flex-1">
-          <Text className="text-[17px] font-semibold text-fg">Changes</Text>
-          <View className="mt-0.5 min-w-0 flex-row items-center gap-2">
+        <View style={s.titleWrap}>
+          <Text style={s.title}>Changes</Text>
+          <View style={s.metaRow}>
             {changes?.branch ? (
-              <Text numberOfLines={1} className="shrink font-mono text-[12px] text-fg-faint">
+              <Text numberOfLines={1} style={s.branch}>
                 ⎇ {changes.branch}
               </Text>
             ) : null}
             {fileCount > 0 ? (
-              <Text numberOfLines={1} className="shrink-0 text-[12px] text-fg-muted">
+              <Text numberOfLines={1} style={s.counts}>
                 {fileCount} file{fileCount === 1 ? "" : "s"} ·{" "}
-                <Text className="text-diff-add-fg">+{totals.add}</Text>{" "}
-                <Text className="text-diff-del-fg">−{totals.del}</Text>
+                <Text style={s.diffAdd}>+{totals.add}</Text>{" "}
+                <Text style={s.diffDel}>−{totals.del}</Text>
               </Text>
             ) : null}
           </View>
         </View>
         {IS_DESKTOP && fileCount > 0 ? (
-          <View className="flex-row overflow-hidden rounded-lg border border-border">
+          <View style={s.layoutToggle}>
             {(["unified", "split"] as const).map((l) => (
               <Pressable
                 key={l}
                 onPress={() => setLayout(l)}
-                className={cn("px-2.5 py-1", layout === l ? "bg-surface-alt" : "bg-transparent")}
+                style={[s.layoutBtn, layout === l && s.layoutBtnActive]}
               >
-                <Text className={cn("text-[12px] font-medium", layout === l ? "text-fg" : "text-fg-faint")}>
+                <Text style={[s.layoutText, layout === l ? s.fgText : s.faintText]}>
                   {l === "unified" ? "Unified" : "Split"}
                 </Text>
               </Pressable>
@@ -251,33 +263,34 @@ export default function ChangesScreen() {
         {fileCount > 1 ? (
           <Pressable
             onPress={pickExtFilter}
-            className={cn(
-              "active:opacity-70 h-7 flex-row items-center gap-1 rounded-lg border px-2",
-              extFilter ? "border-accent bg-accent-soft" : "border-border bg-transparent",
-            )}
+            style={({ pressed }) => [
+              s.filterBtn,
+              extFilter ? s.filterActive : s.filterIdle,
+              pressed && s.pressed70,
+            ]}
           >
-            <Ionicons name="filter" size={13} color={extFilter ? COLOR.accent : COLOR.fgMuted} />
-            <Text className={cn("text-[12px] font-medium", extFilter ? "text-accent" : "text-fg-muted")}>
+            <PounceIcon name="filter" size={13} color={extFilter ? COLOR.accent : COLOR.fgMuted} />
+            <Text style={[s.filterText, extFilter ? s.accentText : s.mutedText]}>
               {extFilter ?? "Filter"}
             </Text>
           </Pressable>
         ) : null}
-        <Pressable onPress={load} className="active:opacity-60 h-9 w-9 items-center justify-center">
-          <Ionicons name="refresh" size={18} color={COLOR.fgMuted} />
+        <Pressable onPress={load} style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}>
+          <PounceIcon name="refresh" size={18} color={COLOR.fgMuted} />
         </Pressable>
       </View>
 
       {/* Diff */}
-      <View className="flex-1 border-t border-border">
+      <View style={s.diffWrap}>
         {loading ? (
-          <View className="flex-1 items-center justify-center">
+          <View style={s.center}>
             <ActivityIndicator color={COLOR.accent} />
           </View>
         ) : fileCount === 0 ? (
-          <View className="flex-1 items-center justify-center px-8">
-            <Text className="text-[40px]">✨</Text>
-            <Text className="mt-3 text-center text-[15px] font-semibold text-fg">Working tree clean</Text>
-            <Text className="mt-1 text-center text-[13px] text-fg-muted">No uncommitted changes in this worktree.</Text>
+          <View style={s.empty}>
+            <Text style={s.emptyEmoji}>✨</Text>
+            <Text style={s.emptyTitle}>Working tree clean</Text>
+            <Text style={s.emptyBody}>No uncommitted changes in this worktree.</Text>
           </View>
         ) : (
           <DiffView
@@ -292,54 +305,52 @@ export default function ChangesScreen() {
 
       {/* Actions */}
       {fileCount > 0 ? (
-        <View style={{ paddingBottom: insets.bottom + 8 }} className="border-t border-border bg-bg-elevated px-3 pt-2">
+        <View style={[s.footer, { paddingBottom: insets.bottom + 8 }]}>
           <TextInput
             value={message}
             onChangeText={setMessage}
             editable={!busy}
             placeholder="Commit message — leave empty to generate…"
-            placeholderTextColor="#62626D"
-            className="max-h-[90px] min-h-[40px] rounded-2xl bg-surface-alt px-3 pt-2 text-[14px] text-fg"
+            placeholderTextColor={T.fgFaint}
+            style={s.input}
             multiline
           />
-          <View className="mt-2 flex-row gap-2">
+          <View style={s.actionsRow}>
             <Pressable
               onPress={commit}
               disabled={busy != null}
-              className={cn(
-                "h-9 flex-1 items-center justify-center rounded-xl bg-accent",
-                busy != null && "opacity-40",
-              )}
+              style={[s.commitBtn, busy != null && s.opacity40]}
             >
               {busy === "commit" ? (
-                <ActivityIndicator color="#fff" size="small" />
+                <ActivityIndicator color={T.onAccent} size="small" />
               ) : (
-                <Text className="text-[13px] font-semibold text-white">Commit</Text>
+                <Text style={s.commitText}>Commit</Text>
               )}
             </Pressable>
             <SecondaryButton label="Push" icon="cloud-upload-outline" busy={busy === "push"} onPress={push} disabled={busy != null} />
-            <View className="flex-1 flex-row overflow-hidden rounded-xl border border-border bg-surface-alt">
+            <View style={s.prGroup}>
               <Pressable
                 onPress={openPR}
                 disabled={busy != null}
-                className={cn(
-                  "h-9 flex-1 flex-row items-center justify-center gap-1.5 active:bg-surface-hover",
-                  busy != null && "opacity-50",
-                )}
+                style={({ pressed }) => [
+                  s.prBtn,
+                  busy != null && s.opacity50,
+                  pressed && s.pressedHover,
+                ]}
               >
                 {busy === "pr" ? (
                   <ActivityIndicator color={COLOR.fgMuted} size="small" />
                 ) : (
-                  <Ionicons name="git-pull-request-outline" size={15} color={COLOR.fgMuted} />
+                  <PounceIcon name="git-pull-request-outline" size={15} color={COLOR.fgMuted} />
                 )}
-                <Text className="text-[13px] font-medium text-fg-muted">{prDraft ? "Draft PR" : "PR"}</Text>
+                <Text style={s.btnLabel}>{prDraft ? "Draft PR" : "PR"}</Text>
               </Pressable>
               <Pressable
                 onPress={pickPrMode}
                 disabled={busy != null}
-                className="h-9 items-center justify-center border-l border-border px-2 active:bg-surface-hover"
+                style={({ pressed }) => [s.prChevron, pressed && s.pressedHover]}
               >
-                <Ionicons name="chevron-down" size={13} color={COLOR.fgFaint} />
+                <PounceIcon name="chevron-down" size={13} color={COLOR.fgFaint} />
               </Pressable>
             </View>
           </View>
@@ -357,7 +368,7 @@ function SecondaryButton({
   disabled,
 }: {
   label: string;
-  icon: React.ComponentProps<typeof Ionicons>["name"];
+  icon: IoniconName;
   busy: boolean;
   onPress: () => void;
   disabled: boolean;
@@ -366,17 +377,133 @@ function SecondaryButton({
     <Pressable
       onPress={onPress}
       disabled={disabled}
-      className={cn(
-        "h-9 flex-1 flex-row items-center justify-center gap-1.5 rounded-xl border border-border bg-surface-alt active:bg-surface-hover",
-        disabled && "opacity-50",
-      )}
+      style={({ pressed }) => [s.secondaryBtn, disabled && s.opacity50, pressed && s.pressedHover]}
     >
       {busy ? (
         <ActivityIndicator color={COLOR.fgMuted} size="small" />
       ) : (
-        <Ionicons name={icon} size={15} color={COLOR.fgMuted} />
+        <PounceIcon name={icon} size={15} color={COLOR.fgMuted} />
       )}
-      <Text className="text-[13px] font-medium text-fg-muted">{label}</Text>
+      <Text style={s.btnLabel}>{label}</Text>
     </Pressable>
   );
 }
+
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: T.bg },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+  },
+  iconBtn: { height: 36, width: 36, alignItems: "center", justifyContent: "center" },
+  pressed60: { opacity: 0.6 },
+  pressed70: { opacity: 0.7 },
+  titleWrap: { minWidth: 0, flex: 1 },
+  title: { fontSize: 17, fontWeight: "600", color: T.fg },
+  metaRow: { marginTop: 2, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 },
+  branch: { flexShrink: 1, fontFamily: "JetBrainsMono", fontSize: 12, color: T.fgFaint },
+  counts: { flexShrink: 0, fontSize: 12, color: T.fgMuted },
+  diffAdd: { color: T.diffAddFg },
+  diffDel: { color: T.diffDelFg },
+  layoutToggle: {
+    flexDirection: "row",
+    overflow: "hidden",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  layoutBtn: { paddingHorizontal: 10, paddingVertical: 4 },
+  layoutBtnActive: { backgroundColor: T.surfaceAlt },
+  layoutText: { fontSize: 12, fontWeight: "500" },
+  fgText: { color: T.fg },
+  faintText: { color: T.fgFaint },
+  filterBtn: {
+    height: 28,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+  },
+  filterActive: { borderColor: T.accent, backgroundColor: T.accentSoft },
+  filterIdle: { borderColor: T.border, backgroundColor: "transparent" },
+  filterText: { fontSize: 12, fontWeight: "500" },
+  accentText: { color: T.accent },
+  mutedText: { color: T.fgMuted },
+  diffWrap: { flex: 1, borderTopWidth: 1, borderColor: T.border },
+  center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
+  emptyEmoji: { fontSize: 40 },
+  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: T.fg },
+  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: T.fgMuted },
+  // Transparent, borderless bar to match the floating-composer look elsewhere.
+  footer: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+  },
+  input: {
+    maxHeight: 90,
+    minHeight: 40,
+    borderRadius: 16,
+    backgroundColor: T.surfaceAlt,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    fontSize: 14,
+    color: T.fg,
+  },
+  actionsRow: { marginTop: 8, flexDirection: "row", gap: 8 },
+  commitBtn: {
+    height: 36,
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    backgroundColor: T.accent,
+  },
+  opacity40: { opacity: 0.4 },
+  opacity50: { opacity: 0.5 },
+  commitText: { fontSize: 13, fontWeight: "600", color: T.onAccent },
+  prGroup: {
+    flex: 1,
+    flexDirection: "row",
+    overflow: "hidden",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: T.border,
+    backgroundColor: T.surfaceAlt,
+  },
+  prBtn: {
+    height: 36,
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  prChevron: {
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    borderLeftWidth: 1,
+    borderColor: T.border,
+    paddingHorizontal: 8,
+  },
+  pressedHover: { backgroundColor: T.surfaceHover },
+  btnLabel: { fontSize: 13, fontWeight: "500", color: T.fgMuted },
+  secondaryBtn: {
+    height: 36,
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: T.border,
+    backgroundColor: T.surfaceAlt,
+  },
+});

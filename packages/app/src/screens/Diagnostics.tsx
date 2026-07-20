@@ -6,14 +6,23 @@
  * "Set path…" editor that pins an absolute binary path the host then honors.
  */
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import { PounceIcon } from "../ui/native/Icon";
 import type { DoctorReport, PounceConfig } from "@pounce/shared";
 import { fetchDoctor, fetchHostConfig, saveHostConfig } from "../services/bridge";
 import { useDevices } from "../state/db/hooks";
 import { COLOR } from "../ui";
+import { T } from "../ui/theme";
 
 function Row({
   ok,
@@ -36,18 +45,18 @@ function Row({
   /** Extra content rendered under the hint (e.g. a path editor). */
   children?: React.ReactNode;
 }) {
-  const color = ok ? COLOR.success : warn ? "#d29922" : COLOR.danger;
+  const color = ok ? COLOR.success : warn ? T.warning : COLOR.danger;
   const icon = ok ? "checkmark-circle" : warn ? "alert-circle" : "close-circle";
   const showHint = !ok || warn || alwaysHint;
   return (
-    <View className="flex-row gap-2.5 border-b border-border px-4 py-3">
-      <Ionicons name={icon} size={18} color={color} style={{ marginTop: 1 }} />
-      <View className="flex-1">
-        <View className="flex-row items-center justify-between">
-          <Text className="text-[14px] font-medium text-fg">{title}</Text>
-          {detail ? <Text className="ml-2 font-mono text-[11px] text-fg-muted">{detail}</Text> : null}
+    <View style={s.row}>
+      <PounceIcon name={icon} size={18} color={color} style={{ marginTop: 1 }} />
+      <View style={s.flex1}>
+        <View style={s.rowHeader}>
+          <Text style={s.rowTitle}>{title}</Text>
+          {detail ? <Text style={s.rowDetail}>{detail}</Text> : null}
         </View>
-        {showHint && hint ? <Text className="mt-1 text-[12px] leading-[17px] text-fg-muted">{hint}</Text> : null}
+        {showHint && hint ? <Text style={s.rowHint}>{hint}</Text> : null}
         {children}
       </View>
     </View>
@@ -88,10 +97,10 @@ function PathEditor({
           setDraft(override ?? "");
           setOpen(true);
         }}
-        className="mt-1.5 flex-row items-center gap-1 active:opacity-60"
+        style={({ pressed }) => [s.editLink, pressed && s.pressed60]}
       >
-        <Ionicons name="create-outline" size={13} color={COLOR.accent} />
-        <Text className="text-[12px] font-medium text-accent">
+        <PounceIcon name="create-outline" size={13} color={COLOR.accent} />
+        <Text style={s.editLinkText}>
           {override ? "Change path" : "Set path manually"}
         </Text>
       </Pressable>
@@ -99,9 +108,9 @@ function PathEditor({
   }
 
   return (
-    <View className="mt-2 gap-2">
-      <Text className="text-[11px] leading-[16px] text-fg-muted">
-        Absolute path to the <Text className="font-mono text-fg">{bin}</Text> binary
+    <View style={s.editor}>
+      <Text style={s.editorHint}>
+        Absolute path to the <Text style={s.editorBin}>{bin}</Text> binary
         {detectedPath ? ` (auto-detected: ${detectedPath})` : ""}.
       </Text>
       <TextInput
@@ -112,19 +121,22 @@ function PathEditor({
         autoCapitalize="none"
         autoCorrect={false}
         spellCheck={false}
-        className="rounded-lg border border-border bg-bg-elevated px-3 py-2 font-mono text-[12px] text-fg"
+        style={s.editorInput}
       />
-      <View className="flex-row items-center gap-2">
+      <View style={s.editorActions}>
         <Pressable
           onPress={save}
           disabled={saving}
-          className="rounded-lg bg-accent px-3 py-1.5 active:opacity-80"
-          style={{ opacity: saving ? 0.6 : 1 }}
+          style={({ pressed }) => [s.saveBtn, pressed && s.pressed80, { opacity: saving ? 0.6 : 1 }]}
         >
-          <Text className="text-[12px] font-semibold text-white">{saving ? "Saving…" : "Save"}</Text>
+          <Text style={s.saveText}>{saving ? "Saving…" : "Save"}</Text>
         </Pressable>
-        <Pressable onPress={() => setOpen(false)} disabled={saving} className="px-2 py-1.5 active:opacity-60">
-          <Text className="text-[12px] text-fg-muted">Cancel</Text>
+        <Pressable
+          onPress={() => setOpen(false)}
+          disabled={saving}
+          style={({ pressed }) => [s.smallBtn, pressed && s.pressed60]}
+        >
+          <Text style={s.cancelText}>Cancel</Text>
         </Pressable>
         {override ? (
           <Pressable
@@ -139,9 +151,9 @@ function PathEditor({
               }
             }}
             disabled={saving}
-            className="ml-auto px-2 py-1.5 active:opacity-60"
+            style={({ pressed }) => [s.smallBtn, s.mlAuto, pressed && s.pressed60]}
           >
-            <Text className="text-[12px] text-danger">Clear</Text>
+            <Text style={s.clearText}>Clear</Text>
           </Pressable>
         ) : null}
       </View>
@@ -191,35 +203,35 @@ export default function DiagnosticsScreen() {
   };
 
   return (
-    <View className="flex-1 bg-bg" style={{ paddingTop: insets.top + 8 }}>
-      <View className="flex-row items-center justify-between px-4 pb-3">
-        <Text className="text-[22px] font-bold text-fg">Diagnostics</Text>
-        <View className="flex-row items-center gap-3">
-          <Pressable onPress={load} className="active:opacity-60">
-            <Ionicons name="refresh" size={18} color={COLOR.fgMuted} />
+    <View style={[s.root, { paddingTop: insets.top + 8 }]}>
+      <View style={s.headerRow}>
+        <Text style={s.headerTitle}>Diagnostics</Text>
+        <View style={s.headerActions}>
+          <Pressable onPress={load} style={({ pressed }) => pressed && s.pressed60}>
+            <PounceIcon name="refresh" size={18} color={COLOR.fgMuted} />
           </Pressable>
-          <Pressable onPress={() => router.back()} className="active:opacity-60">
-            <Text className="text-[15px] text-fg-muted">Done</Text>
+          <Pressable onPress={() => router.back()} style={({ pressed }) => pressed && s.pressed60}>
+            <Text style={s.doneLabel}>Done</Text>
           </Pressable>
         </View>
       </View>
 
       {loading ? (
-        <View className="flex-1 items-center justify-center">
+        <View style={s.center}>
           <ActivityIndicator color={COLOR.accent} />
         </View>
       ) : !report ? (
-        <View className="flex-1 items-center justify-center px-8">
-          <Ionicons name="medkit-outline" size={34} color={COLOR.fgFaint} />
-          <Text className="mt-3 text-center text-[15px] font-semibold text-fg">Can't reach this machine's engine</Text>
-          <Text className="mt-1 text-center text-[13px] leading-[19px] text-fg-muted">
+        <View style={s.empty}>
+          <PounceIcon name="medkit-outline" size={34} color={COLOR.fgFaint} />
+          <Text style={s.emptyTitle}>Can't reach this machine's engine</Text>
+          <Text style={s.emptyBody}>
             Pounce runs a small local service (needs Node.js). If it isn't starting, install Node.js and relaunch
             Pounce, then try again.
           </Text>
         </View>
       ) : (
-        <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
-          <Text className="px-4 pb-2 pt-1 text-[13px] leading-[19px] text-fg-muted">
+        <ScrollView style={s.flex1} contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
+          <Text style={s.summary}>
             {(report.sessionsTotal ?? 0) > 0
               ? `Found ${report.sessionsTotal} session${report.sessionsTotal === 1 ? "" : "s"} on ${report.host ?? "this Mac"}.`
               : `No agent sessions found on ${report.host ?? "this Mac"} yet — install an agent CLI below, then start a task.`}
@@ -327,7 +339,7 @@ export default function DiagnosticsScreen() {
           ) : null}
 
           {report.configFile ? (
-            <Text className="px-4 pt-3 text-[11px] leading-[16px] text-fg-faint">
+            <Text style={s.configNote}>
               Custom paths are saved to {report.configFile}.
             </Text>
           ) : null}
@@ -336,3 +348,79 @@ export default function DiagnosticsScreen() {
     </View>
   );
 }
+
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: T.bg },
+  flex1: { flex: 1 },
+  pressed60: { opacity: 0.6 },
+  pressed80: { opacity: 0.8 },
+  row: {
+    flexDirection: "row",
+    gap: 10,
+    borderBottomWidth: 1,
+    borderColor: T.border,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  rowHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  rowTitle: { fontSize: 14, fontWeight: "500", color: T.fg },
+  rowDetail: { marginLeft: 8, fontFamily: "JetBrainsMono", fontSize: 11, color: T.fgMuted },
+  rowHint: { marginTop: 4, fontSize: 12, lineHeight: 17, color: T.fgMuted },
+  editLink: { marginTop: 6, flexDirection: "row", alignItems: "center", gap: 4 },
+  editLinkText: { fontSize: 12, fontWeight: "500", color: T.accent },
+  editor: { marginTop: 8, gap: 8 },
+  editorHint: { fontSize: 11, lineHeight: 16, color: T.fgMuted },
+  editorBin: { fontFamily: "JetBrainsMono", color: T.fg },
+  editorInput: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: T.border,
+    backgroundColor: T.bgElevated,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontFamily: "JetBrainsMono",
+    fontSize: 12,
+    color: T.fg,
+  },
+  editorActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  saveBtn: {
+    borderRadius: 8,
+    backgroundColor: T.accent,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  saveText: { fontSize: 12, fontWeight: "600", color: T.onAccent },
+  smallBtn: { paddingHorizontal: 8, paddingVertical: 6 },
+  cancelText: { fontSize: 12, color: T.fgMuted },
+  mlAuto: { marginLeft: "auto" },
+  clearText: { fontSize: 12, color: T.danger },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  headerTitle: { fontSize: 22, fontWeight: "700", color: T.fg },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 12 },
+  doneLabel: { fontSize: 15, color: T.fgMuted },
+  center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
+  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: T.fg },
+  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, lineHeight: 19, color: T.fgMuted },
+  summary: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    paddingTop: 4,
+    fontSize: 13,
+    lineHeight: 19,
+    color: T.fgMuted,
+  },
+  configNote: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    fontSize: 11,
+    lineHeight: 16,
+    color: T.fgFaint,
+  },
+});

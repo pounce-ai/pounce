@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import {
   Animated,
   useAnimatedStyle,
@@ -10,6 +10,7 @@ import {
   withTiming,
 } from "./animation";
 import { AgentLogo, COLOR, fmtDuration } from "../ui";
+import { T } from "../ui/theme";
 
 function Dot({ delay }: { delay: number }) {
   const o = useSharedValue(0.3);
@@ -89,6 +90,14 @@ export function WorkingIndicator({
   tokens?: number;
 }) {
   const verb = useMemo(() => VERBS[hashStr(since ?? "") % VERBS.length], [since]);
+  // Hold the indicator back briefly so it doesn't compete with the sent
+  // message's entrance — instant replies never flash it at all.
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    setSettled(false);
+    const t = setTimeout(() => setSettled(true), 450);
+    return () => clearTimeout(t);
+  }, [since]);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!since) return;
@@ -101,14 +110,15 @@ export function WorkingIndicator({
     elapsed != null && Number.isFinite(elapsed)
       ? ` (${fmtDuration(elapsed)}${tokens && tokens > 0 ? ` · ↓ ${fmtTokens(tokens)} tokens` : ""})`
       : "";
+  if (!settled) return null;
   return (
-    <View className="flex-row items-center gap-2 py-1.5">
+    <View style={s.row}>
       {agent ? <AgentLogo agent={agent} size={14} /> : null}
-      <Text className="text-[12px] text-fg-muted">
+      <Text style={s.verb}>
         {verb}…
-        <Text className="text-fg-faint">{detail}</Text>
+        <Text style={s.detail}>{detail}</Text>
       </Text>
-      <View className="flex-row items-center gap-1">
+      <View style={s.dots}>
         <Dot delay={0} />
         <Dot delay={140} />
         <Dot delay={280} />
@@ -116,3 +126,10 @@ export function WorkingIndicator({
     </View>
   );
 }
+
+const s = StyleSheet.create({
+  row: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 },
+  verb: { fontSize: 12, color: T.fgMuted },
+  detail: { color: T.fgFaint },
+  dots: { flexDirection: "row", alignItems: "center", gap: 4 },
+});

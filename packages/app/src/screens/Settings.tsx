@@ -1,11 +1,11 @@
 import type { ComponentType, ReactNode } from "react";
 import { Modal } from "../components/AppModal";
 import { Component, useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
-import { Ionicons } from "@expo/vector-icons";
+import { PounceIcon } from "../ui/native/Icon";
 
 type ScannerProps = { onScan: (data: string) => void; onCancel: () => void };
 import {
@@ -33,12 +33,15 @@ import {
 import { savePairing } from "../services/runtime";
 import { type ParsedPairing, pairingHostName, parsePairing } from "../services/pairing";
 import { DeviceSetupCard } from "../components/DeviceSetupCard";
-import { cn, COLOR, DeviceIcon, fmtDuration } from "../ui";
+import { COLOR, DeviceIcon, fmtDuration, IS_DESKTOP } from "../ui";
+import { appearance$, setAppearance } from "../state/appearance";
+import { T } from "../ui/theme";
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const status = useSelector(() => connection$.status.get());
+  const appearanceMode = useSelector(() => appearance$.get());
   const devices = useDevices();
   // Subscribe to overrides so device rows re-render when a rename/emoji applies.
   useDeviceOverrides();
@@ -161,16 +164,19 @@ export default function SettingsScreen() {
     );
   }
 
-  return (
-    <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>
-      <View className="px-4 pb-2 pt-1">
-        <Text className="text-[26px] font-bold text-fg">Settings</Text>
-      </View>
-
-      <ScrollView className="flex-1 px-4" contentContainerStyle={{ gap: 14, paddingBottom: insets.bottom + 120 }}>
-        <View className="flex-row items-center gap-2">
-          <View className={cn("h-2 w-2 rounded-full", live ? "bg-success" : "bg-fg-faint")} />
-          <Text className="text-[13px] text-fg-muted">
+  // The ScrollView must be the screen's ROOT element on mobile: the native
+  // large-title header only links (and collapses) with the first child scroll
+  // view — wrapped in a View, the title never collapses and content scrolls
+  // over it. Desktop keeps its chrome wrapper.
+  const body = (
+      <ScrollView
+        style={s.scroll}
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={{ gap: 14, paddingBottom: insets.bottom + 16 }}
+      >
+        <View style={s.statusRow}>
+          <View style={[s.dot, live ? s.dotOn : s.dotOff]} />
+          <Text style={s.statusText}>
             {live ? "Connected" : "Not connected"}
           </Text>
         </View>
@@ -191,26 +197,26 @@ export default function SettingsScreen() {
 
         {/* Paired devices */}
         {devices.length ? (
-          <View className="gap-2">
-            <Text className="text-[12px] uppercase tracking-wide text-fg-faint">Your devices</Text>
+          <View style={s.section}>
+            <Text style={s.sectionLabel}>Your devices</Text>
             {devices.map((d) => (
-              <View key={d.id} className="overflow-hidden rounded-xl border border-border bg-surface">
-                <View className="flex-row items-center gap-2.5 px-3 py-2.5">
+              <View key={d.id} style={s.deviceCard}>
+                <View style={s.deviceRow}>
                   <DeviceIcon
                     name={d.name}
                     emoji={deviceEmoji(d.id)}
                     color={d.online ? COLOR.fg : COLOR.fgFaint}
                     size={18}
                   />
-                  <Text className="flex-1 text-[14px] font-medium text-fg" numberOfLines={1}>
+                  <Text style={s.deviceName} numberOfLines={1}>
                     {deviceLabel(d.id, d.name)}
                   </Text>
-                  <View className={cn("h-2 w-2 rounded-full", d.online ? "bg-success" : "bg-fg-faint")} />
-                  <Pressable onPress={() => setEditing(d)} hitSlop={8} className="active:opacity-60 pl-1">
-                    <Ionicons name="pencil-outline" size={15} color={COLOR.fgFaint} />
+                  <View style={[s.dot, d.online ? s.dotOn : s.dotOff]} />
+                  <Pressable onPress={() => setEditing(d)} hitSlop={8} style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}>
+                    <PounceIcon name="pencil-outline" size={15} color={COLOR.fgFaint} />
                   </Pressable>
-                  <Pressable onPress={() => forget(d)} hitSlop={8} className="active:opacity-60 pl-1">
-                    <Ionicons name="trash-outline" size={16} color={COLOR.fgFaint} />
+                  <Pressable onPress={() => forget(d)} hitSlop={8} style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}>
+                    <PounceIcon name="trash-outline" size={16} color={COLOR.fgFaint} />
                   </Pressable>
                 </View>
                 <DeviceDaemon hostId={d.id} hostName={deviceLabel(d.id, d.name)} online={d.online} />
@@ -219,54 +225,94 @@ export default function SettingsScreen() {
             <Pressable
               onPress={refresh}
               disabled={busy}
-              className="active:opacity-60 h-7 flex-row items-center gap-1.5 self-center pt-1"
+              style={({ pressed }) => [s.refreshBtn, pressed && s.pressed60]}
             >
               {syncState === "syncing" ? (
                 <ActivityIndicator size="small" color={COLOR.accent} />
               ) : syncState === "done" ? (
-                <Ionicons name="checkmark-circle" size={15} color={COLOR.success} />
+                <PounceIcon name="checkmark-circle" size={15} color={COLOR.success} />
               ) : null}
-              <Text className={cn("text-[13px]", syncState === "idle" ? "text-accent" : "text-fg-muted")}>
-                {syncState === "syncing" ? "Syncing…" : syncState === "done" ? "Up to date" : "Refresh"}
+              <Text style={[s.refreshLabel, syncState === "idle" ? s.accentText : s.mutedText]}>
+                {syncState === "syncing" ? "Syncing…" : syncState === "done" ? "Up to date" : "Sync now"}
               </Text>
             </Pressable>
+          </View>
+        ) : null}
+
+        {/* Appearance: mobile has the sun/moon header button; desktop has no
+            navigation bar, so it keeps the explicit chips. */}
+        {IS_DESKTOP ? (
+          <View style={s.section}>
+            <Text style={s.sectionLabel}>Appearance</Text>
+            <View style={s.appearanceRow}>
+              {(["system", "light", "dark"] as const).map((m) => (
+                <Pressable
+                  key={m}
+                  onPress={() => setAppearance(m)}
+                  style={({ pressed }) => [
+                    s.appearanceChip,
+                    appearanceMode === m ? s.appearanceChipOn : s.appearanceChipOff,
+                    pressed && s.pressed80,
+                  ]}
+                >
+                  <Text style={appearanceMode === m ? s.appearanceLabelOn : s.appearanceLabel}>
+                    {m === "system" ? "System" : m === "light" ? "Light" : "Dark"}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
           </View>
         ) : null}
 
         {/* Diagnostics (Pounce Doctor) */}
         <Pressable
           onPress={() => router.push("/diagnostics")}
-          className="active:opacity-80 flex-row items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-3"
+          style={({ pressed }) => [s.navRow, pressed && s.pressed80]}
         >
-          <Ionicons name="medkit-outline" size={18} color={COLOR.fgMuted} />
-          <Text className="flex-1 text-[14px] font-medium text-fg">Diagnostics</Text>
-          <Ionicons name="chevron-forward" size={15} color={COLOR.fgFaint} />
+          <PounceIcon name="medkit-outline" size={18} color={COLOR.fgMuted} />
+          <Text style={s.navLabel}>Diagnostics</Text>
+          <PounceIcon name="chevron-forward" size={15} color={COLOR.fgFaint} />
         </Pressable>
 
         {/* Sync history */}
         <Pressable
           onPress={() => router.push("/sync-history")}
-          className="active:opacity-80 flex-row items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-3"
+          style={({ pressed }) => [s.navRow, pressed && s.pressed80]}
         >
-          <Ionicons name="time-outline" size={18} color={COLOR.fgMuted} />
-          <Text className="flex-1 text-[14px] font-medium text-fg">Sync history</Text>
-          <Ionicons name="chevron-forward" size={15} color={COLOR.fgFaint} />
+          <PounceIcon name="time-outline" size={18} color={COLOR.fgMuted} />
+          <Text style={s.navLabel}>Sync history</Text>
+          <PounceIcon name="chevron-forward" size={15} color={COLOR.fgFaint} />
         </Pressable>
 
         {/* Help & FAQ */}
         <Pressable
           onPress={() => router.push("/help")}
-          className="active:opacity-80 flex-row items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-3"
+          style={({ pressed }) => [s.navRow, pressed && s.pressed80]}
         >
-          <Ionicons name="help-circle-outline" size={18} color={COLOR.fgMuted} />
-          <Text className="flex-1 text-[14px] font-medium text-fg">Help &amp; FAQ</Text>
-          <Ionicons name="chevron-forward" size={15} color={COLOR.fgFaint} />
+          <PounceIcon name="help-circle-outline" size={18} color={COLOR.fgMuted} />
+          <Text style={s.navLabel}>Help &amp; FAQ</Text>
+          <PounceIcon name="chevron-forward" size={15} color={COLOR.fgFaint} />
         </Pressable>
 
       </ScrollView>
+  );
 
+  if (IS_DESKTOP) {
+    return (
+      <View style={[s.root, { paddingTop: insets.top }]}>
+        <View style={s.desktopHeader}>
+          <Text style={s.title}>Settings</Text>
+        </View>
+        {body}
+        <DeviceEditModal device={editing} onClose={() => setEditing(null)} />
+      </View>
+    );
+  }
+  return (
+    <>
+      {body}
       <DeviceEditModal device={editing} onClose={() => setEditing(null)} />
-    </View>
+    </>
   );
 }
 
@@ -292,9 +338,9 @@ function DeviceDaemon({ hostId, hostName, online }: { hostId: string; hostName: 
     try {
       const r = await restartDaemon(hostId, force);
       if (r.busy) {
-        Alert.alert("Agent is busy", "A turn is running. Restart anyway? It will interrupt in-progress replies.", [
+        Alert.alert("Agent is busy", "A reply is still being written. Rescan anyway? It will interrupt it.", [
           { text: "Cancel", style: "cancel" },
-          { text: "Restart anyway", style: "destructive", onPress: () => void doRestart(true) },
+          { text: "Rescan anyway", style: "destructive", onPress: () => void doRestart(true) },
         ]);
         return;
       }
@@ -310,9 +356,9 @@ function DeviceDaemon({ hostId, hostName, online }: { hostId: string; hostName: 
   }, [hostId, hostName]);
 
   const confirm = () =>
-    Alert.alert("Restart agent daemon?", `On ${hostName}. Agents disconnect briefly while it re-indexes.`, [
+    Alert.alert("Rescan sessions?", `${hostName} will take a fresh look at its agent sessions. Takes a few seconds.`, [
       { text: "Cancel", style: "cancel" },
-      { text: "Restart", onPress: () => void doRestart(false) },
+      { text: "Rescan", onPress: () => void doRestart(false) },
     ]);
 
   // Only show for hosts whose bridge actually reports a running daemon. The
@@ -320,22 +366,22 @@ function DeviceDaemon({ hostId, hostName, online }: { hostId: string; hostName: 
   // the row above — so the destructive controls aren't crowded together.
   if (!info?.running) return null;
   return (
-    <View className="flex-row items-center gap-2 border-t border-border/60 px-3 py-2">
+    <View style={s.daemonRow}>
       <Pressable
         onPress={confirm}
         disabled={restarting}
         hitSlop={6}
-        className="active:opacity-70 flex-row items-center gap-1 rounded-full bg-surface-alt px-2.5 py-1"
+        style={({ pressed }) => [s.restartPill, pressed && s.pressed70]}
       >
         {restarting ? (
           <ActivityIndicator size="small" color={COLOR.accent} />
         ) : (
-          <Ionicons name="refresh" size={13} color={COLOR.accent} />
+          <PounceIcon name="refresh" size={13} color={COLOR.accent} />
         )}
-        <Text className="text-[12px] font-medium text-accent">{restarting ? "Restarting…" : "Restart"}</Text>
+        <Text style={s.restartLabel}>{restarting ? "Rescanning…" : "Rescan sessions"}</Text>
       </Pressable>
-      <Text className="flex-1 text-right text-[11px] text-fg-faint">
-        daemon · up {info.uptimeSecs != null ? fmtDuration(info.uptimeSecs) : "?"}
+      <Text style={s.uptime}>
+        watching for {info.uptimeSecs != null ? fmtDuration(info.uptimeSecs) : "?"}
       </Text>
     </View>
   );
@@ -368,16 +414,13 @@ function DeviceEditModal({ device, onClose }: { device: Device | null; onClose: 
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable className="flex-1 bg-black/50" onPress={onClose} />
-      <View
-        style={{ paddingBottom: insets.bottom + 16 }}
-        className="gap-4 rounded-t-3xl border-t border-border bg-bg-elevated px-4 pt-3"
-      >
-        <View className="h-1 w-10 self-center rounded-full bg-border" />
-        <Text className="text-[18px] font-bold text-fg">Edit device</Text>
+      <Pressable style={s.scrim} onPress={onClose} />
+      <View style={[s.sheet, { paddingBottom: insets.bottom + 16 }]}>
+        <View style={s.grabber} />
+        <Text style={s.sheetTitle}>Edit device</Text>
 
-        <View className="flex-row items-center gap-3">
-          <View className="h-12 w-12 items-center justify-center rounded-xl bg-surface-alt">
+        <View style={s.editRow}>
+          <View style={s.iconBox}>
             <DeviceIcon name={name || device.name} emoji={emoji} color={COLOR.fg} size={24} />
           </View>
           <TextInput
@@ -386,19 +429,16 @@ function DeviceEditModal({ device, onClose }: { device: Device | null; onClose: 
             placeholder={device.name}
             placeholderTextColor={COLOR.fgFaint}
             autoCapitalize="words"
-            className="flex-1 rounded-xl bg-surface-alt px-3 py-2.5 text-[15px] text-fg"
+            style={s.nameInput}
           />
         </View>
 
-        <View className="gap-2">
-          <Text className="text-[12px] uppercase tracking-wide text-fg-faint">Icon</Text>
-          <View className="flex-row flex-wrap gap-2">
+        <View style={s.section}>
+          <Text style={s.sectionLabel}>Icon</Text>
+          <View style={s.emojiWrap}>
             <Pressable
               onPress={() => setEmoji("")}
-              className={cn(
-                "h-11 w-11 items-center justify-center rounded-xl border",
-                emoji === "" ? "border-accent bg-accent/15" : "border-border bg-surface-alt",
-              )}
+              style={[s.emojiCell, emoji === "" ? s.emojiCellOn : s.emojiCellOff]}
             >
               <DeviceIcon name={device.name} color={COLOR.fg} size={20} />
             </Pressable>
@@ -406,12 +446,9 @@ function DeviceEditModal({ device, onClose }: { device: Device | null; onClose: 
               <Pressable
                 key={`${e}-${i}`}
                 onPress={() => setEmoji(e)}
-                className={cn(
-                  "h-11 w-11 items-center justify-center rounded-xl border",
-                  emoji === e ? "border-accent bg-accent/15" : "border-border bg-surface-alt",
-                )}
+                style={[s.emojiCell, emoji === e ? s.emojiCellOn : s.emojiCellOff]}
               >
-                <Text className="text-[20px]" allowFontScaling={false}>{e}</Text>
+                <Text style={s.emojiGlyph} allowFontScaling={false}>{e}</Text>
               </Pressable>
             ))}
           </View>
@@ -419,9 +456,9 @@ function DeviceEditModal({ device, onClose }: { device: Device | null; onClose: 
 
         <Pressable
           onPress={save}
-          className="active:opacity-90 mt-1 h-12 items-center justify-center rounded-xl bg-accent"
+          style={({ pressed }) => [s.saveBtn, pressed && s.pressed90]}
         >
-          <Text className="text-[15px] font-semibold text-white">Save</Text>
+          <Text style={s.saveLabel}>Save</Text>
         </Pressable>
       </View>
     </Modal>
@@ -446,3 +483,147 @@ class ScannerBoundary extends Component<BoundaryProps, { failed: boolean }> {
     return this.state.failed ? null : this.props.children;
   }
 }
+
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: T.bg },
+  desktopHeader: { paddingHorizontal: 16, paddingBottom: 8, paddingTop: 4 },
+  title: { fontSize: 26, fontWeight: "700", color: T.fg },
+  // Also paints the page bg — on mobile this ScrollView IS the screen root.
+  scroll: { flex: 1, paddingHorizontal: 16, backgroundColor: T.bg },
+  statusRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  statusText: { fontSize: 13, color: T.fgMuted },
+  dot: { height: 8, width: 8, borderRadius: 999 },
+  dotOn: { backgroundColor: T.success },
+  dotOff: { backgroundColor: T.fgFaint },
+  section: { gap: 8 },
+  sectionLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: T.fgFaint },
+  appearanceRow: { flexDirection: "row", gap: 8 },
+  appearanceChip: {
+    height: 32,
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+  },
+  appearanceChipOn: { borderColor: T.accent, backgroundColor: T.accentSoft },
+  appearanceChipOff: { borderColor: T.border, backgroundColor: T.surfaceAlt },
+  appearanceLabel: { fontSize: 13, color: T.fg },
+  appearanceLabelOn: { fontSize: 13, color: T.accent },
+  deviceCard: {
+    overflow: "hidden",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: T.border,
+    backgroundColor: T.surface,
+  },
+  deviceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  deviceName: { flex: 1, fontSize: 14, fontWeight: "500", color: T.fg },
+  iconBtn: { paddingLeft: 4 },
+  refreshBtn: {
+    height: 28,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "center",
+    paddingTop: 4,
+  },
+  refreshLabel: { fontSize: 13 },
+  accentText: { color: T.accent },
+  mutedText: { color: T.fgMuted },
+  navRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: T.border,
+    backgroundColor: T.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  navLabel: { flex: 1, fontSize: 14, fontWeight: "500", color: T.fg },
+  // was border-border/60 — T.border used as-is (no 60%-alpha token)
+  daemonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: T.border,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  restartPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 999,
+    backgroundColor: T.surfaceAlt,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  restartLabel: { fontSize: 12, fontWeight: "500", color: T.accent },
+  uptime: { flex: 1, textAlign: "right", fontSize: 11, color: T.fgFaint },
+  scrim: { flex: 1, backgroundColor: T.overlay },
+  sheet: {
+    gap: 16,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderTopWidth: 1,
+    borderTopColor: T.border,
+    backgroundColor: T.bgElevated,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
+  grabber: { height: 4, width: 40, alignSelf: "center", borderRadius: 999, backgroundColor: T.border },
+  sheetTitle: { fontSize: 18, fontWeight: "700", color: T.fg },
+  editRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  iconBox: {
+    height: 48,
+    width: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    backgroundColor: T.surfaceAlt,
+  },
+  nameInput: {
+    flex: 1,
+    borderRadius: 12,
+    backgroundColor: T.surfaceAlt,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: T.fg,
+  },
+  emojiWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  emojiCell: {
+    height: 44,
+    width: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  emojiCellOn: { borderColor: T.accent, backgroundColor: T.accentSoft },
+  emojiCellOff: { borderColor: T.border, backgroundColor: T.surfaceAlt },
+  emojiGlyph: { fontSize: 20 },
+  saveBtn: {
+    marginTop: 4,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    backgroundColor: T.accent,
+  },
+  saveLabel: { fontSize: 15, fontWeight: "600", color: T.onAccent },
+  pressed60: { opacity: 0.6 },
+  pressed70: { opacity: 0.7 },
+  pressed80: { opacity: 0.8 },
+  pressed90: { opacity: 0.9 },
+});

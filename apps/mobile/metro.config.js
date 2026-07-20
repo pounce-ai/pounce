@@ -1,6 +1,5 @@
-// Metro config: monorepo-aware + Uniwind (Tailwind build-time transform).
+// Metro config: monorepo-aware.
 const { getDefaultConfig } = require("expo/metro-config");
-const { withUniwindConfig } = require("uniwind/metro");
 const path = require("path");
 
 const projectRoot = __dirname;
@@ -15,8 +14,4 @@ config.resolver.nodeModulesPaths = [
 ];
 // Keep hierarchical lookup ON: bun uses symlinked node_modules.
 
-// withUniwindConfig must be the OUTERMOST metro wrapper.
-module.exports = withUniwindConfig(config, {
-  cssEntryFile: "./global.css",
-  dtsFile: "./uniwind-types.d.ts",
-});
+module.exports = config;

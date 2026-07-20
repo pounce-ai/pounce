@@ -1,8 +1,10 @@
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import type { Session } from "@pounce/shared";
 import { useLiveSessions, useProjectNames, useSessionsByLastActive } from "../state/db/hooks";
-import { AgentStatusIcon, cn } from "../ui";
+import { AgentStatusIcon } from "../ui";
+import { GlassCard } from "../ui/native/GlassCard";
+import { T } from "../ui/theme";
 
 /** How many fallback (most-recently-active) cards to show when nothing is live. */
 const FALLBACK_COUNT = 5;
@@ -28,29 +30,29 @@ export function LiveStrip() {
   const sessions = isLive ? live.slice(0, MAX_LIVE) : fallback;
   if (sessions.length === 0) return null;
   return (
-    <View className="pb-1 pt-1">
+    <View style={s.root}>
       <Pressable
         onPress={() => router.push("/sessions")}
-        className="active:opacity-70 flex-row items-center justify-between px-4 pb-2"
+        style={({ pressed }) => [s.headerRow, pressed && s.pressed70]}
       >
-        <View className="flex-row items-center gap-1.5">
-          {isLive ? <View className="h-1.5 w-1.5 rounded-full bg-success" /> : null}
-          <Text className="text-[12px] uppercase tracking-wide text-fg-faint">
+        <View style={s.headerLeft}>
+          {isLive ? <View style={s.liveDot} /> : null}
+          <Text style={s.headerLabel}>
             {isLive ? `Live · ${live.length}` : "Recent"}
           </Text>
         </View>
-        <Text className="text-[12px] text-fg-muted">See all →</Text>
+        <Text style={s.seeAll}>See all →</Text>
       </Pressable>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
       >
-        {sessions.map((s) => (
+        {sessions.map((sn) => (
           <LiveCard
-            key={s.id}
-            session={s}
-            repoName={repoNames[s.repoId] ?? s.repoId.replace(/^repo:/, "")}
+            key={sn.id}
+            session={sn}
+            repoName={repoNames[sn.repoId] ?? sn.repoId.replace(/^repo:/, "")}
           />
         ))}
       </ScrollView>
@@ -63,12 +65,10 @@ function LiveCard({ session, repoName }: { session: Session; repoName: string })
   return (
     <Pressable
       onPress={() => router.push(`/session/${session.id}`)}
-      className={cn(
-        "active:bg-surface-hover w-[150px] rounded-2xl border border-border bg-surface p-3",
-        session.needsAttention && "border-warning/40",
-      )}
+      style={({ pressed }) => pressed && s.pressed70}
     >
-      <View className="flex-row items-center gap-1.5">
+      <GlassCard radius={14} style={[s.card, session.needsAttention && s.cardNeeds]}>
+      <View style={s.cardIconRow}>
         {/* Never animates: this strip is a shortcut, not a status board. */}
         <AgentStatusIcon agent={session.agent} activity={session.activity} size={14} animated={false} />
       </View>
@@ -76,14 +76,39 @@ function LiveCard({ session, repoName }: { session: Session; repoName: string })
           height and pin the repo name to a consistent baseline across the strip. */}
       <Text
         numberOfLines={2}
-        style={{ minHeight: TITLE_LINE_HEIGHT * 2, lineHeight: TITLE_LINE_HEIGHT }}
-        className="mt-2 text-[13px] font-semibold text-fg"
+        style={[s.cardTitle, { minHeight: TITLE_LINE_HEIGHT * 2, lineHeight: TITLE_LINE_HEIGHT }]}
       >
         {session.title}
       </Text>
-      <Text numberOfLines={1} className="mt-1.5 text-[11px] text-fg-faint">
+      <Text numberOfLines={1} style={s.cardRepo}>
         {repoName}
       </Text>
+      </GlassCard>
     </Pressable>
   );
 }
+
+const s = StyleSheet.create({
+  root: { paddingBottom: 4, paddingTop: 4 },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  headerLeft: { flexDirection: "row", alignItems: "center", gap: 6 },
+  liveDot: { height: 6, width: 6, borderRadius: 999, backgroundColor: T.success },
+  headerLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: T.fgFaint },
+  seeAll: { fontSize: 12, color: T.fgMuted },
+  card: {
+    width: 150,
+    padding: 12,
+  },
+  // warning at 40% — no soft-warning token in T; literal from the warning hex.
+  cardNeeds: { borderWidth: 1, borderColor: "rgba(210, 153, 34, 0.4)" },
+  cardIconRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  cardTitle: { marginTop: 8, fontSize: 13, fontWeight: "600", color: T.fg },
+  cardRepo: { marginTop: 6, fontSize: 11, color: T.fgFaint },
+  pressed70: { opacity: 0.7 },
+});

@@ -1,4 +1,4 @@
-// Metro config: out-of-tree desktop platforms (rnx-kit) + Expo + Uniwind.
+// Metro config: out-of-tree desktop platforms (rnx-kit) + Expo.
 //
 // The desktop app renders the SAME sources as mobile (packages/app); platform
 // divergence lives in .macos/.windows platform files inside that package, so
@@ -8,7 +8,6 @@
 // mobile's newer react/react-native, which must never leak into this bundle.
 const { getDefaultConfig } = require("@expo/metro-config");
 const { makeMetroConfig } = require("@rnx-kit/metro-config");
-const { withUniwindConfig } = require("uniwind/metro");
 const path = require("path");
 
 const projectRoot = __dirname;
@@ -92,8 +91,4 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   return next(context, moduleName, platform);
 };
 
-// withUniwindConfig must be the OUTERMOST metro wrapper.
-module.exports = withUniwindConfig(config, {
-  cssEntryFile: "./global.css",
-  dtsFile: "./uniwind-types.d.ts",
-});
+module.exports = config;

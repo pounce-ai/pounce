@@ -76,7 +76,5 @@
     "App.tsx",
     "index.ts",
     "src",
-    "declarations.d.ts",
-    "uniwind-types.d.ts"
   ]
 }

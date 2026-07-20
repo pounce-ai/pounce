@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { connectBridge } from "../services/bridge";
 import { pairingHostName } from "../services/pairing";
 import { savePairing } from "../services/runtime";
 import { COLOR } from "../ui";
+import { T } from "../ui/theme";
 
 /**
  * Deep-link target for `pounce://connect?url=…&token=…[&node=…&relay=…&host=…]`
@@ -46,7 +47,7 @@ export default function ConnectScreen() {
       if (ok) {
         const { registerForPush } = await import("../services/push");
         void registerForPush();
-        router.replace("/(app)/(tabs)");
+        router.replace("/"); // tabs home — group-free so mobile ((main) group) and the desktop shim both resolve it
       } else {
         setError(
           node
@@ -58,23 +59,23 @@ export default function ConnectScreen() {
   }, [url, token, node, relay, host]);
 
   return (
-    <View className="flex-1 items-center justify-center bg-bg px-8">
+    <View style={s.root}>
       {error ? (
         <>
-          <Text className="text-[40px]">🔌</Text>
-          <Text className="mt-3 text-center text-[16px] font-semibold text-fg">Pairing failed</Text>
-          <Text className="mt-1 text-center text-[13px] text-fg-muted">{error}</Text>
+          <Text style={s.emoji}>🔌</Text>
+          <Text style={s.title}>Pairing failed</Text>
+          <Text style={s.body}>{error}</Text>
           <Pressable
-            onPress={() => router.replace("/(app)/(tabs)")}
-            className="active:opacity-80 mt-6 rounded-xl bg-surface-alt px-5 py-2.5"
+            onPress={() => router.replace("/")}
+            style={({ pressed }) => [s.continueBtn, pressed && s.pressed80]}
           >
-            <Text className="text-[14px] font-medium text-fg">Continue anyway</Text>
+            <Text style={s.continueLabel}>Continue anyway</Text>
           </Pressable>
         </>
       ) : (
         <>
           <ActivityIndicator color={COLOR.accent} />
-          <Text className="mt-4 text-center text-[14px] text-fg-muted" numberOfLines={1}>
+          <Text style={s.pairingText} numberOfLines={1}>
             Pairing with {host || url}…
           </Text>
         </>
@@ -82,3 +83,26 @@ export default function ConnectScreen() {
     </View>
   );
 }
+
+const s = StyleSheet.create({
+  root: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: T.bg,
+    paddingHorizontal: 32,
+  },
+  emoji: { fontSize: 40 },
+  title: { marginTop: 12, textAlign: "center", fontSize: 16, fontWeight: "600", color: T.fg },
+  body: { marginTop: 4, textAlign: "center", fontSize: 13, color: T.fgMuted },
+  continueBtn: {
+    marginTop: 24,
+    borderRadius: 12,
+    backgroundColor: T.surfaceAlt,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  pressed80: { opacity: 0.8 },
+  continueLabel: { fontSize: 14, fontWeight: "500", color: T.fg },
+  pairingText: { marginTop: 16, textAlign: "center", fontSize: 14, color: T.fgMuted },
+});

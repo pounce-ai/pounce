@@ -1,5 +1,6 @@
-import { Text } from "react-native";
+import { StyleSheet, Text } from "react-native";
 import type { ThreadUsage } from "../services/bridge";
+import { T } from "../ui/theme";
 
 /** 165_000_000 → "165M", 1_200_000 → "1.2M", 845_000 → "845K", 900 → "900". */
 function fmtTokens(n: number): string {
@@ -35,9 +36,13 @@ export function ThreadUsageSummary({ usage }: { usage: ThreadUsage | null }) {
   const cost =
     usage.cost != null ? `${usage.costComplete === false ? "~" : ""}${fmtCost(usage.cost)}` : null;
   return (
-    <Text numberOfLines={1} className="text-[11px] text-fg-faint">
+    <Text numberOfLines={1} style={s.summary}>
       {fmtTokens(usage.tokens.total)}
       {cost ? ` · ${cost}` : ""}
     </Text>
   );
 }
+
+const s = StyleSheet.create({
+  summary: { fontSize: 11, color: T.fgFaint },
+});

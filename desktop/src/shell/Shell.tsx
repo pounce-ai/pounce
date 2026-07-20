@@ -9,11 +9,12 @@
  * router calls.
  */
 import type { ComponentType } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import { nav$, router, RouteParamsProvider } from "../shims/router";
 import { COLOR } from "@pounce/app/ui";
+import { T } from "@pounce/app/ui/theme";
 import { Sidebar } from "./Sidebar";
 import SessionScreen from "@pounce/app/screens/Session";
 import SessionsScreen from "@pounce/app/screens/Sessions";
@@ -48,18 +49,21 @@ const MODALS: Record<string, { component: ComponentType; width: number; height: 
 
 function EmptyState() {
   return (
-    <View className="flex-1 items-center justify-center gap-3 bg-bg">
+    <View style={s.empty}>
       <Ionicons name="paw-outline" size={44} color={COLOR.fgFaint} />
-      <Text className="text-[15px] text-fg-muted">Select a thread to follow along</Text>
+      <Text style={s.emptyText}>Select a thread to follow along</Text>
       <Pressable
         onPress={() => router.push("/new")}
-        className="active:opacity-80 mt-1 h-9 flex-row items-center gap-1.5 rounded-full bg-accent px-4"
+        style={({ pressed }) => [s.newTaskBtn, pressed && s.pressed80]}
       >
         <Ionicons name="add" size={16} color="#fff" />
-        <Text className="text-[13px] font-semibold text-white">New task</Text>
+        <Text style={s.newTaskLabel}>New task</Text>
       </Pressable>
-      <Pressable onPress={() => router.push("/pair")} className="active:opacity-70 mt-1">
-        <Text className="text-[12px] text-fg-faint">Pair your phone →</Text>
+      <Pressable
+        onPress={() => router.push("/pair")}
+        style={({ pressed }) => [s.pairLink, pressed && s.pressed70]}
+      >
+        <Text style={s.pairLinkText}>Pair your phone →</Text>
       </Pressable>
     </View>
   );
@@ -71,12 +75,12 @@ export function Shell() {
   const entry = modal ? MODALS[modal.path] : null;
 
   return (
-    <View className="flex-1 flex-row bg-bg">
-      <View style={{ width: 300 }} className="border-r border-border">
+    <View style={s.root}>
+      <View style={s.sidebar}>
         <Sidebar />
       </View>
 
-      <View className="flex-1">
+      <View style={s.detail}>
         {detail ? (
           <RouteParamsProvider key={detail.params.id ?? "detail"} params={detail.params}>
             <SessionScreen />
@@ -87,14 +91,10 @@ export function Shell() {
       </View>
 
       {modal && entry ? (
-        <View className="absolute inset-0 items-center justify-center">
-          <Pressable
-            className="absolute inset-0 bg-black/60"
-            onPress={() => nav$.modal.set(null)}
-          />
+        <View style={s.modalHost}>
+          <Pressable style={s.modalScrim} onPress={() => nav$.modal.set(null)} />
           <View
-            style={{ width: entry.width, height: entry.height, maxHeight: "88%" }}
-            className="overflow-hidden rounded-xl border border-border-strong bg-bg"
+            style={[s.modalCard, { width: entry.width, height: entry.height, maxHeight: "88%" }]}
           >
             <RouteParamsProvider
               key={`${modal.path}:${JSON.stringify(modal.params)}`}
@@ -108,3 +108,56 @@ export function Shell() {
     </View>
   );
 }
+
+const s = StyleSheet.create({
+  root: { flex: 1, flexDirection: "row", backgroundColor: T.bg },
+  sidebar: { width: 300, borderRightWidth: 1, borderColor: T.border },
+  detail: { flex: 1 },
+  empty: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    backgroundColor: T.bg,
+  },
+  emptyText: { fontSize: 15, color: T.fgMuted },
+  newTaskBtn: {
+    marginTop: 4,
+    height: 36,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    backgroundColor: T.accent,
+    paddingHorizontal: 16,
+  },
+  newTaskLabel: { fontSize: 13, fontWeight: "600", color: T.onAccent },
+  pairLink: { marginTop: 4 },
+  pairLinkText: { fontSize: 12, color: T.fgFaint },
+  pressed70: { opacity: 0.7 },
+  pressed80: { opacity: 0.8 },
+  modalHost: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalScrim: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: T.overlay,
+  },
+  modalCard: {
+    overflow: "hidden",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: T.borderStrong,
+    backgroundColor: T.bg,
+  },
+});

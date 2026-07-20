@@ -75,12 +75,3 @@ export function classifyLine(line: string): LineKind {
   if (line.startsWith("-")) return "del";
   return "ctx";
 }
-
-/** Tailwind classes per diff-line kind (shared by every native renderer). */
-export const LINE_CLASS: Record<LineKind, string> = {
-  header: "text-fg-faint",
-  hunk: "text-info",
-  add: "bg-diff-add-bg text-diff-add-fg",
-  del: "bg-diff-del-bg text-diff-del-fg",
-  ctx: "text-fg-muted",
-};

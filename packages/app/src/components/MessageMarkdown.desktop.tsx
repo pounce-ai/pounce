@@ -8,14 +8,15 @@
  * mobile implementation, including shell "Run" cards via runnableBlocks.
  */
 import { Fragment, useMemo, type ReactNode } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View, type TextStyle } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { cn, COLOR } from "../ui";
+import { COLOR } from "../ui";
+import { T } from "../ui/theme";
 import { splitCodeBlocks } from "./runnableBlocks";
 
-const BASE: Record<"user" | "assistant", string> = {
-  user: "text-[15px] leading-[21px] text-white",
-  assistant: "text-[15px] leading-[21px] text-fg",
+const BASE: Record<"user" | "assistant", TextStyle> = {
+  user: { fontSize: 15, lineHeight: 21, color: T.onAccent },
+  assistant: { fontSize: 15, lineHeight: 21, color: T.fg },
 };
 
 export function MessageMarkdown({
@@ -31,6 +32,7 @@ export function MessageMarkdown({
   onRun?: (command: string) => void;
 }) {
   const base = BASE[role];
+  const onUser = role === "user";
   // Settled assistant turns get code blocks lifted out (Run cards); streaming
   // turns render on the single path (incomplete fences would mis-split).
   const highlight = role === "assistant" && !streaming;
@@ -38,9 +40,9 @@ export function MessageMarkdown({
 
   if (!highlight || !segments || (segments.length === 1 && segments[0].type === "md")) {
     return (
-      <View className="gap-2">
-        <Blocks text={text} baseClass={base} />
-        {streaming ? <Text className="text-accent">▋</Text> : null}
+      <View style={s.gap2}>
+        <Blocks text={text} baseStyle={base} onUser={onUser} />
+        {streaming ? <Text style={s.cursor}>▋</Text> : null}
       </View>
     );
   }
@@ -55,7 +57,7 @@ export function MessageMarkdown({
             onRun={seg.runnable ? onRun : undefined}
           />
         ) : (
-          <Blocks key={`m${i}`} text={seg.text} baseClass={base} />
+          <Blocks key={`m${i}`} text={seg.text} baseStyle={base} onUser={onUser} />
         ),
       )}
     </View>
@@ -73,20 +75,20 @@ function CodeCard({
   onRun?: (command: string) => void;
 }) {
   return (
-    <View className="overflow-hidden rounded-lg border border-border bg-bg">
-      <View className="flex-row items-center justify-between px-3 py-1">
-        <Text className="text-[10.5px] uppercase tracking-wide text-fg-faint">{lang || "code"}</Text>
+    <View style={s.codeCard}>
+      <View style={s.codeCardHeader}>
+        <Text style={s.codeLang}>{lang || "code"}</Text>
         {onRun ? (
           <Pressable
             onPress={() => onRun(code)}
-            className="active:opacity-70 flex-row items-center gap-1 rounded-md bg-surface-alt px-2 py-0.5"
+            style={({ pressed }) => [s.runBtn, pressed && s.pressed70]}
           >
             <Ionicons name="play" size={10} color={COLOR.success} />
-            <Text className="text-[11px] font-medium text-fg">Run</Text>
+            <Text style={s.runLabel}>Run</Text>
           </Pressable>
         ) : null}
       </View>
-      <Text selectable className="px-3 pb-2 font-mono text-[12.5px] leading-[18px] text-fg-muted">
+      <Text selectable style={s.codeCardBody}>
         {code}
       </Text>
     </View>
@@ -95,7 +97,12 @@ function CodeCard({
 
 // --- tiny markdown block renderer (pure JS/RN) ---
 
-function renderInline(text: string, keyBase: string, baseClass: string): ReactNode[] {
+function renderInline(
+  text: string,
+  keyBase: string,
+  baseStyle: TextStyle,
+  onUser: boolean,
+): ReactNode[] {
   const out: ReactNode[] = [];
   const parts = text.split(/(`[^`\n]+`)/g);
   parts.forEach((part, pi) => {
@@ -103,16 +110,15 @@ function renderInline(text: string, keyBase: string, baseClass: string): ReactNo
     if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
       // Purple chip so inline code pops out of prose (white-on-white/20 inside
       // the accent user bubble, where purple-on-purple would vanish).
-      const onUser = baseClass.includes("text-white");
       out.push(
         <Text
           key={`${keyBase}:c${pi}`}
-          className="rounded px-1 font-mono text-[13px]"
-          style={
+          style={[
+            s.inlineCode,
             onUser
               ? { color: "#f4f2ff", backgroundColor: "rgba(255,255,255,0.20)" }
-              : { color: "#a99cf5", backgroundColor: "rgba(124,111,240,0.16)" }
-          }
+              : { color: "#a99cf5", backgroundColor: "rgba(124,111,240,0.16)" },
+          ]}
         >
           {part.slice(1, -1)}
         </Text>,
@@ -126,7 +132,7 @@ function renderInline(text: string, keyBase: string, baseClass: string): ReactNo
     while ((m = rx.exec(part)) !== null) {
       if (m.index > last) {
         out.push(
-          <Text key={`${keyBase}:t${pi}:${si++}`} className={baseClass}>
+          <Text key={`${keyBase}:t${pi}:${si++}`} style={baseStyle}>
             {part.slice(last, m.index)}
           </Text>,
         );
@@ -134,19 +140,19 @@ function renderInline(text: string, keyBase: string, baseClass: string): ReactNo
       const tok = m[0];
       if (tok.startsWith("**")) {
         out.push(
-          <Text key={`${keyBase}:b${pi}:${si++}`} className={cn(baseClass, "font-semibold")}>
+          <Text key={`${keyBase}:b${pi}:${si++}`} style={[baseStyle, s.semibold]}>
             {tok.slice(2, -2)}
           </Text>,
         );
       } else if (tok.startsWith("[")) {
         out.push(
-          <Text key={`${keyBase}:l${pi}:${si++}`} className={cn(baseClass, "text-info underline")}>
+          <Text key={`${keyBase}:l${pi}:${si++}`} style={[baseStyle, s.link]}>
             {tok.slice(1, tok.indexOf("]"))}
           </Text>,
         );
       } else {
         out.push(
-          <Text key={`${keyBase}:i${pi}:${si++}`} className={cn(baseClass, "italic")}>
+          <Text key={`${keyBase}:i${pi}:${si++}`} style={[baseStyle, s.italic]}>
             {tok.slice(1, -1)}
           </Text>,
         );
@@ -155,7 +161,7 @@ function renderInline(text: string, keyBase: string, baseClass: string): ReactNo
     }
     if (last < part.length) {
       out.push(
-        <Text key={`${keyBase}:t${pi}:end`} className={baseClass}>
+        <Text key={`${keyBase}:t${pi}:end`} style={baseStyle}>
           {part.slice(last)}
         </Text>,
       );
@@ -223,51 +229,63 @@ function parseBlocks(src: string): Block[] {
   return blocks;
 }
 
-const HEADING_CLASS: Record<number, string> = {
-  1: "text-[19px] font-bold",
-  2: "text-[17px] font-bold",
-  3: "text-[15.5px] font-semibold",
-  4: "text-[15px] font-semibold",
+const HEADING_STYLE: Record<number, TextStyle> = {
+  1: { fontSize: 19, fontWeight: "700" },
+  2: { fontSize: 17, fontWeight: "700" },
+  3: { fontSize: 15.5, fontWeight: "600" },
+  4: { fontSize: 15, fontWeight: "600" },
 };
 
-function Blocks({ text, baseClass }: { text: string; baseClass: string }) {
+function Blocks({
+  text,
+  baseStyle,
+  onUser,
+}: {
+  text: string;
+  baseStyle: TextStyle;
+  onUser: boolean;
+}) {
   const blocks = parseBlocks(text);
   return (
-    <View className="gap-2">
+    <View style={s.gap2}>
       {blocks.map((b, bi) => {
         switch (b.kind) {
           case "code":
             return (
-              <View key={bi} className="rounded-lg bg-bg px-3 py-2">
-                <Text selectable className="font-mono text-[12.5px] leading-[18px] text-fg-muted">
+              <View key={bi} style={s.codeBlock}>
+                <Text selectable style={s.codeText}>
                   {b.lines.join("\n")}
                 </Text>
               </View>
             );
-          case "heading":
+          case "heading": {
+            const headingStyle: TextStyle = { ...HEADING_STYLE[b.level], color: T.fg };
             return (
-              <Text key={bi} className={cn(HEADING_CLASS[b.level], "text-fg")}>
-                {renderInline(b.text, `h${bi}`, cn(HEADING_CLASS[b.level], "text-fg"))}
+              <Text key={bi} style={headingStyle}>
+                {renderInline(b.text, `h${bi}`, headingStyle, onUser)}
               </Text>
             );
-          case "quote":
+          }
+          case "quote": {
+            const quoteStyle: TextStyle = { ...baseStyle, color: T.fgMuted };
             return (
-              <View key={bi} className="border-l-2 border-border-strong pl-3">
-                <Text className={cn(baseClass, "text-fg-muted")}>
-                  {renderInline(b.lines.join("\n"), `q${bi}`, cn(baseClass, "text-fg-muted"))}
+              <View key={bi} style={s.quote}>
+                <Text style={quoteStyle}>
+                  {renderInline(b.lines.join("\n"), `q${bi}`, quoteStyle, onUser)}
                 </Text>
               </View>
             );
+          }
           case "list":
             return (
-              <View key={bi} className="gap-1">
+              <View key={bi} style={s.gap1}>
                 {b.items.map((it, ii) => (
-                  <View key={ii} className="flex-row gap-2 pl-1">
-                    <Text className={cn(baseClass, "text-fg-faint")}>{it.marker}</Text>
-                    {/* flexShrink (not flex-1): flex-basis 0 contributes zero
+                  <View key={ii} style={s.listItem}>
+                    <Text style={[baseStyle, s.marker]}>{it.marker}</Text>
+                    {/* flexShrink (not flex:1): flex-basis 0 contributes zero
                         intrinsic width, collapsing the bubble to a skinny column. */}
-                    <Text style={{ flexShrink: 1 }} className={baseClass}>
-                      {renderInline(it.text, `l${bi}:${ii}`, baseClass)}
+                    <Text style={[{ flexShrink: 1 }, baseStyle]}>
+                      {renderInline(it.text, `l${bi}:${ii}`, baseStyle, onUser)}
                     </Text>
                   </View>
                 ))}
@@ -275,11 +293,11 @@ function Blocks({ text, baseClass }: { text: string; baseClass: string }) {
             );
           case "para":
             return (
-              <Text key={bi} className={baseClass}>
+              <Text key={bi} style={baseStyle}>
                 {b.lines.map((ln, li) => (
                   <Fragment key={li}>
                     {li > 0 ? "\n" : ""}
-                    {renderInline(ln, `p${bi}:${li}`, baseClass)}
+                    {renderInline(ln, `p${bi}:${li}`, baseStyle, onUser)}
                   </Fragment>
                 ))}
               </Text>
@@ -289,3 +307,46 @@ function Blocks({ text, baseClass }: { text: string; baseClass: string }) {
     </View>
   );
 }
+
+const s = StyleSheet.create({
+  gap1: { gap: 4 },
+  gap2: { gap: 8 },
+  cursor: { color: T.accent },
+  codeCard: { overflow: "hidden", borderRadius: 8, borderWidth: 1, borderColor: T.border, backgroundColor: T.bg },
+  codeCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  codeLang: { fontSize: 10.5, textTransform: "uppercase", letterSpacing: 0.5, color: T.fgFaint },
+  runBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 6,
+    backgroundColor: T.surfaceAlt,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  runLabel: { fontSize: 11, fontWeight: "500", color: T.fg },
+  codeCardBody: {
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    fontFamily: "JetBrainsMono",
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: T.fgMuted,
+  },
+  pressed70: { opacity: 0.7 },
+  inlineCode: { borderRadius: 4, paddingHorizontal: 4, fontFamily: "JetBrainsMono", fontSize: 13 },
+  semibold: { fontWeight: "600" },
+  italic: { fontStyle: "italic" },
+  link: { color: T.info, textDecorationLine: "underline" },
+  codeBlock: { borderRadius: 8, backgroundColor: T.bg, paddingHorizontal: 12, paddingVertical: 8 },
+  codeText: { fontFamily: "JetBrainsMono", fontSize: 12.5, lineHeight: 18, color: T.fgMuted },
+  quote: { borderLeftWidth: 2, borderColor: T.borderStrong, paddingLeft: 12 },
+  listItem: { flexDirection: "row", gap: 8, paddingLeft: 4 },
+  marker: { color: T.fgFaint },
+});

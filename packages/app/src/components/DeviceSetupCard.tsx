@@ -6,9 +6,10 @@
  * agent host, so its card offers resync/reset instead — see
  * DeviceSetupCard.desktop.tsx.
  */
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { cn, COLOR, INPUT_TWEAKS } from "../ui";
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { PounceIcon } from "../ui/native/Icon";
+import { COLOR, INPUT_TWEAKS } from "../ui";
+import { T } from "../ui/theme";
 
 export interface DeviceSetupCardProps {
   busy: boolean;
@@ -36,26 +37,26 @@ export function DeviceSetupCard({
   onSync,
 }: DeviceSetupCardProps) {
   return (
-    <View className="gap-3 rounded-2xl border border-border bg-surface p-4">
-      <Text className="text-[17px] font-semibold text-fg">Pair a device</Text>
-      <Text className="text-[13px] leading-[19px] text-fg-muted">
+    <View style={s.card}>
+      <Text style={s.cardTitle}>Pair a device</Text>
+      <Text style={s.cardBody}>
         On your computer, show its pairing code, then scan it here. Once paired, your sessions sync automatically.
       </Text>
       <Pressable
         onPress={onScan}
         disabled={busy}
-        className={cn("active:opacity-90 mt-1 h-12 flex-row items-center justify-center gap-2 rounded-xl bg-accent", busy && "opacity-50")}
+        style={({ pressed }) => [s.scanBtn, busy && s.disabled50, pressed && s.pressed90]}
       >
-        <Ionicons name="qr-code-outline" size={18} color="#fff" />
-        <Text className="text-[15px] font-semibold text-white">Scan pairing code</Text>
+        <PounceIcon name="qr-code-outline" size={18} color={T.onAccent} />
+        <Text style={s.scanText}>Scan pairing code</Text>
       </Pressable>
-      <Pressable onPress={() => setManual((m) => !m)} className="active:opacity-60 self-center pt-1">
-        <Text className="text-[13px] text-fg-muted">{manual ? "Hide manual entry" : "Enter code manually"}</Text>
+      <Pressable onPress={() => setManual((m) => !m)} style={({ pressed }) => [s.manualToggle, pressed && s.pressed60]}>
+        <Text style={s.manualToggleText}>{manual ? "Hide manual entry" : "Enter code manually"}</Text>
       </Pressable>
 
       {manual ? (
-        <View className="gap-2 border-t border-border pt-3">
-          <Text className="text-[12px] uppercase tracking-wide text-fg-faint">Address</Text>
+        <View style={s.manualSection}>
+          <Text style={s.fieldLabel}>Address</Text>
           <TextInput {...INPUT_TWEAKS}
             value={url}
             onChangeText={setUrl}
@@ -64,9 +65,9 @@ export function DeviceSetupCard({
             keyboardType="url"
             placeholder="http://192.168.1.6:8099"
             placeholderTextColor={COLOR.fgFaint}
-            className="rounded-xl bg-surface-alt px-3 py-2.5 font-mono text-[13px] text-fg"
+            style={s.input}
           />
-          <Text className="text-[12px] uppercase tracking-wide text-fg-faint">Code</Text>
+          <Text style={s.fieldLabel}>Code</Text>
           <TextInput {...INPUT_TWEAKS}
             value={token}
             onChangeText={setToken}
@@ -74,18 +75,74 @@ export function DeviceSetupCard({
             autoCorrect={false}
             placeholder="pairing code"
             placeholderTextColor={COLOR.fgFaint}
-            className="rounded-xl bg-surface-alt px-3 py-2.5 font-mono text-[13px] text-fg"
+            style={s.input}
           />
           <Pressable
             onPress={() => onSync({ url, token })}
             disabled={busy || !url.trim() || !token.trim()}
-            className={cn("active:opacity-90 mt-1 h-11 flex-row items-center justify-center gap-2 rounded-xl bg-surface-alt", (busy || !url.trim() || !token.trim()) && "opacity-40")}
+            style={({ pressed }) => [
+              s.syncBtn,
+              (busy || !url.trim() || !token.trim()) && s.disabled40,
+              pressed && s.pressed90,
+            ]}
           >
             {busy ? <ActivityIndicator size="small" color={COLOR.fgMuted} /> : null}
-            <Text className="text-[14px] font-semibold text-fg">{busy ? "Connecting…" : "Sync"}</Text>
+            <Text style={s.syncText}>{busy ? "Connecting…" : "Sync"}</Text>
           </Pressable>
         </View>
       ) : null}
     </View>
   );
 }
+
+const s = StyleSheet.create({
+  card: {
+    gap: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: T.border,
+    backgroundColor: T.surface,
+    padding: 16,
+  },
+  cardTitle: { fontSize: 17, fontWeight: "600", color: T.fg },
+  cardBody: { fontSize: 13, lineHeight: 19, color: T.fgMuted },
+  scanBtn: {
+    marginTop: 4,
+    height: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderRadius: 12,
+    backgroundColor: T.accent,
+  },
+  scanText: { fontSize: 15, fontWeight: "600", color: T.onAccent },
+  manualToggle: { alignSelf: "center", paddingTop: 4 },
+  manualToggleText: { fontSize: 13, color: T.fgMuted },
+  manualSection: { gap: 8, borderTopWidth: 1, borderColor: T.border, paddingTop: 12 },
+  fieldLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: T.fgFaint },
+  input: {
+    borderRadius: 12,
+    backgroundColor: T.surfaceAlt,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontFamily: "JetBrainsMono",
+    fontSize: 13,
+    color: T.fg,
+  },
+  syncBtn: {
+    marginTop: 4,
+    height: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderRadius: 12,
+    backgroundColor: T.surfaceAlt,
+  },
+  syncText: { fontSize: 14, fontWeight: "600", color: T.fg },
+  disabled40: { opacity: 0.4 },
+  disabled50: { opacity: 0.5 },
+  pressed60: { opacity: 0.6 },
+  pressed90: { opacity: 0.9 },
+});
