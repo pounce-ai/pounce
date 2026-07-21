@@ -6,10 +6,10 @@
  * agent host, so its card offers resync/reset instead — see
  * DeviceSetupCard.desktop.tsx.
  */
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { PounceIcon } from "../ui/native/Icon";
-import { COLOR, INPUT_TWEAKS } from "../ui";
-import { T } from "../ui/theme";
+import { INPUT_TWEAKS } from "../ui";
 
 export interface DeviceSetupCardProps {
   busy: boolean;
@@ -36,6 +36,7 @@ export function DeviceSetupCard({
   setToken,
   onSync,
 }: DeviceSetupCardProps) {
+  const { theme } = useUnistyles();
   return (
     <View style={s.card}>
       <Text style={s.cardTitle}>Pair a device</Text>
@@ -47,7 +48,7 @@ export function DeviceSetupCard({
         disabled={busy}
         style={({ pressed }) => [s.scanBtn, busy && s.disabled50, pressed && s.pressed90]}
       >
-        <PounceIcon name="qr-code-outline" size={18} color={T.onAccent} />
+        <PounceIcon name="qr-code-outline" size={18} color={theme.colors.onAccent} />
         <Text style={s.scanText}>Scan pairing code</Text>
       </Pressable>
       <Pressable onPress={() => setManual((m) => !m)} style={({ pressed }) => [s.manualToggle, pressed && s.pressed60]}>
@@ -64,7 +65,7 @@ export function DeviceSetupCard({
             autoCorrect={false}
             keyboardType="url"
             placeholder="http://192.168.1.6:8099"
-            placeholderTextColor={COLOR.fgFaint}
+            placeholderTextColor={theme.colors.fgFaint}
             style={s.input}
           />
           <Text style={s.fieldLabel}>Code</Text>
@@ -74,7 +75,7 @@ export function DeviceSetupCard({
             autoCapitalize="none"
             autoCorrect={false}
             placeholder="pairing code"
-            placeholderTextColor={COLOR.fgFaint}
+            placeholderTextColor={theme.colors.fgFaint}
             style={s.input}
           />
           <Pressable
@@ -86,7 +87,7 @@ export function DeviceSetupCard({
               pressed && s.pressed90,
             ]}
           >
-            {busy ? <ActivityIndicator size="small" color={COLOR.fgMuted} /> : null}
+            {busy ? <ActivityIndicator size="small" color={theme.colors.fgMuted} /> : null}
             <Text style={s.syncText}>{busy ? "Connecting…" : "Sync"}</Text>
           </Pressable>
         </View>
@@ -95,17 +96,17 @@ export function DeviceSetupCard({
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   card: {
     gap: 12,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
     padding: 16,
   },
-  cardTitle: { fontSize: 17, fontWeight: "600", color: T.fg },
-  cardBody: { fontSize: 13, lineHeight: 19, color: T.fgMuted },
+  cardTitle: { fontSize: 17, fontWeight: "600", color: theme.colors.fg },
+  cardBody: { fontSize: 13, lineHeight: 19, color: theme.colors.fgMuted },
   scanBtn: {
     marginTop: 4,
     height: 48,
@@ -114,21 +115,21 @@ const s = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
     borderRadius: 12,
-    backgroundColor: T.accent,
+    backgroundColor: theme.colors.accent,
   },
-  scanText: { fontSize: 15, fontWeight: "600", color: T.onAccent },
+  scanText: { fontSize: 15, fontWeight: "600", color: theme.colors.onAccent },
   manualToggle: { alignSelf: "center", paddingTop: 4 },
-  manualToggleText: { fontSize: 13, color: T.fgMuted },
-  manualSection: { gap: 8, borderTopWidth: 1, borderColor: T.border, paddingTop: 12 },
-  fieldLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: T.fgFaint },
+  manualToggleText: { fontSize: 13, color: theme.colors.fgMuted },
+  manualSection: { gap: 8, borderTopWidth: 1, borderColor: theme.colors.border, paddingTop: 12 },
+  fieldLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
   input: {
     borderRadius: 12,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontFamily: "JetBrainsMono",
     fontSize: 13,
-    color: T.fg,
+    color: theme.colors.fg,
   },
   syncBtn: {
     marginTop: 4,
@@ -138,11 +139,11 @@ const s = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
     borderRadius: 12,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
   },
-  syncText: { fontSize: 14, fontWeight: "600", color: T.fg },
+  syncText: { fontSize: 14, fontWeight: "600", color: theme.colors.fg },
   disabled40: { opacity: 0.4 },
   disabled50: { opacity: 0.5 },
   pressed60: { opacity: 0.6 },
   pressed90: { opacity: 0.9 },
-});
+}));

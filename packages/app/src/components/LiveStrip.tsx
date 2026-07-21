@@ -1,10 +1,10 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { useRouter } from "expo-router";
 import type { Session } from "@pounce/shared";
 import { useLiveSessions, useProjectNames, useSessionsByLastActive } from "../state/db/hooks";
 import { AgentStatusIcon } from "../ui";
 import { GlassCard } from "../ui/native/GlassCard";
-import { T } from "../ui/theme";
 
 /** How many fallback (most-recently-active) cards to show when nothing is live. */
 const FALLBACK_COUNT = 5;
@@ -88,7 +88,7 @@ function LiveCard({ session, repoName }: { session: Session; repoName: string })
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   root: { paddingBottom: 4, paddingTop: 4 },
   headerRow: {
     flexDirection: "row",
@@ -98,9 +98,9 @@ const s = StyleSheet.create({
     paddingBottom: 8,
   },
   headerLeft: { flexDirection: "row", alignItems: "center", gap: 6 },
-  liveDot: { height: 6, width: 6, borderRadius: 999, backgroundColor: T.success },
-  headerLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: T.fgFaint },
-  seeAll: { fontSize: 12, color: T.fgMuted },
+  liveDot: { height: 6, width: 6, borderRadius: 999, backgroundColor: theme.colors.success },
+  headerLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
+  seeAll: { fontSize: 12, color: theme.colors.fgMuted },
   card: {
     width: 150,
     padding: 12,
@@ -108,7 +108,7 @@ const s = StyleSheet.create({
   // warning at 40% — no soft-warning token in T; literal from the warning hex.
   cardNeeds: { borderWidth: 1, borderColor: "rgba(210, 153, 34, 0.4)" },
   cardIconRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  cardTitle: { marginTop: 8, fontSize: 13, fontWeight: "600", color: T.fg },
-  cardRepo: { marginTop: 6, fontSize: 11, color: T.fgFaint },
+  cardTitle: { marginTop: 8, fontSize: 13, fontWeight: "600", color: theme.colors.fg },
+  cardRepo: { marginTop: 6, fontSize: 11, color: theme.colors.fgFaint },
   pressed70: { opacity: 0.7 },
-});
+}));

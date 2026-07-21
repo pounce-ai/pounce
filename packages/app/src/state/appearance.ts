@@ -1,12 +1,15 @@
-import { Appearance, Platform } from "react-native";
+import { Appearance, NativeModules, Platform } from "react-native";
+import { UnistylesRuntime } from "react-native-unistyles";
 import { observable } from "@legendapp/state";
 import { persist } from "../services/persistence";
 
 export type AppearanceMode = "system" | "light" | "dark";
 
-/** Native window-level override (apps/mobile/modules/pounce-appearance) —
- *  themes UIKit chrome (nav bars, tab bar, sheets, keyboard) that RN's
- *  Appearance override doesn't reach. Absent on desktop/Expo Go builds. */
+/** Native window-level override — themes system chrome that RN's Appearance
+ *  override doesn't reach. Two hosts, same setStyle contract:
+ *  mobile = expo module (apps/mobile/modules/pounce-appearance) for UIKit
+ *  chrome; desktop macOS = classic RN module (PounceGlass.mm) setting
+ *  NSApp.appearance. Absent on Expo Go/Windows builds. */
 type NativeAppearance = { setStyle(style: "light" | "dark" | "unspecified"): void };
 let nativeChrome: NativeAppearance | null = null;
 try {
@@ -15,6 +18,10 @@ try {
   nativeChrome = requireNativeModule("PounceAppearance");
 } catch {
   nativeChrome = null;
+}
+if (!nativeChrome) {
+  const m = NativeModules.PounceAppearance as NativeAppearance | undefined;
+  if (m && typeof m.setStyle === "function") nativeChrome = m;
 }
 
 /** User's appearance override. "system" follows the OS; light/dark force it
@@ -36,6 +43,20 @@ export function applyAppearance(mode: AppearanceMode = appearance$.get()) {
     Appearance.setColorScheme((mode === "system" ? clear : mode) as never);
   } catch {
     /* keep system appearance */
+  }
+  // Unistyles drives the Android runtime palette (whole-theme swap, no
+  // activity recreate). iOS registers identical PlatformColor themes, so this
+  // is a visual no-op there; desktop gets an inert shim. setTheme is only
+  // legal with adaptive themes off, hence the ordering.
+  try {
+    if (mode === "system") {
+      UnistylesRuntime.setAdaptiveThemes(true);
+    } else {
+      UnistylesRuntime.setAdaptiveThemes(false);
+      UnistylesRuntime.setTheme(mode);
+    }
+  } catch {
+    /* unistyles not configured (tests / unsupported host) */
   }
 }
 

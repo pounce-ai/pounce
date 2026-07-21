@@ -1,31 +1,23 @@
-import type { ReactNode } from "react";
-import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
-import { T } from "../theme";
+import { View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
+import type { GlassCardProps } from "./glass";
 
-export interface GlassCardProps {
-  children: ReactNode;
-  style?: StyleProp<ViewStyle>;
-  /** Corner radius of the card surface. */
-  radius?: number;
-  /** Interactive glass reacts to touches (iOS 26 only; ignored here). */
-  interactive?: boolean;
-  /** Soft drop shadow lifting the card off light backgrounds. */
-  shadow?: boolean;
-}
+export type { GlassCardProps } from "./glass";
 
 /** Cross-platform default (Android/desktop/pre-26 iOS fallback): a plain
- *  grouped-surface card. The iOS variant renders real liquid glass. */
+ *  grouped-surface card. The iOS variant renders real liquid glass. Unistyles
+ *  theme function so Android surfaces repaint on runtime theme switches. */
 export function GlassCard({ children, style, radius = 16, shadow }: GlassCardProps) {
   return (
     <View style={[s.card, { borderRadius: radius }, shadow && s.shadow, style]}>{children}</View>
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   card: {
-    backgroundColor: T.surface,
+    backgroundColor: theme.colors.surface,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
     overflow: "hidden",
   },
   shadow: {
@@ -36,4 +28,4 @@ const s = StyleSheet.create({
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
   },
-});
+}));

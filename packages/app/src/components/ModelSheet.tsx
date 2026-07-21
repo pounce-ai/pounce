@@ -4,18 +4,17 @@ import {
   ActivityIndicator,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   useWindowDimensions,
   View,
 } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { PounceIcon } from "../ui/native/Icon";
 import { warmModels, type ModelInfo } from "../services/bridge";
 import { shortModel } from "../components/ThreadStatusBar";
 import { useAgentModels } from "../state/db/hooks";
-import { COLOR, IS_DESKTOP } from "../ui";
-import { T } from "../ui/theme";
+import { IS_DESKTOP } from "../ui";
 
 /**
  * Searchable model picker. Renders instantly from the warmed cache
@@ -56,6 +55,7 @@ export function ModelSheet({
   mode?: { label: string; onPress: () => void } | null;
   onClose: () => void;
 }) {
+  const { theme } = useUnistyles();
   const { height } = useWindowDimensions();
   const [query, setQuery] = useState("");
   const [attempted, setAttempted] = useState(false);
@@ -93,12 +93,12 @@ export function ModelSheet({
         <Text style={s.title}>Model</Text>
 
         <View style={s.searchRow}>
-          <PounceIcon name="search" size={15} color={COLOR.fgFaint} />
+          <PounceIcon name="search" size={15} color={theme.colors.fgFaint} />
           <TextInput
             value={query}
             onChangeText={setQuery}
             placeholder="Search models…"
-            placeholderTextColor={COLOR.fgFaint}
+            placeholderTextColor={theme.colors.fgFaint}
             autoCapitalize="none"
             autoCorrect={false}
             style={[s.input, IS_DESKTOP && s.inputDesktop]}
@@ -107,7 +107,7 @@ export function ModelSheet({
 
         {loading ? (
           <View style={s.loading}>
-            <ActivityIndicator color={COLOR.accent} />
+            <ActivityIndicator color={theme.colors.accent} />
           </View>
         ) : merged.length === 0 ? (
           <Text style={s.emptyText}>
@@ -145,7 +145,7 @@ export function ModelSheet({
                       </Text>
                     ) : null}
                   </View>
-                  {active ? <PounceIcon name="checkmark" size={18} color={COLOR.accent} /> : null}
+                  {active ? <PounceIcon name="checkmark" size={18} color={theme.colors.accent} /> : null}
                 </Pressable>
               );
             })}
@@ -162,7 +162,7 @@ export function ModelSheet({
           >
             <Text style={s.effortTitle}>Effort</Text>
             <Text style={s.effortLabel}>{effort.label}</Text>
-            <PounceIcon name="chevron-forward" size={16} color={COLOR.fgFaint} style={{ marginLeft: 6 }} />
+            <PounceIcon name="chevron-forward" size={16} color={theme.colors.fgFaint} style={{ marginLeft: 6 }} />
           </Pressable>
         ) : null}
         {mode ? (
@@ -172,22 +172,22 @@ export function ModelSheet({
           >
             <Text style={s.effortTitle}>Mode</Text>
             <Text style={s.effortLabel}>{mode.label}</Text>
-            <PounceIcon name="chevron-forward" size={16} color={COLOR.fgFaint} style={{ marginLeft: 6 }} />
+            <PounceIcon name="chevron-forward" size={16} color={theme.colors.fgFaint} style={{ marginLeft: 6 }} />
           </Pressable>
         ) : null}
     </NativeSheet>
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   flex1: { flex: 1 },
-  scrim: { flex: 1, backgroundColor: T.overlay },
+  scrim: { flex: 1, backgroundColor: theme.colors.overlay },
   sheet: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderTopWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.bgElevated,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bgElevated,
     paddingHorizontal: 16,
     paddingTop: 12,
   },
@@ -197,9 +197,9 @@ const s = StyleSheet.create({
     width: 40,
     alignSelf: "center",
     borderRadius: 999,
-    backgroundColor: T.border,
+    backgroundColor: theme.colors.border,
   },
-  title: { marginBottom: 8, fontSize: 18, fontWeight: "700", color: T.fg },
+  title: { marginBottom: 8, fontSize: 18, fontWeight: "700", color: theme.colors.fg },
   searchRow: {
     marginBottom: 8,
     height: 40,
@@ -207,15 +207,15 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     borderRadius: 16,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 12,
   },
-  input: { flex: 1, fontSize: 15, color: T.fg, height: 40 },
+  input: { flex: 1, fontSize: 15, color: theme.colors.fg, height: 40 },
   // Desktop centers intrinsic-height inputs inside the fixed-height row —
   // see the inputH helper's comment in ui/index.tsx.
-  inputDesktop: { height: "auto" as never, paddingVertical: 0 },
+  inputDesktop: { height: "auto" as unknown as number, paddingVertical: 0 },
   loading: { alignItems: "center", paddingVertical: 40 },
-  emptyText: { paddingVertical: 32, textAlign: "center", fontSize: 13, color: T.fgMuted },
+  emptyText: { paddingVertical: 32, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -224,41 +224,41 @@ const s = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 10,
   },
-  rowPressed: { backgroundColor: T.surfaceHover },
+  rowPressed: { backgroundColor: theme.colors.surfaceHover },
   nameRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   name: { fontSize: 15, fontWeight: "600" },
-  nameActive: { color: T.accent },
-  nameIdle: { color: T.fg },
+  nameActive: { color: theme.colors.accent },
+  nameIdle: { color: theme.colors.fg },
   defaultBadge: {
     borderRadius: 4,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 6,
     paddingVertical: 2,
     fontSize: 10,
     textTransform: "uppercase",
-    color: T.fgFaint,
+    color: theme.colors.fgFaint,
   },
   deprecatedBadge: {
     borderRadius: 4,
-    backgroundColor: T.warningSoft,
+    backgroundColor: theme.colors.warningSoft,
     paddingHorizontal: 6,
     paddingVertical: 2,
     fontSize: 10,
     textTransform: "uppercase",
-    color: T.warning,
+    color: theme.colors.warning,
   },
-  desc: { marginTop: 2, fontSize: 12, lineHeight: 16, color: T.fgMuted },
-  noMatches: { paddingVertical: 24, textAlign: "center", fontSize: 13, color: T.fgMuted },
+  desc: { marginTop: 2, fontSize: 12, lineHeight: 16, color: theme.colors.fgMuted },
+  noMatches: { paddingVertical: 24, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   effortRow: {
     marginTop: 8,
     flexDirection: "row",
     alignItems: "center",
     borderRadius: 16,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
-  effortTitle: { flex: 1, fontSize: 15, fontWeight: "600", color: T.fg },
-  effortLabel: { fontSize: 15, color: T.fgMuted },
+  effortTitle: { flex: 1, fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  effortLabel: { fontSize: 15, color: theme.colors.fgMuted },
   pressed80: { opacity: 0.8 },
-});
+}));

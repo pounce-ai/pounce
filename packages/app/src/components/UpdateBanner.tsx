@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, AppState, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, AppState, Pressable, Text, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PounceIcon } from "../ui/native/Icon";
 import * as Updates from "expo-updates";
-import { COLOR } from "../ui";
-import { T } from "../ui/theme";
 
 /** Re-check for updates when the app foregrounds, at most this often.
  *  Cold starts are covered natively by EXUpdatesCheckOnLaunch=ALWAYS. */
@@ -17,6 +16,7 @@ const FOREGROUND_CHECK_MS = 15 * 60 * 1000;
  * can apply it immediately — or ignore it and get it on next launch anyway.
  */
 export function UpdateBanner() {
+  const { theme } = useUnistyles();
   const { isUpdatePending } = Updates.useUpdates();
   const insets = useSafeAreaInsets();
   const [dismissed, setDismissed] = useState(false);
@@ -63,7 +63,7 @@ export function UpdateBanner() {
       }}
     >
       <View style={s.pill}>
-        <PounceIcon name="sparkles" size={14} color={COLOR.accent} />
+        <PounceIcon name="sparkles" size={14} color={theme.colors.accent} />
         <Text style={s.label}>Update ready</Text>
         <Pressable
           onPress={() => void Updates.reloadAsync().catch(() => {})}
@@ -76,14 +76,14 @@ export function UpdateBanner() {
           hitSlop={8}
           style={({ pressed }) => [s.closeBtn, pressed && s.pressed60]}
         >
-          <PounceIcon name="close" size={16} color={COLOR.fgMuted} />
+          <PounceIcon name="close" size={16} color={theme.colors.fgMuted} />
         </Pressable>
       </View>
     </Animated.View>
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   pill: {
     flexDirection: "row",
     alignItems: "center",
@@ -92,22 +92,22 @@ const s = StyleSheet.create({
     borderWidth: 1,
     // accent at 40% — no soft-accent border token; literal from the accent hex.
     borderColor: "rgba(124, 111, 240, 0.4)",
-    backgroundColor: T.bgElevated,
+    backgroundColor: theme.colors.bgElevated,
     paddingVertical: 8,
     paddingLeft: 16,
     paddingRight: 8,
   },
-  label: { fontSize: 13, fontWeight: "500", color: T.fg },
+  label: { fontSize: 13, fontWeight: "500", color: theme.colors.fg },
   restartBtn: {
     height: 32,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 999,
-    backgroundColor: T.accent,
+    backgroundColor: theme.colors.accent,
     paddingHorizontal: 14,
   },
-  restartText: { fontSize: 13, fontWeight: "600", color: T.onAccent },
+  restartText: { fontSize: 13, fontWeight: "600", color: theme.colors.onAccent },
   closeBtn: { height: 32, width: 32, alignItems: "center", justifyContent: "center" },
   pressed60: { opacity: 0.6 },
   pressed80: { opacity: 0.8 },
-});
+}));

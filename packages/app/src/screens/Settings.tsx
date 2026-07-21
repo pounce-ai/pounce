@@ -1,7 +1,8 @@
 import type { ComponentType, ReactNode } from "react";
 import { Modal } from "../components/AppModal";
 import { Component, useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
@@ -33,13 +34,13 @@ import {
 import { savePairing } from "../services/runtime";
 import { type ParsedPairing, pairingHostName, parsePairing } from "../services/pairing";
 import { DeviceSetupCard } from "../components/DeviceSetupCard";
-import { COLOR, DeviceIcon, fmtDuration, IS_DESKTOP } from "../ui";
+import { DeviceIcon, fmtDuration, IS_DESKTOP } from "../ui";
 import { appearance$, setAppearance } from "../state/appearance";
-import { T } from "../ui/theme";
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { theme } = useUnistyles();
   const status = useSelector(() => connection$.status.get());
   const appearanceMode = useSelector(() => appearance$.get());
   const devices = useDevices();
@@ -172,7 +173,14 @@ export default function SettingsScreen() {
       <ScrollView
         style={s.scroll}
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={{ gap: 14, paddingBottom: insets.bottom + 16 }}
+        // contentInsetAdjustmentBehavior is iOS-only: Android's toolbar header
+        // is in-flow with NO automatic content inset, so the first row sits
+        // flush against it without the explicit top padding.
+        contentContainerStyle={{
+          gap: 14,
+          paddingTop: Platform.OS === "android" ? 16 : 0,
+          paddingBottom: insets.bottom + 16,
+        }}
       >
         <View style={s.statusRow}>
           <View style={[s.dot, live ? s.dotOn : s.dotOff]} />
@@ -205,7 +213,7 @@ export default function SettingsScreen() {
                   <DeviceIcon
                     name={d.name}
                     emoji={deviceEmoji(d.id)}
-                    color={d.online ? COLOR.fg : COLOR.fgFaint}
+                    color={d.online ? theme.colors.fg : theme.colors.fgFaint}
                     size={18}
                   />
                   <Text style={s.deviceName} numberOfLines={1}>
@@ -213,10 +221,10 @@ export default function SettingsScreen() {
                   </Text>
                   <View style={[s.dot, d.online ? s.dotOn : s.dotOff]} />
                   <Pressable onPress={() => setEditing(d)} hitSlop={8} style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}>
-                    <PounceIcon name="pencil-outline" size={15} color={COLOR.fgFaint} />
+                    <PounceIcon name="pencil-outline" size={15} color={theme.colors.fgFaint} />
                   </Pressable>
                   <Pressable onPress={() => forget(d)} hitSlop={8} style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}>
-                    <PounceIcon name="trash-outline" size={16} color={COLOR.fgFaint} />
+                    <PounceIcon name="trash-outline" size={16} color={theme.colors.fgFaint} />
                   </Pressable>
                 </View>
                 <DeviceDaemon hostId={d.id} hostName={deviceLabel(d.id, d.name)} online={d.online} />
@@ -228,9 +236,9 @@ export default function SettingsScreen() {
               style={({ pressed }) => [s.refreshBtn, pressed && s.pressed60]}
             >
               {syncState === "syncing" ? (
-                <ActivityIndicator size="small" color={COLOR.accent} />
+                <ActivityIndicator size="small" color={theme.colors.accent} />
               ) : syncState === "done" ? (
-                <PounceIcon name="checkmark-circle" size={15} color={COLOR.success} />
+                <PounceIcon name="checkmark-circle" size={15} color={theme.colors.success} />
               ) : null}
               <Text style={[s.refreshLabel, syncState === "idle" ? s.accentText : s.mutedText]}>
                 {syncState === "syncing" ? "Syncing…" : syncState === "done" ? "Up to date" : "Sync now"}
@@ -269,9 +277,9 @@ export default function SettingsScreen() {
           onPress={() => router.push("/diagnostics")}
           style={({ pressed }) => [s.navRow, pressed && s.pressed80]}
         >
-          <PounceIcon name="medkit-outline" size={18} color={COLOR.fgMuted} />
+          <PounceIcon name="medkit-outline" size={18} color={theme.colors.fgMuted} />
           <Text style={s.navLabel}>Diagnostics</Text>
-          <PounceIcon name="chevron-forward" size={15} color={COLOR.fgFaint} />
+          <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} />
         </Pressable>
 
         {/* Sync history */}
@@ -279,9 +287,9 @@ export default function SettingsScreen() {
           onPress={() => router.push("/sync-history")}
           style={({ pressed }) => [s.navRow, pressed && s.pressed80]}
         >
-          <PounceIcon name="time-outline" size={18} color={COLOR.fgMuted} />
+          <PounceIcon name="time-outline" size={18} color={theme.colors.fgMuted} />
           <Text style={s.navLabel}>Sync history</Text>
-          <PounceIcon name="chevron-forward" size={15} color={COLOR.fgFaint} />
+          <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} />
         </Pressable>
 
         {/* Help & FAQ */}
@@ -289,9 +297,9 @@ export default function SettingsScreen() {
           onPress={() => router.push("/help")}
           style={({ pressed }) => [s.navRow, pressed && s.pressed80]}
         >
-          <PounceIcon name="help-circle-outline" size={18} color={COLOR.fgMuted} />
+          <PounceIcon name="help-circle-outline" size={18} color={theme.colors.fgMuted} />
           <Text style={s.navLabel}>Help &amp; FAQ</Text>
-          <PounceIcon name="chevron-forward" size={15} color={COLOR.fgFaint} />
+          <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} />
         </Pressable>
 
       </ScrollView>
@@ -323,6 +331,7 @@ export default function SettingsScreen() {
  * report a daemon — so it never clutters a device that can't use it.
  */
 function DeviceDaemon({ hostId, hostName, online }: { hostId: string; hostName: string; online: boolean }) {
+  const { theme } = useUnistyles();
   const [info, setInfo] = useState<DaemonInfo | null>(null);
   const [restarting, setRestarting] = useState(false);
 
@@ -374,9 +383,9 @@ function DeviceDaemon({ hostId, hostName, online }: { hostId: string; hostName: 
         style={({ pressed }) => [s.restartPill, pressed && s.pressed70]}
       >
         {restarting ? (
-          <ActivityIndicator size="small" color={COLOR.accent} />
+          <ActivityIndicator size="small" color={theme.colors.accent} />
         ) : (
-          <PounceIcon name="refresh" size={13} color={COLOR.accent} />
+          <PounceIcon name="refresh" size={13} color={theme.colors.accent} />
         )}
         <Text style={s.restartLabel}>{restarting ? "Rescanning…" : "Rescan sessions"}</Text>
       </Pressable>
@@ -393,6 +402,7 @@ const DEVICE_EMOJI = ["💻", "🖥️", "📱", "🖲️", "☁️", "🐧", "�
 /** Bottom-sheet editor: rename a device and optionally pick an emoji icon. */
 function DeviceEditModal({ device, onClose }: { device: Device | null; onClose: () => void }) {
   const insets = useSafeAreaInsets();
+  const { theme } = useUnistyles();
   const [name, setName] = useState("");
   const [emoji, setEmoji] = useState("");
 
@@ -421,13 +431,13 @@ function DeviceEditModal({ device, onClose }: { device: Device | null; onClose: 
 
         <View style={s.editRow}>
           <View style={s.iconBox}>
-            <DeviceIcon name={name || device.name} emoji={emoji} color={COLOR.fg} size={24} />
+            <DeviceIcon name={name || device.name} emoji={emoji} color={theme.colors.fg} size={24} />
           </View>
           <TextInput
             value={name}
             onChangeText={setName}
             placeholder={device.name}
-            placeholderTextColor={COLOR.fgFaint}
+            placeholderTextColor={theme.colors.fgFaint}
             autoCapitalize="words"
             style={s.nameInput}
           />
@@ -440,7 +450,7 @@ function DeviceEditModal({ device, onClose }: { device: Device | null; onClose: 
               onPress={() => setEmoji("")}
               style={[s.emojiCell, emoji === "" ? s.emojiCellOn : s.emojiCellOff]}
             >
-              <DeviceIcon name={device.name} color={COLOR.fg} size={20} />
+              <DeviceIcon name={device.name} color={theme.colors.fg} size={20} />
             </Pressable>
             {DEVICE_EMOJI.map((e, i) => (
               <Pressable
@@ -484,19 +494,22 @@ class ScannerBoundary extends Component<BoundaryProps, { failed: boolean }> {
   }
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
   desktopHeader: { paddingHorizontal: 16, paddingBottom: 8, paddingTop: 4 },
-  title: { fontSize: 26, fontWeight: "700", color: T.fg },
+  title: { fontSize: 26, fontWeight: "700", color: theme.colors.fg },
   // Also paints the page bg — on mobile this ScrollView IS the screen root.
-  scroll: { flex: 1, paddingHorizontal: 16, backgroundColor: T.bg },
+  scroll: { flex: 1, paddingHorizontal: 16, backgroundColor: theme.colors.bg },
   statusRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  statusText: { fontSize: 13, color: T.fgMuted },
+  statusText: { fontSize: 13, color: theme.colors.fgMuted },
   dot: { height: 8, width: 8, borderRadius: 999 },
-  dotOn: { backgroundColor: T.success },
-  dotOff: { backgroundColor: T.fgFaint },
-  section: { gap: 8 },
-  sectionLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: T.fgFaint },
+  dotOn: { backgroundColor: theme.colors.success },
+  dotOff: { backgroundColor: theme.colors.fgFaint },
+  // 14 matches the ScrollView's inter-card gap, so card-to-card spacing reads
+  // as ONE rhythm across the whole screen (device cards were 8 while the
+  // standalone nav cards sat 14 apart — visibly inconsistent).
+  section: { gap: 14 },
+  sectionLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
   appearanceRow: { flexDirection: "row", gap: 8 },
   appearanceChip: {
     height: 32,
@@ -506,16 +519,16 @@ const s = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: 12,
   },
-  appearanceChipOn: { borderColor: T.accent, backgroundColor: T.accentSoft },
-  appearanceChipOff: { borderColor: T.border, backgroundColor: T.surfaceAlt },
-  appearanceLabel: { fontSize: 13, color: T.fg },
-  appearanceLabelOn: { fontSize: 13, color: T.accent },
+  appearanceChipOn: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
+  appearanceChipOff: { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceAlt },
+  appearanceLabel: { fontSize: 13, color: theme.colors.fg },
+  appearanceLabelOn: { fontSize: 13, color: theme.colors.accent },
   deviceCard: {
     overflow: "hidden",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
   },
   deviceRow: {
     flexDirection: "row",
@@ -524,7 +537,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  deviceName: { flex: 1, fontSize: 14, fontWeight: "500", color: T.fg },
+  deviceName: { flex: 1, fontSize: 14, fontWeight: "500", color: theme.colors.fg },
   iconBtn: { paddingLeft: 4 },
   refreshBtn: {
     height: 28,
@@ -535,27 +548,27 @@ const s = StyleSheet.create({
     paddingTop: 4,
   },
   refreshLabel: { fontSize: 13 },
-  accentText: { color: T.accent },
-  mutedText: { color: T.fgMuted },
+  accentText: { color: theme.colors.accent },
+  mutedText: { color: theme.colors.fgMuted },
   navRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
     paddingHorizontal: 12,
     paddingVertical: 12,
   },
-  navLabel: { flex: 1, fontSize: 14, fontWeight: "500", color: T.fg },
-  // was border-border/60 — T.border used as-is (no 60%-alpha token)
+  navLabel: { flex: 1, fontSize: 14, fontWeight: "500", color: theme.colors.fg },
+  // was border-border/60 — theme.colors.border used as-is (no 60%-alpha token)
   daemonRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     borderTopWidth: 1,
-    borderTopColor: T.border,
+    borderTopColor: theme.colors.border,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
@@ -564,25 +577,25 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 4,
     borderRadius: 999,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
-  restartLabel: { fontSize: 12, fontWeight: "500", color: T.accent },
-  uptime: { flex: 1, textAlign: "right", fontSize: 11, color: T.fgFaint },
-  scrim: { flex: 1, backgroundColor: T.overlay },
+  restartLabel: { fontSize: 12, fontWeight: "500", color: theme.colors.accent },
+  uptime: { flex: 1, textAlign: "right", fontSize: 11, color: theme.colors.fgFaint },
+  scrim: { flex: 1, backgroundColor: theme.colors.overlay },
   sheet: {
     gap: 16,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderTopWidth: 1,
-    borderTopColor: T.border,
-    backgroundColor: T.bgElevated,
+    borderTopColor: theme.colors.border,
+    backgroundColor: theme.colors.bgElevated,
     paddingHorizontal: 16,
     paddingTop: 12,
   },
-  grabber: { height: 4, width: 40, alignSelf: "center", borderRadius: 999, backgroundColor: T.border },
-  sheetTitle: { fontSize: 18, fontWeight: "700", color: T.fg },
+  grabber: { height: 4, width: 40, alignSelf: "center", borderRadius: 999, backgroundColor: theme.colors.border },
+  sheetTitle: { fontSize: 18, fontWeight: "700", color: theme.colors.fg },
   editRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   iconBox: {
     height: 48,
@@ -590,16 +603,16 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 12,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
   },
   nameInput: {
     flex: 1,
     borderRadius: 12,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
-    color: T.fg,
+    color: theme.colors.fg,
   },
   emojiWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   emojiCell: {
@@ -610,8 +623,8 @@ const s = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
   },
-  emojiCellOn: { borderColor: T.accent, backgroundColor: T.accentSoft },
-  emojiCellOff: { borderColor: T.border, backgroundColor: T.surfaceAlt },
+  emojiCellOn: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
+  emojiCellOff: { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceAlt },
   emojiGlyph: { fontSize: 20 },
   saveBtn: {
     marginTop: 4,
@@ -619,11 +632,11 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 12,
-    backgroundColor: T.accent,
+    backgroundColor: theme.colors.accent,
   },
-  saveLabel: { fontSize: 15, fontWeight: "600", color: T.onAccent },
+  saveLabel: { fontSize: 15, fontWeight: "600", color: theme.colors.onAccent },
   pressed60: { opacity: 0.6 },
   pressed70: { opacity: 0.7 },
   pressed80: { opacity: 0.8 },
   pressed90: { opacity: 0.9 },
-});
+}));

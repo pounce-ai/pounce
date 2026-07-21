@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
-import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Linking, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { PounceIcon } from "../ui/native/Icon";
-import { COLOR, INPUT_TWEAKS, IS_DESKTOP } from "../ui";
-import { T } from "../ui/theme";
+import { INPUT_TWEAKS, IS_DESKTOP } from "../ui";
 
 const DOCS_URL = "https://use-pounce.com/how-it-works.html";
 
@@ -65,6 +65,7 @@ const FAQS: Faq[] = [
 export default function HelpScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { theme } = useUnistyles();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<Set<number>>(new Set());
 
@@ -96,12 +97,12 @@ export default function HelpScreen() {
 
       {/* Search */}
       <View style={s.searchRow}>
-        <PounceIcon name="search" size={16} color={COLOR.fgFaint} />
+        <PounceIcon name="search" size={16} color={theme.colors.fgFaint} />
         <TextInput {...INPUT_TWEAKS}
           value={query}
           onChangeText={setQuery}
           placeholder="Search help…"
-          placeholderTextColor={COLOR.fgFaint}
+          placeholderTextColor={theme.colors.fgFaint}
           autoCapitalize="none"
           autoCorrect={false}
           style={[s.searchInput, IS_DESKTOP && s.inputDesktop]}
@@ -111,7 +112,7 @@ export default function HelpScreen() {
             onPress={() => setQuery("")}
             style={({ pressed }) => [s.clearBtn, pressed && s.pressed60]}
           >
-            <PounceIcon name="close-circle" size={16} color={COLOR.fgFaint} />
+            <PounceIcon name="close-circle" size={16} color={theme.colors.fgFaint} />
           </Pressable>
         ) : null}
       </View>
@@ -135,7 +136,7 @@ export default function HelpScreen() {
                   <PounceIcon
                     name={isOpen ? "chevron-up" : "chevron-down"}
                     size={16}
-                    color={COLOR.fgFaint}
+                    color={theme.colors.fgFaint}
                   />
                 </View>
                 {isOpen ? (
@@ -158,7 +159,7 @@ export default function HelpScreen() {
           onPress={() => void Linking.openURL(DOCS_URL)}
           style={({ pressed }) => [s.docsBtn, pressed && s.pressed80]}
         >
-          <PounceIcon name="book-outline" size={16} color={COLOR.accent} />
+          <PounceIcon name="book-outline" size={16} color={theme.colors.accent} />
           <Text style={s.docsLabel}>Open the full docs</Text>
         </Pressable>
       </ScrollView>
@@ -166,8 +167,8 @@ export default function HelpScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -175,8 +176,8 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
   },
-  headerTitle: { fontSize: 22, fontWeight: "700", color: T.fg },
-  doneLabel: { fontSize: 15, color: T.fgMuted },
+  headerTitle: { fontSize: 22, fontWeight: "700", color: theme.colors.fg },
+  doneLabel: { fontSize: 15, color: theme.colors.fgMuted },
   pressed60: { opacity: 0.6 },
   pressed80: { opacity: 0.8 },
   pressed90: { opacity: 0.9 },
@@ -188,29 +189,29 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     borderRadius: 16,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 12,
   },
-  searchInput: { flex: 1, fontSize: 15, color: T.fg, height: 44 },
+  searchInput: { flex: 1, fontSize: 15, color: theme.colors.fg, height: 44 },
   // Desktop keeps the input's intrinsic height (centered by the row) — see inputH in ui/index.tsx.
-  inputDesktop: { height: "auto" as never, paddingVertical: 0 },
+  inputDesktop: { height: "auto" as const, paddingVertical: 0 },
   clearBtn: { padding: 4 },
   scroll: { flex: 1, paddingHorizontal: 16 },
   card: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
   cardHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
-  question: { flex: 1, fontSize: 15, fontWeight: "600", color: T.fg },
-  answer: { marginTop: 8, fontSize: 14, lineHeight: 21, color: T.fgMuted },
+  question: { flex: 1, fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  answer: { marginTop: 8, fontSize: 14, lineHeight: 21, color: theme.colors.fgMuted },
   empty: { alignItems: "center", paddingHorizontal: 32, paddingVertical: 64 },
   emptyEmoji: { fontSize: 40 },
-  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: T.fg },
-  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: T.fgMuted },
+  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   docsBtn: {
     marginTop: 8,
     flexDirection: "row",
@@ -219,10 +220,10 @@ const s = StyleSheet.create({
     gap: 8,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
-  docsLabel: { fontSize: 14, fontWeight: "500", color: T.accent },
-});
+  docsLabel: { fontSize: 14, fontWeight: "500", color: theme.colors.accent },
+}));

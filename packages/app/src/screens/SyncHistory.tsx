@@ -1,12 +1,12 @@
 import { useMemo } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { PounceIcon } from "../ui/native/Icon";
 import type { SyncLogEntry } from "../state/stores";
 import { useSyncLog } from "../state/db/hooks";
-import { COLOR, IS_DESKTOP, timeAgo } from "../ui";
-import { T } from "../ui/theme";
+import { IS_DESKTOP, timeAgo } from "../ui";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -59,6 +59,7 @@ function groupByDay(log: SyncLogEntry[]): DaySection[] {
 export default function SyncHistoryScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { theme } = useUnistyles();
   const rows = useSyncLog();
   // The collection isn't intrinsically ordered — present newest-first.
   const log = useMemo(
@@ -100,7 +101,7 @@ export default function SyncHistoryScreen() {
                 return (
                   <View key={entry.at} style={s.card}>
                     <View style={s.cardHeader}>
-                      <PounceIcon name="sync" size={14} color={COLOR.accent} />
+                      <PounceIcon name="sync" size={14} color={theme.colors.accent} />
                       <Text style={s.cardTime}>
                         {clock(new Date(entry.at))}
                       </Text>
@@ -113,7 +114,7 @@ export default function SyncHistoryScreen() {
                     <View style={s.repoList}>
                       {entry.repos.map((r) => (
                         <View key={r.repoId} style={s.repoRow}>
-                          <PounceIcon name="folder-outline" size={13} color={COLOR.fgFaint} />
+                          <PounceIcon name="folder-outline" size={13} color={theme.colors.fgFaint} />
                           <Text numberOfLines={1} style={s.repoName}>
                             {r.name}
                           </Text>
@@ -132,8 +133,8 @@ export default function SyncHistoryScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -141,31 +142,31 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
   },
-  headerTitle: { fontSize: 22, fontWeight: "700", color: T.fg },
-  doneLabel: { fontSize: 15, color: T.fgMuted },
+  headerTitle: { fontSize: 22, fontWeight: "700", color: theme.colors.fg },
+  doneLabel: { fontSize: 15, color: theme.colors.fgMuted },
   pressed60: { opacity: 0.6 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
   emptyEmoji: { fontSize: 40 },
-  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: T.fg },
-  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: T.fgMuted },
+  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   scroll: { flex: 1, paddingHorizontal: 16 },
   section: { gap: 8 },
-  sectionLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: T.fgFaint },
+  sectionLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
   card: {
     gap: 10,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
   cardHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
-  cardTime: { flex: 1, fontSize: 14, fontWeight: "600", color: T.fg },
-  cardAgo: { fontSize: 12, color: T.fgFaint },
-  cardSummary: { fontSize: 12, color: T.fgMuted },
+  cardTime: { flex: 1, fontSize: 14, fontWeight: "600", color: theme.colors.fg },
+  cardAgo: { fontSize: 12, color: theme.colors.fgFaint },
+  cardSummary: { fontSize: 12, color: theme.colors.fgMuted },
   repoList: { gap: 6 },
   repoRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  repoName: { flex: 1, fontSize: 13, color: T.fg },
-  repoCount: { fontSize: 12, fontWeight: "500", color: T.fgMuted },
-});
+  repoName: { flex: 1, fontSize: 13, color: theme.colors.fg },
+  repoCount: { fontSize: 12, fontWeight: "500", color: theme.colors.fgMuted },
+}));

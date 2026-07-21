@@ -1,11 +1,11 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LegendList } from "@legendapp/list/react-native";
 import { useRouter } from "expo-router";
 import { useSessionsByLastActive } from "../state/db/hooks";
 import { SessionCard } from "../components/SessionCard";
 import { IS_DESKTOP } from "../ui";
-import { T } from "../ui/theme";
 
 /**
  * "All sessions" — every session flattened into one feed ordered by last
@@ -58,8 +58,8 @@ export default function SessionsScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -67,13 +67,13 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
   },
-  headerTitle: { fontSize: 22, fontWeight: "700", color: T.fg },
-  headerSub: { fontSize: 12, color: T.fgFaint },
-  doneLabel: { fontSize: 15, color: T.fgMuted },
+  headerTitle: { fontSize: 22, fontWeight: "700", color: theme.colors.fg },
+  headerSub: { fontSize: 12, color: theme.colors.fgFaint },
+  doneLabel: { fontSize: 15, color: theme.colors.fgMuted },
   pressed60: { opacity: 0.6 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
   emptyEmoji: { fontSize: 40 },
-  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: T.fg },
-  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: T.fgMuted },
+  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   row: { paddingHorizontal: 16, paddingBottom: 10 },
-});
+}));

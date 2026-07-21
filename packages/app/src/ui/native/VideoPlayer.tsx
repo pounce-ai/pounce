@@ -1,5 +1,5 @@
-import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
-import { T } from "../theme";
+import { Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 
 export interface VideoPlayerProps {
   uri: string;
@@ -16,7 +16,7 @@ export function VideoPlayer({ style }: VideoPlayerProps) {
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   fallback: { alignItems: "center", justifyContent: "center", backgroundColor: "#000" },
-  label: { color: T.fgMuted, fontSize: 13, textAlign: "center", padding: 24 },
-});
+  label: { color: theme.colors.fgMuted, fontSize: 13, textAlign: "center", padding: 24 },
+}));

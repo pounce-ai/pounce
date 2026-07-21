@@ -44,6 +44,9 @@ config.resolver.nodeModulesPaths = [path.resolve(projectRoot, "node_modules")];
 const PKG = (...p) => path.resolve(workspaceRoot, "packages", ...p);
 const EXACT = {
   "expo-router": path.resolve(projectRoot, "src/shims/router.tsx"),
+  // unistyles has no macos/windows support; the shim resolves theme functions
+  // once against the AppKit-PlatformColor theme (see src/shims/unistyles.ts).
+  "react-native-unistyles": path.resolve(projectRoot, "src/shims/unistyles.ts"),
   "@pounce/shared": PKG("shared/src/index.ts"),
   "@pounce/runtime": PKG("runtime/src/index.ts"),
   "@pounce/transcript": PKG("transcript/src/index.js"),

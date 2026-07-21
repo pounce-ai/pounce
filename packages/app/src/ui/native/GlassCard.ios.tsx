@@ -1,6 +1,6 @@
-import { StyleSheet, View } from "react-native";
+import { View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
-import { T } from "../theme";
 import type { GlassCardProps } from "./GlassCard";
 
 const hasGlass = isLiquidGlassAvailable();
@@ -29,7 +29,7 @@ export function GlassCard({ children, style, radius = 16, interactive, shadow }:
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   glass: { overflow: "hidden" },
   shadow: {
     shadowColor: "#000",
@@ -38,9 +38,9 @@ const s = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
   },
   fallback: {
-    backgroundColor: T.surface,
+    backgroundColor: theme.colors.surface,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
     overflow: "hidden",
   },
-});
+}));

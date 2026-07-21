@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // eslint-disable-next-line @react-native/no-deprecated-api -- core Clipboard is
 // the only clipboard already inside shipped binaries (OTA-safe).
-import { ActionSheetIOS, ActivityIndicator, Alert, Clipboard, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActionSheetIOS, ActivityIndicator, Alert, Clipboard, Pressable, Text, TextInput, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Platform } from "react-native";
 import { KeyboardAvoidingView } from "../components/kav";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -54,8 +55,7 @@ import {
 } from "../state/db/hooks";
 import { diffTotals, fetchGitChanges, fetchMessages, fetchUsage, interruptTurn, respondPermission, respondPrompt, searchMessages, sendSessionInput, startInteractive, streamLiveMessage, type MessageSearchHit, type ThreadUsage } from "../services/bridge";
 import { PounceIcon } from "../ui/native/Icon";
-import { ACTIVITY_LABEL, AgentStatusIcon, BranchChip, COLOR, pickSheet } from "../ui";
-import { T } from "../ui/theme";
+import { ACTIVITY_LABEL, AgentStatusIcon, BranchChip, pickSheet } from "../ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "../ui/agent-meta";
 
 /** Desktop renders this screen in a wide pane: pickers use Alert instead of
@@ -106,6 +106,7 @@ export default function SessionScreen() {
   const { id, at, q } = useLocalSearchParams<{ id: string; at?: string; q?: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { theme } = useUnistyles();
   const [sending, setSending] = useState(false);
   const [stopping, setStopping] = useState(false);
 
@@ -778,7 +779,7 @@ export default function SessionScreen() {
               <Text style={s.activityLabel}>{ACTIVITY_LABEL[headerActivity]}</Text>
               {session.branch ? (
                 <View style={s.shrink}>
-                  <BranchChip branch={session.branch} worktree={session.worktree} size={10} color={COLOR.fgFaint} />
+                  <BranchChip branch={session.branch} worktree={session.worktree} size={10} color={theme.colors.fgFaint} />
                 </View>
               ) : null}
               <ThreadUsageSummary usage={usage} />
@@ -790,7 +791,7 @@ export default function SessionScreen() {
             onPress={() => (threadSearchOpen ? closeThreadSearch() : setThreadSearchOpen(true))}
             style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
           >
-            <PounceIcon name="search" size={18} color={threadSearchOpen ? COLOR.accent : COLOR.fgMuted} />
+            <PounceIcon name="search" size={18} color={threadSearchOpen ? theme.colors.accent : theme.colors.fgMuted} />
           </Pressable>
           <Pressable
             onPress={() => setEnvSheet(true)}
@@ -799,26 +800,26 @@ export default function SessionScreen() {
             <PounceIcon
               name="ellipsis-horizontal"
               size={20}
-              color={running ? COLOR.danger : COLOR.fgMuted}
+              color={running ? theme.colors.danger : theme.colors.fgMuted}
             />
           </Pressable>
         </View>
         {threadSearchOpen ? (
           <View style={s.searchRow}>
             <View style={s.searchField}>
-              <PounceIcon name="search" size={13} color={COLOR.fgFaint} />
+              <PounceIcon name="search" size={13} color={theme.colors.fgFaint} />
               <TextInput
                 value={threadQuery}
                 onChangeText={setThreadQuery}
                 placeholder="Find in this thread…"
-                placeholderTextColor={COLOR.fgFaint}
+                placeholderTextColor={theme.colors.fgFaint}
                 autoFocus
                 autoCapitalize="none"
                 autoCorrect={false}
                 style={s.searchInput}
               />
               {threadSearching ? (
-                <ActivityIndicator size="small" color={COLOR.fgFaint} />
+                <ActivityIndicator size="small" color={theme.colors.fgFaint} />
               ) : threadQuery.trim().length >= 3 ? (
                 <Text style={s.hitCount}>
                   {threadHits.length ? `${threadHitIdx + 1}/${threadHits.length}` : "0"}
@@ -830,14 +831,14 @@ export default function SessionScreen() {
               onPress={() => goToHit(threadHits, threadHitIdx - 1, threadQuery.trim())}
               style={({ pressed }) => [s.hitBtn, pressed && s.pressed60]}
             >
-              <PounceIcon name="chevron-up" size={17} color={threadHits.length ? COLOR.fgMuted : COLOR.fgFaint} />
+              <PounceIcon name="chevron-up" size={17} color={threadHits.length ? theme.colors.fgMuted : theme.colors.fgFaint} />
             </Pressable>
             <Pressable
               disabled={!threadHits.length}
               onPress={() => goToHit(threadHits, threadHitIdx + 1, threadQuery.trim())}
               style={({ pressed }) => [s.hitBtn, pressed && s.pressed60]}
             >
-              <PounceIcon name="chevron-down" size={17} color={threadHits.length ? COLOR.fgMuted : COLOR.fgFaint} />
+              <PounceIcon name="chevron-down" size={17} color={threadHits.length ? theme.colors.fgMuted : theme.colors.fgFaint} />
             </Pressable>
           </View>
         ) : null}
@@ -852,7 +853,7 @@ export default function SessionScreen() {
           <TimelineSkeleton />
         ) : live && failed && events.length === 0 ? (
           <View style={s.emptyWrap}>
-            <PounceIcon name="cloud-offline-outline" size={34} color={COLOR.fgFaint} />
+            <PounceIcon name="cloud-offline-outline" size={34} color={theme.colors.fgFaint} />
             <Text style={s.emptyTitle}>Couldn't load this conversation</Text>
             <Text style={s.emptyBody}>
               Make sure {session.host || "your computer"} is awake and the Pounce Bridge is running on the same Wi‑Fi.
@@ -869,7 +870,7 @@ export default function SessionScreen() {
           </View>
         ) : (
           // Fade the history in so it doesn't snap in after the skeleton.
-          <Animated.View style={s.flex1} entering={FadeIn.duration(260)}>
+          <Animated.View style={ANIM.flex1} entering={FadeIn.duration(260)}>
             <Timeline
               events={rawEvents}
               agent={session.agent}
@@ -898,7 +899,7 @@ export default function SessionScreen() {
                 entering={FadeIn.duration(150)}
                 exiting={FadeOut.duration(120)}
                 pointerEvents="box-none"
-                style={s.jumpWrap}
+                style={ANIM.jumpWrap}
               >
                 <Pressable
                   onPress={() => {
@@ -910,7 +911,7 @@ export default function SessionScreen() {
                   }}
                   style={({ pressed }) => [s.jumpPill, pressed && s.pressed80]}
                 >
-                  <PounceIcon name="arrow-down" size={15} color={COLOR.accent} />
+                  <PounceIcon name="arrow-down" size={15} color={theme.colors.accent} />
                   <Text style={s.jumpLabel}>Latest</Text>
                 </Pressable>
               </Animated.View>
@@ -997,12 +998,12 @@ export default function SessionScreen() {
                 key={i}
                 style={s.queuedRow}
               >
-                <PounceIcon name="time-outline" size={13} color={COLOR.fgFaint} />
+                <PounceIcon name="time-outline" size={13} color={theme.colors.fgFaint} />
                 <Text numberOfLines={1} style={s.queuedText}>
                   {q.text || (q.images.length ? "🖼️ Image" : "")}
                 </Text>
                 <Pressable onPress={() => cancelQueued(i)} hitSlop={8}>
-                  <PounceIcon name="close" size={14} color={COLOR.fgMuted} />
+                  <PounceIcon name="close" size={14} color={theme.colors.fgMuted} />
                 </Pressable>
               </View>
             ))}
@@ -1039,15 +1040,23 @@ export default function SessionScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+/** Plain styles for Reanimated views — unistyles sheet entries carry the C++
+ *  proxy, which Animated.View rejects ("an empty object is not a valid style
+ *  value"). Layout-only, so nothing here needs theme reactivity. */
+const ANIM = {
+  flex1: { flex: 1 },
+  jumpWrap: { position: "absolute", bottom: 12, left: 0, right: 0, alignItems: "center" },
+} as const;
+
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
   flex1: { flex: 1 },
   shrink: { flexShrink: 1 },
   pressed60: { opacity: 0.6 },
   pressed80: { opacity: 0.8 },
-  notFound: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: T.bg },
-  notFoundText: { color: T.fgMuted },
-  header: { borderBottomWidth: 1, borderColor: T.border, backgroundColor: T.bgElevated },
+  notFound: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.bg },
+  notFoundText: { color: theme.colors.fgMuted },
+  header: { borderBottomWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.bgElevated },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1057,10 +1066,10 @@ const s = StyleSheet.create({
     paddingTop: 4,
   },
   iconBtn: { height: 36, width: 36, alignItems: "center", justifyContent: "center" },
-  backGlyph: { fontSize: 22, color: T.fg },
-  headerTitle: { fontSize: 15, fontWeight: "600", color: T.fg },
+  backGlyph: { fontSize: 22, color: theme.colors.fg },
+  headerTitle: { fontSize: 15, fontWeight: "600", color: theme.colors.fg },
   headerSubRow: { marginTop: 2, flexDirection: "row", alignItems: "center", gap: 8 },
-  activityLabel: { fontSize: 12, color: T.fgMuted },
+  activityLabel: { fontSize: 12, color: theme.colors.fgMuted },
   searchRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingBottom: 10 },
   searchField: {
     height: 36,
@@ -1069,34 +1078,34 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     borderRadius: 12,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 10,
   },
-  searchInput: { height: 36, flex: 1, fontSize: 14, color: T.fg },
-  hitCount: { fontSize: 12, fontVariant: ["tabular-nums"], color: T.fgMuted },
+  searchInput: { height: 36, flex: 1, fontSize: 14, color: theme.colors.fg },
+  hitCount: { fontSize: 12, fontVariant: ["tabular-nums"], color: theme.colors.fgMuted },
   hitBtn: { height: 36, width: 32, alignItems: "center", justifyContent: "center" },
   transcriptArea: { flex: 1, alignItems: "center" },
   emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
   emptyEmoji: { fontSize: 34 },
-  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: T.fg },
-  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: T.fgMuted },
+  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   retryBtn: {
     marginTop: 20,
     borderRadius: 999,
-    backgroundColor: T.accent,
+    backgroundColor: theme.colors.accent,
     paddingHorizontal: 20,
     paddingVertical: 10,
   },
-  retryLabel: { fontSize: 14, fontWeight: "600", color: T.onAccent },
-  jumpWrap: { position: "absolute", bottom: 12, left: 0, right: 0, alignItems: "center" },
+  retryLabel: { fontSize: 14, fontWeight: "600", color: theme.colors.onAccent },
+  // jumpWrap lives in ANIM (plain object) — its Animated.View can't take sheet entries.
   jumpPill: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.bgElevated,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bgElevated,
     paddingHorizontal: 14,
     paddingVertical: 8,
     shadowColor: "#000",
@@ -1105,11 +1114,11 @@ const s = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     elevation: 4,
   },
-  jumpLabel: { fontSize: 13, fontWeight: "600", color: T.accent },
+  jumpLabel: { fontSize: 13, fontWeight: "600", color: theme.colors.accent },
   // Transparent, borderless bar — the Composer's floating glass pill carries
   // its own margins and chrome now.
   composerBar: { alignItems: "center", paddingTop: 8 },
-  archivedNote: { paddingHorizontal: 16, paddingBottom: 8, fontSize: 12, color: T.fgFaint },
+  archivedNote: { paddingHorizontal: 16, paddingBottom: 8, fontSize: 12, color: theme.colors.fgFaint },
   queuedWrap: { marginHorizontal: 12, marginBottom: 8, gap: 6 },
   queuedRow: {
     flexDirection: "row",
@@ -1117,11 +1126,11 @@ const s = StyleSheet.create({
     gap: 8,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surfaceAlt,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  queuedText: { flex: 1, fontSize: 12, color: T.fgMuted },
-  queuedHint: { paddingHorizontal: 4, fontSize: 11, color: T.fgFaint },
-});
+  queuedText: { flex: 1, fontSize: 12, color: theme.colors.fgMuted },
+  queuedHint: { paddingHorizontal: 4, fontSize: 11, color: theme.colors.fgFaint },
+}));

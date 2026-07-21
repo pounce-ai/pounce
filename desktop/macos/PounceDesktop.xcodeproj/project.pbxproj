@@ -16,6 +16,7 @@
 		9A4BF82C5547624C90FD0D94 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D3ED28924113631023F81A9C /* PrivacyInfo.xcprivacy */; };
 		AB5E4A2000000000000000A1 /* PounceSpeech.mm in Sources */ = {isa = PBXBuildFile; fileRef = AB5E4A2000000000000000A3 /* PounceSpeech.mm */; };
 		AB5E4A2000000000000000B1 /* PounceUpdater.mm in Sources */ = {isa = PBXBuildFile; fileRef = AB5E4A2000000000000000B3 /* PounceUpdater.mm */; };
+		AB5E4A2000000000000000C1 /* PounceGlass.mm in Sources */ = {isa = PBXBuildFile; fileRef = AB5E4A2000000000000000C3 /* PounceGlass.mm */; };
 		E9A6F8AEEC0450025AC84DFC /* libPods-PounceDesktop-macOS.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 6A333B985658A14B39E4D33A /* libPods-PounceDesktop-macOS.a */; };
 /* End PBXBuildFile section */
 
@@ -36,6 +37,8 @@
 		AB5E4A2000000000000000A3 /* PounceSpeech.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = PounceSpeech.mm; sourceTree = "<group>"; };
 		AB5E4A2000000000000000B2 /* PounceUpdater.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PounceUpdater.h; sourceTree = "<group>"; };
 		AB5E4A2000000000000000B3 /* PounceUpdater.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = PounceUpdater.mm; sourceTree = "<group>"; };
+		AB5E4A2000000000000000C2 /* PounceGlass.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PounceGlass.h; sourceTree = "<group>"; };
+		AB5E4A2000000000000000C3 /* PounceGlass.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = PounceGlass.mm; sourceTree = "<group>"; };
 		AD5D5B9B23B33B7870AF93FC /* Pods-PounceDesktop-macOS.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PounceDesktop-macOS.release.xcconfig"; path = "Target Support Files/Pods-PounceDesktop-macOS/Pods-PounceDesktop-macOS.release.xcconfig"; sourceTree = "<group>"; };
 		D3ED28924113631023F81A9C /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
@@ -86,6 +89,8 @@
 				AB5E4A2000000000000000A3 /* PounceSpeech.mm */,
 				AB5E4A2000000000000000B2 /* PounceUpdater.h */,
 				AB5E4A2000000000000000B3 /* PounceUpdater.mm */,
+				AB5E4A2000000000000000C2 /* PounceGlass.h */,
+				AB5E4A2000000000000000C3 /* PounceGlass.mm */,
 				514201512437B4B40078DB4F /* Assets.xcassets */,
 				514201532437B4B40078DB4F /* Main.storyboard */,
 				514201562437B4B40078DB4F /* Info.plist */,
@@ -417,6 +422,7 @@
 				5142014D2437B4B30078DB4F /* AppDelegate.mm in Sources */,
 				AB5E4A2000000000000000A1 /* PounceSpeech.mm in Sources */,
 				AB5E4A2000000000000000B1 /* PounceUpdater.mm in Sources */,
+				AB5E4A2000000000000000C1 /* PounceGlass.mm in Sources */,
 				564DCA3C7AE63986D9DBCF0C /* ExpoModulesProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

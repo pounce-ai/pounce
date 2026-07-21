@@ -18,6 +18,12 @@
       "sourceType": "github",
       "skillPath": "plugins/expo/skills/native-data-fetching/SKILL.md",
       "computedHash": "21253dd72e2afa0cc0a6693295f043af3b149fa250c7aedef4d33144e69258ff"
+    },
+    "react-native-unistyles-v3": {
+      "source": "jpudysz/react-native-unistyles",
+      "sourceType": "github",
+      "skillPath": "skills/react-native-unistyles-v3/SKILL.md",
+      "computedHash": "c7eac6e591b6cd7b3f9e586116f1344d3239296d2d6c716e87812dedaccaffd4"
     }
   }
 }

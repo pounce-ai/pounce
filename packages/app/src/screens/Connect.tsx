@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { connectBridge } from "../services/bridge";
 import { pairingHostName } from "../services/pairing";
 import { savePairing } from "../services/runtime";
-import { COLOR } from "../ui";
-import { T } from "../ui/theme";
 
 /**
  * Deep-link target for `pounce://connect?url=…&token=…[&node=…&relay=…&host=…]`
@@ -24,6 +23,7 @@ export default function ConnectScreen() {
     host?: string;
   }>();
   const router = useRouter();
+  const { theme } = useUnistyles();
   const [error, setError] = useState<string | null>(null);
   const done = useRef(false);
 
@@ -74,7 +74,7 @@ export default function ConnectScreen() {
         </>
       ) : (
         <>
-          <ActivityIndicator color={COLOR.accent} />
+          <ActivityIndicator color={theme.colors.accent} />
           <Text style={s.pairingText} numberOfLines={1}>
             Pairing with {host || url}…
           </Text>
@@ -84,25 +84,25 @@ export default function ConnectScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   root: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: T.bg,
+    backgroundColor: theme.colors.bg,
     paddingHorizontal: 32,
   },
   emoji: { fontSize: 40 },
-  title: { marginTop: 12, textAlign: "center", fontSize: 16, fontWeight: "600", color: T.fg },
-  body: { marginTop: 4, textAlign: "center", fontSize: 13, color: T.fgMuted },
+  title: { marginTop: 12, textAlign: "center", fontSize: 16, fontWeight: "600", color: theme.colors.fg },
+  body: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   continueBtn: {
     marginTop: 24,
     borderRadius: 12,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 20,
     paddingVertical: 10,
   },
   pressed80: { opacity: 0.8 },
-  continueLabel: { fontSize: 14, fontWeight: "500", color: T.fg },
-  pairingText: { marginTop: 16, textAlign: "center", fontSize: 14, color: T.fgMuted },
-});
+  continueLabel: { fontSize: 14, fontWeight: "500", color: theme.colors.fg },
+  pairingText: { marginTop: 16, textAlign: "center", fontSize: 14, color: theme.colors.fgMuted },
+}));

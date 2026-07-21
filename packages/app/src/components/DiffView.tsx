@@ -1,21 +1,12 @@
 import { memo, useEffect, useMemo, useState } from "react";
-import { ScrollView, StyleSheet, Text, View, type TextStyle } from "react-native";
+import { ScrollView, Text, View, type TextStyle } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import PatchDiffDOM from "./PatchDiffDOM";
 import { classifyLine, type LineKind } from "./diffPatch";
 import type { DiffViewProps } from "./DiffViewTypes";
-import { T } from "../ui/theme";
 
 /** How long the DOM renderer gets to report ready before we fall back. */
 const DOM_READY_TIMEOUT_MS = 6000;
-
-/** Styles per diff-line kind (replaces the old shared Tailwind LINE_CLASS map). */
-const LINE_STYLE: Record<LineKind, TextStyle> = {
-  header: { color: T.fgFaint },
-  hunk: { color: T.info },
-  add: { backgroundColor: T.diffAddBg, color: T.diffAddFg },
-  del: { backgroundColor: T.diffDelBg, color: T.diffDelFg },
-  ctx: { color: T.fgMuted },
-};
 
 /**
  * Unified-diff viewer seam. Mobile: @pierre/diffs (syntax highlighting,
@@ -96,7 +87,19 @@ function DiffSkeleton() {
 
 /** Plain colored-line renderer — the escape hatch when the DOM viewer dies. */
 function FallbackDiff({ patch }: { patch: string }) {
+  const { theme } = useUnistyles();
   const lines = useMemo(() => patch.split("\n"), [patch]);
+  /** Styles per diff-line kind (replaces the old shared Tailwind LINE_CLASS map). */
+  const LINE_STYLE: Record<LineKind, TextStyle> = useMemo(
+    () => ({
+      header: { color: theme.colors.fgFaint },
+      hunk: { color: theme.colors.info },
+      add: { backgroundColor: theme.colors.diffAddBg, color: theme.colors.diffAddFg },
+      del: { backgroundColor: theme.colors.diffDelBg, color: theme.colors.diffDelFg },
+      ctx: { color: theme.colors.fgMuted },
+    }),
+    [theme],
+  );
   return (
     <ScrollView style={s.flex1} contentContainerStyle={{ paddingVertical: 6 }}>
       {lines.map((line, i) => (
@@ -108,7 +111,7 @@ function FallbackDiff({ patch }: { patch: string }) {
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   flex1: { flex: 1 },
   skeleton: {
     position: "absolute",
@@ -116,7 +119,7 @@ const s = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: T.bg,
+    backgroundColor: theme.colors.bg,
     paddingHorizontal: 0,
     paddingTop: 4,
   },
@@ -127,14 +130,14 @@ const s = StyleSheet.create({
     gap: 8,
     borderBottomWidth: 1,
     borderTopWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.bgElevated,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bgElevated,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  skelIcon: { height: 16, width: 16, borderRadius: 4, backgroundColor: T.surfaceHover },
-  skelTitle: { height: 12, flex: 1, borderRadius: 4, backgroundColor: T.surfaceHover },
-  skelStat: { height: 12, width: 48, borderRadius: 4, backgroundColor: T.surfaceHover },
+  skelIcon: { height: 16, width: 16, borderRadius: 4, backgroundColor: theme.colors.surfaceHover },
+  skelTitle: { height: 12, flex: 1, borderRadius: 4, backgroundColor: theme.colors.surfaceHover },
+  skelStat: { height: 12, width: 48, borderRadius: 4, backgroundColor: theme.colors.surfaceHover },
   skelLineRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -142,7 +145,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 4,
   },
-  skelLineNo: { height: 10, width: 24, borderRadius: 4, backgroundColor: T.surface },
-  skelLine: { height: 10, borderRadius: 4, backgroundColor: T.surface },
+  skelLineNo: { height: 10, width: 24, borderRadius: 4, backgroundColor: theme.colors.surface },
+  skelLine: { height: 10, borderRadius: 4, backgroundColor: theme.colors.surface },
   diffLine: { paddingHorizontal: 12, fontFamily: "JetBrainsMono", fontSize: 11, lineHeight: 18 },
-});
+}));

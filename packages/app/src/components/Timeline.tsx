@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, Text, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
 import { PounceIcon } from "../ui/native/Icon";
 import { VideoPlayer } from "../ui/native/VideoPlayer";
@@ -14,8 +15,6 @@ import {
 } from "@pounce/shared";
 import { defaultMarked } from "../state/stores";
 import { useThreadMarkers } from "../state/db/hooks";
-import { COLOR } from "../ui";
-import { T } from "../ui/theme";
 import { MessageMarkdown } from "../components/MessageMarkdown";
 import { PromptForm } from "../components/PromptForm";
 import { DiffBlock, HlText } from "../components/CodeHighlight";
@@ -537,10 +536,11 @@ function PromptCard({
 /** Plan mode's proposed plan (from ExitPlanMode), rendered as markdown in a
  *  distinct accent card so it reads as a plan, not a buried tool call. */
 function PlanCard({ plan }: { plan: string }) {
+  const { theme } = useUnistyles();
   return (
     <View style={[s.accentCard, s.gap6]}>
       <View style={s.rowCenter6}>
-        <PounceIcon name="map-outline" size={13} color={COLOR.accent} />
+        <PounceIcon name="map-outline" size={13} color={theme.colors.accent} />
         <Text style={s.planLabel}>Plan</Text>
       </View>
       <MessageMarkdown text={plan} role="assistant" />
@@ -611,6 +611,7 @@ function VideoTile({ onPress }: { onPress: () => void }) {
  *  unless `eager`, which renders immediately (viewability doesn't fire reliably
  *  for a thumbnail nested inside a tool card, so tool-card previews opt out). */
 function LazyImage({ uri, onPress }: { uri: string; onPress: () => void }) {
+  const { theme } = useUnistyles();
   // No viewability gating: the list's virtualization already bounds mounted
   // rows, and legend-list's useViewability doesn't reliably fire an initial
   // callback for rows that mount already-visible — thumbnails stayed gray
@@ -621,7 +622,7 @@ function LazyImage({ uri, onPress }: { uri: string; onPress: () => void }) {
   if (failed) {
     return (
       <View style={[s.thumb, s.thumbPlaceholder, s.thumbBrokenWrap]}>
-        <PounceIcon name="image-outline" size={22} color={COLOR.fgFaint} />
+        <PounceIcon name="image-outline" size={22} color={theme.colors.fgFaint} />
         <Text style={s.thumbBrokenLabel}>Image unavailable</Text>
       </View>
     );
@@ -688,6 +689,7 @@ function Bubble({
   /** Enables shell "Run" cards on assistant turns (queues !cmd to composer). */
   onRun?: (command: string) => void;
 }) {
+  const { theme } = useUnistyles();
   // User turns are compact right-aligned accent bubbles; assistant turns render
   // full-width (rich markdown/code needs the room), no bubble chrome. Both go
   // through the native md4c renderer — the user composes markdown too.
@@ -705,7 +707,7 @@ function Bubble({
       <View style={s.flex1}>
         <MessageMarkdown text={text} role="assistant" streaming={streaming} onRun={onRun} />
       </View>
-      {marked ? <PounceIcon name="bookmark" size={10} color={COLOR.accent} style={{ marginTop: 3 }} /> : null}
+      {marked ? <PounceIcon name="bookmark" size={10} color={theme.colors.accent} style={{ marginTop: 3 }} /> : null}
     </View>
   );
 }
@@ -746,6 +748,7 @@ const SHELL_GOLD = "#d29922";
  * card, instead of the output sprawling as its own full-width block.
  */
 function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: ToolResultEvent; cwd?: string | null }) {
+  const { theme } = useUnistyles();
   // Rows are recycled: key the expansion to the event id so an open accordion
   // can't bleed into whatever event this component instance shows next.
   const [openId, setOpenId] = useState<string | null>(null);
@@ -776,7 +779,7 @@ function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: 
     >
       <View style={s.rowCenter8}>
         {shell ? (
-          <Text style={[s.shellDollar, { color: failed ? COLOR.danger : SHELL_GOLD }]}>
+          <Text style={[s.shellDollar, { color: failed ? theme.colors.danger : SHELL_GOLD }]}>
             $
           </Text>
         ) : (
@@ -806,7 +809,7 @@ function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: 
             <Text style={s.runningLabel}>Running</Text>
           </View>
         ) : expandable ? (
-          <PounceIcon name={open ? "chevron-up" : "chevron-down"} size={13} color={COLOR.fgFaint} />
+          <PounceIcon name={open ? "chevron-up" : "chevron-down"} size={13} color={theme.colors.fgFaint} />
         ) : null}
       </View>
       {open && event.call.previewUri ? (
@@ -912,7 +915,7 @@ const DANGER_TINT = "rgba(248, 81, 73, 0.1)";
 const TERM_BG = "#0d0d12";
 const TERM_FG = "#cdd0d6";
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   flex1: { flex: 1 },
   gap6: { gap: 6 },
   gap8: { gap: 8 },
@@ -923,11 +926,11 @@ const s = StyleSheet.create({
   rowCenter6: { flexDirection: "row", alignItems: "center", gap: 6 },
   rowCenter8: { flexDirection: "row", alignItems: "center", gap: 8 },
   centerContent: { alignItems: "center", justifyContent: "center" },
-  textDanger: { color: T.danger },
-  textMuted: { color: T.fgMuted },
-  textFaint: { color: T.fgFaint },
+  textDanger: { color: theme.colors.danger },
+  textMuted: { color: theme.colors.fgMuted },
+  textFaint: { color: theme.colors.fgFaint },
   monoText12: { fontFamily: "JetBrainsMono", fontSize: 12 },
-  batchHeader: { paddingLeft: 4, fontSize: 12, color: T.fgMuted },
+  batchHeader: { paddingLeft: 4, fontSize: 12, color: theme.colors.fgMuted },
   permCard: {
     gap: 8,
     borderRadius: 12,
@@ -936,15 +939,15 @@ const s = StyleSheet.create({
     backgroundColor: WARNING_TINT,
     padding: 12,
   },
-  permTitle: { flex: 1, fontSize: 13, fontWeight: "500", color: T.fg },
-  permChosen: { fontSize: 12, fontWeight: "500", color: T.fgMuted },
+  permTitle: { flex: 1, fontSize: 13, fontWeight: "500", color: theme.colors.fg },
+  permChosen: { fontSize: 12, fontWeight: "500", color: theme.colors.fgMuted },
   optionsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   optionBtn: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
-  optionBtnReject: { borderWidth: 1, borderColor: T.border, backgroundColor: T.surfaceAlt },
-  optionBtnAllow: { backgroundColor: T.accent },
+  optionBtnReject: { borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceAlt },
+  optionBtnAllow: { backgroundColor: theme.colors.accent },
   optionLabel: { fontSize: 13, fontWeight: "600" },
-  optionLabelReject: { color: T.fgMuted },
-  optionLabelAllow: { color: T.onAccent },
+  optionLabelReject: { color: theme.colors.fgMuted },
+  optionLabelAllow: { color: theme.colors.onAccent },
   accentCard: {
     borderRadius: 12,
     borderWidth: 1,
@@ -957,16 +960,16 @@ const s = StyleSheet.create({
     fontWeight: "600",
     textTransform: "uppercase",
     letterSpacing: 0.5,
-    color: T.accent,
+    color: theme.colors.accent,
   },
   imagesRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   justifyStart: { justifyContent: "flex-start" },
   justifyEnd: { justifyContent: "flex-end" },
   lightboxScrim: { backgroundColor: "rgba(0, 0, 0, 0.9)" },
   thumb: { width: THUMB, height: THUMB, borderRadius: 12 },
-  thumbPlaceholder: { borderWidth: 1, borderColor: T.border, backgroundColor: T.surfaceAlt },
+  thumbPlaceholder: { borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceAlt },
   thumbBrokenWrap: { alignItems: "center", justifyContent: "center", gap: 4 },
-  thumbBrokenLabel: { fontSize: 10, color: T.fgFaint },
+  thumbBrokenLabel: { fontSize: 10, color: theme.colors.fgFaint },
   videoTile: { backgroundColor: "#000", alignItems: "center", justifyContent: "center" },
   lightboxMedia: { width: "94%", height: "84%" },
   commandChip: {
@@ -977,38 +980,38 @@ const s = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     borderColor: ACCENT_BORDER,
-    backgroundColor: T.accentSoft,
+    backgroundColor: theme.colors.accentSoft,
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  commandName: { fontFamily: "JetBrainsMono", fontSize: 13, fontWeight: "600", color: T.accent },
-  commandArgs: { flexShrink: 1, fontFamily: "JetBrainsMono", fontSize: 12, color: T.fgMuted },
+  commandName: { fontFamily: "JetBrainsMono", fontSize: 13, fontWeight: "600", color: theme.colors.accent },
+  commandArgs: { flexShrink: 1, fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fgMuted },
   outputNote: { maxWidth: "86%", borderRadius: 12, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6 },
   outputNoteError: { borderColor: DANGER_BORDER, backgroundColor: DANGER_TINT },
-  outputNoteOk: { borderColor: T.border, backgroundColor: T.surfaceAlt },
-  userBubble: { maxWidth: "86%", borderRadius: 16, backgroundColor: T.accent, paddingHorizontal: 12, paddingVertical: 6 },
+  outputNoteOk: { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceAlt },
+  userBubble: { maxWidth: "86%", borderRadius: 16, backgroundColor: theme.colors.accent, paddingHorizontal: 12, paddingVertical: 6 },
   assistantRow: { flexDirection: "row", alignItems: "flex-start", gap: 4 },
   toolCard: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
   toolCardFailed: { borderColor: DANGER_BORDER, backgroundColor: DANGER_TINT },
-  toolCardOk: { borderColor: T.border, backgroundColor: T.surfaceAlt },
+  toolCardOk: { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceAlt },
   shellDollar: { fontFamily: "JetBrainsMono", fontSize: 13, fontWeight: "600" },
-  toolName: { fontFamily: "JetBrainsMono", fontSize: 12, color: T.fg },
-  toolPreview: { flex: 1, fontFamily: "JetBrainsMono", fontSize: 12, lineHeight: 17, color: T.fgMuted },
-  runningDot: { height: 6, width: 6, borderRadius: 999, backgroundColor: T.success },
+  toolName: { fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fg },
+  toolPreview: { flex: 1, fontFamily: "JetBrainsMono", fontSize: 12, lineHeight: 17, color: theme.colors.fgMuted },
+  runningDot: { height: 6, width: 6, borderRadius: 999, backgroundColor: theme.colors.success },
   runningLabel: {
     fontSize: 10,
     fontWeight: "600",
     textTransform: "uppercase",
     letterSpacing: 0.5,
-    color: T.success,
+    color: theme.colors.success,
   },
   tailBox: { marginTop: 8, borderRadius: 8, backgroundColor: TERM_BG, paddingHorizontal: 10, paddingVertical: 6 },
-  tailText: { fontFamily: "JetBrainsMono", fontSize: 11, lineHeight: 15, color: T.fgFaint },
+  tailText: { fontFamily: "JetBrainsMono", fontSize: 11, lineHeight: 15, color: theme.colors.fgFaint },
   resultBox: { borderRadius: 12, backgroundColor: TERM_BG, paddingHorizontal: 12, paddingVertical: 8 },
-  resultBoxNested: { borderRadius: 8, borderWidth: 1, borderColor: T.border },
+  resultBoxNested: { borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border },
   resultBoxError: { borderWidth: 1, borderColor: DANGER_BORDER },
   resultText: { fontFamily: "JetBrainsMono", fontSize: 12, color: TERM_FG },
   termBox: { borderRadius: 12, backgroundColor: "#000000", padding: 8 },
   termTextOut: { color: "#d6d6d6" },
   meta: { paddingVertical: 2, textAlign: "center", fontSize: 11 },
-});
+}));

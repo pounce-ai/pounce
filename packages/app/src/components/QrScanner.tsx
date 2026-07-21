@@ -1,8 +1,8 @@
 import { useEffect } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { T } from "../ui/theme";
 
 /**
  * Full-screen QR scanner. Lives in its own module so it's only loaded
@@ -61,26 +61,26 @@ export default function QrScanner({
 
 // Overlay text/chrome sits on live camera video, so it stays literal white/black
 // regardless of the system appearance.
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   permission: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: T.bg,
+    backgroundColor: theme.colors.bg,
     paddingHorizontal: 32,
   },
-  permissionTitle: { textAlign: "center", fontSize: 15, fontWeight: "600", color: T.fg },
-  permissionBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: T.fgMuted },
+  permissionTitle: { textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  permissionBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   allowBtn: {
     marginTop: 20,
     borderRadius: 12,
-    backgroundColor: T.accent,
+    backgroundColor: theme.colors.accent,
     paddingHorizontal: 20,
     paddingVertical: 10,
   },
-  allowText: { fontSize: 14, fontWeight: "600", color: T.onAccent },
+  allowText: { fontSize: 14, fontWeight: "600", color: theme.colors.onAccent },
   cancelLink: { marginTop: 12 },
-  cancelLinkText: { fontSize: 14, color: T.fgMuted },
+  cancelLinkText: { fontSize: 14, color: theme.colors.fgMuted },
   camera: { flex: 1, backgroundColor: "#000" },
   hint: { position: "absolute", left: 0, right: 0, top: 0, alignItems: "center" },
   hintText: { fontSize: 15, fontWeight: "500", color: "#fff" },
@@ -96,4 +96,4 @@ const s = StyleSheet.create({
   pressed60: { opacity: 0.6 },
   pressed80: { opacity: 0.8 },
   pressed90: { opacity: 0.9 },
-});
+}));

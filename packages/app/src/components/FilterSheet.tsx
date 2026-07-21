@@ -5,13 +5,12 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   useWindowDimensions,
   View,
-  type ColorValue,
 } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSelector } from "@legendapp/state/react";
 import { PounceIcon } from "../ui/native/Icon";
@@ -38,8 +37,7 @@ import {
   useProjects,
   useThreads,
 } from "../state/db/hooks";
-import { agentLabel, COLOR, DeviceIcon, IS_DESKTOP } from "../ui";
-import { T } from "../ui/theme";
+import { agentLabel, DeviceIcon, IS_DESKTOP } from "../ui";
 
 /**
  * The one filter trigger used in every header (Home, Search). Highlights when a
@@ -47,6 +45,7 @@ import { T } from "../ui/theme";
  * share the exact same control instead of drifting.
  */
 export function FilterButton({ active, onPress }: { active: boolean; onPress: () => void }) {
+  const { theme } = useUnistyles();
   const count = useSelector(() => activeFilterCount());
   const on = active || count > 0;
   return (
@@ -54,7 +53,7 @@ export function FilterButton({ active, onPress }: { active: boolean; onPress: ()
       onPress={onPress}
       style={({ pressed }) => [s.filterBtn, on ? s.filterBtnOn : s.filterBtnOff, pressed && s.pressed80]}
     >
-      <PounceIcon name="filter" size={17} color={on ? COLOR.accent : COLOR.fgMuted} />
+      <PounceIcon name="filter" size={17} color={on ? theme.colors.accent : theme.colors.fgMuted} />
       {count > 0 ? (
         <View style={s.badge}>
           <Text style={s.badgeText}>{count}</Text>
@@ -89,11 +88,12 @@ function FilterChip({
   );
 }
 
-/** The three coarse status buckets, each with the dot colour ActivityDot uses. */
-const STATUS_CHIPS: { bucket: StatusBucket; label: string; dot: ColorValue }[] = [
-  { bucket: "active", label: "Active", dot: T.success },
-  { bucket: "idle", label: "Idle", dot: T.fgFaint },
-  { bucket: "done", label: "Done", dot: T.info },
+/** The three coarse status buckets, each with the dot colour ActivityDot uses.
+ *  Theme token keys — resolved against the live theme at render time. */
+const STATUS_CHIPS: { bucket: StatusBucket; label: string; dot: "success" | "fgFaint" | "info" }[] = [
+  { bucket: "active", label: "Active", dot: "success" },
+  { bucket: "idle", label: "Idle", dot: "fgFaint" },
+  { bucket: "done", label: "Done", dot: "info" },
 ];
 
 /**
@@ -127,6 +127,7 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
  *  native formSheet route on mobile (apps/mobile app/filters.tsx). The parent
  *  supplies the container (backdrop/sheet chrome) and vertical gap. */
 export function FilterSheetContent({ onClose }: { onClose: () => void }) {
+  const { theme } = useUnistyles();
   const { height } = useWindowDimensions();
   const f = useSelector(() => filters$.get());
   const devices = useDevices();
@@ -169,11 +170,14 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      {/* Grabber doubles as an expand/collapse toggle. */}
-        <Pressable onPress={() => setExpanded((v) => !v)} hitSlop={12} style={s.grabber}>
-          <View style={s.grabberBar} />
-          <PounceIcon name={expanded ? "chevron-down" : "chevron-up"} size={12} color={COLOR.fgFaint} />
-        </Pressable>
+      {/* Grabber doubles as an expand/collapse toggle — phone sheets only;
+          the desktop modal card has a fixed height. */}
+        {IS_DESKTOP ? null : (
+          <Pressable onPress={() => setExpanded((v) => !v)} hitSlop={12} style={s.grabber}>
+            <View style={s.grabberBar} />
+            <PounceIcon name={expanded ? "chevron-down" : "chevron-up"} size={12} color={theme.colors.fgFaint} />
+          </Pressable>
+        )}
         <View style={s.rowBetween}>
           <Text style={s.title}>Filter</Text>
           {hasFilter ? (
@@ -181,7 +185,7 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
               onPress={() => filters$.set(CLEARED_FILTERS)}
               style={({ pressed }) => [s.clearRow, pressed && s.pressed60]}
             >
-              <PounceIcon name="close-circle-outline" size={15} color={COLOR.fgMuted} />
+              <PounceIcon name="close-circle-outline" size={15} color={theme.colors.fgMuted} />
               <Text style={s.clearText}>Clear all</Text>
             </Pressable>
           ) : null}
@@ -205,7 +209,7 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
                 label={c.label}
                 active={f.statuses.includes(c.bucket)}
                 onPress={() => toggleStatus(c.bucket)}
-                icon={<View style={[s.statusDot, { backgroundColor: c.dot }]} />}
+                icon={<View style={[s.statusDot, { backgroundColor: theme.colors[c.dot] }]} />}
               />
             ))}
           </View>
@@ -225,7 +229,7 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
                     <DeviceIcon
                       name={d.name}
                       emoji={deviceEmoji(d.id)}
-                      color={f.device === d.id ? COLOR.accent : COLOR.fgMuted}
+                      color={f.device === d.id ? theme.colors.accent : theme.colors.fgMuted}
                       size={13}
                     />
                   }
@@ -265,19 +269,19 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
               ) : null}
             </View>
             <View style={s.searchRow}>
-              <PounceIcon name="git-branch-outline" size={14} color={COLOR.fgFaint} />
+              <PounceIcon name="git-branch-outline" size={14} color={theme.colors.fgFaint} />
               <TextInput
                 value={f.branchQuery}
                 onChangeText={(t) => filters$.branchQuery.set(t)}
                 placeholder="Search branch or worktree…"
-                placeholderTextColor={COLOR.fgFaint}
+                placeholderTextColor={theme.colors.fgFaint}
                 autoCapitalize="none"
                 autoCorrect={false}
                 style={[s.input, IS_DESKTOP && s.inputDesktop]}
               />
               {f.branchQuery ? (
                 <Pressable onPress={() => filters$.branchQuery.set("")} hitSlop={8} style={({ pressed }) => pressed && s.pressed60}>
-                  <PounceIcon name="close-circle" size={15} color={COLOR.fgFaint} />
+                  <PounceIcon name="close-circle" size={15} color={theme.colors.fgFaint} />
                 </Pressable>
               ) : null}
             </View>
@@ -293,7 +297,7 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
                     <PounceIcon
                       name={active ? "checkmark-circle" : "git-branch-outline"}
                       size={16}
-                      color={active ? COLOR.accent : COLOR.fgMuted}
+                      color={active ? theme.colors.accent : theme.colors.fgMuted}
                     />
                     <Text
                       numberOfLines={1}
@@ -326,12 +330,12 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
             {/* Searchable, multi-select folder list. Tap a row to toggle it in the
                 filter; tap the eye to permanently hide a folder everywhere. */}
             <View style={s.searchRow}>
-              <PounceIcon name="search" size={14} color={COLOR.fgFaint} />
+              <PounceIcon name="search" size={14} color={theme.colors.fgFaint} />
               <TextInput
                 value={repoQuery}
                 onChangeText={setRepoQuery}
                 placeholder="Search folders…"
-                placeholderTextColor={COLOR.fgFaint}
+                placeholderTextColor={theme.colors.fgFaint}
                 autoCapitalize="none"
                 autoCorrect={false}
                 style={[s.input, IS_DESKTOP && s.inputDesktop]}
@@ -355,9 +359,9 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
                       <PounceIcon
                         name={selected ? "checkbox" : "square-outline"}
                         size={18}
-                        color={ignored ? COLOR.fgFaint : selected ? COLOR.accent : COLOR.fgMuted}
+                        color={ignored ? theme.colors.fgFaint : selected ? theme.colors.accent : theme.colors.fgMuted}
                       />
-                      <PounceIcon name="folder-outline" size={13} color={ignored ? COLOR.fgFaint : COLOR.fgMuted} />
+                      <PounceIcon name="folder-outline" size={13} color={ignored ? theme.colors.fgFaint : theme.colors.fgMuted} />
                       <Text
                         numberOfLines={1}
                         style={[
@@ -372,7 +376,7 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
                       <PounceIcon
                         name={ignored ? "eye-off" : "eye-outline"}
                         size={15}
-                        color={ignored ? COLOR.accent : COLOR.fgFaint}
+                        color={ignored ? theme.colors.accent : theme.colors.fgFaint}
                       />
                     </Pressable>
                   </View>
@@ -395,10 +399,10 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   filterBtn: { height: 36, width: 36, alignItems: "center", justifyContent: "center", borderRadius: 999 },
-  filterBtnOn: { backgroundColor: T.accentSoft },
-  filterBtnOff: { backgroundColor: T.surfaceAlt },
+  filterBtnOn: { backgroundColor: theme.colors.accentSoft },
+  filterBtnOff: { backgroundColor: theme.colors.surfaceAlt },
   badge: {
     position: "absolute",
     right: -2,
@@ -408,10 +412,10 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 999,
-    backgroundColor: T.accent,
+    backgroundColor: theme.colors.accent,
     paddingHorizontal: 4,
   },
-  badgeText: { fontSize: 10, fontWeight: "700", color: T.onAccent },
+  badgeText: { fontSize: 10, fontWeight: "700", color: theme.colors.onAccent },
   chip: {
     height: 32,
     flexDirection: "row",
@@ -421,33 +425,33 @@ const s = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: 12,
   },
-  chipOn: { borderColor: T.accent, backgroundColor: T.accentSoft },
-  chipOff: { borderColor: T.border, backgroundColor: T.surfaceAlt },
+  chipOn: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
+  chipOff: { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceAlt },
   chipLabel: { maxWidth: 180, fontSize: 13 },
-  textAccent: { color: T.accent },
-  textFg: { color: T.fg },
-  textIgnored: { color: T.fgFaint, textDecorationLine: "line-through" },
+  textAccent: { color: theme.colors.accent },
+  textFg: { color: theme.colors.fg },
+  textIgnored: { color: theme.colors.fgFaint, textDecorationLine: "line-through" },
   kav: { flex: 1, justifyContent: "flex-end" },
-  backdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: T.overlay },
+  backdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: theme.colors.overlay },
   sheet: {
     gap: 16,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderTopWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.bgElevated,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bgElevated,
     paddingHorizontal: 16,
     paddingTop: 12,
   },
   grabber: { alignItems: "center", gap: 4, paddingBottom: 2, paddingTop: 2 },
-  grabberBar: { height: 4, width: 40, borderRadius: 999, backgroundColor: T.border },
+  grabberBar: { height: 4, width: 40, borderRadius: 999, backgroundColor: theme.colors.border },
   rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  title: { fontSize: 18, fontWeight: "700", color: T.fg },
+  title: { fontSize: 18, fontWeight: "700", color: theme.colors.fg },
   clearRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  clearText: { fontSize: 13, color: T.fgMuted },
-  clearSmall: { fontSize: 12, color: T.fgMuted },
+  clearText: { fontSize: 13, color: theme.colors.fgMuted },
+  clearSmall: { fontSize: 12, color: theme.colors.fgMuted },
   section: { gap: 6 },
-  sectionLabel: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: T.fgFaint },
+  sectionLabel: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
   chipsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   statusDot: { height: 8, width: 8, borderRadius: 999 },
   searchRow: {
@@ -456,14 +460,14 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     borderRadius: 12,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 12,
   },
-  input: { flex: 1, fontSize: 14, color: T.fg, height: 36 },
+  input: { flex: 1, fontSize: 14, color: theme.colors.fg, height: 36 },
   // react-native-macos top-aligns text inside a fixed-height field, so on
   // desktop the input keeps its intrinsic height (centered by the row's
   // alignItems) and the fixed height lives on the container row instead.
-  inputDesktop: { height: "auto" as never, paddingVertical: 0 },
+  inputDesktop: { height: "auto" as unknown as number, paddingVertical: 0 },
   optionRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -474,7 +478,7 @@ const s = StyleSheet.create({
     paddingRight: 8,
   },
   optionText: { flex: 1, fontSize: 14 },
-  emptyText: { paddingVertical: 12, textAlign: "center", fontSize: 13, color: T.fgMuted },
+  emptyText: { paddingVertical: 12, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   repoRow: { flexDirection: "row", alignItems: "center" },
   flex1: { flex: 1 },
   eyeBtn: { paddingHorizontal: 8, paddingVertical: 8 },
@@ -484,11 +488,11 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 12,
-    backgroundColor: T.accent,
+    backgroundColor: theme.colors.accent,
   },
-  doneText: { fontSize: 15, fontWeight: "600", color: T.onAccent },
+  doneText: { fontSize: 15, fontWeight: "600", color: theme.colors.onAccent },
   pressed60: { opacity: 0.6 },
   pressed80: { opacity: 0.8 },
   pressed90: { opacity: 0.9 },
-  pressedHover: { backgroundColor: T.surfaceHover },
-});
+  pressedHover: { backgroundColor: theme.colors.surfaceHover },
+}));

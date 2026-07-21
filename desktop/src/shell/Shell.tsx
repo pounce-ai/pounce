@@ -9,7 +9,7 @@
  * router calls.
  */
 import type { ComponentType } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import { nav$, router, RouteParamsProvider } from "../shims/router";
@@ -28,6 +28,21 @@ import HelpScreen from "@pounce/app/screens/Help";
 import SyncHistoryScreen from "@pounce/app/screens/SyncHistory";
 import DiagnosticsScreen from "@pounce/app/screens/Diagnostics";
 import PairScreen from "../screens/Pair";
+import { FilterSheetContent } from "@pounce/app/components/FilterSheet";
+
+/** Filters as a routed modal card (same href as mobile) — the shared sheet
+ *  body with the shell's standard scrim/card instead of a phone bottom sheet. */
+function FiltersModal() {
+  return (
+    <ScrollView
+      style={s.filtersBody}
+      contentContainerStyle={{ gap: 16, paddingBottom: 32 }}
+      keyboardShouldPersistTaps="handled"
+    >
+      <FilterSheetContent onClose={() => nav$.modal.set(null)} />
+    </ScrollView>
+  );
+}
 
 /** Modal cards need an explicit height: the screens inside are flex-1, so a
  *  content-sized card collapses to its minimum while centered children
@@ -45,6 +60,7 @@ const MODALS: Record<string, { component: ComponentType; width: number; height: 
   "/sync-history": { component: SyncHistoryScreen, width: 620, height: 600 },
   "/diagnostics": { component: DiagnosticsScreen, width: 620, height: 620 },
   "/pair": { component: PairScreen, width: 560, height: 640 },
+  "/filters": { component: FiltersModal, width: 560, height: 660 },
 };
 
 function EmptyState() {
@@ -56,7 +72,7 @@ function EmptyState() {
         onPress={() => router.push("/new")}
         style={({ pressed }) => [s.newTaskBtn, pressed && s.pressed80]}
       >
-        <Ionicons name="add" size={16} color="#fff" />
+        <Ionicons name="add" size={16} color={T.onAccent} />
         <Text style={s.newTaskLabel}>New task</Text>
       </Pressable>
       <Pressable
@@ -160,4 +176,5 @@ const s = StyleSheet.create({
     borderColor: T.borderStrong,
     backgroundColor: T.bg,
   },
+  filtersBody: { flex: 1, backgroundColor: T.bgElevated, paddingHorizontal: 16, paddingTop: 12 },
 });

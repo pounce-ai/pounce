@@ -3,11 +3,11 @@ import {
   ActivityIndicator,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Platform } from "react-native";
 import { KeyboardAvoidingView } from "../components/kav";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,8 +15,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { PounceIcon } from "../ui/native/Icon";
 import { runExec } from "../services/bridge";
 import { useThread } from "../state/db/hooks";
-import { COLOR } from "../ui";
-import { T } from "../ui/theme";
 
 interface Entry {
   command: string;
@@ -29,6 +27,7 @@ export default function TerminalScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { theme } = useUnistyles();
   const session = useThread(id);
 
   const [command, setCommand] = useState("");
@@ -59,7 +58,7 @@ export default function TerminalScreen() {
     >
       <View style={s.header}>
         <Pressable onPress={() => router.back()} style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}>
-          <PounceIcon name="chevron-down" size={22} color={COLOR.fg} />
+          <PounceIcon name="chevron-down" size={22} color={theme.colors.fg} />
         </Pressable>
         <View style={s.flex1}>
           <Text style={s.title}>Terminal</Text>
@@ -95,7 +94,7 @@ export default function TerminalScreen() {
         ))}
         {running ? (
           <View style={s.runningRow}>
-            <ActivityIndicator color={COLOR.fgMuted} size="small" />
+            <ActivityIndicator color={theme.colors.fgMuted} size="small" />
             <Text style={s.runningText}>running…</Text>
           </View>
         ) : null}
@@ -109,7 +108,7 @@ export default function TerminalScreen() {
             onChangeText={setCommand}
             editable={!running}
             placeholder="command…"
-            placeholderTextColor={T.fgFaint}
+            placeholderTextColor={theme.colors.fgFaint}
             autoCapitalize="none"
             autoCorrect={false}
             onSubmitEditing={run}
@@ -121,7 +120,7 @@ export default function TerminalScreen() {
             disabled={!command.trim() || running}
             style={[s.sendBtn, (!command.trim() || running) && s.opacity40]}
           >
-            <PounceIcon name="arrow-up" size={20} color={T.onAccent} />
+            <PounceIcon name="arrow-up" size={20} color={theme.colors.onAccent} />
           </Pressable>
         </View>
       </View>
@@ -129,8 +128,8 @@ export default function TerminalScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -141,41 +140,41 @@ const s = StyleSheet.create({
   iconBtn: { height: 36, width: 36, alignItems: "center", justifyContent: "center" },
   pressed60: { opacity: 0.6 },
   flex1: { flex: 1 },
-  title: { fontSize: 17, fontWeight: "600", color: T.fg },
-  subtitle: { fontFamily: "JetBrainsMono", fontSize: 11, color: T.fgFaint },
-  scroll: { flex: 1, borderTopWidth: 1, borderColor: T.border },
-  emptyHint: { marginTop: 32, textAlign: "center", fontSize: 13, color: T.fgFaint },
+  title: { fontSize: 17, fontWeight: "600", color: theme.colors.fg },
+  subtitle: { fontFamily: "JetBrainsMono", fontSize: 11, color: theme.colors.fgFaint },
+  scroll: { flex: 1, borderTopWidth: 1, borderColor: theme.colors.border },
+  emptyHint: { marginTop: 32, textAlign: "center", fontSize: 13, color: theme.colors.fgFaint },
   cmdRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  promptGlyph: { fontFamily: "JetBrainsMono", fontSize: 12, color: T.accent },
-  cmdText: { flex: 1, fontFamily: "JetBrainsMono", fontSize: 12, color: T.fg },
-  exitCode: { fontFamily: "JetBrainsMono", fontSize: 11, color: T.danger },
+  promptGlyph: { fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.accent },
+  cmdText: { flex: 1, fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fg },
+  exitCode: { fontFamily: "JetBrainsMono", fontSize: 11, color: theme.colors.danger },
   output: {
     marginTop: 4,
     fontFamily: "JetBrainsMono",
     fontSize: 11,
     lineHeight: 16,
-    color: T.fgMuted,
+    color: theme.colors.fgMuted,
   },
   runningRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  runningText: { fontFamily: "JetBrainsMono", fontSize: 12, color: T.fgFaint },
+  runningText: { fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fgFaint },
   // Transparent, borderless bar to match the floating-composer look elsewhere.
   footer: {
     paddingHorizontal: 12,
     paddingTop: 8,
   },
   inputRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
-  inputPrompt: { paddingBottom: 8, fontFamily: "JetBrainsMono", fontSize: 14, color: T.accent },
+  inputPrompt: { paddingBottom: 8, fontFamily: "JetBrainsMono", fontSize: 14, color: theme.colors.accent },
   input: {
     maxHeight: 90,
     minHeight: 40,
     flex: 1,
     borderRadius: 16,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 12,
     paddingTop: 8,
     fontFamily: "JetBrainsMono",
     fontSize: 14,
-    color: T.fg,
+    color: theme.colors.fg,
   },
   sendBtn: {
     height: 40,
@@ -183,7 +182,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 999,
-    backgroundColor: T.accent,
+    backgroundColor: theme.colors.accent,
   },
   opacity40: { opacity: 0.4 },
-});
+}));

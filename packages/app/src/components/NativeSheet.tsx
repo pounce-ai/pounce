@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Modal } from "./AppModal";
-import { T } from "../ui/theme";
 
 export interface NativeSheetProps {
   visible: boolean;
@@ -23,15 +23,15 @@ export function NativeSheet({ visible, onClose, children }: NativeSheetProps) {
   );
 }
 
-const s = StyleSheet.create({
-  scrim: { flex: 1, backgroundColor: T.overlay },
+const s = StyleSheet.create((theme) => ({
+  scrim: { flex: 1, backgroundColor: theme.colors.overlay },
   sheet: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderTopWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.bgElevated,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bgElevated,
     paddingHorizontal: 16,
     paddingTop: 12,
   },
-});
+}));

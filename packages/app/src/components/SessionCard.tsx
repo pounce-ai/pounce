@@ -1,9 +1,9 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { useRouter } from "expo-router";
 import type { Session } from "@pounce/shared";
 import { ACTIVITY_LABEL, AgentChip, BranchChip, timeAgo } from "../ui";
 import { GlassCard } from "../ui/native/GlassCard";
-import { T } from "../ui/theme";
 
 export function SessionCard({
   session,
@@ -60,7 +60,7 @@ export function SessionCard({
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   card: {
     padding: 14,
   },
@@ -69,23 +69,23 @@ const s = StyleSheet.create({
   pressed70: { opacity: 0.7 },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   title: { flex: 1, fontSize: 15, fontWeight: "600" },
-  titleIdle: { color: T.fgMuted },
-  titleFg: { color: T.fg },
+  titleIdle: { color: theme.colors.fgMuted },
+  titleFg: { color: theme.colors.fg },
   metaRow: { marginTop: 6, flexDirection: "row", alignItems: "center", gap: 6 },
-  metaText: { fontSize: 11, color: T.fgFaint },
+  metaText: { fontSize: 11, color: theme.colors.fgFaint },
   branch: { maxWidth: "60%" },
   archived: {
     borderRadius: 4,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 6,
     paddingVertical: 2,
     fontSize: 10,
     textTransform: "uppercase",
-    color: T.fgFaint,
+    color: theme.colors.fgFaint,
   },
   footerRow: { marginTop: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   status: { fontSize: 12 },
-  statusWarning: { color: T.warning },
-  statusDanger: { color: T.danger },
-  statusFaint: { color: T.fgFaint },
-});
+  statusWarning: { color: theme.colors.warning },
+  statusDanger: { color: theme.colors.danger },
+  statusFaint: { color: theme.colors.fgFaint },
+}));

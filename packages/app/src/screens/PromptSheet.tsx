@@ -6,7 +6,8 @@
  * the terminal, another device) dismisses it.
  */
 import { useEffect, useRef } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import { PounceIcon } from "../ui/native/Icon";
@@ -14,12 +15,11 @@ import { PromptForm } from "../components/PromptForm";
 import { respondPrompt, sendSessionInput } from "../services/bridge";
 import { clearPendingPrompt, pendingPrompts$ } from "../state/stores";
 import { useThread } from "../state/db/hooks";
-import { COLOR } from "../ui";
-import { T } from "../ui/theme";
 
 export default function PromptSheetScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { theme } = useUnistyles();
   const session = useThread(id);
   const pending = useSelector(() => pendingPrompts$[id!].get());
   const answered = useRef(false);
@@ -65,7 +65,7 @@ export default function PromptSheetScreen() {
         />
       ) : (
         <View style={s.resolvedRow}>
-          <PounceIcon name="checkmark-circle-outline" size={18} color={COLOR.fgMuted} />
+          <PounceIcon name="checkmark-circle-outline" size={18} color={theme.colors.fgMuted} />
           <Text style={s.resolvedText}>This prompt was already answered.</Text>
         </View>
       )}
@@ -73,16 +73,16 @@ export default function PromptSheetScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   root: {
-    backgroundColor: T.bgElevated,
+    backgroundColor: theme.colors.bgElevated,
     paddingHorizontal: 20,
     paddingBottom: 40,
     paddingTop: 16,
   },
   header: { marginBottom: 16, alignItems: "center" },
-  grabber: { marginBottom: 12, height: 4, width: 36, borderRadius: 999, backgroundColor: T.border },
-  title: { fontSize: 12, color: T.fgMuted },
+  grabber: { marginBottom: 12, height: 4, width: 36, borderRadius: 999, backgroundColor: theme.colors.border },
+  title: { fontSize: 12, color: theme.colors.fgMuted },
   resolvedRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -90,5 +90,5 @@ const s = StyleSheet.create({
     gap: 8,
     paddingVertical: 24,
   },
-  resolvedText: { fontSize: 13, color: T.fgMuted },
-});
+  resolvedText: { fontSize: 13, color: theme.colors.fgMuted },
+}));

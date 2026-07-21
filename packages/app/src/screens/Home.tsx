@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActionSheetIOS, Animated as RNAnimated, Easing, Modal, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { ActionSheetIOS, Animated as RNAnimated, Easing, Modal, Pressable, RefreshControl, Text, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import { LinearTransition } from "react-native-reanimated";
@@ -34,8 +35,7 @@ import { SessionCard } from "../components/SessionCard";
 import { LiveStrip } from "../components/LiveStrip";
 import { SessionListSkeleton } from "../components/Skeleton";
 import { FilterButton, FilterSheet } from "../components/FilterSheet";
-import { COLOR, DeviceIcon, IS_DESKTOP } from "../ui";
-import { T } from "../ui/theme";
+import { DeviceIcon, IS_DESKTOP } from "../ui";
 import { refreshLive } from "../services/runtime";
 
 /** Collapse key for the Favourites pseudo-group (shares the collapsed$ map). */
@@ -63,6 +63,7 @@ type Row =
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { theme } = useUnistyles();
 
   const [refreshing, setRefreshing] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -221,7 +222,7 @@ export default function HomeScreen() {
       <Text numberOfLines={1} style={s.subFaint}>Tap to sync a device</Text>
     ) : attentionCount > 0 ? (
       <>
-        <PounceIcon name="alert-circle" size={13} color={COLOR.warning} />
+        <PounceIcon name="alert-circle" size={13} color={theme.colors.warning} />
         <Text numberOfLines={1} style={s.subWarning}>
           {attentionCount} need{attentionCount === 1 ? "s" : ""} you
         </Text>
@@ -240,7 +241,7 @@ export default function HomeScreen() {
             {loading ? (
               <SyncSpinner />
             ) : connected && attentionCount === 0 ? (
-              <PounceIcon name="checkmark-circle" size={12} color={COLOR.success} style={{ marginTop: 5 }} />
+              <PounceIcon name="checkmark-circle" size={12} color={theme.colors.success} style={{ marginTop: 5 }} />
             ) : null}
           </View>
           {subtitle || filterCount ? (
@@ -319,7 +320,7 @@ export default function HomeScreen() {
         // survive being offline/mid-reconnect — the strip hides itself when
         // empty. Gating on `connected` made it vanish on every blip.
         ListHeaderComponent={<LiveStrip />}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLOR.accent} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent} />}
         ListEmptyComponent={
           loading ? (
             <SessionListSkeleton />
@@ -357,6 +358,7 @@ export default function HomeScreen() {
 /** Rotating sync glyph — the wordmark badge's "working" state. Core Animated
  *  so it spins on desktop too (the reanimated seam is static there). */
 function SyncSpinner() {
+  const { theme } = useUnistyles();
   const turn = useRef(new RNAnimated.Value(0)).current;
   useEffect(() => {
     const loop = RNAnimated.loop(
@@ -368,7 +370,7 @@ function SyncSpinner() {
   const rotate = turn.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
   return (
     <RNAnimated.View style={{ marginTop: 5, transform: [{ rotate }] }}>
-      <PounceIcon name="sync" size={12} color={COLOR.fgFaint} />
+      <PounceIcon name="sync" size={12} color={theme.colors.fgFaint} />
     </RNAnimated.View>
   );
 }
@@ -382,13 +384,14 @@ function FavHeader({
   collapsed: boolean;
   onPress: () => void;
 }) {
+  const { theme } = useUnistyles();
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [s.groupHeader, pressed && s.pressed70]}
     >
-      <PounceIcon name={collapsed ? "chevron-forward" : "chevron-down"} size={13} color={COLOR.fgFaint} />
-      <PounceIcon name="star" size={13} color={COLOR.accent} />
+      <PounceIcon name={collapsed ? "chevron-forward" : "chevron-down"} size={13} color={theme.colors.fgFaint} />
+      <PounceIcon name="star" size={13} color={theme.colors.accent} />
       <Text style={s.groupTitle}>Favourites</Text>
       <Text style={s.groupCount}>{count}</Text>
     </Pressable>
@@ -420,6 +423,7 @@ function DirHeader({
   onAdd: () => void;
   onLongPress: () => void;
 }) {
+  const { theme } = useUnistyles();
   return (
     <Pressable
       onPress={onPress}
@@ -427,13 +431,13 @@ function DirHeader({
       delayLongPress={350}
       style={({ pressed }) => [s.groupHeader, pressed && s.pressed70]}
     >
-      <PounceIcon name={collapsed ? "chevron-forward" : "chevron-down"} size={13} color={COLOR.fgFaint} />
+      <PounceIcon name={collapsed ? "chevron-forward" : "chevron-down"} size={13} color={theme.colors.fgFaint} />
       {fav ? (
-        <PounceIcon name="star" size={13} color={COLOR.accent} />
+        <PounceIcon name="star" size={13} color={theme.colors.accent} />
       ) : deviceName ? (
-        <DeviceIcon name={deviceName} emoji={emoji} color={COLOR.fgFaint} size={13} />
+        <DeviceIcon name={deviceName} emoji={emoji} color={theme.colors.fgFaint} size={13} />
       ) : (
-        <PounceIcon name="folder-outline" size={13} color={COLOR.fgFaint} />
+        <PounceIcon name="folder-outline" size={13} color={theme.colors.fgFaint} />
       )}
       <Text numberOfLines={1} style={s.groupTitle}>
         {name}
@@ -451,14 +455,14 @@ function DirHeader({
         hitSlop={8}
         style={({ pressed }) => [s.addBtn, pressed && s.pressed60]}
       >
-        <PounceIcon name="add" size={17} color={COLOR.fgMuted} />
+        <PounceIcon name="add" size={17} color={theme.colors.fgMuted} />
       </Pressable>
     </Pressable>
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
   headerRow: {
     flexDirection: "row",
     alignItems: "flex-end",
@@ -469,10 +473,10 @@ const s = StyleSheet.create({
   },
   headerLeft: { flex: 1, paddingRight: 8 },
   wordmarkRow: { flexDirection: "row", alignItems: "flex-start", gap: 4 },
-  wordmark: { fontSize: 26, fontWeight: "700", color: T.fg },
+  wordmark: { fontSize: 26, fontWeight: "700", color: theme.colors.fg },
   subtitleRow: { marginTop: 2, flexDirection: "row", alignItems: "center", gap: 4 },
-  subFaint: { fontSize: 13, color: T.fgFaint },
-  subWarning: { fontSize: 13, color: T.warning },
+  subFaint: { fontSize: 13, color: theme.colors.fgFaint },
+  subWarning: { fontSize: 13, color: theme.colors.warning },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0 },
   newBtn: {
     height: 36,
@@ -480,19 +484,19 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 4,
     borderRadius: 999,
-    backgroundColor: T.accent,
+    backgroundColor: theme.colors.accent,
     paddingHorizontal: 14,
   },
-  newBtnLabel: { fontSize: 14, fontWeight: "600", color: T.onAccent },
+  newBtnLabel: { fontSize: 14, fontWeight: "600", color: theme.colors.onAccent },
   sessionRow: { paddingHorizontal: 16, paddingBottom: 10 },
   empty: { alignItems: "center", paddingHorizontal: 32, paddingVertical: 80 },
   emptyEmoji: { fontSize: 40 },
-  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: T.fg },
-  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: T.fgMuted },
+  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   emptyCta: {
     marginTop: 20,
     borderRadius: 999,
-    backgroundColor: T.accent,
+    backgroundColor: theme.colors.accent,
     paddingHorizontal: 20,
     paddingVertical: 10,
   },
@@ -504,18 +508,17 @@ const s = StyleSheet.create({
     paddingBottom: 6,
     paddingTop: 12,
   },
-  groupTitle: { flex: 1, fontSize: 13, fontWeight: "600", color: T.fgMuted },
-  groupCount: { fontSize: 12, color: T.fgFaint },
-  // warning at 15% — no T.warningSoft token; literal tracks T.warning's fallback hex
+  groupTitle: { flex: 1, fontSize: 13, fontWeight: "600", color: theme.colors.fgMuted },
+  groupCount: { fontSize: 12, color: theme.colors.fgFaint },
   attentionBadge: {
     borderRadius: 999,
-    backgroundColor: T.warningSoft,
+    backgroundColor: theme.colors.warningSoft,
     paddingHorizontal: 8,
     paddingVertical: 2,
   },
-  attentionText: { fontSize: 11, fontWeight: "600", color: T.warning },
+  attentionText: { fontSize: 11, fontWeight: "600", color: theme.colors.warning },
   addBtn: { marginLeft: 2, height: 28, width: 28, alignItems: "center", justifyContent: "center" },
   pressed60: { opacity: 0.6 },
   pressed70: { opacity: 0.7 },
   pressed80: { opacity: 0.8 },
-});
+}));

@@ -4,12 +4,12 @@ import {
   Image,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   useWindowDimensions,
   View,
   type ColorValue,
 } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { PounceIcon } from "../ui/native/Icon";
 import type { IoniconName } from "../ui/native/icon-map";
 import type { Session } from "@pounce/shared";
@@ -21,8 +21,6 @@ import {
   type GitChecks,
 } from "../services/bridge";
 import type { ThreadSource } from "../state/stores";
-import { COLOR } from "../ui";
-import { T } from "../ui/theme";
 
 /** One row in the environment sheet — icon · label · trailing value/chevron. */
 function Row({
@@ -43,7 +41,8 @@ function Row({
   right?: ReactNode;
   onPress?: () => void;
 }) {
-  const color = danger ? COLOR.danger : COLOR.fg;
+  const { theme } = useUnistyles();
+  const color = danger ? theme.colors.danger : theme.colors.fg;
   return (
     <Pressable
       onPress={onPress}
@@ -52,25 +51,26 @@ function Row({
     >
       {leading ??
         (icon ? (
-          <PounceIcon name={icon} size={18} color={iconColor ?? (danger ? COLOR.danger : COLOR.fgMuted)} />
+          <PounceIcon name={icon} size={18} color={iconColor ?? (danger ? theme.colors.danger : theme.colors.fgMuted)} />
         ) : null)}
       <Text numberOfLines={1} style={[s.rowLabel, { color }]}>
         {label}
       </Text>
       {right}
-      {onPress && !right ? <PounceIcon name="chevron-forward" size={15} color={COLOR.fgFaint} /> : null}
+      {onPress && !right ? <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} /> : null}
     </Pressable>
   );
 }
 
 /** Section heading with an optional trailing "+" action. */
 function SectionHeader({ title, onAdd }: { title: string; onAdd?: () => void }) {
+  const { theme } = useUnistyles();
   return (
     <View style={s.sectionHeader}>
       <Text style={s.sectionTitle}>{title}</Text>
       {onAdd ? (
         <Pressable onPress={onAdd} hitSlop={6} style={({ pressed }) => pressed && s.pressed60}>
-          <PounceIcon name="add" size={18} color={COLOR.fgFaint} />
+          <PounceIcon name="add" size={18} color={theme.colors.fgFaint} />
         </Pressable>
       ) : null}
     </View>
@@ -134,6 +134,7 @@ export function EnvironmentSheet({
   fav?: boolean;
   onToggleFavourite?: () => void;
 }) {
+  const { theme } = useUnistyles();
   const { height } = useWindowDimensions();
   const [git, setGit] = useState<GitChanges | null>(null);
   const [checks, setChecks] = useState<GitChecks | null>(null);
@@ -159,9 +160,9 @@ export function EnvironmentSheet({
   const act = (run: () => void) => () => { onClose(); run(); };
 
   const CHECK_ROW: Record<string, { icon: ComponentIcon; color: ColorValue; label: string }> = {
-    passing: { icon: "checkmark-circle-outline", color: COLOR.success, label: "Checks successful" },
-    failing: { icon: "close-circle-outline", color: COLOR.danger, label: `Checks failing (${checks?.failed}/${checks?.total})` },
-    pending: { icon: "time-outline", color: COLOR.fgMuted, label: "Checks running" },
+    passing: { icon: "checkmark-circle-outline", color: theme.colors.success, label: "Checks successful" },
+    failing: { icon: "close-circle-outline", color: theme.colors.danger, label: `Checks failing (${checks?.failed}/${checks?.total})` },
+    pending: { icon: "time-outline", color: theme.colors.fgMuted, label: "Checks running" },
   };
   const checkRow = checks?.checks ? CHECK_ROW[checks.checks] : null;
 
@@ -177,7 +178,7 @@ export function EnvironmentSheet({
             {onToggleFavourite ? (
               <Row
                 icon={fav ? "star" : "star-outline"}
-                iconColor={fav ? COLOR.accent : undefined}
+                iconColor={fav ? theme.colors.accent : undefined}
                 label={fav ? "Remove from favourites" : "Add to favourites"}
                 onPress={act(onToggleFavourite)}
               />
@@ -266,7 +267,7 @@ export function EnvironmentSheet({
                       hitSlop={8}
                       style={({ pressed }) => pressed && s.pressed60}
                     >
-                      <PounceIcon name="close" size={15} color={COLOR.fgFaint} />
+                      <PounceIcon name="close" size={15} color={theme.colors.fgFaint} />
                     </Pressable>
                   ) : undefined
                 }
@@ -286,7 +287,7 @@ export function EnvironmentSheet({
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -295,7 +296,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 10,
   },
-  rowPressed: { backgroundColor: T.surfaceHover },
+  rowPressed: { backgroundColor: theme.colors.surfaceHover },
   rowLabel: { flex: 1, fontSize: 15, fontWeight: "500" },
   sectionHeader: {
     marginBottom: 4,
@@ -309,17 +310,17 @@ const s = StyleSheet.create({
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 0.5,
-    color: T.fgFaint,
+    color: theme.colors.fgFaint,
   },
-  divider: { marginVertical: 8, height: 1, backgroundColor: T.border },
-  markerCount: { fontSize: 13, fontWeight: "600", color: T.fgMuted },
+  divider: { marginVertical: 8, height: 1, backgroundColor: theme.colors.border },
+  markerCount: { fontSize: 13, fontWeight: "600", color: theme.colors.fgMuted },
   diffCounts: { fontSize: 14, fontWeight: "600" },
-  diffAdd: { color: T.diffAddFg },
-  diffDel: { color: T.diffDelFg },
-  noChanges: { fontSize: 13, color: T.fgFaint },
-  fixLabel: { fontSize: 14, fontWeight: "500", color: T.fgMuted },
-  emptyEnv: { paddingHorizontal: 8, paddingVertical: 12, fontSize: 13, color: T.fgMuted },
-  emptySources: { paddingHorizontal: 8, paddingVertical: 8, fontSize: 13, color: T.fgMuted },
-  sourceThumb: { height: 28, width: 28, borderRadius: 6, backgroundColor: T.surface },
+  diffAdd: { color: theme.colors.diffAddFg },
+  diffDel: { color: theme.colors.diffDelFg },
+  noChanges: { fontSize: 13, color: theme.colors.fgFaint },
+  fixLabel: { fontSize: 14, fontWeight: "500", color: theme.colors.fgMuted },
+  emptyEnv: { paddingHorizontal: 8, paddingVertical: 12, fontSize: 13, color: theme.colors.fgMuted },
+  emptySources: { paddingHorizontal: 8, paddingVertical: 8, fontSize: 13, color: theme.colors.fgMuted },
+  sourceThumb: { height: 28, width: 28, borderRadius: 6, backgroundColor: theme.colors.surface },
   pressed60: { opacity: 0.6 },
-});
+}));

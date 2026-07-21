@@ -1,7 +1,7 @@
-import { ScrollView, StyleSheet } from "react-native";
+import { ScrollView } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { router } from "expo-router";
 import { FilterSheetContent } from "@pounce/app/components/FilterSheet";
-import { T } from "@pounce/app/ui/theme";
 
 /** Filters as a TrueSheet screen (see the Sheet.Screen options in _layout).
  *  No flex:1 on the root: the sheet's 'auto' detent measures intrinsic
@@ -19,6 +19,6 @@ export default function FiltersSheet() {
   );
 }
 
-const s = StyleSheet.create({
-  root: { backgroundColor: T.bgElevated, paddingHorizontal: 16, paddingTop: 12 },
-});
+const s = StyleSheet.create((theme) => ({
+  root: { backgroundColor: theme.colors.bgElevated, paddingHorizontal: 16, paddingTop: 12 },
+}));

@@ -2,7 +2,8 @@ import { Component, memo, type ReactNode, useMemo, useRef, useState } from "reac
 // eslint-disable-next-line @react-native/no-deprecated-api -- core Clipboard is
 // the only clipboard already inside shipped binaries (OTA-safe); expo-clipboard
 // would need a new native module and a store build.
-import { Clipboard, Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from "react-native";
+import { Clipboard, Pressable, ScrollView, Text, useColorScheme, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { PounceIcon } from "../ui/native/Icon";
 import {
   EnrichedMarkdownText,
@@ -14,7 +15,6 @@ import * as WebBrowser from "expo-web-browser";
 import remend from "remend";
 import { splitCodeBlocks } from "../components/runnableBlocks";
 import { COLOR } from "../ui";
-import { T } from "../ui/theme";
 import { hexFor } from "../ui/theme-hex";
 
 const MONO = "JetBrainsMono";
@@ -203,6 +203,7 @@ const PRISM_LANG: Record<string, string> = {
  * lines. Prism theme + card fill follow the system scheme.
  */
 const CodeBlock = memo(function CodeBlock({ lang, code, onRun }: { lang: string; code: string; onRun?: (c: string) => void }) {
+  const { theme } = useUnistyles();
   const light = useColorScheme() === "light";
   const prismLang = PRISM_LANG[lang] ?? lang;
   // Brief "Copied" confirmation on the copy action; timer cleared on re-tap so
@@ -222,13 +223,13 @@ const CodeBlock = memo(function CodeBlock({ lang, code, onRun }: { lang: string;
         <Text style={s.lang}>{lang || "code"}</Text>
         {onRun ? (
           <Pressable onPress={() => onRun(code)} hitSlop={6} style={({ pressed }) => [s.action, pressed && s.pressed70]}>
-            <PounceIcon name="play" size={12} color={COLOR.accent} />
+            <PounceIcon name="play" size={12} color={theme.colors.accent} />
             <Text style={s.runLabel}>Run</Text>
           </Pressable>
         ) : null}
         <Pressable onPress={copy} hitSlop={6} style={({ pressed }) => [s.action, pressed && s.pressed70]}>
-          <PounceIcon name={copied ? "checkmark" : "copy-outline"} size={12} color={copied ? COLOR.success : COLOR.fgMuted} />
-          <Text style={[s.copyLabel, { color: copied ? COLOR.success : COLOR.fgMuted }]}>
+          <PounceIcon name={copied ? "checkmark" : "copy-outline"} size={12} color={copied ? theme.colors.success : theme.colors.fgMuted} />
+          <Text style={[s.copyLabel, { color: copied ? theme.colors.success : theme.colors.fgMuted }]}>
             {copied ? "Copied" : "Copy"}
           </Text>
         </Pressable>
@@ -289,21 +290,21 @@ class MarkdownErrorBoundary extends Component<
   }
 }
 
-const s = StyleSheet.create({
-  card: { overflow: "hidden", borderRadius: 12, borderWidth: 1, borderColor: T.border },
+const s = StyleSheet.create((theme) => ({
+  card: { overflow: "hidden", borderRadius: 12, borderWidth: 1, borderColor: theme.colors.border },
   cardHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
     borderBottomWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  lang: { flex: 1, fontFamily: MONO, fontSize: 11, textTransform: "lowercase", color: T.fgFaint },
+  lang: { flex: 1, fontFamily: MONO, fontSize: 11, textTransform: "lowercase", color: theme.colors.fgFaint },
   action: { flexDirection: "row", alignItems: "center", gap: 4 },
-  runLabel: { fontSize: 12, fontWeight: "600", color: T.accent },
+  runLabel: { fontSize: 12, fontWeight: "600", color: theme.colors.accent },
   copyLabel: { fontSize: 12, fontWeight: "600" },
   codeLine: { flexDirection: "row" },
   pressed70: { opacity: 0.7 },
-});
+}));

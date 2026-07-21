@@ -10,19 +10,17 @@ import {
   ActivityIndicator,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { PounceIcon } from "../ui/native/Icon";
 import type { DoctorReport, PounceConfig } from "@pounce/shared";
 import { fetchDoctor, fetchHostConfig, saveHostConfig } from "../services/bridge";
 import { useDevices } from "../state/db/hooks";
-import { COLOR } from "../ui";
-import { T } from "../ui/theme";
 
 function Row({
   ok,
@@ -45,7 +43,8 @@ function Row({
   /** Extra content rendered under the hint (e.g. a path editor). */
   children?: React.ReactNode;
 }) {
-  const color = ok ? COLOR.success : warn ? T.warning : COLOR.danger;
+  const { theme } = useUnistyles();
+  const color = ok ? theme.colors.success : warn ? theme.colors.warning : theme.colors.danger;
   const icon = ok ? "checkmark-circle" : warn ? "alert-circle" : "close-circle";
   const showHint = !ok || warn || alwaysHint;
   return (
@@ -76,6 +75,7 @@ function PathEditor({
   override?: string | null;
   onSaved: (bin: string, value: string) => Promise<void>;
 }) {
+  const { theme } = useUnistyles();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(override ?? "");
   const [saving, setSaving] = useState(false);
@@ -99,7 +99,7 @@ function PathEditor({
         }}
         style={({ pressed }) => [s.editLink, pressed && s.pressed60]}
       >
-        <PounceIcon name="create-outline" size={13} color={COLOR.accent} />
+        <PounceIcon name="create-outline" size={13} color={theme.colors.accent} />
         <Text style={s.editLinkText}>
           {override ? "Change path" : "Set path manually"}
         </Text>
@@ -117,7 +117,7 @@ function PathEditor({
         value={draft}
         onChangeText={setDraft}
         placeholder={`/path/to/${bin}`}
-        placeholderTextColor={COLOR.fgFaint}
+        placeholderTextColor={theme.colors.fgFaint}
         autoCapitalize="none"
         autoCorrect={false}
         spellCheck={false}
@@ -164,6 +164,7 @@ function PathEditor({
 export default function DiagnosticsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { theme } = useUnistyles();
   const devices = useDevices();
   const hostId = devices[0]?.id;
   const [report, setReport] = useState<DoctorReport | null>(null);
@@ -208,7 +209,7 @@ export default function DiagnosticsScreen() {
         <Text style={s.headerTitle}>Diagnostics</Text>
         <View style={s.headerActions}>
           <Pressable onPress={load} style={({ pressed }) => pressed && s.pressed60}>
-            <PounceIcon name="refresh" size={18} color={COLOR.fgMuted} />
+            <PounceIcon name="refresh" size={18} color={theme.colors.fgMuted} />
           </Pressable>
           <Pressable onPress={() => router.back()} style={({ pressed }) => pressed && s.pressed60}>
             <Text style={s.doneLabel}>Done</Text>
@@ -218,11 +219,11 @@ export default function DiagnosticsScreen() {
 
       {loading ? (
         <View style={s.center}>
-          <ActivityIndicator color={COLOR.accent} />
+          <ActivityIndicator color={theme.colors.accent} />
         </View>
       ) : !report ? (
         <View style={s.empty}>
-          <PounceIcon name="medkit-outline" size={34} color={COLOR.fgFaint} />
+          <PounceIcon name="medkit-outline" size={34} color={theme.colors.fgFaint} />
           <Text style={s.emptyTitle}>Can't reach this machine's engine</Text>
           <Text style={s.emptyBody}>
             Pounce runs a small local service (needs Node.js). If it isn't starting, install Node.js and relaunch
@@ -349,8 +350,8 @@ export default function DiagnosticsScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
   flex1: { flex: 1 },
   pressed60: { opacity: 0.6 },
   pressed80: { opacity: 0.8 },
@@ -358,42 +359,42 @@ const s = StyleSheet.create({
     flexDirection: "row",
     gap: 10,
     borderBottomWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
   rowHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  rowTitle: { fontSize: 14, fontWeight: "500", color: T.fg },
-  rowDetail: { marginLeft: 8, fontFamily: "JetBrainsMono", fontSize: 11, color: T.fgMuted },
-  rowHint: { marginTop: 4, fontSize: 12, lineHeight: 17, color: T.fgMuted },
+  rowTitle: { fontSize: 14, fontWeight: "500", color: theme.colors.fg },
+  rowDetail: { marginLeft: 8, fontFamily: "JetBrainsMono", fontSize: 11, color: theme.colors.fgMuted },
+  rowHint: { marginTop: 4, fontSize: 12, lineHeight: 17, color: theme.colors.fgMuted },
   editLink: { marginTop: 6, flexDirection: "row", alignItems: "center", gap: 4 },
-  editLinkText: { fontSize: 12, fontWeight: "500", color: T.accent },
+  editLinkText: { fontSize: 12, fontWeight: "500", color: theme.colors.accent },
   editor: { marginTop: 8, gap: 8 },
-  editorHint: { fontSize: 11, lineHeight: 16, color: T.fgMuted },
-  editorBin: { fontFamily: "JetBrainsMono", color: T.fg },
+  editorHint: { fontSize: 11, lineHeight: 16, color: theme.colors.fgMuted },
+  editorBin: { fontFamily: "JetBrainsMono", color: theme.colors.fg },
   editorInput: {
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.bgElevated,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bgElevated,
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontFamily: "JetBrainsMono",
     fontSize: 12,
-    color: T.fg,
+    color: theme.colors.fg,
   },
   editorActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   saveBtn: {
     borderRadius: 8,
-    backgroundColor: T.accent,
+    backgroundColor: theme.colors.accent,
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  saveText: { fontSize: 12, fontWeight: "600", color: T.onAccent },
+  saveText: { fontSize: 12, fontWeight: "600", color: theme.colors.onAccent },
   smallBtn: { paddingHorizontal: 8, paddingVertical: 6 },
-  cancelText: { fontSize: 12, color: T.fgMuted },
+  cancelText: { fontSize: 12, color: theme.colors.fgMuted },
   mlAuto: { marginLeft: "auto" },
-  clearText: { fontSize: 12, color: T.danger },
+  clearText: { fontSize: 12, color: theme.colors.danger },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -401,26 +402,26 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
   },
-  headerTitle: { fontSize: 22, fontWeight: "700", color: T.fg },
+  headerTitle: { fontSize: 22, fontWeight: "700", color: theme.colors.fg },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 12 },
-  doneLabel: { fontSize: 15, color: T.fgMuted },
+  doneLabel: { fontSize: 15, color: theme.colors.fgMuted },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
-  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: T.fg },
-  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, lineHeight: 19, color: T.fgMuted },
+  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, lineHeight: 19, color: theme.colors.fgMuted },
   summary: {
     paddingHorizontal: 16,
     paddingBottom: 8,
     paddingTop: 4,
     fontSize: 13,
     lineHeight: 19,
-    color: T.fgMuted,
+    color: theme.colors.fgMuted,
   },
   configNote: {
     paddingHorizontal: 16,
     paddingTop: 12,
     fontSize: 11,
     lineHeight: 16,
-    color: T.fgFaint,
+    color: theme.colors.fgFaint,
   },
-});
+}));

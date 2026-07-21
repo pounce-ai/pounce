@@ -1,6 +1,6 @@
-import { StyleSheet, Text } from "react-native";
+import { Text } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import type { ThreadUsage } from "../services/bridge";
-import { T } from "../ui/theme";
 
 /** 165_000_000 → "165M", 1_200_000 → "1.2M", 845_000 → "845K", 900 → "900". */
 function fmtTokens(n: number): string {
@@ -43,6 +43,6 @@ export function ThreadUsageSummary({ usage }: { usage: ThreadUsage | null }) {
   );
 }
 
-const s = StyleSheet.create({
-  summary: { fontSize: 11, color: T.fgFaint },
-});
+const s = StyleSheet.create((theme) => ({
+  summary: { fontSize: 11, color: theme.colors.fgFaint },
+}));

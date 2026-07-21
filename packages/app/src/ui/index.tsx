@@ -3,7 +3,6 @@ import {
   ActionSheetIOS,
   Alert,
   Platform,
-  StyleSheet,
   View,
   Text,
   type ColorValue,
@@ -11,16 +10,16 @@ import {
   type TextStyle,
   type ViewStyle,
 } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { PounceIcon } from "./native/Icon";
 import type { IoniconName } from "./native/icon-map";
 import type { ActivityStatus } from "@pounce/shared";
 import { AgentLogo } from "./agent-logos";
-import { T } from "./theme";
 
 // Shared tokens live in tokens.ts (no circular dep with agent-logos); re-export
 // them here so call sites keep importing everything from "../ui".
 export { COLOR, AGENT_LABEL, AGENT_HEX, agentLabel } from "./tokens";
-import { AGENT_HEX, agentLabel, COLOR } from "./tokens";
+import { AGENT_HEX, agentLabel } from "./tokens";
 
 /** Real brand logos for agents (Claude, Codex, OpenCode, Grok, …). */
 export { AgentLogo };
@@ -186,6 +185,7 @@ export function AgentStatusIcon({
    *  shows the live state) — the static logo + lock badge still render. */
   animated?: boolean;
 }) {
+  const { theme } = useUnistyles();
   const active =
     animated && (activity === "running" || activity === "streaming" || activity === "queued");
   const frame = useSyncExternalStore(active ? subscribeTicker : noTick, getFrame);
@@ -196,7 +196,7 @@ export function AgentStatusIcon({
         <Text
           allowFontScaling={false}
           style={{
-            color: AGENT_HEX[agent] ?? COLOR.accent,
+            color: AGENT_HEX[agent] ?? theme.colors.accent,
             fontSize: size + 1,
             lineHeight: size + 3,
             textAlign: "center",
@@ -216,7 +216,7 @@ export function AgentStatusIcon({
         <View
           style={[s.lockBadge, { right: -badge * 0.35, bottom: -badge * 0.3, width: badge, height: badge }]}
         >
-          <PounceIcon name="lock-closed" size={badge * 0.68} color={COLOR.fgMuted} />
+          <PounceIcon name="lock-closed" size={badge * 0.68} color={theme.colors.fgMuted} />
         </View>
       ) : null}
     </View>
@@ -230,7 +230,7 @@ export function BranchChip({
   branch,
   worktree,
   size = 11,
-  color = COLOR.fgMuted,
+  color,
   style,
 }: {
   branch: string;
@@ -239,10 +239,12 @@ export function BranchChip({
   color?: ColorValue;
   style?: StyleProp<ViewStyle>;
 }) {
+  const { theme } = useUnistyles();
+  const tint = color ?? theme.colors.fgMuted;
   return (
     <View style={[s.branchChip, style]}>
-      <PounceIcon name={worktree ? "git-network-outline" : "git-branch-outline"} size={size} color={color} />
-      <Text numberOfLines={1} style={[s.branchText, { color, fontSize: size + 1 }]}>
+      <PounceIcon name={worktree ? "git-network-outline" : "git-branch-outline"} size={size} color={tint} />
+      <Text numberOfLines={1} style={[s.branchText, { color: tint, fontSize: size + 1 }]}>
         {branch}
       </Text>
     </View>
@@ -265,23 +267,23 @@ export function MergeChip({ state }: { state: "ready" | "conflicts" | "uncommitt
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   agentChip: { flexDirection: "row", alignItems: "center", gap: 6 },
-  agentChipLabel: { fontSize: 12, fontWeight: "500", color: T.fgMuted },
+  agentChipLabel: { fontSize: 12, fontWeight: "500", color: theme.colors.fgMuted },
   center: { alignItems: "center", justifyContent: "center" },
   lockBadge: {
     position: "absolute",
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 999,
-    backgroundColor: T.bgElevated,
+    backgroundColor: theme.colors.bgElevated,
   },
   branchChip: { flexDirection: "row", alignItems: "center", gap: 4 },
   branchText: { flexShrink: 1, fontFamily: "JetBrainsMono" },
   mergeChip: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2, fontSize: 11, fontWeight: "500" },
   // status colors at 10% — no /10 tokens in T; literals from the status hexes.
-  mergeReady: { color: T.success, backgroundColor: "rgba(63, 185, 80, 0.1)" },
-  mergeConflicts: { color: T.danger, backgroundColor: "rgba(248, 81, 73, 0.1)" },
-  mergeUncommitted: { color: T.info, backgroundColor: "rgba(88, 166, 255, 0.1)" },
-  mergeClean: { color: T.fgFaint, backgroundColor: T.surfaceAlt },
-});
+  mergeReady: { color: theme.colors.success, backgroundColor: "rgba(63, 185, 80, 0.1)" },
+  mergeConflicts: { color: theme.colors.danger, backgroundColor: "rgba(248, 81, 73, 0.1)" },
+  mergeUncommitted: { color: theme.colors.info, backgroundColor: "rgba(88, 166, 255, 0.1)" },
+  mergeClean: { color: theme.colors.fgFaint, backgroundColor: theme.colors.surfaceAlt },
+}));

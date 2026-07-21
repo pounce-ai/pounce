@@ -3,6 +3,7 @@ import { AppState } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { Providers } from "@pounce/app/components/Providers";
 import { Shell } from "./src/shell/Shell";
+import { applyAppearance } from "@pounce/app/state/appearance";
 import { bootstrap } from "@pounce/app/services/runtime";
 import { ensureLocalBridge } from "./src/services/localBridge";
 import { heartbeat } from "./src/services/heartbeat";
@@ -10,6 +11,11 @@ import { UpdateConsent } from "./src/components/UpdateConsent";
 
 export default function App() {
   useEffect(() => {
+    // Hand appearance control to JS: AppDelegate pins the window dark for the
+    // pre-mount loading view; PounceAppearance.setStyle releases that pin and
+    // applies the persisted System/Light/Dark choice (mobile's root layout
+    // does the same on its side). Hydration lands via appearance$.onChange.
+    applyAppearance();
     // Adopt the machine-local bridge (zero-config pairing) before the shared
     // bootstrap connects whatever devices are configured.
     void ensureLocalBridge().finally(() => void bootstrap());

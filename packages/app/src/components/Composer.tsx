@@ -5,11 +5,11 @@ import {
   Image,
   Keyboard,
   Pressable,
-  StyleSheet,
   Text,
   useColorScheme,
   View,
 } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import {
   EnrichedMarkdownTextInput,
   type EnrichedMarkdownTextInputInstance,
@@ -33,7 +33,6 @@ import { SLASH_COMMANDS } from "../ui/agent-meta";
 import { fetchFiles, type RepoEntry } from "../services/bridge";
 import { isVoiceAvailable, startDictation, type Dictation } from "../services/voice";
 import { AgentLogo, COLOR } from "../ui";
-import { T } from "../ui/theme";
 import { hexFor } from "../ui/theme-hex";
 
 const MENTION_RE = /((?:^|\s))@([^\s@]*)$/;
@@ -138,6 +137,7 @@ export function Composer({
   markers?: { count: number; onPress: () => void } | null;
   ref?: Ref<ComposerHandle>;
 }) {
+  const { theme } = useUnistyles();
   // The rich input is uncontrolled: `draft` mirrors its plain text (drives the
   // slash/mention menus + canSend), `markdownRef` mirrors the markdown we send,
   // and we push text back through the imperative ref (not a `value` prop).
@@ -422,7 +422,7 @@ export function Composer({
                 onPress={() => setImages((cur) => cur.filter((_, i) => i !== idx))}
                 style={s.thumbClose}
               >
-                <PounceIcon name="close-circle" size={20} color={COLOR.fgMuted} />
+                <PounceIcon name="close-circle" size={20} color={theme.colors.fgMuted} />
               </Pressable>
             </View>
           ))}
@@ -471,7 +471,7 @@ export function Composer({
                 <PounceIcon
                   name={f.type === "dir" ? "folder-outline" : "document-text-outline"}
                   size={15}
-                  color={f.type === "dir" ? COLOR.accent : COLOR.fgMuted}
+                  color={f.type === "dir" ? theme.colors.accent : theme.colors.fgMuted}
                 />
                 <Text numberOfLines={1} style={s.mentionPath}>
                   {dir ? <Text style={s.mentionFaint}>{dir}</Text> : null}
@@ -539,7 +539,7 @@ export function Composer({
               onPress={onViewChanges}
               style={({ pressed }) => [s.diffBtn, pressed && s.pressed70]}
             >
-              <PounceIcon name="git-compare-outline" size={19} color={COLOR.fgMuted} />
+              <PounceIcon name="git-compare-outline" size={19} color={theme.colors.fgMuted} />
               {diffStat && (diffStat.add > 0 || diffStat.del > 0) ? (
                 <Text style={s.diffStatText}>
                   <Text style={s.diffAdd}>+{diffStat.add}</Text>{" "}
@@ -582,12 +582,13 @@ function RoundButton({
   icon: IoniconName;
   onPress: () => void;
 }) {
+  const { theme } = useUnistyles();
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [s.roundBtn, pressed && s.pressed70]}
     >
-      <PounceIcon name={icon} size={19} color={COLOR.fgMuted} />
+      <PounceIcon name={icon} size={19} color={theme.colors.fgMuted} />
     </Pressable>
   );
 }
@@ -607,6 +608,7 @@ function ControlPill({
   active?: boolean;
   onPress: () => void;
 }) {
+  const { theme } = useUnistyles();
   return (
     <Pressable
       onPress={onPress}
@@ -621,11 +623,11 @@ function ControlPill({
       ]}
     >
       {agent ? <AgentLogo agent={agent} size={13} /> : null}
-      {icon ? <PounceIcon name={icon} size={12} color={active ? COLOR.accent : COLOR.fgMuted} /> : null}
+      {icon ? <PounceIcon name={icon} size={12} color={active ? theme.colors.accent : theme.colors.fgMuted} /> : null}
       <Text numberOfLines={1} style={[s.pillLabel, active ? s.pillLabelActive : s.pillLabelIdle]}>
         {label}
       </Text>
-      <PounceIcon name="chevron-down" size={11} color={active ? COLOR.accent : COLOR.fgFaint} />
+      <PounceIcon name="chevron-down" size={11} color={active ? theme.colors.accent : theme.colors.fgFaint} />
     </Pressable>
   );
 }
@@ -634,6 +636,7 @@ function ControlPill({
 /** Mic toggle for dictation. Idle: an outline mic. Listening: a pulsing red dot
  *  with a filled mic — unmistakable that the mic is live and how to stop it. */
 function MicButton({ listening, onPress }: { listening: boolean; onPress: () => void }) {
+  const { theme } = useUnistyles();
   const sc = useSharedValue(1);
   useEffect(() => {
     if (listening) {
@@ -647,13 +650,15 @@ function MicButton({ listening, onPress }: { listening: boolean; onPress: () => 
   return (
     <Pressable onPress={onPress} hitSlop={6} style={s.micBtn}>
       {listening ? (
+        // Animated.View: keep the static COLOR token — unistyles theme styles
+        // must not mix into reanimated-managed styles.
         <Animated.View
           style={[style, s.micLive, { width: 28, height: 28, borderRadius: 14, backgroundColor: COLOR.danger }]}
         >
           <PounceIcon name="mic" size={16} color="#fff" />
         </Animated.View>
       ) : (
-        <PounceIcon name="mic-outline" size={22} color={COLOR.fgMuted} />
+        <PounceIcon name="mic-outline" size={22} color={theme.colors.fgMuted} />
       )}
     </Pressable>
   );
@@ -666,6 +671,8 @@ function Bar({ delay }: { delay: number }) {
     h.value = withDelay(delay, withRepeat(withSequence(withTiming(15, { duration: 340 }), withTiming(5, { duration: 340 })), -1, true));
   }, [h, delay]);
   const style = useAnimatedStyle(() => ({ height: h.value }));
+  // Animated.View: keep the static COLOR token — unistyles theme styles must not
+  // mix into reanimated-managed styles.
   return <Animated.View style={[style, { width: 3, borderRadius: 2, backgroundColor: COLOR.danger }]} />;
 }
 
@@ -684,7 +691,7 @@ function ListeningBanner() {
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   flex1: { flex: 1 },
   thumbRow: { marginHorizontal: 12, marginBottom: 8, flexDirection: "row", flexWrap: "wrap", gap: 8 },
   thumbWrap: { position: "relative" },
@@ -698,7 +705,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 999,
-    backgroundColor: T.bg,
+    backgroundColor: theme.colors.bg,
   },
   menuCard: {
     marginHorizontal: 12,
@@ -706,8 +713,8 @@ const s = StyleSheet.create({
     overflow: "hidden",
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
   },
   mentionCard: { maxHeight: 240 },
   menuRow: {
@@ -717,13 +724,13 @@ const s = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  menuRowDivider: { borderTopWidth: 1, borderColor: T.border },
-  pressedSurface: { backgroundColor: T.surfaceHover },
-  menuHint: { paddingHorizontal: 12, paddingVertical: 10, fontSize: 12, color: T.fgFaint },
-  slashCmd: { fontFamily: "JetBrainsMono", fontSize: 13, color: T.accent },
-  slashDesc: { flex: 1, fontSize: 12, color: T.fgMuted },
-  mentionPath: { flex: 1, fontFamily: "JetBrainsMono", fontSize: 12, color: T.fg },
-  mentionFaint: { color: T.fgFaint },
+  menuRowDivider: { borderTopWidth: 1, borderColor: theme.colors.border },
+  pressedSurface: { backgroundColor: theme.colors.surfaceHover },
+  menuHint: { paddingHorizontal: 12, paddingVertical: 10, fontSize: 12, color: theme.colors.fgFaint },
+  slashCmd: { fontFamily: "JetBrainsMono", fontSize: 13, color: theme.colors.accent },
+  slashDesc: { flex: 1, fontSize: 12, color: theme.colors.fgMuted },
+  mentionPath: { flex: 1, fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fg },
+  mentionFaint: { color: theme.colors.fgFaint },
   card: {
     marginHorizontal: 12,
     marginBottom: 8,
@@ -748,8 +755,8 @@ const s = StyleSheet.create({
     paddingHorizontal: 4,
   },
   diffStatText: { fontSize: 12, fontWeight: "600" },
-  diffAdd: { color: T.success },
-  diffDel: { color: T.danger },
+  diffAdd: { color: theme.colors.success },
+  diffDel: { color: theme.colors.danger },
   roundBtn: {
     height: 32,
     width: 32,
@@ -768,18 +775,18 @@ const s = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 10,
   },
-  pillIdle: { backgroundColor: T.surfaceAlt },
-  pillActive: { backgroundColor: T.accentSoft },
+  pillIdle: { backgroundColor: theme.colors.surfaceAlt },
+  pillActive: { backgroundColor: theme.colors.accentSoft },
   pillLabel: { maxWidth: 150, flexShrink: 1, fontSize: 13, fontWeight: "500" },
-  pillLabelIdle: { color: T.fg },
-  pillLabelActive: { color: T.accent },
+  pillLabelIdle: { color: theme.colors.fg },
+  pillLabelActive: { color: theme.colors.accent },
   stopBtn: {
     height: 36,
     width: 36,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 999,
-    backgroundColor: T.danger,
+    backgroundColor: theme.colors.danger,
   },
   sendBtn: {
     height: 36,
@@ -787,7 +794,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 999,
-    backgroundColor: T.accent,
+    backgroundColor: theme.colors.accent,
   },
   opacity40: { opacity: 0.4 },
   pressed70: { opacity: 0.7 },
@@ -809,5 +816,5 @@ const s = StyleSheet.create({
     paddingVertical: 6,
   },
   listenBars: { flexDirection: "row", alignItems: "flex-end", gap: 2 },
-  listenLabel: { fontSize: 12, fontWeight: "500", color: T.danger },
-});
+  listenLabel: { fontSize: 12, fontWeight: "500", color: theme.colors.danger },
+}));

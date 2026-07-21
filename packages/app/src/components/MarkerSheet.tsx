@@ -1,9 +1,9 @@
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { NativeSheet } from "./NativeSheet";
 import { PounceIcon } from "../ui/native/Icon";
 import { cleanAssistantText, parseUserMessage } from "@pounce/transcript";
-import { AgentLogo, COLOR, timeAgo } from "../ui";
-import { T } from "../ui/theme";
+import { AgentLogo, timeAgo } from "../ui";
 
 /** A marked message, resolved against the current event list. */
 export interface Marker {
@@ -31,6 +31,7 @@ export function MarkerSheet({
   onJump: (index: number) => void;
   onClose: () => void;
 }) {
+  const { theme } = useUnistyles();
   const { height } = useWindowDimensions();
 
   return (
@@ -53,7 +54,7 @@ export function MarkerSheet({
                 style={({ pressed }) => [s.row, pressed && s.rowPressed]}
               >
                 {user ? (
-                  <PounceIcon name="person-circle-outline" size={18} color={COLOR.accent} />
+                  <PounceIcon name="person-circle-outline" size={18} color={theme.colors.accent} />
                 ) : (
                   <AgentLogo agent={agent} size={16} />
                 )}
@@ -77,15 +78,15 @@ function userPreview(text: string, agent: string): string {
   return text;
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   headerRow: {
     marginBottom: 8,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  headerTitle: { fontSize: 18, fontWeight: "700", color: T.fg },
-  headerCount: { fontSize: 13, color: T.fgMuted },
+  headerTitle: { fontSize: 18, fontWeight: "700", color: theme.colors.fg },
+  headerCount: { fontSize: 13, color: theme.colors.fgMuted },
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -94,7 +95,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 10,
   },
-  rowPressed: { backgroundColor: T.surfaceHover },
-  preview: { flex: 1, fontSize: 14, lineHeight: 19, color: T.fg },
-  time: { fontSize: 11, color: T.fgFaint },
-});
+  rowPressed: { backgroundColor: theme.colors.surfaceHover },
+  preview: { flex: 1, fontSize: 14, lineHeight: 19, color: theme.colors.fg },
+  time: { fontSize: 11, color: theme.colors.fgFaint },
+}));

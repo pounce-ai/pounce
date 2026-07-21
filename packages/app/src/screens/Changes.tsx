@@ -4,12 +4,12 @@ import {
   Alert,
   Linking,
   Pressable,
-  StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
 import { KeyboardAvoidingView, Platform } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { PounceIcon } from "../ui/native/Icon";
@@ -30,8 +30,7 @@ import { extOf } from "../components/diffPatch";
 import { seenFiles$, setSeenFile } from "../state/stores";
 import { useSelector } from "@legendapp/state/react";
 import { useThread } from "../state/db/hooks";
-import { COLOR, IS_DESKTOP, pickSheet } from "../ui";
-import { T } from "../ui/theme";
+import { IS_DESKTOP, pickSheet } from "../ui";
 
 /** Branches where committing directly is almost never intended. */
 const isMainBranch = (b: string | null | undefined) => b === "main" || b === "master";
@@ -42,6 +41,7 @@ export default function ChangesScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { theme } = useUnistyles();
   const session = useThread(id);
 
   const [changes, setChanges] = useState<GitChanges | null>(null);
@@ -226,7 +226,7 @@ export default function ChangesScreen() {
       {/* Header */}
       <View style={s.header}>
         <Pressable onPress={() => router.back()} style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}>
-          <PounceIcon name="chevron-down" size={22} color={COLOR.fg} />
+          <PounceIcon name="chevron-down" size={22} color={theme.colors.fg} />
         </Pressable>
         <View style={s.titleWrap}>
           <Text style={s.title}>Changes</Text>
@@ -269,14 +269,14 @@ export default function ChangesScreen() {
               pressed && s.pressed70,
             ]}
           >
-            <PounceIcon name="filter" size={13} color={extFilter ? COLOR.accent : COLOR.fgMuted} />
+            <PounceIcon name="filter" size={13} color={extFilter ? theme.colors.accent : theme.colors.fgMuted} />
             <Text style={[s.filterText, extFilter ? s.accentText : s.mutedText]}>
               {extFilter ?? "Filter"}
             </Text>
           </Pressable>
         ) : null}
         <Pressable onPress={load} style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}>
-          <PounceIcon name="refresh" size={18} color={COLOR.fgMuted} />
+          <PounceIcon name="refresh" size={18} color={theme.colors.fgMuted} />
         </Pressable>
       </View>
 
@@ -284,7 +284,7 @@ export default function ChangesScreen() {
       <View style={s.diffWrap}>
         {loading ? (
           <View style={s.center}>
-            <ActivityIndicator color={COLOR.accent} />
+            <ActivityIndicator color={theme.colors.accent} />
           </View>
         ) : fileCount === 0 ? (
           <View style={s.empty}>
@@ -311,7 +311,7 @@ export default function ChangesScreen() {
             onChangeText={setMessage}
             editable={!busy}
             placeholder="Commit message — leave empty to generate…"
-            placeholderTextColor={T.fgFaint}
+            placeholderTextColor={theme.colors.fgFaint}
             style={s.input}
             multiline
           />
@@ -322,7 +322,7 @@ export default function ChangesScreen() {
               style={[s.commitBtn, busy != null && s.opacity40]}
             >
               {busy === "commit" ? (
-                <ActivityIndicator color={T.onAccent} size="small" />
+                <ActivityIndicator color={theme.colors.onAccent} size="small" />
               ) : (
                 <Text style={s.commitText}>Commit</Text>
               )}
@@ -339,9 +339,9 @@ export default function ChangesScreen() {
                 ]}
               >
                 {busy === "pr" ? (
-                  <ActivityIndicator color={COLOR.fgMuted} size="small" />
+                  <ActivityIndicator color={theme.colors.fgMuted} size="small" />
                 ) : (
-                  <PounceIcon name="git-pull-request-outline" size={15} color={COLOR.fgMuted} />
+                  <PounceIcon name="git-pull-request-outline" size={15} color={theme.colors.fgMuted} />
                 )}
                 <Text style={s.btnLabel}>{prDraft ? "Draft PR" : "PR"}</Text>
               </Pressable>
@@ -350,7 +350,7 @@ export default function ChangesScreen() {
                 disabled={busy != null}
                 style={({ pressed }) => [s.prChevron, pressed && s.pressedHover]}
               >
-                <PounceIcon name="chevron-down" size={13} color={COLOR.fgFaint} />
+                <PounceIcon name="chevron-down" size={13} color={theme.colors.fgFaint} />
               </Pressable>
             </View>
           </View>
@@ -373,6 +373,7 @@ function SecondaryButton({
   onPress: () => void;
   disabled: boolean;
 }) {
+  const { theme } = useUnistyles();
   return (
     <Pressable
       onPress={onPress}
@@ -380,17 +381,17 @@ function SecondaryButton({
       style={({ pressed }) => [s.secondaryBtn, disabled && s.opacity50, pressed && s.pressedHover]}
     >
       {busy ? (
-        <ActivityIndicator color={COLOR.fgMuted} size="small" />
+        <ActivityIndicator color={theme.colors.fgMuted} size="small" />
       ) : (
-        <PounceIcon name={icon} size={15} color={COLOR.fgMuted} />
+        <PounceIcon name={icon} size={15} color={theme.colors.fgMuted} />
       )}
       <Text style={s.btnLabel}>{label}</Text>
     </Pressable>
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -402,24 +403,24 @@ const s = StyleSheet.create({
   pressed60: { opacity: 0.6 },
   pressed70: { opacity: 0.7 },
   titleWrap: { minWidth: 0, flex: 1 },
-  title: { fontSize: 17, fontWeight: "600", color: T.fg },
+  title: { fontSize: 17, fontWeight: "600", color: theme.colors.fg },
   metaRow: { marginTop: 2, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 },
-  branch: { flexShrink: 1, fontFamily: "JetBrainsMono", fontSize: 12, color: T.fgFaint },
-  counts: { flexShrink: 0, fontSize: 12, color: T.fgMuted },
-  diffAdd: { color: T.diffAddFg },
-  diffDel: { color: T.diffDelFg },
+  branch: { flexShrink: 1, fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fgFaint },
+  counts: { flexShrink: 0, fontSize: 12, color: theme.colors.fgMuted },
+  diffAdd: { color: theme.colors.diffAddFg },
+  diffDel: { color: theme.colors.diffDelFg },
   layoutToggle: {
     flexDirection: "row",
     overflow: "hidden",
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
   },
   layoutBtn: { paddingHorizontal: 10, paddingVertical: 4 },
-  layoutBtnActive: { backgroundColor: T.surfaceAlt },
+  layoutBtnActive: { backgroundColor: theme.colors.surfaceAlt },
   layoutText: { fontSize: 12, fontWeight: "500" },
-  fgText: { color: T.fg },
-  faintText: { color: T.fgFaint },
+  fgText: { color: theme.colors.fg },
+  faintText: { color: theme.colors.fgFaint },
   filterBtn: {
     height: 28,
     flexDirection: "row",
@@ -429,17 +430,17 @@ const s = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: 8,
   },
-  filterActive: { borderColor: T.accent, backgroundColor: T.accentSoft },
-  filterIdle: { borderColor: T.border, backgroundColor: "transparent" },
+  filterActive: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
+  filterIdle: { borderColor: theme.colors.border, backgroundColor: "transparent" },
   filterText: { fontSize: 12, fontWeight: "500" },
-  accentText: { color: T.accent },
-  mutedText: { color: T.fgMuted },
-  diffWrap: { flex: 1, borderTopWidth: 1, borderColor: T.border },
+  accentText: { color: theme.colors.accent },
+  mutedText: { color: theme.colors.fgMuted },
+  diffWrap: { flex: 1, borderTopWidth: 1, borderColor: theme.colors.border },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
   emptyEmoji: { fontSize: 40 },
-  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: T.fg },
-  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: T.fgMuted },
+  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   // Transparent, borderless bar to match the floating-composer look elsewhere.
   footer: {
     paddingHorizontal: 12,
@@ -449,11 +450,11 @@ const s = StyleSheet.create({
     maxHeight: 90,
     minHeight: 40,
     borderRadius: 16,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 12,
     paddingTop: 8,
     fontSize: 14,
-    color: T.fg,
+    color: theme.colors.fg,
   },
   actionsRow: { marginTop: 8, flexDirection: "row", gap: 8 },
   commitBtn: {
@@ -462,19 +463,19 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 12,
-    backgroundColor: T.accent,
+    backgroundColor: theme.colors.accent,
   },
   opacity40: { opacity: 0.4 },
   opacity50: { opacity: 0.5 },
-  commitText: { fontSize: 13, fontWeight: "600", color: T.onAccent },
+  commitText: { fontSize: 13, fontWeight: "600", color: theme.colors.onAccent },
   prGroup: {
     flex: 1,
     flexDirection: "row",
     overflow: "hidden",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surfaceAlt,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceAlt,
   },
   prBtn: {
     height: 36,
@@ -489,11 +490,11 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderLeftWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
     paddingHorizontal: 8,
   },
-  pressedHover: { backgroundColor: T.surfaceHover },
-  btnLabel: { fontSize: 13, fontWeight: "500", color: T.fgMuted },
+  pressedHover: { backgroundColor: theme.colors.surfaceHover },
+  btnLabel: { fontSize: 13, fontWeight: "500", color: theme.colors.fgMuted },
   secondaryBtn: {
     height: 36,
     flex: 1,
@@ -503,7 +504,7 @@ const s = StyleSheet.create({
     gap: 6,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surfaceAlt,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceAlt,
   },
-});
+}));

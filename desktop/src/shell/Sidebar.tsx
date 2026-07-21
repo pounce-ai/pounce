@@ -15,9 +15,10 @@ import { applyFilters, connection$, filters$, needsYou } from "@pounce/app/state
 import { useDevices, useIgnoredSet, useProjectNames, useThreads } from "@pounce/app/state/db/hooks";
 import { SessionListSkeleton } from "@pounce/app/components/Skeleton";
 import { LiveStrip } from "@pounce/app/components/LiveStrip";
-import { FilterButton, FilterSheet } from "@pounce/app/components/FilterSheet";
+import { FilterButton } from "@pounce/app/components/FilterSheet";
 import { AgentStatusIcon, COLOR, INPUT_TWEAKS, timeAgo } from "@pounce/app/ui";
 import { T } from "@pounce/app/ui/theme";
+import { GlassSurface } from "@pounce/app/ui/native/GlassSurface";
 import { nav$ } from "../shims/router";
 
 type Row =
@@ -35,7 +36,6 @@ function rank(s: Session): number {
 export function Sidebar() {
   const router = useRouter();
   const [query, setQuery] = useState("");
-  const [showFilters, setShowFilters] = useState(false);
   // Plain state, not a Legend observable: selecting a parent object returns
   // the same mutated reference, so toggles never re-render (the classic
   // object-selector gotcha) — and this is purely local UI state anyway.
@@ -111,6 +111,16 @@ export function Sidebar() {
 
   return (
     <View style={s.root}>
+      {/* Behind-window vibrancy: the standard macOS sidebar material blurring
+          the desktop through the window. An absolute-fill backdrop (content
+          stays in ordinary Views above it); non-macOS/stale binaries paint the
+          old opaque bgElevated instead. */}
+      <GlassSurface
+        material="sidebar"
+        blendingMode="behindWindow"
+        fallbackColor={T.bgElevated}
+        style={StyleSheet.absoluteFill}
+      />
       {/* Top bar: search + new */}
       <View style={s.topBar}>
         <View style={s.searchBox}>
@@ -135,12 +145,12 @@ export function Sidebar() {
             </Pressable>
           ) : null}
         </View>
-        <FilterButton active={showFilters} onPress={() => setShowFilters(true)} />
+        <FilterButton active={false} onPress={() => router.push("/filters")} />
         <Pressable
           onPress={() => router.push("/new")}
           style={({ pressed }) => [s.newBtn, pressed && s.pressed80]}
         >
-          <Ionicons name="add" size={18} color="#fff" />
+          <Ionicons name="add" size={18} color={T.onAccent} />
         </Pressable>
       </View>
 
@@ -246,9 +256,6 @@ export function Sidebar() {
         <FooterIcon name="settings-outline" hint="Settings" onPress={() => router.push("/settings")} />
       </View>
 
-      {/* Same filter sheet as mobile (Home/Search) — 1:1 controls via the shared
-          component; renders as an in-window overlay through AppModal.desktop. */}
-      <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
     </View>
   );
 }
@@ -372,7 +379,8 @@ const WARNING_TINT_10 = "rgba(210, 153, 34, 0.1)";
 const WARNING_TINT_15 = T.warningSoft;
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bgElevated },
+  // No background: the GlassSurface backdrop paints (vibrancy or fallback).
+  root: { flex: 1 },
   topBar: {
     flexDirection: "row",
     alignItems: "center",

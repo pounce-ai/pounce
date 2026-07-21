@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import {
   Animated,
   useAnimatedStyle,
@@ -10,7 +11,6 @@ import {
   withTiming,
 } from "./animation";
 import { AgentLogo, COLOR, fmtDuration } from "../ui";
-import { T } from "../ui/theme";
 
 function Dot({ delay }: { delay: number }) {
   const o = useSharedValue(0.3);
@@ -21,6 +21,8 @@ function Dot({ delay }: { delay: number }) {
     );
   }, [o, delay]);
   const style = useAnimatedStyle(() => ({ opacity: o.value }));
+  // Animated.View: keep the static COLOR token — unistyles theme styles must not
+  // mix into reanimated-managed styles.
   return <Animated.View style={[style, { width: 5, height: 5, borderRadius: 3, backgroundColor: COLOR.fgMuted }]} />;
 }
 
@@ -127,9 +129,9 @@ export function WorkingIndicator({
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   row: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 },
-  verb: { fontSize: 12, color: T.fgMuted },
-  detail: { color: T.fgFaint },
+  verb: { fontSize: 12, color: theme.colors.fgMuted },
+  detail: { color: theme.colors.fgFaint },
   dots: { flexDirection: "row", alignItems: "center", gap: 4 },
-});
+}));

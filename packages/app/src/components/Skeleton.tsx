@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -8,7 +9,6 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { Skeleton } from "boneyard-js/native";
-import { T } from "../ui/theme";
 
 /**
  * A static card-shaped template. Boneyard renders it, snapshots the native
@@ -92,7 +92,7 @@ export function TimelineSkeleton() {
   // the bones to the bottom and fill upward — otherwise they cluster at the top
   // over an empty black chat area.
   return (
-    <Animated.View style={[style, s.timeline]} pointerEvents="none">
+    <Animated.View style={[style, TIMELINE_LAYOUT]} pointerEvents="none">
       <BubbleBone user lines={1} />
       <BubbleBone user={false} lines={2} />
       <BubbleBone user lines={2} />
@@ -106,27 +106,30 @@ export function TimelineSkeleton() {
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   card: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
     padding: 14,
   },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  title: { flex: 1, fontSize: 15, fontWeight: "600", color: T.fg },
-  meta: { marginTop: 6, fontSize: 12, color: T.fgMuted },
+  title: { flex: 1, fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  meta: { marginTop: 6, fontSize: 12, color: theme.colors.fgMuted },
   footerRow: { marginTop: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  footerLeft: { fontSize: 11, color: T.fgMuted },
-  footerRight: { fontSize: 11, color: T.fgFaint },
+  footerLeft: { fontSize: 11, color: theme.colors.fgMuted },
+  footerRight: { fontSize: 11, color: theme.colors.fgFaint },
   list: { gap: 10, paddingHorizontal: 16, paddingTop: 6 },
-  timeline: {
-    flex: 1,
-    justifyContent: "flex-end",
-    gap: 12,
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-    paddingTop: 12,
-  },
-});
+}));
+
+/** Plain style for the pulsing Reanimated wrapper — unistyles sheet entries
+ *  carry the C++ proxy, which Animated.View rejects. Layout-only. */
+const TIMELINE_LAYOUT = {
+  flex: 1,
+  justifyContent: "flex-end",
+  gap: 12,
+  paddingHorizontal: 12,
+  paddingBottom: 12,
+  paddingTop: 12,
+} as const;

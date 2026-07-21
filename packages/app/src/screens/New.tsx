@@ -4,10 +4,10 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   View,
 } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { PounceIcon } from "../ui/native/Icon";
@@ -24,8 +24,7 @@ import { useAgentCaps, useDevices, useProjects, useThreads } from "../state/db/h
 import { Composer, type ComposerSubmit } from "../components/Composer";
 import { FolderBrowser } from "../components/FolderBrowser";
 import { startInteractive } from "../services/bridge";
-import { AgentLogo, agentLabel, COLOR, IS_DESKTOP } from "../ui";
-import { T } from "../ui/theme";
+import { AgentLogo, agentLabel, IS_DESKTOP } from "../ui";
 import { effectiveCaps } from "../ui/agent-meta";
 
 // Fallback order when the selected device hasn't reported its agents yet
@@ -43,6 +42,7 @@ function repoIdForCwd(cwd: string | null): string {
 export default function NewTaskScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { theme } = useUnistyles();
   const { repoId } = useLocalSearchParams<{ repoId?: string }>();
   const devices = useDevices();
   const rawThreads = useThreads();
@@ -204,7 +204,7 @@ export default function NewTaskScreen() {
             onPress={() => setBrowsing(true)}
             style={({ pressed }) => [s.folderBtn, pressed && s.pressed80]}
           >
-            <PounceIcon name="folder-outline" size={17} color={cwd ? COLOR.accent : COLOR.fgFaint} />
+            <PounceIcon name="folder-outline" size={17} color={cwd ? theme.colors.accent : theme.colors.fgFaint} />
             <View style={s.flex1}>
               <Text numberOfLines={1} style={[s.folderLabel, cwd ? s.fgText : s.faintText]}>
                 {folderLabel ?? "Choose a folder…"}
@@ -215,7 +215,7 @@ export default function NewTaskScreen() {
                 </Text>
               ) : null}
             </View>
-            <PounceIcon name="chevron-forward" size={15} color={COLOR.fgFaint} />
+            <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} />
           </Pressable>
 
           {repos.length ? (
@@ -264,7 +264,7 @@ export default function NewTaskScreen() {
             <PounceIcon
               name={interactive ? "flash" : "flash-outline"}
               size={13}
-              color={interactive ? COLOR.accent : COLOR.fgMuted}
+              color={interactive ? theme.colors.accent : theme.colors.fgMuted}
             />
             <Text style={[s.interactiveText, interactive ? s.accentText : s.mutedText]}>
               Interactive{interactive ? " · answerable prompts" : ""}
@@ -313,8 +313,8 @@ function Chip({ label, active, onPress }: { label: string; active: boolean; onPr
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -322,8 +322,8 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
   },
-  headerTitle: { fontSize: 22, fontWeight: "700", color: T.fg },
-  cancelLabel: { fontSize: 15, color: T.fgMuted },
+  headerTitle: { fontSize: 22, fontWeight: "700", color: theme.colors.fg },
+  cancelLabel: { fontSize: 15, color: theme.colors.fgMuted },
   pressed60: { opacity: 0.6 },
   pressed80: { opacity: 0.8 },
   scroll: { flex: 1, paddingHorizontal: 16 },
@@ -335,16 +335,16 @@ const s = StyleSheet.create({
     gap: 8,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
   flex1: { flex: 1 },
   folderLabel: { fontSize: 14 },
-  fgText: { color: T.fg },
-  faintText: { color: T.fgFaint },
-  folderPath: { fontFamily: "JetBrainsMono", fontSize: 11, color: T.fgFaint },
+  fgText: { color: theme.colors.fg },
+  faintText: { color: theme.colors.fgFaint },
+  folderPath: { fontFamily: "JetBrainsMono", fontSize: 11, color: theme.colors.fgFaint },
   agentPill: {
     flexDirection: "row",
     alignItems: "center",
@@ -354,11 +354,11 @@ const s = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  pillActive: { borderColor: T.accent, backgroundColor: T.accentSoft },
-  pillIdle: { borderColor: T.border, backgroundColor: T.surface },
+  pillActive: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
+  pillIdle: { borderColor: theme.colors.border, backgroundColor: theme.colors.surface },
   pillText: { fontSize: 13 },
-  accentText: { color: T.accent },
-  mutedText: { color: T.fgMuted },
+  accentText: { color: theme.colors.accent },
+  mutedText: { color: theme.colors.fgMuted },
   // Transparent, borderless bar — the Composer's floating glass pill carries
   // its own margins and chrome now.
   footer: {
@@ -375,10 +375,10 @@ const s = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 12,
   },
-  interactiveActive: { backgroundColor: T.accentSoft },
-  interactiveIdle: { backgroundColor: T.surfaceAlt },
+  interactiveActive: { backgroundColor: theme.colors.accentSoft },
+  interactiveIdle: { backgroundColor: theme.colors.surfaceAlt },
   interactiveText: { fontSize: 12 },
   field: { gap: 8 },
-  fieldLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: T.fgFaint },
+  fieldLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
   chip: { borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 6 },
-});
+}));

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, Platform, Pressable, Text, TextInput, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
@@ -15,8 +16,7 @@ import {
 } from "../state/db/hooks";
 import { SessionCard } from "../components/SessionCard";
 import { FilterButton, FilterSheet } from "../components/FilterSheet";
-import { COLOR, IS_DESKTOP } from "../ui";
-import { T } from "../ui/theme";
+import { IS_DESKTOP } from "../ui";
 import { searchQuery$ } from "../state/search";
 
 /** Search only kicks in at this many characters: short fragments match almost
@@ -27,6 +27,7 @@ const MIN_QUERY_LENGTH = 5;
 /** Full-screen thread search — matches title, branch, host, agent, repo. */
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
+  const { theme } = useUnistyles();
   // Desktop's sidebar seeds the modal via /search?q=… — start searching
   // immediately instead of making the user retype.
   const { q: seedQuery } = useLocalSearchParams<{ q?: string }>();
@@ -146,19 +147,19 @@ export default function SearchScreen() {
 
       {IS_DESKTOP ? (
         <View style={s.searchBox}>
-          <PounceIcon name="search" size={16} color={COLOR.fgFaint} />
+          <PounceIcon name="search" size={16} color={theme.colors.fgFaint} />
           <TextInput
             value={localQuery}
             onChangeText={setLocalQuery}
             placeholder="Find a thread…"
-            placeholderTextColor={COLOR.fgFaint}
+            placeholderTextColor={theme.colors.fgFaint}
             autoCapitalize="none"
             autoCorrect={false}
             style={[s.input, IS_DESKTOP && s.inputDesktop]}
           />
           {localQuery ? (
             <Pressable onPress={() => setLocalQuery("")} style={({ pressed }) => [s.clearBtn, pressed && s.pressed60]}>
-              <PounceIcon name="close-circle" size={16} color={COLOR.fgFaint} />
+              <PounceIcon name="close-circle" size={16} color={theme.colors.fgFaint} />
             </Pressable>
           ) : null}
         </View>
@@ -195,7 +196,7 @@ export default function SearchScreen() {
             <View style={s.footer}>
               <View style={s.footerHeaderRow}>
                 <Text style={s.sectionLabel}>In messages</Text>
-                {msgSearching ? <ActivityIndicator size="small" color={COLOR.fgFaint} /> : null}
+                {msgSearching ? <ActivityIndicator size="small" color={theme.colors.fgFaint} /> : null}
               </View>
               {msgHits.map((h) => (
                 <MessageHitRow
@@ -224,7 +225,12 @@ export default function SearchScreen() {
             </View>
           )
         }
-        contentContainerStyle={{ paddingTop: 4, paddingBottom: insets.bottom + 16 }}
+        // Android ignores contentInsetAdjustmentBehavior (iOS-only), so the
+        // list needs real top padding below the in-flow toolbar + search bar.
+        contentContainerStyle={{
+          paddingTop: Platform.OS === "android" ? 16 : 4,
+          paddingBottom: insets.bottom + 16,
+        }}
       />
 
       {IS_DESKTOP ? <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} /> : null}
@@ -276,8 +282,8 @@ function MessageHitRow({
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
   desktopHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -286,7 +292,7 @@ const s = StyleSheet.create({
     paddingBottom: 8,
     paddingTop: 4,
   },
-  title: { fontSize: 26, fontWeight: "700", color: T.fg },
+  title: { fontSize: 26, fontWeight: "700", color: theme.colors.fg },
   mobileFilterRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -303,12 +309,12 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     borderRadius: 16,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 12,
   },
-  input: { flex: 1, fontSize: 15, color: T.fg, height: 44 },
+  input: { flex: 1, fontSize: 15, color: theme.colors.fg, height: 44 },
   // Desktop centers intrinsic-height inputs (see inputH's comment in ui/index.tsx).
-  inputDesktop: { height: "auto" as never, paddingVertical: 0 },
+  inputDesktop: { height: "auto" as const, paddingVertical: 0 },
   clearBtn: { padding: 4 },
   resultRow: { paddingHorizontal: 16, paddingBottom: 10 },
   listHeader: {
@@ -318,7 +324,7 @@ const s = StyleSheet.create({
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 0.5,
-    color: T.fgFaint,
+    color: theme.colors.fgFaint,
   },
   footer: { paddingTop: 8 },
   footerHeaderRow: {
@@ -328,24 +334,24 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 6,
   },
-  sectionLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: T.fgFaint },
+  sectionLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
   empty: { alignItems: "center", paddingHorizontal: 32, paddingVertical: 80 },
   emptyEmoji: { fontSize: 40 },
-  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: T.fg },
-  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: T.fgMuted },
+  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   hitCard: {
     marginHorizontal: 16,
     marginBottom: 10,
     borderRadius: 16,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
   hitTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  hitTitle: { flex: 1, fontSize: 14, fontWeight: "600", color: T.fg },
-  hitMeta: { fontSize: 11, color: T.fgFaint },
-  hitSnippet: { marginTop: 4, fontSize: 13, color: T.fgMuted },
-  hitFooter: { marginTop: 4, fontSize: 11, color: T.fgFaint },
+  hitTitle: { flex: 1, fontSize: 14, fontWeight: "600", color: theme.colors.fg },
+  hitMeta: { fontSize: 11, color: theme.colors.fgFaint },
+  hitSnippet: { marginTop: 4, fontSize: 13, color: theme.colors.fgMuted },
+  hitFooter: { marginTop: 4, fontSize: 11, color: theme.colors.fgFaint },
   pressed60: { opacity: 0.6 },
   pressed70: { opacity: 0.7 },
-});
+}));

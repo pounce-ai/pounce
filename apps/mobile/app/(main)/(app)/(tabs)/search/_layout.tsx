@@ -1,4 +1,4 @@
-import { useColorScheme } from "react-native";
+import { Platform, useColorScheme } from "react-native";
 import { Stack } from "expo-router";
 import { hexFor } from "@pounce/app/ui/theme-hex";
 import { router } from "expo-router";
@@ -21,6 +21,9 @@ export default function SearchLayout() {
         headerLargeTitleStyle: { color: hex.fg },
         headerTintColor: hex.accent,
         contentStyle: { backgroundColor: hex.bg },
+        // iOS keeps the system scroll-edge bar; Android's toolbar otherwise
+        // falls back to the theme's (light) surface even in forced dark.
+        ...(Platform.OS === "android" ? { headerStyle: { backgroundColor: hex.bg } } : null),
       }}
     >
       <Stack.Screen

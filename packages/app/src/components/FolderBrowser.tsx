@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import { Modal } from "./AppModal";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PounceIcon } from "../ui/native/Icon";
 import type { IoniconName } from "../ui/native/icon-map";
 import { browseDirs, type DirEntry, type DirListing } from "../services/bridge";
-import { COLOR } from "../ui";
-import { T } from "../ui/theme";
 
 /** Shorten an absolute path for display: home → "~", keep the tail readable. */
 function pretty(path: string, home: string): string {
@@ -32,6 +31,7 @@ export function FolderBrowser({
   onPick: (path: string) => void;
 }) {
   const insets = useSafeAreaInsets();
+  const { theme } = useUnistyles();
   const [listing, setListing] = useState<DirListing | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -67,7 +67,7 @@ export function FolderBrowser({
 
         {/* Current path */}
         <View style={s.pathRow}>
-          <PounceIcon name="folder-open-outline" size={15} color={COLOR.accent} />
+          <PounceIcon name="folder-open-outline" size={15} color={theme.colors.accent} />
           <Text numberOfLines={1} style={s.pathText}>
             {listing ? pretty(listing.path, home) : "…"}
           </Text>
@@ -76,7 +76,7 @@ export function FolderBrowser({
         <ScrollView style={s.list} contentContainerStyle={{ paddingBottom: 16 }}>
           {loading ? (
             <View style={s.loadingWrap}>
-              <ActivityIndicator color={COLOR.accent} />
+              <ActivityIndicator color={theme.colors.accent} />
             </View>
           ) : error ? (
             <View style={s.errorWrap}>
@@ -140,22 +140,23 @@ function Row({
   muted?: boolean;
   accentIcon?: boolean;
 }) {
+  const { theme } = useUnistyles();
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [s.row, pressed && s.pressedHover]}
     >
-      <PounceIcon name={icon} size={17} color={accentIcon ? COLOR.accent : COLOR.fgMuted} />
+      <PounceIcon name={icon} size={17} color={accentIcon ? theme.colors.accent : theme.colors.fgMuted} />
       <Text numberOfLines={1} style={[s.rowLabel, muted ? s.rowLabelMuted : s.rowLabelFg]}>
         {label}
       </Text>
-      {!muted ? <PounceIcon name="chevron-forward" size={15} color={COLOR.fgFaint} /> : null}
+      {!muted ? <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} /> : null}
     </Pressable>
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -163,8 +164,8 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 8,
   },
-  headerTitle: { fontSize: 18, fontWeight: "700", color: T.fg },
-  cancelText: { fontSize: 15, color: T.fgMuted },
+  headerTitle: { fontSize: 18, fontWeight: "700", color: theme.colors.fg },
+  cancelText: { fontSize: 15, color: theme.colors.fgMuted },
   pathRow: {
     marginHorizontal: 16,
     marginBottom: 8,
@@ -172,45 +173,45 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     borderRadius: 12,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  pathText: { flex: 1, fontFamily: "JetBrainsMono", fontSize: 12, color: T.fgMuted },
+  pathText: { flex: 1, fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fgMuted },
   list: { flex: 1, paddingHorizontal: 16 },
   loadingWrap: { alignItems: "center", paddingVertical: 64 },
   errorWrap: { alignItems: "center", paddingHorizontal: 32, paddingVertical: 64 },
-  errorText: { textAlign: "center", fontSize: 13, color: T.fgMuted },
+  errorText: { textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   entries: { gap: 6 },
-  emptyText: { paddingHorizontal: 4, paddingVertical: 24, textAlign: "center", fontSize: 13, color: T.fgFaint },
+  emptyText: { paddingHorizontal: 4, paddingVertical: 24, textAlign: "center", fontSize: 13, color: theme.colors.fgFaint },
   footer: {
     borderTopWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.bgElevated,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bgElevated,
     paddingHorizontal: 16,
     paddingTop: 12,
   },
   pickBtn: { alignItems: "center", borderRadius: 999, paddingVertical: 12 },
-  pickBtnEnabled: { backgroundColor: T.accent },
-  pickBtnDisabled: { backgroundColor: T.surfaceAlt },
+  pickBtnEnabled: { backgroundColor: theme.colors.accent },
+  pickBtnDisabled: { backgroundColor: theme.colors.surfaceAlt },
   pickText: { fontSize: 15, fontWeight: "600" },
-  pickTextEnabled: { color: T.onAccent },
-  pickTextDisabled: { color: T.fgFaint },
+  pickTextEnabled: { color: theme.colors.onAccent },
+  pickTextDisabled: { color: theme.colors.fgFaint },
   row: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
     paddingHorizontal: 12,
     paddingVertical: 12,
   },
   rowLabel: { flex: 1, fontSize: 14 },
-  rowLabelMuted: { color: T.fgMuted },
-  rowLabelFg: { color: T.fg },
+  rowLabelMuted: { color: theme.colors.fgMuted },
+  rowLabelFg: { color: theme.colors.fg },
   pressed60: { opacity: 0.6 },
   pressed80: { opacity: 0.8 },
-  pressedHover: { backgroundColor: T.surfaceHover },
-});
+  pressedHover: { backgroundColor: theme.colors.surfaceHover },
+}));
