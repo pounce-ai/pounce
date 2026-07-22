@@ -8,10 +8,44 @@
  * Adding ANOTHER machine's bridge stays available via manual entry.
  */
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { clearBridgeConfig, syncLiveData } from "../services/bridge";
+import { addDeviceConfig, clearBridgeConfig, syncLiveData } from "../services/bridge";
 import { allCollections, clearCollection } from "../state/db/collections";
+
+/** This Mac's own bridge (same convention as the desktop shell's localBridge). */
+const LOCAL_URL = `http://127.0.0.1:${process.env.EXPO_PUBLIC_BRIDGE_PORT ?? "8099"}`;
+
+/** Re-adopt this Mac's bridge RIGHT NOW (mirrors the shell's ensureLocalBridge —
+ *  inlined because packages/app can't import from desktop/). Without this, a
+ *  reset wiped the device config and then synced against nothing: the workspace
+ *  sat empty until the next heartbeat tick re-adopted (~10-20s of "is it
+ *  broken?"). */
+async function readoptLocalBridge(): Promise<boolean> {
+  try {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 2500);
+    const res = await fetch(`${LOCAL_URL}/ui`, { signal: ac.signal }).finally(() =>
+      clearTimeout(timer),
+    );
+    if (!res.ok) return false;
+    const { token } = (await res.json()) as { token?: string };
+    if (!token) return false;
+    await addDeviceConfig(LOCAL_URL, token);
+    return true;
+  } catch {
+    return false;
+  }
+}
 import {
   checkForUpdatesNow,
   isAutoUpdateEnabled,
@@ -75,11 +109,17 @@ export function DeviceSetupCard({
     setResyncing(true);
     setResyncDone(false);
     try {
+      // Self-healing: if the device config is missing (e.g. right after a
+      // reset), a bare sync is a silent no-op — re-adopt this Mac first.
+      await readoptLocalBridge();
       await syncLiveData({ fresh: true });
       setResyncDone(true);
       setTimeout(() => setResyncDone(false), 2500);
     } catch {
-      Alert.alert("Resync failed", "The local agent host didn't answer. It may still be starting — try again in a few seconds.");
+      Alert.alert(
+        "Resync failed",
+        "The local agent host didn't answer. It may still be starting — try again in a few seconds.",
+      );
     } finally {
       setResyncing(false);
     }
@@ -99,6 +139,9 @@ export function DeviceSetupCard({
               try {
                 await clearBridgeConfig();
                 for (const c of allCollections) clearCollection(c);
+                // Re-adopt this Mac immediately so the workspace repopulates in
+                // one beat instead of sitting empty until the next heartbeat.
+                await readoptLocalBridge();
                 await syncLiveData({ fresh: true }).catch(() => {});
               } catch {
                 // heartbeat re-adopts the local bridge on its next tick anyway
@@ -114,7 +157,8 @@ export function DeviceSetupCard({
     <View style={s.card}>
       <Text style={s.cardTitle}>This Mac</Text>
       <Text style={s.cardBody}>
-        Pounce runs the agent host on this machine and connects to it automatically — no pairing needed here.
+        Pounce runs the agent host on this machine and connects to it automatically — no pairing
+        needed here.
       </Text>
       <View style={s.actionsRow}>
         <Pressable
@@ -163,22 +207,27 @@ export function DeviceSetupCard({
               trackColor={{ true: COLOR.accent, false: COLOR.fgFaint }}
             />
           </View>
-          <Pressable onPress={() => checkForUpdatesNow()} style={({ pressed }) => [s.checkNow, pressed && s.pressed60]}>
+          <Pressable
+            onPress={() => checkForUpdatesNow()}
+            style={({ pressed }) => [s.checkNow, pressed && s.pressed60]}
+          >
             <Text style={s.checkNowText}>Check for updates now</Text>
           </Pressable>
         </View>
       ) : null}
 
-      <Pressable onPress={() => setManual((m) => !m)} style={({ pressed }) => [s.manualToggle, pressed && s.pressed60]}>
-        <Text style={s.manualToggleText}>
-          {manual ? "Hide" : "Add another machine…"}
-        </Text>
+      <Pressable
+        onPress={() => setManual((m) => !m)}
+        style={({ pressed }) => [s.manualToggle, pressed && s.pressed60]}
+      >
+        <Text style={s.manualToggleText}>{manual ? "Hide" : "Add another machine…"}</Text>
       </Pressable>
 
       {manual ? (
         <View style={s.section}>
           <Text style={s.fieldLabel}>Address</Text>
-          <TextInput {...INPUT_TWEAKS}
+          <TextInput
+            {...INPUT_TWEAKS}
             value={url}
             onChangeText={setUrl}
             autoCapitalize="none"
@@ -188,7 +237,8 @@ export function DeviceSetupCard({
             style={s.input}
           />
           <Text style={s.fieldLabel}>Code</Text>
-          <TextInput {...INPUT_TWEAKS}
+          <TextInput
+            {...INPUT_TWEAKS}
             value={token}
             onChangeText={setToken}
             autoCapitalize="none"
