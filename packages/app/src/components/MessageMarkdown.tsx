@@ -1,4 +1,4 @@
-import { Component, memo, type ReactNode, useMemo, useRef, useState } from "react";
+import { Component, memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 // eslint-disable-next-line @react-native/no-deprecated-api -- core Clipboard is
 // the only clipboard already inside shipped binaries (OTA-safe); expo-clipboard
 // would need a new native module and a store build.
@@ -12,12 +12,56 @@ import {
 } from "react-native-enriched-markdown";
 import { Highlight, themes } from "prism-react-renderer";
 import * as WebBrowser from "expo-web-browser";
-import remend from "remend";
+import { StreamdownText } from "react-native-streamdown";
+import type { RemendOptions } from "remend";
 import { splitCodeBlocks } from "../components/runnableBlocks";
 import { COLOR } from "../ui";
 import { hexFor } from "../ui/theme-hex";
 
 const MONO = "JetBrainsMono";
+
+/** Grok-style reveal pacing: the bridge streams text in sentence-sized chunks,
+ *  and splashing a whole chunk at once defeats the native tail fade-in. This
+ *  parcels growth out a few words per tick instead — the engine animates each
+ *  increment — with an adaptive step so a big chunk drains in under a second
+ *  and the shown text never trails the real stream far. Non-append updates
+ *  (recycled row, rewritten buffer) and the settled state pass through
+ *  verbatim; the first mount does too, so reopening a mid-stream thread
+ *  doesn't replay the whole message. */
+function usePacedText(target: string, enabled: boolean): string {
+  const [shown, setShown] = useState(target);
+  const shownRef = useRef(target);
+  useEffect(() => {
+    if (!enabled || !target.startsWith(shownRef.current)) {
+      shownRef.current = target;
+      setShown(target);
+      return;
+    }
+    if (target.length === shownRef.current.length) return;
+    const timer = setInterval(() => {
+      const cur = shownRef.current;
+      if (cur.length >= target.length) {
+        clearInterval(timer);
+        return;
+      }
+      // A steady 1–2 words per tick is what makes the reveal read as calm —
+      // the native tail fade softens each small step into a shimmer, and the
+      // list's pin-to-end moves in matching small nudges. Only a deep backlog
+      // (a burst chunk) drains faster, and even then gently.
+      const backlog = target.length - cur.length;
+      const steps = backlog > 600 ? 4 : backlog > 250 ? 2 : 1;
+      let next = cur.length;
+      for (let i = 0; i < steps && next < target.length; i++) {
+        const ws = target.slice(next + 1).search(/\s/);
+        next = ws === -1 ? target.length : next + 1 + ws;
+      }
+      shownRef.current = target.slice(0, next);
+      setShown(shownRef.current);
+    }, 40);
+    return () => clearInterval(timer);
+  }, [target, enabled]);
+  return enabled ? shown : target;
+}
 
 /** Open tapped links in an in-app browser (SFSafariViewController / Custom Tabs)
  *  so the user stays inside Pounce instead of being kicked out to Safari. Only
@@ -26,6 +70,13 @@ const MONO = "JetBrainsMono";
 function openLink(url: string): void {
   if (/^https?:\/\//i.test(url)) void WebBrowser.openBrowserAsync(url).catch(() => {});
 }
+
+/** Streamdown merges this over its defaults. katex on to match latexMath below —
+ *  otherwise a dangling $$ renders raw mid-stream. (Its default linkMode
+ *  'text-only' stands: incomplete links show as plain text, never a dead tap
+ *  target.) Module-scope so the reference is stable — the hook re-runs remend
+ *  when this identity changes. */
+const REMEND_CONFIG: RemendOptions = { katex: true };
 
 /** latex on for the assistant's math; underline/sub/superscript off so prose
  *  like a__b or ~n isn't reinterpreted. GFM strikethrough comes from
@@ -59,12 +110,48 @@ function buildAssistantStyle(scheme: string | null | undefined): MarkdownStyle {
     // Purple accent chip so inline code pops out of prose — the enriched default
     // gives inline code a pink border, so pin the border to the fill to hide it.
     code: light
-      ? { fontFamily: MONO, fontSize: 13.5, color: "#5b4fd8", backgroundColor: "rgba(124,111,240,0.12)", borderColor: "rgba(124,111,240,0.12)" }
-      : { fontFamily: MONO, fontSize: 13.5, color: "#a99cf5", backgroundColor: "rgba(124,111,240,0.16)", borderColor: "rgba(124,111,240,0.16)" },
+      ? {
+          fontFamily: MONO,
+          fontSize: 13.5,
+          color: "#5b4fd8",
+          backgroundColor: "rgba(124,111,240,0.12)",
+          borderColor: "rgba(124,111,240,0.12)",
+        }
+      : {
+          fontFamily: MONO,
+          fontSize: 13.5,
+          color: "#a99cf5",
+          backgroundColor: "rgba(124,111,240,0.16)",
+          borderColor: "rgba(124,111,240,0.16)",
+        },
     codeBlock: light
-      ? { fontFamily: MONO, fontSize: 13, color: "#24292e", backgroundColor: "#f6f8fa", borderColor: "#e1e4e8", borderWidth: 1, borderRadius: 10, padding: 10 }
-      : { fontFamily: MONO, fontSize: 13, color: "#cdd0d6", backgroundColor: "#0d0d12", borderColor: "#26262f", borderWidth: 1, borderRadius: 10, padding: 10 },
-    blockquote: { color: hex.fgMuted, borderColor: light ? "#d0d0d7" : "#33333e", borderWidth: 3, gapWidth: 10, backgroundColor: "transparent" },
+      ? {
+          fontFamily: MONO,
+          fontSize: 13,
+          color: "#24292e",
+          backgroundColor: "#f6f8fa",
+          borderColor: "#e1e4e8",
+          borderWidth: 1,
+          borderRadius: 10,
+          padding: 10,
+        }
+      : {
+          fontFamily: MONO,
+          fontSize: 13,
+          color: "#cdd0d6",
+          backgroundColor: "#0d0d12",
+          borderColor: "#26262f",
+          borderWidth: 1,
+          borderRadius: 10,
+          padding: 10,
+        },
+    blockquote: {
+      color: hex.fgMuted,
+      borderColor: light ? "#d0d0d7" : "#33333e",
+      borderWidth: 3,
+      gapWidth: 10,
+      backgroundColor: "transparent",
+    },
     // list.color defaults to a light-theme color — set it for both schemes.
     list: { color: hex.fg, bulletColor: hex.fgMuted, markerColor: hex.fgMuted, gapWidth: 8 },
     // Table defaults are light-theme (white bg / near-black text) — theme both.
@@ -89,7 +176,12 @@ function buildAssistantStyle(scheme: string | null | undefined): MarkdownStyle {
           borderWidth: 1,
           borderRadius: 8,
         },
-    thematicBreak: { color: light ? "#e5e5ea" : "#26262f", height: 1, marginTop: 8, marginBottom: 8 },
+    thematicBreak: {
+      color: light ? "#e5e5ea" : "#26262f",
+      height: 1,
+      marginTop: 8,
+      marginBottom: 8,
+    },
   };
 }
 
@@ -105,8 +197,19 @@ function buildUserStyle(scheme: string | null | undefined): MarkdownStyle {
     h2: { ...assistant.h2, color: "#ffffff" },
     h3: { ...assistant.h3, color: "#ffffff" },
     link: { color: "#ffffff", underline: true },
-    code: { fontFamily: MONO, fontSize: 13.5, color: "#f4f2ff", backgroundColor: "rgba(255,255,255,0.20)", borderColor: "rgba(255,255,255,0.20)" },
-    list: { color: "#ffffff", bulletColor: "rgba(255,255,255,0.7)", markerColor: "rgba(255,255,255,0.7)", gapWidth: 8 },
+    code: {
+      fontFamily: MONO,
+      fontSize: 13.5,
+      color: "#f4f2ff",
+      backgroundColor: "rgba(255,255,255,0.20)",
+      borderColor: "rgba(255,255,255,0.20)",
+    },
+    list: {
+      color: "#ffffff",
+      bulletColor: "rgba(255,255,255,0.7)",
+      markerColor: "rgba(255,255,255,0.7)",
+      gapWidth: 8,
+    },
   };
 }
 
@@ -118,8 +221,9 @@ function buildUserStyle(scheme: string | null | undefined): MarkdownStyle {
  * When `onRun` is provided (a live assistant turn), finalized text is split so
  * shell code blocks render as tappable "Run" cards while the surrounding prose
  * stays markdown. Streaming turns skip splitting (incomplete fences) and render
- * on the single markdown path, with partial text repaired by remend (closes
- * dangling **, `, ``` fences) so nothing renders as raw asterisks mid-stream.
+ * via StreamdownText, which repairs partial text with remend (closes dangling
+ * **, `, ``` fences) on a dedicated worklet runtime so per-token repair work
+ * stays off the JS thread.
  */
 export function MessageMarkdown({
   text,
@@ -148,7 +252,12 @@ export function MessageMarkdown({
     <View style={{ gap: 8 }}>
       {segments.map((seg, i) =>
         seg.type === "code" ? (
-          <CodeBlock key={`c${i}`} lang={seg.lang} code={seg.code} onRun={seg.runnable ? onRun : undefined} />
+          <CodeBlock
+            key={`c${i}`}
+            lang={seg.lang}
+            code={seg.code}
+            onRun={seg.runnable ? onRun : undefined}
+          />
         ) : (
           <MarkdownBody key={`m${i}`} text={seg.text} role="assistant" />
         ),
@@ -172,16 +281,33 @@ function MarkdownBody({
     () => (role === "user" ? buildUserStyle(scheme) : buildAssistantStyle(scheme)),
     [role, scheme],
   );
-  const markdown = streaming ? remend(text) : text;
+  const paced = usePacedText(text, !!streaming);
+  // Live turns run remend off the JS thread (streamdown's remend-processor
+  // worklet runtime — needs worklets bundle mode); settled turns skip remend
+  // entirely, so the plain engine renders them directly.
+  if (streaming) {
+    return (
+      <MarkdownErrorBoundary text={text} role={role}>
+        <StreamdownText
+          markdown={paced}
+          remendConfig={REMEND_CONFIG}
+          markdownStyle={markdownStyle}
+          md4cFlags={MD4C_FLAGS}
+          flavor="github"
+          selectable={false}
+          onLinkPress={({ url }) => openLink(url)}
+        />
+      </MarkdownErrorBoundary>
+    );
+  }
   return (
     <MarkdownErrorBoundary text={text} role={role}>
       <EnrichedMarkdownText
-        markdown={markdown}
+        markdown={text}
         markdownStyle={markdownStyle}
         md4cFlags={MD4C_FLAGS}
         flavor="github"
-        streamingAnimation={!!streaming}
-        selectable={!streaming}
+        selectable
         onLinkPress={({ url }) => openLink(url)}
       />
     </MarkdownErrorBoundary>
@@ -191,10 +317,26 @@ function MarkdownBody({
 /** Map our fenced-block language tags to Prism language ids (aliases prism
  *  doesn't know natively). Unknown → passed through; empty → plain text. */
 const PRISM_LANG: Record<string, string> = {
-  ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", mjs: "javascript", cjs: "javascript",
-  py: "python", rb: "ruby", sh: "bash", shell: "bash", zsh: "bash", console: "bash",
-  "shell-session": "bash", yml: "yaml", md: "markdown", "c++": "cpp", "c#": "csharp",
-  text: "", txt: "", "": "",
+  ts: "typescript",
+  tsx: "tsx",
+  js: "javascript",
+  jsx: "jsx",
+  mjs: "javascript",
+  cjs: "javascript",
+  py: "python",
+  rb: "ruby",
+  sh: "bash",
+  shell: "bash",
+  zsh: "bash",
+  console: "bash",
+  "shell-session": "bash",
+  yml: "yaml",
+  md: "markdown",
+  "c++": "cpp",
+  "c#": "csharp",
+  text: "",
+  txt: "",
+  "": "",
 };
 
 /**
@@ -202,7 +344,15 @@ const PRISM_LANG: Record<string, string> = {
  * for shell blocks), Prism-highlighted and horizontally scrollable for long
  * lines. Prism theme + card fill follow the system scheme.
  */
-const CodeBlock = memo(function CodeBlock({ lang, code, onRun }: { lang: string; code: string; onRun?: (c: string) => void }) {
+const CodeBlock = memo(function CodeBlock({
+  lang,
+  code,
+  onRun,
+}: {
+  lang: string;
+  code: string;
+  onRun?: (c: string) => void;
+}) {
   const { theme } = useUnistyles();
   const light = useColorScheme() === "light";
   const prismLang = PRISM_LANG[lang] ?? lang;
@@ -222,25 +372,49 @@ const CodeBlock = memo(function CodeBlock({ lang, code, onRun }: { lang: string;
       <View style={s.cardHeader}>
         <Text style={s.lang}>{lang || "code"}</Text>
         {onRun ? (
-          <Pressable onPress={() => onRun(code)} hitSlop={6} style={({ pressed }) => [s.action, pressed && s.pressed70]}>
+          <Pressable
+            onPress={() => onRun(code)}
+            hitSlop={6}
+            style={({ pressed }) => [s.action, pressed && s.pressed70]}
+          >
             <PounceIcon name="play" size={12} color={theme.colors.accent} />
             <Text style={s.runLabel}>Run</Text>
           </Pressable>
         ) : null}
-        <Pressable onPress={copy} hitSlop={6} style={({ pressed }) => [s.action, pressed && s.pressed70]}>
-          <PounceIcon name={copied ? "checkmark" : "copy-outline"} size={12} color={copied ? theme.colors.success : theme.colors.fgMuted} />
-          <Text style={[s.copyLabel, { color: copied ? theme.colors.success : theme.colors.fgMuted }]}>
+        <Pressable
+          onPress={copy}
+          hitSlop={6}
+          style={({ pressed }) => [s.action, pressed && s.pressed70]}
+        >
+          <PounceIcon
+            name={copied ? "checkmark" : "copy-outline"}
+            size={12}
+            color={copied ? theme.colors.success : theme.colors.fgMuted}
+          />
+          <Text
+            style={[s.copyLabel, { color: copied ? theme.colors.success : theme.colors.fgMuted }]}
+          >
             {copied ? "Copied" : "Copy"}
           </Text>
         </Pressable>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: 10 }}>
-        <Highlight code={code} language={prismLang || "text"} theme={light ? themes.github : themes.vsDark}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ padding: 10 }}
+      >
+        <Highlight
+          code={code}
+          language={prismLang || "text"}
+          theme={light ? themes.github : themes.vsDark}
+        >
           {({ tokens, getTokenProps }) => (
             <View>
               {tokens.map((line, i) => (
                 <View key={i} style={s.codeLine}>
-                  {line.length === 0 ? <Text style={{ fontSize: 12.5, lineHeight: 18 }}> </Text> : null}
+                  {line.length === 0 ? (
+                    <Text style={{ fontSize: 12.5, lineHeight: 18 }}> </Text>
+                  ) : null}
                   {line.map((token, j) => {
                     const { style } = getTokenProps({ token });
                     return (
@@ -301,7 +475,13 @@ const s = StyleSheet.create((theme) => ({
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  lang: { flex: 1, fontFamily: MONO, fontSize: 11, textTransform: "lowercase", color: theme.colors.fgFaint },
+  lang: {
+    flex: 1,
+    fontFamily: MONO,
+    fontSize: 11,
+    textTransform: "lowercase",
+    color: theme.colors.fgFaint,
+  },
   action: { flexDirection: "row", alignItems: "center", gap: 4 },
   runLabel: { fontSize: 12, fontWeight: "600", color: theme.colors.accent },
   copyLabel: { fontSize: 12, fontWeight: "600" },

@@ -19,11 +19,7 @@ import { MessageMarkdown } from "../components/MessageMarkdown";
 import { PromptForm } from "../components/PromptForm";
 import { DiffBlock, HlText } from "../components/CodeHighlight";
 import { Modal } from "../components/AppModal";
-import {
-  cleanAssistantText,
-  isEmptyUserMessage,
-  parseUserMessage,
-} from "@pounce/transcript";
+import { cleanAssistantText, isEmptyUserMessage, parseUserMessage } from "@pounce/transcript";
 // collapseToolResults lives in a pure (RN-free) module so it can be unit-tested;
 // imported for use below and re-exported since Session.tsx imports it from here.
 import { collapseToolResults } from "./timelineEvents";
@@ -76,7 +72,10 @@ function batchHeaders(data: TimelineEvent[]): Map<string, string> {
   const m = new Map<string, string>();
   let i = 0;
   while (i < data.length) {
-    if (data[i].type !== "tool_call") { i++; continue; }
+    if (data[i].type !== "tool_call") {
+      i++;
+      continue;
+    }
     let j = i;
     while (j < data.length && data[j].type === "tool_call") j++;
     if (j - i >= 2) {
@@ -136,14 +135,10 @@ export const Timeline = memo(function Timeline({
   /** Search deep-link: mark this event's row so the user sees WHY they landed
    *  here — yellow accent + the matched term. */
   highlight?: { id: string; term: string };
-  /** ChatGPT-style send anchor. While set, the event with this id (the just-
-   *  sent user message) is scrolled to the TOP of the viewport and a footer
-   *  spacer (~2/3 of the list viewport) provides empty space the reply streams
-   *  down into; pin-to-tail is suspended. Manual port of Margelo's
-   *  `anchoredEndSpace` pattern (@legendapp/list 3.3.x has no such prop).
-   *  The id may leave `data` mid-turn (the optimistic user event is swapped
-   *  for the daemon's echo) — the anchor stays in force until this prop is
-   *  cleared, only the one-shot scroll is keyed to the id. */
+  /** The just-sent user message's id. Triggers ONE scroll to the end so the
+   *  turn starts pinned there; from that point `maintainScrollAtEnd` follows
+   *  the streaming reply natively (LegendList's chat pattern) and a user
+   *  scroll-up detaches it. Cleared by the parent when the turn completes. */
   anchorToId?: string | null;
 }) {
   // Pair each tool result with its call so the call row renders both as one
@@ -161,13 +156,8 @@ export const Timeline = memo(function Timeline({
   // marked state as a prop (a per-row live query would be far too heavy).
   const markerMap = useThreadMarkers(sessionId);
 
-  // --- Send-anchoring ------------------------------------------------------
-  const anchored = anchorToId != null;
-  // The spacer is sized off the LIST's own viewport (onLayout on the wrapper
-  // below), not the window — the list shares the screen with header/composer.
-  const [containerH, setContainerH] = useState(0);
-  const spacerH = Math.round(containerH * 0.66);
-  // Timeline needs its own imperative handle for the anchor scroll, but the
+  // --- Send scroll ----------------------------------------------------------
+  // Timeline needs its own imperative handle for the send scroll, but the
   // parent also holds one (marker jumps / the Latest pill) — feed both.
   const innerRef = useRef<LegendListRef | null>(null);
   const setRefs = useCallback(
@@ -178,116 +168,90 @@ export const Timeline = memo(function Timeline({
     },
     [listRef],
   );
-  // One-shot scroll per anchor id: put the sent message at the viewport top.
-  // rAF-retried until the item exists in `data` (the optimistic append usually
-  // lands in the same commit, but don't assume); guarded by `consumedAnchor` so
-  // the per-token data updates of the streaming turn never re-scroll — and so
-  // the optimistic→echo id swap mid-turn can't re-trigger it either.
+  // One-shot per send: land at the end even if the user was reading history.
+  // From there LegendList's own chat behavior (maintainScrollAtEnd + threshold)
+  // follows the streaming reply automatically and detaches when the user
+  // scrolls up — no manual tail-following.
   const consumedAnchor = useRef<string | null>(null);
   useEffect(() => {
     if (!anchorToId || consumedAnchor.current === anchorToId) return;
-    let cancelled = false;
-    let tries = 0;
-    const attempt = () => {
-      if (cancelled || consumedAnchor.current === anchorToId) return;
-      const index = data.findIndex((e) => e.id === anchorToId);
-      if (index >= 0) {
-        consumedAnchor.current = anchorToId;
-        innerRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0 });
-      } else if (++tries < 12) {
-        requestAnimationFrame(attempt);
-      }
-      // Item never appeared (e.g. anchor outlived a rolled-back optimistic
-      // event): give up quietly — the spacer still clears with the anchor.
-    };
-    requestAnimationFrame(attempt);
-    return () => {
-      cancelled = true;
-    };
-  }, [anchorToId, data]);
+    consumedAnchor.current = anchorToId;
+    requestAnimationFrame(() => {
+      // Not animated: while an animated scroll is in flight the first reply
+      // chunks land, the pin's near-end check samples mid-animation, and
+      // following never engages — an atomic jump closes that race.
+      innerRef.current?.scrollToEnd({ animated: false });
+      onAtBottomChange?.(true);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchorToId]);
 
   return (
-    <View style={s.flex1} onLayout={(e) => setContainerH(e.nativeEvent.layout.height)}>
-    <LegendList
-      ref={setRefs}
-      data={data}
-      keyExtractor={(e) => e.id}
-      renderItem={({ item }) => (
-        <Row
-          event={item}
-          agent={agent}
-          marked={markerMap.get(item.id) ?? defaultMarked(item, agent)}
-          onLongPressEvent={onLongPressEvent}
-          onRunCommand={onRunCommand}
-          cwd={cwd}
-          pairedResult={
-            item.type === "tool_call" ? resultByCallId.get(item.call.id || item.id) : undefined
-          }
-          batchHeader={headers.get(item.id)}
-          onRespondPermission={onRespondPermission}
-          onRespondPrompt={onRespondPrompt}
-          onSendInput={onSendInput}
-          highlightTerm={highlight && item.id === highlight.id ? highlight.term : undefined}
-        />
-      )}
-      // A blended average across the row types (short user bubbles / meta lines
-      // vs. taller assistant turns) — closer to reality than 72, so scrolling
-      // through unmeasured history settles with less correction.
-      estimatedItemSize={96}
-      recycleItems
-      // Bottom-anchored streaming chat, Claude-style. Two independent behaviours,
-      // and conflating them was the "random jump" bug:
-      //   • size: true  — keep visible content steady when an item *resizes*
-      //     (the last bubble growing token-by-token, or an accordion above
-      //     expanding). New turns only ever append BELOW the viewport, so a
-      //     scrolled-up reading position stays put without data-anchoring.
-      //   • data: false — do NOT re-anchor to a visible item on every data
-      //     update. Streaming fires one data update per token; with the bare
-      //     `maintainVisibleContentPosition` (which normalizes to
-      //     { data: true, size: true }) each token re-anchored some visible row
-      //     and fought maintainScrollAtEnd's pin-to-tail — the jitter the user
-      //     saw. Tail-following is maintainScrollAtEnd's job alone.
-      maintainVisibleContentPosition={{ data: false, size: true }}
-      alignItemsAtEnd
-      // Open on the newest message (bottom), not the top of the history, and
-      // stay pinned to the end as live turns stream in (dataChange + itemLayout
-      // triggers follow the growing last bubble); only while near the end so a
-      // scrolled-up user isn't yanked down.
-      initialScrollAtEnd
-      // OFF while send-anchored: the reply must stream DOWNWARD into the
-      // spacer, not drag the viewport to the tail. When the anchor clears
-      // (turn done / Latest pill) this re-enables — and LegendList's own
-      // near-end gate (see above) decides whether to settle to the bottom,
-      // so a user who scrolled up mid-turn isn't yanked when the spacer drops.
-      maintainScrollAtEnd={!anchored}
-      onScroll={(e) => {
-        const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
-        // While anchored, the trailing spacer is virtual emptiness — being
-        // anywhere inside it still counts as "at bottom", so the Latest pill
-        // only appears once the user scrolls up past real content. onScroll
-        // only fires on user scrolls, so streaming alone never flips this.
-        const fromEnd =
-          contentSize.height -
-          (contentOffset.y + layoutMeasurement.height) -
-          (anchored ? spacerH : 0);
-        onAtBottomChange?.(fromEnd < 80);
-      }}
-      scrollEventThrottle={64}
-      // While send-anchored, append the anchoredEndSpace spacer AFTER the
-      // regular footer (the WorkingIndicator stays snug under the streaming
-      // reply; the empty room comes after it).
-      ListFooterComponent={
-        anchored ? (
-          <View>
-            {footer}
-            <View style={{ height: spacerH }} />
-          </View>
-        ) : (
-          footer
-        )
-      }
-      contentContainerStyle={{ padding: 12, gap: 8 }}
-    />
+    <View style={s.flex1}>
+      <LegendList
+        ref={setRefs}
+        data={data}
+        keyExtractor={(e) => e.id}
+        renderItem={({ item }) => (
+          <Row
+            event={item}
+            agent={agent}
+            marked={markerMap.get(item.id) ?? defaultMarked(item, agent)}
+            onLongPressEvent={onLongPressEvent}
+            onRunCommand={onRunCommand}
+            cwd={cwd}
+            pairedResult={
+              item.type === "tool_call" ? resultByCallId.get(item.call.id || item.id) : undefined
+            }
+            batchHeader={headers.get(item.id)}
+            onRespondPermission={onRespondPermission}
+            onRespondPrompt={onRespondPrompt}
+            onSendInput={onSendInput}
+            highlightTerm={highlight && item.id === highlight.id ? highlight.term : undefined}
+          />
+        )}
+        // A blended average across the row types (short user bubbles / meta lines
+        // vs. taller assistant turns) — closer to reality than 72, so scrolling
+        // through unmeasured history settles with less correction.
+        estimatedItemSize={96}
+        recycleItems
+        // Bottom-anchored streaming chat, Claude-style. Two independent behaviours,
+        // and conflating them was the "random jump" bug:
+        //   • size: true  — keep visible content steady when an item *resizes*
+        //     (the last bubble growing token-by-token, or an accordion above
+        //     expanding). New turns only ever append BELOW the viewport, so a
+        //     scrolled-up reading position stays put without data-anchoring.
+        //   • data: false — do NOT re-anchor to a visible item on every data
+        //     update. Streaming fires one data update per token; with the bare
+        //     `maintainVisibleContentPosition` (which normalizes to
+        //     { data: true, size: true }) each token re-anchored some visible row
+        //     and fought maintainScrollAtEnd's pin-to-tail — the jitter the user
+        //     saw. Tail-following is maintainScrollAtEnd's job alone.
+        maintainVisibleContentPosition={{ data: false, size: true }}
+        alignItemsAtEnd
+        // Open on the newest message (bottom), not the top of the history, and
+        // stay pinned to the end as live turns stream in (dataChange + itemLayout
+        // triggers follow the growing last bubble); only while near the end so a
+        // scrolled-up user isn't yanked down.
+        initialScrollAtEnd
+        // The chat pattern from LegendList's own guide: stay pinned to the end
+        // as the streaming reply grows (data + item-layout triggers), but only
+        // while the viewport is within the threshold of the bottom — scrolling
+        // up detaches automatically, riding back down re-attaches.
+        maintainScrollAtEnd
+        // 0.25 viewport: forgiving enough that a chunky growth step (a pasted
+        // paragraph, the settled-row swap at turn end) doesn't spuriously
+        // detach the pin, while a deliberate scroll-up still does.
+        maintainScrollAtEndThreshold={0.25}
+        onScroll={(e) => {
+          const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+          const fromEnd = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+          onAtBottomChange?.(fromEnd < 80);
+        }}
+        scrollEventThrottle={64}
+        ListFooterComponent={footer}
+        contentContainerStyle={{ padding: 12, gap: 8 }}
+      />
     </View>
   );
 });
@@ -430,7 +394,9 @@ function AssistantBubble({
   onRun?: (command: string) => void;
 }) {
   const clean = useMemo(() => cleanAssistantText(text, agent), [text, agent]);
-  return <Bubble role="assistant" text={clean} streaming={streaming} marked={marked} onRun={onRun} />;
+  return (
+    <Bubble role="assistant" text={clean} streaming={streaming} marked={marked} onRun={onRun} />
+  );
 }
 
 function UserRow({
@@ -577,7 +543,12 @@ function InlineImages({ images, eager }: { images: readonly MessageImage[]; eage
           <LazyImage key={att.uri} uri={att.uri!} onPress={() => setPreview(att)} />
         ),
       )}
-      <Modal visible={!!preview} transparent animationType="fade" onRequestClose={() => setPreview(null)}>
+      <Modal
+        visible={!!preview}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPreview(null)}
+      >
         <Pressable
           onPress={() => setPreview(null)}
           style={[StyleSheet.absoluteFill, s.centerContent]}
@@ -662,10 +633,7 @@ function OutputNote({ text, isError }: { text: string; isError: boolean }) {
   return (
     <View style={s.rowEnd}>
       <View style={[s.outputNote, isError ? s.outputNoteError : s.outputNoteOk]}>
-        <Text
-          numberOfLines={6}
-          style={[s.monoText12, isError ? s.textDanger : s.textMuted]}
-        >
+        <Text numberOfLines={6} style={[s.monoText12, isError ? s.textDanger : s.textMuted]}>
           {text}
         </Text>
       </View>
@@ -707,7 +675,14 @@ function Bubble({
       <View style={s.flex1}>
         <MessageMarkdown text={text} role="assistant" streaming={streaming} onRun={onRun} />
       </View>
-      {marked ? <PounceIcon name="bookmark" size={10} color={theme.colors.accent} style={{ marginTop: 3 }} /> : null}
+      {marked ? (
+        <PounceIcon
+          name="bookmark"
+          size={10}
+          color={theme.colors.accent}
+          style={{ marginTop: 3 }}
+        />
+      ) : null}
     </View>
   );
 }
@@ -747,7 +722,15 @@ const SHELL_GOLD = "#d29922";
  * Expanding reveals the full command and the tool's output nested in the same
  * card, instead of the output sprawling as its own full-width block.
  */
-function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: ToolResultEvent; cwd?: string | null }) {
+function ToolAccordion({
+  event,
+  result,
+  cwd,
+}: {
+  event: ToolCallEvent;
+  result?: ToolResultEvent;
+  cwd?: string | null;
+}) {
   const { theme } = useUnistyles();
   // Rows are recycled: key the expansion to the event id so an open accordion
   // can't bleed into whatever event this component instance shows next.
@@ -768,7 +751,10 @@ function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: 
     const raw = String(result.result.content.text ?? "");
     // Strip ANSI escapes and carriage-return progress redraws before tailing.
     const clean = raw.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/^.*\r(?!\n)/gm, "");
-    const lines = clean.trimEnd().split("\n").filter((l) => l.trim().length > 0);
+    const lines = clean
+      .trimEnd()
+      .split("\n")
+      .filter((l) => l.trim().length > 0);
     return lines.length ? lines.slice(-3).join("\n") : null;
   }, [running, open, result]);
   return (
@@ -796,10 +782,7 @@ function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: 
             />
           </View>
         ) : (
-          <Text
-            numberOfLines={open ? undefined : 1}
-            style={s.toolPreview}
-          >
+          <Text numberOfLines={open ? undefined : 1} style={s.toolPreview}>
             {open ? preview : preview.replace(/\s+/g, " ")}
           </Text>
         )}
@@ -809,7 +792,11 @@ function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: 
             <Text style={s.runningLabel}>Running</Text>
           </View>
         ) : expandable ? (
-          <PounceIcon name={open ? "chevron-up" : "chevron-down"} size={13} color={theme.colors.fgFaint} />
+          <PounceIcon
+            name={open ? "chevron-up" : "chevron-down"}
+            size={13}
+            color={theme.colors.fgFaint}
+          />
         ) : null}
       </View>
       {open && event.call.previewUri ? (
@@ -837,16 +824,34 @@ function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: 
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function ResultBody({ content, isError, nested }: { content: any; isError: boolean; nested?: boolean }) {
+function ResultBody({
+  content,
+  isError,
+  nested,
+}: {
+  content: any;
+  isError: boolean;
+  nested?: boolean;
+}) {
   if (content?.kind === "diff") {
-    return <DiffBlock patch={content.patch ?? ""} path={content.path} nested={nested} maxLines={nested ? 120 : 40} />;
+    return (
+      <DiffBlock
+        patch={content.patch ?? ""}
+        path={content.path}
+        nested={nested}
+        maxLines={nested ? 120 : 40}
+      />
+    );
   }
-  const text = content?.kind === "text" ? content.text : content?.kind === "json" ? JSON.stringify(content.value) : "";
+  const text =
+    content?.kind === "text"
+      ? content.text
+      : content?.kind === "json"
+        ? JSON.stringify(content.value)
+        : "";
   if (!text) return null;
   return (
-    <View
-      style={[s.resultBox, nested && s.resultBoxNested, isError && s.resultBoxError]}
-    >
+    <View style={[s.resultBox, nested && s.resultBoxNested, isError && s.resultBoxError]}>
       <Text numberOfLines={nested ? 30 : 12} style={s.resultText}>
         {text}
       </Text>
@@ -863,7 +868,10 @@ function ToolResult({ content, isError }: { content: any; isError: boolean }) {
 function Term({ data, stream }: { data: string; stream: string }) {
   return (
     <View style={s.termBox}>
-      <Text numberOfLines={20} style={[s.monoText12, stream === "stderr" ? s.textDanger : s.termTextOut]}>
+      <Text
+        numberOfLines={20}
+        style={[s.monoText12, stream === "stderr" ? s.textDanger : s.termTextOut]}
+      >
         {data}
       </Text>
     </View>
@@ -896,11 +904,7 @@ function SearchHighlight({ term, children }: { term?: string; children: React.Re
 }
 
 function Meta({ text, level }: { text: string; level?: "info" | "warning" | "error" }) {
-  return (
-    <Text style={[s.meta, level === "error" ? s.textDanger : s.textFaint]}>
-      {text}
-    </Text>
-  );
+  return <Text style={[s.meta, level === "error" ? s.textDanger : s.textFaint]}>{text}</Text>;
 }
 
 /* Soft accent/warning/danger tints (the old accent/40-style alpha classes) have
@@ -943,7 +947,11 @@ const s = StyleSheet.create((theme) => ({
   permChosen: { fontSize: 12, fontWeight: "500", color: theme.colors.fgMuted },
   optionsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   optionBtn: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
-  optionBtnReject: { borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceAlt },
+  optionBtnReject: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceAlt,
+  },
   optionBtnAllow: { backgroundColor: theme.colors.accent },
   optionLabel: { fontSize: 13, fontWeight: "600" },
   optionLabelReject: { color: theme.colors.fgMuted },
@@ -967,7 +975,11 @@ const s = StyleSheet.create((theme) => ({
   justifyEnd: { justifyContent: "flex-end" },
   lightboxScrim: { backgroundColor: "rgba(0, 0, 0, 0.9)" },
   thumb: { width: THUMB, height: THUMB, borderRadius: 12 },
-  thumbPlaceholder: { borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceAlt },
+  thumbPlaceholder: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceAlt,
+  },
   thumbBrokenWrap: { alignItems: "center", justifyContent: "center", gap: 4 },
   thumbBrokenLabel: { fontSize: 10, color: theme.colors.fgFaint },
   videoTile: { backgroundColor: "#000", alignItems: "center", justifyContent: "center" },
@@ -984,19 +996,47 @@ const s = StyleSheet.create((theme) => ({
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  commandName: { fontFamily: "JetBrainsMono", fontSize: 13, fontWeight: "600", color: theme.colors.accent },
-  commandArgs: { flexShrink: 1, fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fgMuted },
-  outputNote: { maxWidth: "86%", borderRadius: 12, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6 },
+  commandName: {
+    fontFamily: "JetBrainsMono",
+    fontSize: 13,
+    fontWeight: "600",
+    color: theme.colors.accent,
+  },
+  commandArgs: {
+    flexShrink: 1,
+    fontFamily: "JetBrainsMono",
+    fontSize: 12,
+    color: theme.colors.fgMuted,
+  },
+  outputNote: {
+    maxWidth: "86%",
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
   outputNoteError: { borderColor: DANGER_BORDER, backgroundColor: DANGER_TINT },
   outputNoteOk: { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceAlt },
-  userBubble: { maxWidth: "86%", borderRadius: 16, backgroundColor: theme.colors.accent, paddingHorizontal: 12, paddingVertical: 6 },
+  userBubble: {
+    maxWidth: "86%",
+    borderRadius: 16,
+    backgroundColor: theme.colors.accent,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
   assistantRow: { flexDirection: "row", alignItems: "flex-start", gap: 4 },
   toolCard: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
   toolCardFailed: { borderColor: DANGER_BORDER, backgroundColor: DANGER_TINT },
   toolCardOk: { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceAlt },
   shellDollar: { fontFamily: "JetBrainsMono", fontSize: 13, fontWeight: "600" },
   toolName: { fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fg },
-  toolPreview: { flex: 1, fontFamily: "JetBrainsMono", fontSize: 12, lineHeight: 17, color: theme.colors.fgMuted },
+  toolPreview: {
+    flex: 1,
+    fontFamily: "JetBrainsMono",
+    fontSize: 12,
+    lineHeight: 17,
+    color: theme.colors.fgMuted,
+  },
   runningDot: { height: 6, width: 6, borderRadius: 999, backgroundColor: theme.colors.success },
   runningLabel: {
     fontSize: 10,
@@ -1005,9 +1045,25 @@ const s = StyleSheet.create((theme) => ({
     letterSpacing: 0.5,
     color: theme.colors.success,
   },
-  tailBox: { marginTop: 8, borderRadius: 8, backgroundColor: TERM_BG, paddingHorizontal: 10, paddingVertical: 6 },
-  tailText: { fontFamily: "JetBrainsMono", fontSize: 11, lineHeight: 15, color: theme.colors.fgFaint },
-  resultBox: { borderRadius: 12, backgroundColor: TERM_BG, paddingHorizontal: 12, paddingVertical: 8 },
+  tailBox: {
+    marginTop: 8,
+    borderRadius: 8,
+    backgroundColor: TERM_BG,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  tailText: {
+    fontFamily: "JetBrainsMono",
+    fontSize: 11,
+    lineHeight: 15,
+    color: theme.colors.fgFaint,
+  },
+  resultBox: {
+    borderRadius: 12,
+    backgroundColor: TERM_BG,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
   resultBoxNested: { borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border },
   resultBoxError: { borderWidth: 1, borderColor: DANGER_BORDER },
   resultText: { fontFamily: "JetBrainsMono", fontSize: 12, color: TERM_FG },

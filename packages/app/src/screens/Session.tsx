@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // eslint-disable-next-line @react-native/no-deprecated-api -- core Clipboard is
 // the only clipboard already inside shipped binaries (OTA-safe).
-import { ActionSheetIOS, ActivityIndicator, Alert, Clipboard, Pressable, Text, TextInput, View } from "react-native";
+import {
+  ActionSheetIOS,
+  ActivityIndicator,
+  Alert,
+  Clipboard,
+  Pressable,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Platform } from "react-native";
 import { KeyboardAvoidingView } from "../components/kav";
@@ -36,6 +45,7 @@ import {
   pendingPrompts$,
   pendingTurns$,
   rekeyThread,
+  rekeyedThreadIds$,
   removeSource,
   saveThreadMessages,
   setPendingPrompt,
@@ -53,7 +63,21 @@ import {
   useThreadMarkers,
   useThreadModel,
 } from "../state/db/hooks";
-import { diffTotals, fetchGitChanges, fetchMessages, fetchUsage, interruptTurn, respondPermission, respondPrompt, searchMessages, sendSessionInput, startInteractive, streamLiveMessage, type MessageSearchHit, type ThreadUsage } from "../services/bridge";
+import {
+  diffTotals,
+  fetchGitChanges,
+  fetchMessages,
+  fetchUsage,
+  interruptTurn,
+  respondPermission,
+  respondPrompt,
+  searchMessages,
+  sendSessionInput,
+  startInteractive,
+  streamLiveMessage,
+  type MessageSearchHit,
+  type ThreadUsage,
+} from "../services/bridge";
 import { PounceIcon } from "../ui/native/Icon";
 import { ACTIVITY_LABEL, AgentStatusIcon, BranchChip, pickSheet } from "../ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "../ui/agent-meta";
@@ -81,11 +105,38 @@ const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|heic|heif|tiff?)$/i;
 function mimeForImage(name: string): string {
   const ext = name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? "";
   const map: Record<string, string> = {
-    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
-    webp: "image/webp", bmp: "image/bmp", heic: "image/heic", heif: "image/heif",
-    tif: "image/tiff", tiff: "image/tiff",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    bmp: "image/bmp",
+    heic: "image/heic",
+    heif: "image/heif",
+    tif: "image/tiff",
+    tiff: "image/tiff",
   };
   return map[ext] ?? "image/png";
+}
+
+/** True when `b` is the transcript re-parse of streamed event `a`. The daemon
+ *  mints fresh event ids when it re-reads the transcript after a turn, so id
+ *  equality alone can't collapse a finished turn's streamed copy against the
+ *  fetched one — without this, the whole reply renders twice at completion. */
+function isEquivalentEvent(a: TimelineEvent, b: TimelineEvent): boolean {
+  if (a.type !== b.type) return false;
+  switch (a.type) {
+    case "user_message":
+    case "assistant_message":
+    case "thinking_finished":
+      return a.text === (b as typeof a).text;
+    case "tool_call":
+      return a.call.id === (b as typeof a).call.id;
+    case "tool_result":
+      return a.result.toolCallId === (b as typeof a).result.toolCallId;
+    default:
+      return false;
+  }
 }
 
 function mergeById(cur: TimelineEvent[], inc: TimelineEvent[]): TimelineEvent[] {
@@ -94,16 +145,51 @@ function mergeById(cur: TimelineEvent[], inc: TimelineEvent[]): TimelineEvent[] 
   for (const ev of inc) {
     const i = idx.get(ev.id);
     if (i != null) out[i] = ev;
-    else { idx.set(ev.id, out.length); out.push(ev); }
+    else {
+      idx.set(ev.id, out.length);
+      out.push(ev);
+    }
   }
   return out;
+}
+
+/** Fold a fetched transcript into the rendered list without disturbing rows
+ *  already on screen. A fetched event matching a rendered one only by content
+ *  (re-parses mint fresh ids) is dropped in favor of the RENDERED event — its
+ *  row keeps its key, so the just-streamed reply never remounts/re-measures at
+ *  the exact moment the anchor spacer collapses. (Swapping to the fetched copy
+ *  reset the row to its estimated size and scroll-to-end then landed at the
+ *  START of the message.) Rendered extras the transcript hasn't flushed yet are
+ *  kept — the render list only ever accretes. */
+function reconcileFetched(cur: TimelineEvent[], fetched: TimelineEvent[]): TimelineEvent[] {
+  if (!cur.length) return fetched;
+  const used = new Set<string>();
+  const next = fetched.map((f) => {
+    const match = cur.find((e) => !used.has(e.id) && (e.id === f.id || isEquivalentEvent(e, f)));
+    if (!match) return f;
+    used.add(match.id);
+    // Adopt the fetched (canonical) payload — it carries the settled flags,
+    // e.g. assistant_message.streaming=false, which flips the row off the
+    // streaming renderer — but under the RENDERED id, so the row's key and
+    // measurement survive.
+    return match.id === f.id ? f : { ...f, id: match.id };
+  });
+  const extras = cur.filter(
+    (e) => !used.has(e.id) && !e.id.startsWith("opt:") && !next.some((f) => f.id === e.id),
+  );
+  return extras.length ? mergeById(next, extras) : next;
 }
 
 export default function SessionScreen() {
   // `at` (optional, ISO timestamp) deep-links to a specific message — search
   // hits pass the matched event's time so we can land on it, not just the
   // thread — and `q` is the matched term, echoed as a yellow row highlight.
-  const { id, at, q } = useLocalSearchParams<{ id: string; at?: string; q?: string }>();
+  const { id: routeId, at, q } = useLocalSearchParams<{ id: string; at?: string; q?: string }>();
+  // A new_* thread's first turn re-keys it onto the daemon's real id; follow
+  // that alias here, in place — replacing the route would remount the screen
+  // and visibly blank the timeline right as the reply finishes.
+  const rekeyedId = useSelector(() => rekeyedThreadIds$[routeId!].get());
+  const id = rekeyedId ?? routeId;
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { theme } = useUnistyles();
@@ -160,7 +246,10 @@ export default function SessionScreen() {
   // fetches on navigation, caches per thread, and orders the two, so there's no
   // manual race. Each stage REPLACES (event ids are seq-based, so merging would
   // duplicate); an in-flight live turn re-appends its streamed events after.
-  const canFetch = live && !!session?.id;
+  // `new_*` threads don't exist on the host yet — fetching their transcript
+  // resolves EMPTY, and the history-seed effect would replace liveEvents with
+  // that emptiness, erasing the optimistic first message mid-send.
+  const canFetch = live && !!session?.id && !session.id.startsWith("new_");
   const host = session?.hostId;
   const agent = session?.agent;
   const tid = session?.id;
@@ -203,7 +292,9 @@ export default function SessionScreen() {
       .then(setUsage)
       .catch(() => {});
   }, [live, session?.hostId, session?.agent, session?.id, session?.cwd]);
-  useEffect(() => { refreshUsage(); }, [refreshUsage]);
+  useEffect(() => {
+    refreshUsage();
+  }, [refreshUsage]);
 
   const retry = useCallback(() => {
     void recentQ.refetch();
@@ -222,11 +313,14 @@ export default function SessionScreen() {
   }, [persisted]);
 
   // Seed the render list from the best available history (full ▸ recent), and
-  // persist it so the thread opens instantly next time.
+  // persist it so the thread opens instantly next time. Union, not replace:
+  // when the rekey alias flips tid (new_* → real) the screen stays mounted, so
+  // a fetch racing the transcript flush must not erase streamed events the
+  // render list already holds — the render list only ever accretes.
   useEffect(() => {
     const ev = fullQ.data ?? recentQ.data;
     if (ev) {
-      setLiveEvents(chrono(ev));
+      setLiveEvents((cur) => reconcileFetched(cur, chrono(ev)));
       if (tid) saveThreadMessages(tid, ev);
     }
   }, [recentQ.data, fullQ.data, tid]);
@@ -236,8 +330,7 @@ export default function SessionScreen() {
   // prompt is on the hosted CLI's screen, so presence in the freshest fetch is
   // the pending signal — the merged render list can't be used (merges never
   // remove). Feeds pendingPrompts$, which auto-presents the form sheet below.
-  const freshest =
-    recentQ.dataUpdatedAt >= fullQ.dataUpdatedAt ? recentQ.data : fullQ.data;
+  const freshest = recentQ.dataUpdatedAt >= fullQ.dataUpdatedAt ? recentQ.data : fullQ.data;
   useEffect(() => {
     if (!live || !tid || !host || !freshest) return;
     const last = freshest[freshest.length - 1];
@@ -277,7 +370,8 @@ export default function SessionScreen() {
 
   // Loading only until *something* is renderable; failed only if we have nothing
   // and the full fetch errored (a failed recent still falls through to full).
-  const loading = canFetch && !recentQ.data && !fullQ.data && (recentQ.isLoading || fullQ.isLoading);
+  const loading =
+    canFetch && !recentQ.data && !fullQ.data && (recentQ.isLoading || fullQ.isLoading);
   const failed = canFetch && fullQ.isError && !recentQ.data && !fullQ.data;
 
   const rawEvents = live ? liveEvents : demoTl.events;
@@ -324,7 +418,8 @@ export default function SessionScreen() {
         // it stays absolute (the agent can read either).
         const rel = cwd && f.path.startsWith(`${cwd}/`) ? f.path.slice(cwd.length + 1) : f.path;
         sources.push({ path: rel, name: f.name, kind });
-        if (kind === "image" && withImages) images.push({ path: f.path, mediaType: f.type || mimeForImage(f.name) });
+        if (kind === "image" && withImages)
+          images.push({ path: f.path, mediaType: f.type || mimeForImage(f.name) });
         else mentions.push(rel);
       }
       addSources(session.id, sources);
@@ -372,10 +467,16 @@ export default function SessionScreen() {
         const ts = ev.ts ? Date.parse(ev.ts) : Number.NaN;
         if (Number.isNaN(ts)) continue;
         const diff = Math.abs(ts - target);
-        if (diff < bestDiff) { bestDiff = diff; best = i; }
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          best = i;
+        }
         if (needle && diff < bestWithTermDiff) {
           const text = "text" in ev ? (ev as { text?: string }).text : undefined;
-          if (text?.toLowerCase().includes(needle)) { bestWithTermDiff = diff; bestWithTerm = i; }
+          if (text?.toLowerCase().includes(needle)) {
+            bestWithTermDiff = diff;
+            bestWithTerm = i;
+          }
         }
       }
       // A term-bearing row within 2 minutes of the hit beats the raw nearest.
@@ -389,7 +490,9 @@ export default function SessionScreen() {
   // with the matched term. Once per mount; the delay lets the list finish its
   // initial layout first.
   const didJumpToAt = useRef(false);
-  const [searchHighlight, setSearchHighlight] = useState<{ id: string; term: string } | undefined>();
+  const [searchHighlight, setSearchHighlight] = useState<
+    { id: string; term: string } | undefined
+  >();
   useEffect(() => {
     if (!at || didJumpToAt.current || !fullQ.data || events.length === 0) return;
     didJumpToAt.current = true;
@@ -460,7 +563,6 @@ export default function SessionScreen() {
     setSearchHighlight(undefined);
   }, []);
 
-
   const onLongPressEvent = useCallback(
     (ev: TimelineEvent) => {
       // Optimistic ids are replaced on refetch — a toggle here would orphan.
@@ -489,128 +591,137 @@ export default function SessionScreen() {
   // One message → one streamed turn. Only pre-delivery errors propagate (so the
   // Composer restores the user's draft); once the host has the turn, failures
   // in streaming/refetching are swallowed and sync catches up.
-  const runTurn = useCallback(async (s: ComposerSubmit) => {
-    if (!session) return;
-    if (live) {
-      const optimistic: TimelineEvent = {
-        id: `opt:${Date.now()}`,
-        conversationId: session.id,
-        seq: Number.MAX_SAFE_INTEGER,
-        ts: new Date().toISOString(),
-        type: "user_message",
-        text: s.text || (s.images.length ? "🖼️ Image" : ""),
-      };
-      // Anchor the timeline to this message: it scrolls to the viewport top
-      // and the reply streams into the spacer below (see Timeline.anchorToId).
-      setAnchorId(optimistic.id);
-      // Interactive thread: drive the hosted PTY (the bridge reuses its live PTY
-      // or `--resume`s the SAME session) so prompts stay answerable and no new
-      // session is spawned. PTY turns don't stream over SSE, so echo the message
-      // and poll the transcript — the synthesized prompt_request / reply lands
-      // there — rather than wait on the 20s workspace sync.
-      if (isThreadInteractive(session.id)) {
+  const runTurn = useCallback(
+    async (s: ComposerSubmit) => {
+      if (!session) return;
+      if (live) {
+        const optimistic: TimelineEvent = {
+          id: `opt:${Date.now()}`,
+          conversationId: session.id,
+          seq: Number.MAX_SAFE_INTEGER,
+          ts: new Date().toISOString(),
+          type: "user_message",
+          text: s.text || (s.images.length ? "🖼️ Image" : ""),
+        };
+        // Anchor the timeline to this message: it scrolls to the viewport top
+        // and the reply streams into the spacer below (see Timeline.anchorToId).
+        setAnchorId(optimistic.id);
+        // Interactive thread: drive the hosted PTY (the bridge reuses its live PTY
+        // or `--resume`s the SAME session) so prompts stay answerable and no new
+        // session is spawned. PTY turns don't stream over SSE, so echo the message
+        // and poll the transcript — the synthesized prompt_request / reply lands
+        // there — rather than wait on the 20s workspace sync.
+        if (isThreadInteractive(session.id)) {
+          setLiveEvents((e) => mergeById(e, [optimistic]));
+          await startInteractive(session.hostId, s.text, session.cwd, session.id);
+          // The render seeds from full ▸ recent history, so refetch both — the
+          // submit lands over a few seconds (see submitPrompt), so poll a handful
+          // of times to surface the reply / question card promptly.
+          for (const ms of [1500, 2500, 4000, 6000]) {
+            await new Promise((r) => setTimeout(r, ms));
+            await Promise.all([recentQ.refetch(), fullQ.refetch()]).catch(() => {});
+          }
+          return;
+        }
         setLiveEvents((e) => mergeById(e, [optimistic]));
-        await startInteractive(session.hostId, s.text, session.cwd, session.id);
-        // The render seeds from full ▸ recent history, so refetch both — the
-        // submit lands over a few seconds (see submitPrompt), so poll a handful
-        // of times to surface the reply / question card promptly.
-        for (const ms of [1500, 2500, 4000, 6000]) {
-          await new Promise((r) => setTimeout(r, ms));
-          await Promise.all([recentQ.refetch(), fullQ.refetch()]).catch(() => {});
-        }
-        return;
-      }
-      setLiveEvents((e) => mergeById(e, [optimistic]));
-      // Everything the turn streams, kept so the post-turn refetch can't erase
-      // it: the turn's `done` can resolve before the host has flushed the last
-      // assistant line to the transcript, so a re-parse may briefly miss it.
-      const turnEvents: TimelineEvent[] = [];
-      // The daemon only streams frames once it has accepted the turn, so the
-      // first event marks the message as delivered. After that point an error
-      // (cellular blip mid-stream, post-turn refetch) must NOT propagate to the
-      // Composer — restoring the draft for a message the agent is already
-      // working on is how sent text "reappeared" in the input box.
-      let delivered = false;
-      let threadId: string | null = null;
-      try {
-        ({ threadId } = await streamLiveMessage(
-          session.hostId,
-          session.agent,
-          session.id,
-          session.cwd,
-          s.text,
-          (ev) => {
-            delivered = true;
-            turnEvents.push(ev);
-            setLiveEvents((e) => {
-              // The daemon echoes the user turn as it streams; drop our optimistic
-              // placeholder then so the message isn't shown twice.
-              const base =
-                ev.type === "user_message" && !ev.id.startsWith("opt:")
-                  ? e.filter((x) => !x.id.startsWith("opt:"))
-                  : e;
-              return mergeById(base, [ev]);
-            });
-          },
-          {
-            images: s.images,
-            permissionMode: modesFor(session.agent).length > 1
-              ? (mode ?? modesFor(session.agent)[0]?.value)
-              : undefined,
-            reasoningEffort: effectiveCaps(session.agent, capsFor(session.agent)).thinking ? effort : undefined,
-            model: modelForThread(session.id),
-          },
-        ));
-      } catch (err) {
-        if (!delivered) {
-          // The turn never reached the host: drop the optimistic echo and let
-          // the error propagate so the Composer restores the draft.
-          setLiveEvents((e) => e.filter((x) => x.id !== optimistic.id));
-          throw err;
-        }
-        // Delivered — the host keeps working even though our stream dropped.
-        // The sync tick refetches the transcript, so just stop streaming.
-        return;
-      }
-      if (threadId) {
-        // fresh: the host's message cache can predate this turn. And if the
-        // re-parse STILL misses streamed events (transcript flush lag), keep
-        // them — replacing the list with an incomplete fetch made the reply
-        // vanish right as the turn finished. Best-effort: the turn is already
-        // delivered, so a refetch failure must not bubble up and restore the
-        // draft — the streamed events stay on screen and sync catches up.
+        // Everything the turn streams, kept so the post-turn refetch can't erase
+        // it: the turn's `done` can resolve before the host has flushed the last
+        // assistant line to the transcript, so a re-parse may briefly miss it.
+        const turnEvents: TimelineEvent[] = [];
+        // The daemon only streams frames once it has accepted the turn, so the
+        // first event marks the message as delivered. After that point an error
+        // (cellular blip mid-stream, post-turn refetch) must NOT propagate to the
+        // Composer — restoring the draft for a message the agent is already
+        // working on is how sent text "reappeared" in the input box.
+        let delivered = false;
+        let threadId: string | null = null;
         try {
-          const fetched = await fetchMessages(session.hostId, session.agent, threadId, { fresh: true });
-          const missing = turnEvents.filter((e) => !fetched.some((f) => f.id === e.id));
-          const merged = mergeById(chrono(fetched), missing);
-          setLiveEvents(merged);
-          saveThreadMessages(threadId, merged); // one persist per completed turn
-        } catch {
-          // Refetch failed but the turn happened — persist what we streamed so
-          // the rekey below (which remounts the route) doesn't blank the thread.
-          if (turnEvents.length) saveThreadMessages(threadId, chrono(turnEvents));
+          ({ threadId } = await streamLiveMessage(
+            session.hostId,
+            session.agent,
+            session.id,
+            session.cwd,
+            s.text,
+            (ev) => {
+              delivered = true;
+              turnEvents.push(ev);
+              setLiveEvents((e) => {
+                // The daemon echoes the user turn as it streams; drop our optimistic
+                // placeholder then so the message isn't shown twice.
+                const base =
+                  ev.type === "user_message" && !ev.id.startsWith("opt:")
+                    ? e.filter((x) => !x.id.startsWith("opt:"))
+                    : e;
+                return mergeById(base, [ev]);
+              });
+            },
+            {
+              images: s.images,
+              permissionMode:
+                modesFor(session.agent).length > 1
+                  ? (mode ?? modesFor(session.agent)[0]?.value)
+                  : undefined,
+              reasoningEffort: effectiveCaps(session.agent, capsFor(session.agent)).thinking
+                ? effort
+                : undefined,
+              model: modelForThread(session.id),
+            },
+          ));
+        } catch (err) {
+          if (!delivered) {
+            // The turn never reached the host: drop the optimistic echo and let
+            // the error propagate so the Composer restores the draft.
+            setLiveEvents((e) => e.filter((x) => x.id !== optimistic.id));
+            throw err;
+          }
+          // Delivered — the host keeps working even though our stream dropped.
+          // The sync tick refetches the transcript, so just stop streaming.
+          return;
         }
+        if (threadId) {
+          // fresh: the host's message cache can predate this turn. And if the
+          // re-parse STILL misses streamed events (transcript flush lag), keep
+          // them — replacing the list with an incomplete fetch made the reply
+          // vanish right as the turn finished. Best-effort: the turn is already
+          // delivered, so a refetch failure must not bubble up and restore the
+          // draft — the streamed events stay on screen and sync catches up.
+          try {
+            const fetched = await fetchMessages(session.hostId, session.agent, threadId, {
+              fresh: true,
+            });
+            // Older history is id-stable across fetches; only this turn's
+            // streamed rows need their identity preserved (see reconcileFetched).
+            const merged = reconcileFetched(turnEvents, chrono(fetched));
+            setLiveEvents(merged);
+            saveThreadMessages(threadId, merged); // one persist per completed turn
+          } catch {
+            // Refetch failed but the turn happened — persist what we streamed so
+            // the rekey below (which remounts the route) doesn't blank the thread.
+            if (turnEvents.length) saveThreadMessages(threadId, chrono(turnEvents));
+          }
+        }
+        refreshUsage();
+        // A freshly-created task carries a temporary `new_*` id the daemon doesn't
+        // know. Once the first turn returns the real thread id, re-key the local
+        // session onto it — otherwise the session stays orphaned ("Queued"
+        // forever, empty on reopen) while sync surfaces the real thread as a
+        // separate entry. The screen follows via the rekeyedThreadIds$ alias; no
+        // route replace (a remount would blank the just-finished reply).
+        if (threadId && threadId !== session.id && session.id.startsWith("new_")) {
+          rekeyThread(session.id, { ...session, id: threadId, activity: "idle" });
+        }
+      } else {
+        const { getRuntime } = await import("../services/runtime");
+        const rt = await getRuntime();
+        await rt.sendMessage({
+          conversation: { id: session.id, agent: session.agent, threadId: session.id } as never,
+          project: { path: session.cwd ?? "" } as never,
+          text: s.text,
+        });
       }
-      refreshUsage();
-      // A freshly-created task carries a temporary `new_*` id the daemon doesn't
-      // know. Once the first turn returns the real thread id, re-key the local
-      // session onto it and swap the route — otherwise the session stays orphaned
-      // ("Queued" forever, empty on reopen) while sync surfaces the real thread as
-      // a separate entry.
-      if (threadId && threadId !== session.id && session.id.startsWith("new_")) {
-        rekeyThread(session.id, { ...session, id: threadId, activity: "idle" });
-        router.replace(`/session/${threadId}`);
-      }
-    } else {
-      const { getRuntime } = await import("../services/runtime");
-      const rt = await getRuntime();
-      await rt.sendMessage({
-        conversation: { id: session.id, agent: session.agent, threadId: session.id } as never,
-        project: { path: session.cwd ?? "" } as never,
-        text: s.text,
-      });
-    }
-  }, [session, live, refreshUsage, mode, effort, router, recentQ, fullQ]);
+    },
+    [session, live, refreshUsage, mode, effort, recentQ, fullQ],
+  );
 
   // Follow-ups typed while a turn runs are queued and drained in order — the
   // Claude Code / Codex model. inFlightRef gates re-entrancy synchronously so a
@@ -631,28 +742,31 @@ export default function SessionScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remoteTick]);
 
-  const onSubmit = useCallback(async (s: ComposerSubmit) => {
-    if (inFlightRef.current) {
-      queueRef.current = [...queueRef.current, s];
-      setQueued(queueRef.current);
-      return;
-    }
-    inFlightRef.current = true;
-    setSending(true);
-    try {
-      await runTurn(s);
-      // Drain queued follow-ups, unless a stop cleared the flag mid-way.
-      while (inFlightRef.current && queueRef.current.length) {
-        const [next, ...rest] = queueRef.current;
-        queueRef.current = rest;
-        setQueued(rest);
-        await runTurn(next);
+  const onSubmit = useCallback(
+    async (s: ComposerSubmit) => {
+      if (inFlightRef.current) {
+        queueRef.current = [...queueRef.current, s];
+        setQueued(queueRef.current);
+        return;
       }
-    } finally {
-      inFlightRef.current = false;
-      setSending(false);
-    }
-  }, [runTurn]);
+      inFlightRef.current = true;
+      setSending(true);
+      try {
+        await runTurn(s);
+        // Drain queued follow-ups, unless a stop cleared the flag mid-way.
+        while (inFlightRef.current && queueRef.current.length) {
+          const [next, ...rest] = queueRef.current;
+          queueRef.current = rest;
+          setQueued(rest);
+          await runTurn(next);
+        }
+      } finally {
+        inFlightRef.current = false;
+        setSending(false);
+      }
+    },
+    [runTurn],
+  );
 
   const cancelQueued = useCallback((i: number) => {
     queueRef.current = queueRef.current.filter((_, n) => n !== i);
@@ -684,6 +798,33 @@ export default function SessionScreen() {
     void Promise.resolve(onSubmit(pending)).catch(() => {});
   }, [session, id, onSubmit]);
 
+  const running = sending || session?.activity === "running" || session?.activity === "streaming";
+
+  // Working-tree +/- totals for the composer's diff shortcut. Refreshed when
+  // a turn starts/ends (`running` flips) — that's when the working tree moves.
+  // This block sits ABOVE the not-found return: `session` can flicker to
+  // undefined during sync reconcile on a brand-new thread, and hooks below an
+  // early return crash React ("Rendered fewer hooks than expected").
+  const [diffStat, setDiffStat] = useState<{ add: number; del: number } | null>(null);
+  useEffect(() => {
+    if (!session?.cwd) return;
+    let cancelled = false;
+    fetchGitChanges(session.hostId, session.cwd)
+      .then((g) => {
+        if (!cancelled) setDiffStat(diffTotals(g.files));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.hostId, session?.cwd, running]);
+  // Send-anchor lifecycle end: once the turn completes, drop the anchor —
+  // Timeline removes its spacer and restores maintainScrollAtEnd, whose own
+  // near-end gate keeps a scrolled-up reader in place (no yank, no jump).
+  useEffect(() => {
+    if (!running) setAnchorId(null);
+  }, [running]);
+
   if (!session) {
     return (
       <View style={s.notFound}>
@@ -694,25 +835,6 @@ export default function SessionScreen() {
 
   const canSteer = session.isLive;
   const caps = effectiveCaps(session.agent, reportedCaps);
-  const running = sending || session.activity === "running" || session.activity === "streaming";
-
-  // Working-tree +/- totals for the composer's diff shortcut. Refreshed when
-  // a turn starts/ends (`running` flips) — that's when the working tree moves.
-  const [diffStat, setDiffStat] = useState<{ add: number; del: number } | null>(null);
-  useEffect(() => {
-    if (!session.cwd) return;
-    let cancelled = false;
-    fetchGitChanges(session.hostId, session.cwd)
-      .then((g) => { if (!cancelled) setDiffStat(diffTotals(g.files)); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [session.hostId, session.cwd, running]);
-  // Send-anchor lifecycle end: once the turn completes, drop the anchor —
-  // Timeline removes its spacer and restores maintainScrollAtEnd, whose own
-  // near-end gate keeps a scrolled-up reader in place (no yank, no jump).
-  useEffect(() => {
-    if (!running) setAnchorId(null);
-  }, [running]);
   // The synced thread record lags live turns (short turns never re-sync), so
   // the header trusts the screen's own in-flight state over session.activity.
   const headerActivity = running ? ("running" as const) : session.activity;
@@ -724,7 +846,11 @@ export default function SessionScreen() {
   let turnStartTs: string | undefined;
   let turnStartIdx = rawEvents.length;
   for (let i = rawEvents.length - 1; i >= 0; i--) {
-    if (rawEvents[i].type === "user_message") { turnStartTs = rawEvents[i].ts; turnStartIdx = i; break; }
+    if (rawEvents[i].type === "user_message") {
+      turnStartTs = rawEvents[i].ts;
+      turnStartIdx = i;
+      break;
+    }
   }
   let outChars = 0;
   for (let i = turnStartIdx + 1; i < rawEvents.length; i++) {
@@ -739,10 +865,23 @@ export default function SessionScreen() {
   const showMode = modes.length > 1;
   const showEffort = caps.thinking;
   const activeMode = mode ?? modes[0]?.value;
-  const modeLabel = activeMode === "default" ? "Mode" : modes.find((m) => m.value === activeMode)?.label ?? "Mode";
+  const modeLabel =
+    activeMode === "default"
+      ? "Mode"
+      : (modes.find((m) => m.value === activeMode)?.label ?? "Mode");
   const effortLabel = REASONING_EFFORTS.find((e) => e.value === effort)?.label ?? "Effort";
-  const openMode = () => pickSheet("Mode", modes.map((m) => `${m.label} · ${m.hint}`), (i) => setMode(modes[i].value));
-  const openEffort = () => pickSheet("Reasoning effort", REASONING_EFFORTS.map((e) => e.label), (i) => setEffort(REASONING_EFFORTS[i].value));
+  const openMode = () =>
+    pickSheet(
+      "Mode",
+      modes.map((m) => `${m.label} · ${m.hint}`),
+      (i) => setMode(modes[i].value),
+    );
+  const openEffort = () =>
+    pickSheet(
+      "Reasoning effort",
+      REASONING_EFFORTS.map((e) => e.label),
+      (i) => setEffort(REASONING_EFFORTS[i].value),
+    );
 
   // Combined model·effort pill label for the composer, e.g. "opus 4.7 · High".
   const activeModel = selectedModel ?? usage?.model ?? null;
@@ -762,279 +901,331 @@ export default function SessionScreen() {
       {/* Desktop: the whole pane is a drop target — dragging files/folders from
           Finder adds them as sources. No-op wrapper on mobile. */}
       <DropZone style={{ flex: 1 }} onDropFiles={onDropFiles}>
-      {/* Header */}
-      <View style={[s.header, { paddingTop: insets.top }]}>
-        <View style={s.headerRow}>
-          {/* Desktop's sidebar is always visible — a back button has nothing
+        {/* Header */}
+        <View style={[s.header, { paddingTop: insets.top }]}>
+          <View style={s.headerRow}>
+            {/* Desktop's sidebar is always visible — a back button has nothing
               to go back to, so it's mobile-only. */}
-          {!DESKTOP ? (
-            <Pressable onPress={() => router.back()} style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}>
-              <Text style={s.backGlyph}>‹</Text>
-            </Pressable>
-          ) : null}
-          <AgentStatusIcon agent={session.agent} activity={headerActivity} size={18} />
-          <View style={s.flex1}>
-            <Text numberOfLines={1} style={s.headerTitle}>{session.title}</Text>
-            <View style={s.headerSubRow}>
-              <Text style={s.activityLabel}>{ACTIVITY_LABEL[headerActivity]}</Text>
-              {session.branch ? (
-                <View style={s.shrink}>
-                  <BranchChip branch={session.branch} worktree={session.worktree} size={10} color={theme.colors.fgFaint} />
-                </View>
-              ) : null}
-              <ThreadUsageSummary usage={usage} />
+            {!DESKTOP ? (
+              <Pressable
+                onPress={() => router.back()}
+                style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
+              >
+                <Text style={s.backGlyph}>‹</Text>
+              </Pressable>
+            ) : null}
+            <AgentStatusIcon agent={session.agent} activity={headerActivity} size={18} />
+            <View style={s.flex1}>
+              <Text numberOfLines={1} style={s.headerTitle}>
+                {session.title}
+              </Text>
+              <View style={s.headerSubRow}>
+                {/* "Idle" reads as a broken state to users (the synced record
+                    lags live turns, so it shows mid-work) — only surface
+                    activity when there's something to say. */}
+                {headerActivity !== "idle" ? (
+                  <Text style={s.activityLabel}>{ACTIVITY_LABEL[headerActivity]}</Text>
+                ) : null}
+                {session.branch ? (
+                  <View style={s.shrink}>
+                    <BranchChip
+                      branch={session.branch}
+                      worktree={session.worktree}
+                      size={10}
+                      color={theme.colors.fgFaint}
+                    />
+                  </View>
+                ) : null}
+                <ThreadUsageSummary usage={usage} />
+              </View>
             </View>
-          </View>
-          {/* Favourite + markers live in the "…" sheet — the header stays
+            {/* Favourite + markers live in the "…" sheet — the header stays
               back / title / search / more. */}
-          <Pressable
-            onPress={() => (threadSearchOpen ? closeThreadSearch() : setThreadSearchOpen(true))}
-            style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
-          >
-            <PounceIcon name="search" size={18} color={threadSearchOpen ? theme.colors.accent : theme.colors.fgMuted} />
-          </Pressable>
-          <Pressable
-            onPress={() => setEnvSheet(true)}
-            style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
-          >
-            <PounceIcon
-              name="ellipsis-horizontal"
-              size={20}
-              color={running ? theme.colors.danger : theme.colors.fgMuted}
-            />
-          </Pressable>
-        </View>
-        {threadSearchOpen ? (
-          <View style={s.searchRow}>
-            <View style={s.searchField}>
-              <PounceIcon name="search" size={13} color={theme.colors.fgFaint} />
-              <TextInput
-                value={threadQuery}
-                onChangeText={setThreadQuery}
-                placeholder="Find in this thread…"
-                placeholderTextColor={theme.colors.fgFaint}
-                autoFocus
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={s.searchInput}
-              />
-              {threadSearching ? (
-                <ActivityIndicator size="small" color={theme.colors.fgFaint} />
-              ) : threadQuery.trim().length >= 3 ? (
-                <Text style={s.hitCount}>
-                  {threadHits.length ? `${threadHitIdx + 1}/${threadHits.length}` : "0"}
-                </Text>
-              ) : null}
-            </View>
             <Pressable
-              disabled={!threadHits.length}
-              onPress={() => goToHit(threadHits, threadHitIdx - 1, threadQuery.trim())}
-              style={({ pressed }) => [s.hitBtn, pressed && s.pressed60]}
+              onPress={() => (threadSearchOpen ? closeThreadSearch() : setThreadSearchOpen(true))}
+              style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
             >
-              <PounceIcon name="chevron-up" size={17} color={threadHits.length ? theme.colors.fgMuted : theme.colors.fgFaint} />
+              <PounceIcon
+                name="search"
+                size={18}
+                color={threadSearchOpen ? theme.colors.accent : theme.colors.fgMuted}
+              />
             </Pressable>
             <Pressable
-              disabled={!threadHits.length}
-              onPress={() => goToHit(threadHits, threadHitIdx + 1, threadQuery.trim())}
-              style={({ pressed }) => [s.hitBtn, pressed && s.pressed60]}
+              onPress={() => setEnvSheet(true)}
+              style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
             >
-              <PounceIcon name="chevron-down" size={17} color={threadHits.length ? theme.colors.fgMuted : theme.colors.fgFaint} />
+              <PounceIcon
+                name="ellipsis-horizontal"
+                size={20}
+                color={running ? theme.colors.danger : theme.colors.fgMuted}
+              />
             </Pressable>
           </View>
-        ) : null}
-      </View>
+          {threadSearchOpen ? (
+            <View style={s.searchRow}>
+              <View style={s.searchField}>
+                <PounceIcon name="search" size={13} color={theme.colors.fgFaint} />
+                <TextInput
+                  value={threadQuery}
+                  onChangeText={setThreadQuery}
+                  placeholder="Find in this thread…"
+                  placeholderTextColor={theme.colors.fgFaint}
+                  autoFocus
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={s.searchInput}
+                />
+                {threadSearching ? (
+                  <ActivityIndicator size="small" color={theme.colors.fgFaint} />
+                ) : threadQuery.trim().length >= 3 ? (
+                  <Text style={s.hitCount}>
+                    {threadHits.length ? `${threadHitIdx + 1}/${threadHits.length}` : "0"}
+                  </Text>
+                ) : null}
+              </View>
+              <Pressable
+                disabled={!threadHits.length}
+                onPress={() => goToHit(threadHits, threadHitIdx - 1, threadQuery.trim())}
+                style={({ pressed }) => [s.hitBtn, pressed && s.pressed60]}
+              >
+                <PounceIcon
+                  name="chevron-up"
+                  size={17}
+                  color={threadHits.length ? theme.colors.fgMuted : theme.colors.fgFaint}
+                />
+              </Pressable>
+              <Pressable
+                disabled={!threadHits.length}
+                onPress={() => goToHit(threadHits, threadHitIdx + 1, threadQuery.trim())}
+                style={({ pressed }) => [s.hitBtn, pressed && s.pressed60]}
+              >
+                <PounceIcon
+                  name="chevron-down"
+                  size={17}
+                  color={threadHits.length ? theme.colors.fgMuted : theme.colors.fgFaint}
+                />
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
 
-      <View style={s.transcriptArea}>
-        {/* One readable column for every transcript-area state. Desktop:
+        <View style={s.transcriptArea}>
+          {/* One readable column for every transcript-area state. Desktop:
             proportional (92% of the pane, capped) so the chat adapts to the
             window; mobile: full width, unchanged. */}
-        <View style={[s.flex1, DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }]}>
-        {loading && events.length === 0 ? (
-          <TimelineSkeleton />
-        ) : live && failed && events.length === 0 ? (
-          <View style={s.emptyWrap}>
-            <PounceIcon name="cloud-offline-outline" size={34} color={theme.colors.fgFaint} />
-            <Text style={s.emptyTitle}>Couldn't load this conversation</Text>
-            <Text style={s.emptyBody}>
-              Make sure {session.host || "your computer"} is awake and the Pounce Bridge is running on the same Wi‑Fi.
-            </Text>
-            <Pressable onPress={retry} style={({ pressed }) => [s.retryBtn, pressed && s.pressed80]}>
-              <Text style={s.retryLabel}>Retry</Text>
-            </Pressable>
-          </View>
-        ) : events.length === 0 ? (
-          <View style={s.emptyWrap}>
-            <Text style={s.emptyEmoji}>💬</Text>
-            <Text style={s.emptyTitle}>No messages yet</Text>
-            <Text style={s.emptyBody}>Send a message below to get this thread going.</Text>
-          </View>
-        ) : (
-          // Fade the history in so it doesn't snap in after the skeleton.
-          <Animated.View style={ANIM.flex1} entering={FadeIn.duration(260)}>
-            <Timeline
-              events={rawEvents}
-              agent={session.agent}
-              cwd={session.cwd}
-              sessionId={id!}
-              listRef={listRef}
-              highlight={searchHighlight}
-              anchorToId={anchorId}
-              onLongPressEvent={onLongPressEvent}
-              onRunCommand={canSteer ? onRunCommand : undefined}
-              onAtBottomChange={setAtBottom}
-              onRespondPermission={(requestId, optionId) => {
-                if (session?.hostId) void respondPermission(session.hostId, requestId, optionId);
-              }}
-              onRespondPrompt={(_promptId, optionIndex) => {
-                if (session?.hostId && id) void respondPrompt(session.hostId, id, optionIndex);
-              }}
-              onSendInput={(data) => {
-                if (session?.hostId && id) void sendSessionInput(session.hostId, id, data);
-              }}
-              footer={running ? <WorkingIndicator agent={session.agent} since={turnStartTs} tokens={turnTokens} /> : undefined}
-            />
-            {/* Floating "jump to latest" — appears when scrolled up off the bottom. */}
-            {!atBottom ? (
-              <Animated.View
-                entering={FadeIn.duration(150)}
-                exiting={FadeOut.duration(120)}
-                pointerEvents="box-none"
-                style={ANIM.jumpWrap}
-              >
-                <Pressable
-                  onPress={() => {
-                    // Tapping = give up the send anchor: the spacer drops and
-                    // pin-to-tail resumes for the rest of the turn.
-                    setAnchorId(null);
-                    listRef.current?.scrollToEnd({ animated: true });
-                    setAtBottom(true);
-                  }}
-                  style={({ pressed }) => [s.jumpPill, pressed && s.pressed80]}
-                >
-                  <PounceIcon name="arrow-down" size={15} color={theme.colors.accent} />
-                  <Text style={s.jumpLabel}>Latest</Text>
-                </Pressable>
-              </Animated.View>
-            ) : null}
-          </Animated.View>
-        )}
-        </View>
-      </View>
-
-      <MarkerSheet
-        visible={markerSheet}
-        markers={markers}
-        agent={session.agent}
-        onJump={jumpTo}
-        onClose={() => setMarkerSheet(false)}
-      />
-
-      <EnvironmentSheet
-        visible={envSheet}
-        session={session}
-        running={running}
-        sources={sources}
-        fav={fav}
-        onToggleFavourite={canFavourite ? () => toggleFavThread(session.id) : undefined}
-        onClose={() => setEnvSheet(false)}
-        onStop={() => void stop()}
-        onViewChanges={() => router.push(`/changes?id=${session.id}`)}
-        onTerminal={() => router.push(`/terminal?id=${session.id}`)}
-        onAddSource={canSteer ? () => composerRef.current?.startMention() : undefined}
-        onRemoveSource={(p) => removeSource(session.id, p)}
-        onFixConflicts={
-          canSteer
-            ? () => composerRef.current?.insert("Resolve the merge conflicts in this worktree, then continue.")
-            : undefined
-        }
-      />
-
-      <ModelSheet
-        visible={modelSheet}
-        hostId={session.hostId}
-        agent={session.agent}
-        current={selectedModel ?? usage?.model ?? null}
-        pinned={[selectedModel, usage?.model, ...(usage?.models ?? [])].filter(
-          (m): m is string => !!m && m !== "<synthetic>",
-        )}
-        onSelect={(modelId) => {
-          setThreadModel(session.id, modelId);
-          setModelSheet(false);
-          // Immediate, informative confirmation — switching invalidates the
-          // per-model prompt cache, so the next turn re-sends the full
-          // conversation to the new model. Any daemon warning (deprecation,
-          // reroute) still arrives inline when that turn runs.
-          const name = cachedModels(session.hostId, session.agent)?.find((m) => m.id === modelId)?.name ?? modelId;
-          setLiveEvents((e) =>
-            mergeById(e, [{
-              id: `switch:${Date.now()}`,
-              conversationId: session.id,
-              seq: Number.MAX_SAFE_INTEGER,
-              ts: new Date().toISOString(),
-              type: "system_event",
-              level: "info",
-              message: `Switched to ${name}. Your next message re-sends the full conversation as context to it (fresh cache).`,
-            }]),
-          );
-        }}
-        effort={canSteer && showEffort ? { label: effortLabel, onPress: openEffort } : null}
-        mode={canSteer && showMode ? { label: modeLabel, onPress: openMode } : null}
-        onClose={() => setModelSheet(false)}
-      />
-
-      {/* Composer (model·effort, mode, mic and send now live inside its card) —
-          same adaptive column as the transcript so they stay aligned. */}
-      <View style={[s.composerBar, { paddingBottom: insets.bottom + 8 }]}>
-        <View style={DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }}>
-        {!canSteer ? (
-          <Text style={s.archivedNote}>
-            Archived session — worktree was removed. Read-only.
-          </Text>
-        ) : null}
-        {queued.length > 0 ? (
-          <View style={s.queuedWrap}>
-            {queued.map((q, i) => (
-              <View
-                key={i}
-                style={s.queuedRow}
-              >
-                <PounceIcon name="time-outline" size={13} color={theme.colors.fgFaint} />
-                <Text numberOfLines={1} style={s.queuedText}>
-                  {q.text || (q.images.length ? "🖼️ Image" : "")}
+          <View style={[s.flex1, DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }]}>
+            {loading && events.length === 0 ? (
+              <TimelineSkeleton />
+            ) : live && failed && events.length === 0 ? (
+              <View style={s.emptyWrap}>
+                <PounceIcon name="cloud-offline-outline" size={34} color={theme.colors.fgFaint} />
+                <Text style={s.emptyTitle}>Couldn't load this conversation</Text>
+                <Text style={s.emptyBody}>
+                  Make sure {session.host || "your computer"} is awake and the Pounce Bridge is
+                  running on the same Wi‑Fi.
                 </Text>
-                <Pressable onPress={() => cancelQueued(i)} hitSlop={8}>
-                  <PounceIcon name="close" size={14} color={theme.colors.fgMuted} />
+                <Pressable
+                  onPress={retry}
+                  style={({ pressed }) => [s.retryBtn, pressed && s.pressed80]}
+                >
+                  <Text style={s.retryLabel}>Retry</Text>
                 </Pressable>
               </View>
-            ))}
-            <Text style={s.queuedHint}>Queued — sends after the current reply</Text>
+            ) : events.length === 0 ? (
+              <View style={s.emptyWrap}>
+                <Text style={s.emptyEmoji}>💬</Text>
+                <Text style={s.emptyTitle}>No messages yet</Text>
+                <Text style={s.emptyBody}>Send a message below to get this thread going.</Text>
+              </View>
+            ) : (
+              // Fade the history in so it doesn't snap in after the skeleton.
+              <Animated.View style={ANIM.flex1} entering={FadeIn.duration(260)}>
+                <Timeline
+                  events={rawEvents}
+                  agent={session.agent}
+                  cwd={session.cwd}
+                  sessionId={id!}
+                  listRef={listRef}
+                  highlight={searchHighlight}
+                  anchorToId={anchorId}
+                  onLongPressEvent={onLongPressEvent}
+                  onRunCommand={canSteer ? onRunCommand : undefined}
+                  onAtBottomChange={setAtBottom}
+                  onRespondPermission={(requestId, optionId) => {
+                    if (session?.hostId)
+                      void respondPermission(session.hostId, requestId, optionId);
+                  }}
+                  onRespondPrompt={(_promptId, optionIndex) => {
+                    if (session?.hostId && id) void respondPrompt(session.hostId, id, optionIndex);
+                  }}
+                  onSendInput={(data) => {
+                    if (session?.hostId && id) void sendSessionInput(session.hostId, id, data);
+                  }}
+                  footer={
+                    running ? (
+                      <WorkingIndicator
+                        agent={session.agent}
+                        since={turnStartTs}
+                        tokens={turnTokens}
+                      />
+                    ) : undefined
+                  }
+                />
+                {/* Floating "jump to latest" — appears when scrolled up off the bottom. */}
+                {!atBottom ? (
+                  <Animated.View
+                    entering={FadeIn.duration(150)}
+                    exiting={FadeOut.duration(120)}
+                    pointerEvents="box-none"
+                    style={ANIM.jumpWrap}
+                  >
+                    <Pressable
+                      onPress={() => {
+                        // Tapping = give up the send anchor: the spacer drops and
+                        // pin-to-tail resumes for the rest of the turn.
+                        setAnchorId(null);
+                        listRef.current?.scrollToEnd({ animated: true });
+                        setAtBottom(true);
+                      }}
+                      style={({ pressed }) => [s.jumpPill, pressed && s.pressed80]}
+                    >
+                      <PounceIcon name="arrow-down" size={15} color={theme.colors.accent} />
+                      <Text style={s.jumpLabel}>Latest</Text>
+                    </Pressable>
+                  </Animated.View>
+                ) : null}
+              </Animated.View>
+            )}
           </View>
-        ) : null}
-        <Composer
-          ref={composerRef}
-          agent={session.agent}
-          caps={caps}
-          disabled={!canSteer}
-          sending={sending}
-          running={running}
-          hostId={session.hostId}
-          cwd={session.cwd}
-          onSubmit={onSubmit}
-          onStop={stop}
-          onViewChanges={() => router.push(`/changes?id=${session.id}`)}
-          diffStat={diffStat}
-          model={live && !!session.cwd ? { label: modelPillLabel, onPress: () => setModelSheet(true) } : null}
-          // Mode lives in the Model sheet now; the pill only appears as a
-          // fallback when there's no model pill to reach that sheet through.
-          mode={
-            canSteer && showMode && !(live && !!session.cwd)
-              ? { label: modeLabel, active: activeMode !== "default", onPress: openMode }
-              : null
-          }
-          markers={markers.length ? { count: markers.length, onPress: () => setMarkerSheet(true) } : null}
-        />
         </View>
-      </View>
+
+        <MarkerSheet
+          visible={markerSheet}
+          markers={markers}
+          agent={session.agent}
+          onJump={jumpTo}
+          onClose={() => setMarkerSheet(false)}
+        />
+
+        <EnvironmentSheet
+          visible={envSheet}
+          session={session}
+          running={running}
+          sources={sources}
+          fav={fav}
+          onToggleFavourite={canFavourite ? () => toggleFavThread(session.id) : undefined}
+          onClose={() => setEnvSheet(false)}
+          onStop={() => void stop()}
+          onViewChanges={() => router.push(`/changes?id=${session.id}`)}
+          onTerminal={() => router.push(`/terminal?id=${session.id}`)}
+          onAddSource={canSteer ? () => composerRef.current?.startMention() : undefined}
+          onRemoveSource={(p) => removeSource(session.id, p)}
+          onFixConflicts={
+            canSteer
+              ? () =>
+                  composerRef.current?.insert(
+                    "Resolve the merge conflicts in this worktree, then continue.",
+                  )
+              : undefined
+          }
+        />
+
+        <ModelSheet
+          visible={modelSheet}
+          hostId={session.hostId}
+          agent={session.agent}
+          current={selectedModel ?? usage?.model ?? null}
+          pinned={[selectedModel, usage?.model, ...(usage?.models ?? [])].filter(
+            (m): m is string => !!m && m !== "<synthetic>",
+          )}
+          onSelect={(modelId) => {
+            setThreadModel(session.id, modelId);
+            setModelSheet(false);
+            // Immediate, informative confirmation — switching invalidates the
+            // per-model prompt cache, so the next turn re-sends the full
+            // conversation to the new model. Any daemon warning (deprecation,
+            // reroute) still arrives inline when that turn runs.
+            const name =
+              cachedModels(session.hostId, session.agent)?.find((m) => m.id === modelId)?.name ??
+              modelId;
+            setLiveEvents((e) =>
+              mergeById(e, [
+                {
+                  id: `switch:${Date.now()}`,
+                  conversationId: session.id,
+                  seq: Number.MAX_SAFE_INTEGER,
+                  ts: new Date().toISOString(),
+                  type: "system_event",
+                  level: "info",
+                  message: `Switched to ${name}. Your next message re-sends the full conversation as context to it (fresh cache).`,
+                },
+              ]),
+            );
+          }}
+          effort={canSteer && showEffort ? { label: effortLabel, onPress: openEffort } : null}
+          mode={canSteer && showMode ? { label: modeLabel, onPress: openMode } : null}
+          onClose={() => setModelSheet(false)}
+        />
+
+        {/* Composer (model·effort, mode, mic and send now live inside its card) —
+          same adaptive column as the transcript so they stay aligned. */}
+        <View style={[s.composerBar, { paddingBottom: insets.bottom + 8 }]}>
+          <View style={DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }}>
+            {!canSteer ? (
+              <Text style={s.archivedNote}>
+                Archived session — worktree was removed. Read-only.
+              </Text>
+            ) : null}
+            {queued.length > 0 ? (
+              <View style={s.queuedWrap}>
+                {queued.map((q, i) => (
+                  <View key={i} style={s.queuedRow}>
+                    <PounceIcon name="time-outline" size={13} color={theme.colors.fgFaint} />
+                    <Text numberOfLines={1} style={s.queuedText}>
+                      {q.text || (q.images.length ? "🖼️ Image" : "")}
+                    </Text>
+                    <Pressable onPress={() => cancelQueued(i)} hitSlop={8}>
+                      <PounceIcon name="close" size={14} color={theme.colors.fgMuted} />
+                    </Pressable>
+                  </View>
+                ))}
+                <Text style={s.queuedHint}>Queued — sends after the current reply</Text>
+              </View>
+            ) : null}
+            <Composer
+              ref={composerRef}
+              agent={session.agent}
+              caps={caps}
+              disabled={!canSteer}
+              sending={sending}
+              running={running}
+              hostId={session.hostId}
+              cwd={session.cwd}
+              onSubmit={onSubmit}
+              onStop={stop}
+              onViewChanges={() => router.push(`/changes?id=${session.id}`)}
+              diffStat={diffStat}
+              model={
+                live && !!session.cwd
+                  ? { label: modelPillLabel, onPress: () => setModelSheet(true) }
+                  : null
+              }
+              // Mode lives in the Model sheet now; the pill only appears as a
+              // fallback when there's no model pill to reach that sheet through.
+              mode={
+                canSteer && showMode && !(live && !!session.cwd)
+                  ? { label: modeLabel, active: activeMode !== "default", onPress: openMode }
+                  : null
+              }
+              markers={
+                markers.length
+                  ? { count: markers.length, onPress: () => setMarkerSheet(true) }
+                  : null
+              }
+            />
+          </View>
+        </View>
       </DropZone>
     </KeyboardAvoidingView>
   );
@@ -1054,9 +1245,18 @@ const s = StyleSheet.create((theme) => ({
   shrink: { flexShrink: 1 },
   pressed60: { opacity: 0.6 },
   pressed80: { opacity: 0.8 },
-  notFound: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.bg },
+  notFound: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.colors.bg,
+  },
   notFoundText: { color: theme.colors.fgMuted },
-  header: { borderBottomWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.bgElevated },
+  header: {
+    borderBottomWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bgElevated,
+  },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1070,7 +1270,13 @@ const s = StyleSheet.create((theme) => ({
   headerTitle: { fontSize: 15, fontWeight: "600", color: theme.colors.fg },
   headerSubRow: { marginTop: 2, flexDirection: "row", alignItems: "center", gap: 8 },
   activityLabel: { fontSize: 12, color: theme.colors.fgMuted },
-  searchRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingBottom: 10 },
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+  },
   searchField: {
     height: 36,
     flex: 1,
@@ -1087,7 +1293,13 @@ const s = StyleSheet.create((theme) => ({
   transcriptArea: { flex: 1, alignItems: "center" },
   emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
   emptyEmoji: { fontSize: 34 },
-  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyTitle: {
+    marginTop: 12,
+    textAlign: "center",
+    fontSize: 15,
+    fontWeight: "600",
+    color: theme.colors.fg,
+  },
   emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   retryBtn: {
     marginTop: 20,
@@ -1118,7 +1330,12 @@ const s = StyleSheet.create((theme) => ({
   // Transparent, borderless bar — the Composer's floating glass pill carries
   // its own margins and chrome now.
   composerBar: { alignItems: "center", paddingTop: 8 },
-  archivedNote: { paddingHorizontal: 16, paddingBottom: 8, fontSize: 12, color: theme.colors.fgFaint },
+  archivedNote: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    fontSize: 12,
+    color: theme.colors.fgFaint,
+  },
   queuedWrap: { marginHorizontal: 12, marginBottom: 8, gap: 6 },
   queuedRow: {
     flexDirection: "row",

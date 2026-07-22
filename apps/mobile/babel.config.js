@@ -7,8 +7,9 @@ module.exports = function (api) {
 
   return {
     // Uniwind needs no Babel plugin (build-time Metro transform).
-    // babel-preset-expo (SDK 54+) auto-injects the Reanimated 4 / worklets plugin.
-    presets: ["babel-preset-expo"],
+    // Native disables babel-preset-expo's auto-injected worklets plugin so we
+    // can pass it bundleMode options below; web keeps the preset's default.
+    presets: [["babel-preset-expo", { native: { worklets: false } }]],
     plugins: [
       // react-native-boost: build-time optimization of RN core components. Must run
       // before other plugins, so keep it first in the list.
@@ -22,7 +23,12 @@ module.exports = function (api) {
       // Native-only: the web bundle is just the Expo DOM components.
       ...(isWeb
         ? []
-        : [["react-native-unistyles/plugin", { root: "app", autoProcessPaths: ["packages/app/src"] }]]),
+        : [
+            [
+              "react-native-unistyles/plugin",
+              { root: "app", autoProcessPaths: ["packages/app/src"] },
+            ],
+          ]),
       // Web = the Expo DOM components (only PatchDiffDOM). @pierre/diffs → shiki
       // lazy-loads its highlighter/wasm via static import(); Metro splits those
       // into an async __common-*.js chunk that Expo's DOM HTML serializer never
@@ -30,6 +36,27 @@ module.exports = function (api) {
       // Inline those imports as synchronous requires on web only; native keeps
       // its async imports (that path bundles fine and ships in the app-store build).
       ...(isWeb ? ["babel-plugin-dynamic-import-node"] : []),
+      // Worklets Bundle Mode: secondary runtimes load the whole bytecode bundle
+      // instead of eval'ing per-worklet code strings (also sidesteps the Hermes v1
+      // 512KB-per-eval metadata regression). Must stay LAST in this list. Pairs
+      // with getBundleModeMetroConfig in metro.config.js and the metro/
+      // metro-runtime patches in /patches.
+      // importForwarding lets worklets call remend (react-native-streamdown's
+      // repair pass) by re-requiring it on the worklet runtime — without it the
+      // import is closure-captured as a Remote Function and throws on first
+      // stream. (Newer worklets docs call this option `workletizableModules`.)
+      ...(isWeb
+        ? []
+        : [
+            [
+              "react-native-worklets/plugin",
+              {
+                bundleMode: true,
+                strictGlobal: true,
+                importForwarding: { moduleNames: ["remend"] },
+              },
+            ],
+          ]),
     ],
   };
 };

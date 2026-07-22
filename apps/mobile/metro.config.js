@@ -1,5 +1,6 @@
 // Metro config: monorepo-aware.
 const { getDefaultConfig } = require("expo/metro-config");
+const { getBundleModeMetroConfig } = require("react-native-worklets/bundleMode");
 const path = require("path");
 
 const projectRoot = __dirname;
@@ -14,4 +15,7 @@ config.resolver.nodeModulesPaths = [
 ];
 // Keep hierarchical lookup ON: bun uses symlinked node_modules.
 
-module.exports = config;
+// Worklets Bundle Mode (see babel.config.js): shims react-native/TurboModuleRegistry
+// for secondary runtimes and pins module ids so worklet runtimes can address the
+// shared bundle.
+module.exports = getBundleModeMetroConfig(config);
