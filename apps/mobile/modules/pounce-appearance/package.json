@@ -1,0 +1,6 @@
+{
+  "name": "pounce-appearance",
+  "version": "0.1.0",
+  "description": "Window-level overrideUserInterfaceStyle so the forced light/dark toggle also themes native chrome (nav bars, tab bar, sheets, keyboard)",
+  "main": "index.ts"
+}

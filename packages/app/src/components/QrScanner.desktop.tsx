@@ -4,7 +4,8 @@
  * local bridge and manual (URL + token) for other machines, so this fork just
  * points the user at the manual path.
  */
-import { Pressable, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { T } from "../ui/theme";
 
 export default function QrScanner({
   onCancel,
@@ -13,18 +14,41 @@ export default function QrScanner({
   onCancel: () => void;
 }) {
   return (
-    <View className="flex-1 items-center justify-center gap-3 bg-bg px-8">
-      <Text className="text-[28px]">📷</Text>
-      <Text className="text-center text-[14px] font-semibold text-fg">
+    <View style={s.root}>
+      <Text style={s.emoji}>📷</Text>
+      <Text style={s.title}>
         No camera scanning on desktop
       </Text>
-      <Text className="text-center text-[12.5px] text-fg-muted">
+      <Text style={s.body}>
         This Mac's bridge connects automatically. To add another machine, use
         “Enter code manually” with its address and token.
       </Text>
-      <Pressable onPress={onCancel} className="active:opacity-80 mt-2 rounded-full bg-surface-alt px-5 py-2">
-        <Text className="text-[13px] font-medium text-fg">Back</Text>
+      <Pressable onPress={onCancel} style={({ pressed }) => [s.backBtn, pressed && s.pressed80]}>
+        <Text style={s.backText}>Back</Text>
       </Pressable>
     </View>
   );
 }
+
+const s = StyleSheet.create({
+  root: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    backgroundColor: T.bg,
+    paddingHorizontal: 32,
+  },
+  emoji: { fontSize: 28 },
+  title: { textAlign: "center", fontSize: 14, fontWeight: "600", color: T.fg },
+  body: { textAlign: "center", fontSize: 12.5, color: T.fgMuted },
+  backBtn: {
+    marginTop: 8,
+    borderRadius: 999,
+    backgroundColor: T.surfaceAlt,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+  },
+  backText: { fontSize: 13, fontWeight: "500", color: T.fg },
+  pressed80: { opacity: 0.8 },
+});

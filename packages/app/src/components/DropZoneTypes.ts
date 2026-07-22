@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { StyleProp, ViewStyle } from "react-native";
 
 /** A file dropped onto the app (desktop drag-and-drop). */
 export interface DroppedFile {
@@ -11,7 +12,7 @@ export interface DroppedFile {
 
 export interface DropZoneProps {
   children: ReactNode;
-  className?: string;
+  style?: StyleProp<ViewStyle>;
   /** Called with the dropped files/folders (absolute paths). */
   onDropFiles: (files: DroppedFile[]) => void;
 }

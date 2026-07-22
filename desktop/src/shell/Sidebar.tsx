@@ -5,7 +5,7 @@
  * needing attention float to the top (same ranking as mobile Home).
  */
 import { useMemo, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { LegendList } from "@legendapp/list/react-native";
 import { useSelector } from "@legendapp/state/react";
 import { useRouter } from "expo-router";
@@ -15,8 +15,10 @@ import { applyFilters, connection$, filters$, needsYou } from "@pounce/app/state
 import { useDevices, useIgnoredSet, useProjectNames, useThreads } from "@pounce/app/state/db/hooks";
 import { SessionListSkeleton } from "@pounce/app/components/Skeleton";
 import { LiveStrip } from "@pounce/app/components/LiveStrip";
-import { FilterButton, FilterSheet } from "@pounce/app/components/FilterSheet";
-import { AgentStatusIcon, cn, COLOR, INPUT_TWEAKS, timeAgo } from "@pounce/app/ui";
+import { FilterButton } from "@pounce/app/components/FilterSheet";
+import { AgentStatusIcon, COLOR, INPUT_TWEAKS, timeAgo } from "@pounce/app/ui";
+import { T } from "@pounce/app/ui/theme";
+import { GlassSurface } from "@pounce/app/ui/native/GlassSurface";
 import { nav$ } from "../shims/router";
 
 type Row =
@@ -34,7 +36,6 @@ function rank(s: Session): number {
 export function Sidebar() {
   const router = useRouter();
   const [query, setQuery] = useState("");
-  const [showFilters, setShowFilters] = useState(false);
   // Plain state, not a Legend observable: selecting a parent object returns
   // the same mutated reference, so toggles never re-render (the classic
   // object-selector gotcha) — and this is purely local UI state anyway.
@@ -109,18 +110,27 @@ export function Sidebar() {
   }, [threads, projectNames, ignored, f, collapsedMap]);
 
   return (
-    <View className="flex-1 bg-bg-elevated">
+    <View style={s.root}>
+      {/* Behind-window vibrancy: the standard macOS sidebar material blurring
+          the desktop through the window. An absolute-fill backdrop (content
+          stays in ordinary Views above it); non-macOS/stale binaries paint the
+          old opaque bgElevated instead. */}
+      <GlassSurface
+        material="sidebar"
+        blendingMode="behindWindow"
+        fallbackColor={T.bgElevated}
+        style={StyleSheet.absoluteFill}
+      />
       {/* Top bar: search + new */}
-      <View className="flex-row items-center gap-2 px-3 pb-2 pt-3">
-        <View className="h-8 flex-1 flex-row items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5">
+      <View style={s.topBar}>
+        <View style={s.searchBox}>
           <Ionicons name="search" size={13} color={COLOR.fgFaint} />
           <TextInput {...INPUT_TWEAKS}
             value={query}
             onChangeText={setQuery}
             placeholder="Search threads"
             placeholderTextColor={COLOR.fgFaint}
-            className="flex-1 text-[13px] text-fg"
-            style={{ paddingVertical: 0 }}
+            style={s.searchInput}
             // Enter promotes the sidebar's quick metadata filter into the full
             // Search modal (message-body search included), seeded with the query.
             returnKeyType="search"
@@ -130,17 +140,17 @@ export function Sidebar() {
             }}
           />
           {query ? (
-            <Pressable onPress={() => setQuery("")} className="active:opacity-60">
+            <Pressable onPress={() => setQuery("")} style={({ pressed }) => pressed && s.pressed60}>
               <Ionicons name="close-circle" size={14} color={COLOR.fgFaint} />
             </Pressable>
           ) : null}
         </View>
-        <FilterButton active={showFilters} onPress={() => setShowFilters(true)} />
+        <FilterButton active={false} onPress={() => router.push("/filters")} />
         <Pressable
           onPress={() => router.push("/new")}
-          className="active:opacity-80 h-8 w-8 items-center justify-center rounded-lg bg-accent"
+          style={({ pressed }) => [s.newBtn, pressed && s.pressed80]}
         >
-          <Ionicons name="add" size={18} color="#fff" />
+          <Ionicons name="add" size={18} color={T.onAccent} />
         </Pressable>
       </View>
 
@@ -150,10 +160,10 @@ export function Sidebar() {
       {query.trim() ? (
         <Pressable
           onPress={() => router.push(`/search?q=${encodeURIComponent(query.trim())}`)}
-          className="active:opacity-70 mx-3 mb-1 flex-row items-center gap-1.5 rounded-md bg-surface px-2 py-1.5"
+          style={({ pressed }) => [s.searchPromote, pressed && s.pressed70]}
         >
           <Ionicons name="chatbubbles-outline" size={12} color={COLOR.accent} />
-          <Text numberOfLines={1} className="flex-1 text-[11px] font-medium text-fg-muted">
+          <Text numberOfLines={1} style={s.searchPromoteText}>
             Search messages for “{query.trim()}”
           </Text>
           <Ionicons name="chevron-forward" size={11} color={COLOR.fgFaint} />
@@ -161,9 +171,9 @@ export function Sidebar() {
       ) : null}
 
       {attention > 0 ? (
-        <View className="mx-3 mb-1 flex-row items-center gap-1.5 rounded-md bg-warning/10 px-2 py-1">
+        <View style={s.attentionBanner}>
           <Ionicons name="alert-circle" size={12} color={COLOR.fgMuted} />
-          <Text className="text-[11px] font-medium text-warning">
+          <Text style={s.attentionText}>
             {attention} thread{attention === 1 ? "" : "s"} need{attention === 1 ? "s" : ""} you
           </Text>
         </View>
@@ -195,30 +205,30 @@ export function Sidebar() {
           loading ? (
             <SessionListSkeleton count={6} />
           ) : !connected ? (
-            <View className="items-center px-6 py-16">
-              <Text className="text-[28px]">🐾</Text>
-              <Text className="mt-2 text-center text-[13px] font-semibold text-fg">Starting up…</Text>
-              <Text className="mt-1 text-center text-[12px] text-fg-muted">
+            <View style={s.emptyBox}>
+              <Text style={s.emptyEmoji}>🐾</Text>
+              <Text style={s.emptyTitle}>Starting up…</Text>
+              <Text style={s.emptyBody}>
                 The agent host on this Mac is warming up. Threads appear here automatically.
               </Text>
             </View>
           ) : q ? (
-            <View className="items-center px-6 py-16">
-              <Text className="text-center text-[12px] text-fg-muted">No threads match “{query}”.</Text>
+            <View style={s.emptyBox}>
+              <Text style={s.emptyNoMatch}>No threads match “{query}”.</Text>
             </View>
           ) : (
-            <View className="items-center px-6 py-16">
-              <Text className="text-[28px]">🐾</Text>
-              <Text className="mt-2 text-center text-[13px] font-semibold text-fg">No threads yet</Text>
-              <Text className="mt-1 text-center text-[12px] leading-[17px] text-fg-muted">
+            <View style={s.emptyBox}>
+              <Text style={s.emptyEmoji}>🐾</Text>
+              <Text style={s.emptyTitle}>No threads yet</Text>
+              <Text style={[s.emptyBody, s.emptyBodyLeading]}>
                 Start a task with the + button, or run an agent in a repo on this Mac.
               </Text>
               <Pressable
                 onPress={() => router.push("/diagnostics")}
-                className="active:opacity-70 mt-3 flex-row items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2"
+                style={({ pressed }) => [s.checkSetupBtn, pressed && s.pressed70]}
               >
                 <Ionicons name="medkit-outline" size={13} color={COLOR.fgMuted} />
-                <Text className="text-[12px] font-medium text-fg-muted">Check setup</Text>
+                <Text style={s.checkSetupLabel}>Check setup</Text>
               </Pressable>
             </View>
           )
@@ -227,10 +237,12 @@ export function Sidebar() {
       />
 
       {/* Footer: connection + utilities */}
-      <View className="flex-row items-center gap-1 border-t border-border px-3 py-2">
-        <View className="flex-1 flex-row items-center gap-1.5">
-          <View className={cn("h-2 w-2 rounded-full", connected ? "bg-success" : loading ? "bg-warning" : "bg-fg-faint")} />
-          <Text numberOfLines={1} className="text-[11px] text-fg-muted">
+      <View style={s.footer}>
+        <View style={s.footerStatus}>
+          <View
+            style={[s.statusDot, connected ? s.dotSuccess : loading ? s.dotWarning : s.dotFaint]}
+          />
+          <Text numberOfLines={1} style={s.footerStatusText}>
             {connected
               ? deviceList.filter((d) => d.online).map((d) => d.name).join(", ") || "Connected"
               : loading
@@ -244,9 +256,6 @@ export function Sidebar() {
         <FooterIcon name="settings-outline" hint="Settings" onPress={() => router.push("/settings")} />
       </View>
 
-      {/* Same filter sheet as mobile (Home/Search) — 1:1 controls via the shared
-          component; renders as an in-window overlay through AppModal.desktop. */}
-      <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
     </View>
   );
 }
@@ -280,25 +289,25 @@ function GroupHeader({ row, onPress }: { row: Extract<Row, { type: "header" }>; 
   return (
     <Pressable
       onPress={onPress}
-      className="active:opacity-70 flex-row items-center gap-1.5 px-3 pb-1 pt-2.5"
+      style={({ pressed }) => [s.groupHeader, pressed && s.pressed70]}
     >
       <Ionicons name={row.collapsed ? "chevron-forward" : "chevron-down"} size={11} color={COLOR.fgFaint} />
       <Ionicons name="folder-outline" size={12} color={COLOR.fgFaint} />
-      <Text numberOfLines={1} className="flex-1 text-[12px] font-semibold uppercase tracking-wide text-fg-muted">
+      <Text numberOfLines={1} style={s.groupName}>
         {row.name}
       </Text>
       {row.attention > 0 ? (
-        <View className="rounded-full bg-warning/15 px-1.5 py-px">
-          <Text className="text-[10px] font-semibold text-warning">{row.attention}</Text>
+        <View style={s.groupBadge}>
+          <Text style={s.groupBadgeText}>{row.attention}</Text>
         </View>
       ) : null}
-      <Text className="text-[11px] text-fg-faint">{row.count}</Text>
+      <Text style={s.groupCount}>{row.count}</Text>
     </Pressable>
   );
 }
 
 function ThreadRow({
-  session: s,
+  session: s2,
   selected,
   onPress,
 }: {
@@ -309,36 +318,36 @@ function ThreadRow({
   return (
     <Pressable
       onPress={onPress}
-      className={cn(
-        "mx-2 rounded-lg px-2.5 py-1.5",
-        selected ? "bg-accent-soft" : "active:bg-surface-hover",
-      )}
+      style={({ pressed }) => [
+        s.threadRow,
+        selected ? s.threadRowSelected : pressed && s.threadRowHover,
+      ]}
     >
-      <View className="flex-row items-center gap-2">
+      <View style={s.threadTitleRow}>
         {/* The open thread's feed already shows live state — its row stays calm. */}
-        <AgentStatusIcon agent={s.agent} activity={s.activity} size={12} animated={!selected} />
+        <AgentStatusIcon agent={s2.agent} activity={s2.activity} size={12} animated={!selected} />
         <Text
           numberOfLines={1}
-          className={cn(
-            "flex-1 text-[13px]",
-            selected ? "font-semibold text-fg" : s.activity === "idle" ? "text-fg-muted" : "text-fg",
-          )}
+          style={[
+            s.threadTitle,
+            selected ? s.threadTitleSelected : s2.activity === "idle" ? s.threadTitleIdle : null,
+          ]}
         >
-          {s.title}
+          {s2.title}
         </Text>
-        <Text className="text-[11px] text-fg-faint">{timeAgo(s.updatedAt)}</Text>
+        <Text style={s.threadTime}>{timeAgo(s2.updatedAt)}</Text>
       </View>
-      <View className="mt-0.5 flex-row items-center gap-1.5 pl-[20px]">
-        {s.branch ? (
-          <Text numberOfLines={1} className="flex-1 font-mono text-[10.5px] text-fg-faint">
-            ⎇ {s.branch}
+      <View style={s.threadMetaRow}>
+        {s2.branch ? (
+          <Text numberOfLines={1} style={s.threadBranch}>
+            ⎇ {s2.branch}
           </Text>
         ) : (
-          <Text numberOfLines={1} className="flex-1 text-[10.5px] text-fg-faint">
-            {s.host}
+          <Text numberOfLines={1} style={s.threadHost}>
+            {s2.host}
           </Text>
         )}
-        {s.worktree ? <Ionicons name="git-branch-outline" size={10} color={COLOR.fgFaint} /> : null}
+        {s2.worktree ? <Ionicons name="git-branch-outline" size={10} color={COLOR.fgFaint} /> : null}
       </View>
     </Pressable>
   );
@@ -357,9 +366,162 @@ function FooterIcon({
     <Pressable
       onPress={onPress}
       accessibilityLabel={hint}
-      className="active:opacity-60 h-7 w-7 items-center justify-center rounded-md"
+      style={({ pressed }) => [s.footerIcon, pressed && s.pressed60]}
     >
       <Ionicons name={name} size={15} color={COLOR.fgMuted} />
     </Pressable>
   );
 }
+
+/* T.warning is a PlatformColor on macOS, so translucent "warning/10|15" tints
+ * keep literal rgba values (matching the palette's warning hex). */
+const WARNING_TINT_10 = "rgba(210, 153, 34, 0.1)";
+const WARNING_TINT_15 = T.warningSoft;
+
+const s = StyleSheet.create({
+  // No background: the GlassSurface backdrop paints (vibrancy or fallback).
+  root: { flex: 1 },
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    paddingTop: 12,
+  },
+  searchBox: {
+    height: 32,
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: T.border,
+    backgroundColor: T.surface,
+    paddingHorizontal: 10,
+  },
+  searchInput: { flex: 1, fontSize: 13, color: T.fg, paddingVertical: 0 },
+  newBtn: {
+    height: 32,
+    width: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+    backgroundColor: T.accent,
+  },
+  searchPromote: {
+    marginHorizontal: 12,
+    marginBottom: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 6,
+    backgroundColor: T.surface,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  searchPromoteText: { flex: 1, fontSize: 11, fontWeight: "500", color: T.fgMuted },
+  attentionBanner: {
+    marginHorizontal: 12,
+    marginBottom: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 6,
+    backgroundColor: WARNING_TINT_10,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  attentionText: { fontSize: 11, fontWeight: "500", color: T.warning },
+  emptyBox: { alignItems: "center", paddingHorizontal: 24, paddingVertical: 64 },
+  emptyEmoji: { fontSize: 28 },
+  emptyTitle: { marginTop: 8, textAlign: "center", fontSize: 13, fontWeight: "600", color: T.fg },
+  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 12, color: T.fgMuted },
+  emptyBodyLeading: { lineHeight: 17 },
+  emptyNoMatch: { textAlign: "center", fontSize: 12, color: T.fgMuted },
+  checkSetupBtn: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: T.border,
+    backgroundColor: T.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  checkSetupLabel: { fontSize: 12, fontWeight: "500", color: T.fgMuted },
+  footer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderTopWidth: 1,
+    borderColor: T.border,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  footerStatus: { flex: 1, flexDirection: "row", alignItems: "center", gap: 6 },
+  statusDot: { height: 8, width: 8, borderRadius: 999 },
+  dotSuccess: { backgroundColor: T.success },
+  dotWarning: { backgroundColor: T.warning },
+  dotFaint: { backgroundColor: T.fgFaint },
+  footerStatusText: { fontSize: 11, color: T.fgMuted },
+  footerIcon: {
+    height: 28,
+    width: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 6,
+  },
+  groupHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingBottom: 4,
+    paddingTop: 10,
+  },
+  groupName: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: T.fgMuted,
+  },
+  groupBadge: {
+    borderRadius: 999,
+    backgroundColor: WARNING_TINT_15,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  groupBadgeText: { fontSize: 10, fontWeight: "600", color: T.warning },
+  groupCount: { fontSize: 11, color: T.fgFaint },
+  threadRow: {
+    marginHorizontal: 8,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  threadRowSelected: { backgroundColor: T.accentSoft },
+  threadRowHover: { backgroundColor: T.surfaceHover },
+  threadTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  threadTitle: { flex: 1, fontSize: 13, color: T.fg },
+  threadTitleSelected: { fontWeight: "600", color: T.fg },
+  threadTitleIdle: { color: T.fgMuted },
+  threadTime: { fontSize: 11, color: T.fgFaint },
+  threadMetaRow: {
+    marginTop: 2,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingLeft: 20,
+  },
+  threadBranch: { flex: 1, fontFamily: "JetBrainsMono", fontSize: 10.5, color: T.fgFaint },
+  threadHost: { flex: 1, fontSize: 10.5, color: T.fgFaint },
+  pressed60: { opacity: 0.6 },
+  pressed70: { opacity: 0.7 },
+  pressed80: { opacity: 0.8 },
+});

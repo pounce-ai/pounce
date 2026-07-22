@@ -4,7 +4,6 @@ import { Component, type ReactNode, useEffect, useMemo, useState } from "react";
 import { PatchDiff } from "@pierre/diffs/react";
 import type { DOMProps } from "expo/dom";
 import { extOf, splitPatch, type PatchFile } from "./diffPatch";
-import { COLOR } from "../ui/tokens";
 
 /**
  * The @pierre/diffs renderer, hosted in an Expo DOM component (a WebView that
@@ -87,18 +86,19 @@ function getIconForFile(path: string): string | null {
   return alias ? lookupIconForFile(`x.${alias}`) : null;
 }
 
-// --- theme tokens — shared COLOR where it exists, surfaces local (tokens.ts
-// has no bg/border values; they mirror global.css) ---------------------------
+// --- theme tokens -----------------------------------------------------------
+// Literal hexes: this renders inside the DOM WebView (real CSS — PlatformColor
+// can't cross the bridge) and the diff surface deliberately stays dark.
 const C = {
   bg: "#0b0b0f",
   elevated: "#101016",
   border: "#26262e",
-  fg: COLOR.fg,
-  fgMuted: COLOR.fgMuted,
-  fgFaint: COLOR.fgFaint,
-  add: COLOR.success,
-  del: COLOR.danger,
-  accent: COLOR.accent,
+  fg: "#ececf1",
+  fgMuted: "#9a9aa5",
+  fgFaint: "#62626d",
+  add: "#3fb950",
+  del: "#f85149",
+  accent: "#7c6ff0",
 };
 
 function FileSection({

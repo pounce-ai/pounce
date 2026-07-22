@@ -6,7 +6,8 @@
  * instead; layouts mirror SessionCard / Timeline so bones dissolve into rows.
  */
 import { useEffect, useRef } from "react";
-import { Animated, Easing, View } from "react-native";
+import { Animated, Easing, StyleSheet, View } from "react-native";
+import { T } from "../ui/theme";
 
 function usePulse(): Animated.Value {
   const pulse = useRef(new Animated.Value(1)).current;
@@ -38,14 +39,14 @@ const BONE = "rgba(255,255,255,0.11)";
 /** One skeleton card shaped like a SessionCard. */
 export function SessionCardSkeleton() {
   return (
-    <View className="rounded-2xl border border-border bg-surface p-3.5">
-      <View className="flex-row items-center gap-2">
+    <View style={s.card}>
+      <View style={s.titleRow}>
         <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: BONE }} />
         <View style={{ flex: 1, height: 14, borderRadius: 7, backgroundColor: BONE }} />
         <View style={{ width: 50, height: 18, borderRadius: 9, backgroundColor: BONE }} />
       </View>
       <View style={{ marginTop: 10, width: "55%", height: 10, borderRadius: 5, backgroundColor: BONE }} />
-      <View className="mt-2 flex-row items-center justify-between">
+      <View style={s.footerRow}>
         <View style={{ width: 84, height: 9, borderRadius: 5, backgroundColor: BONE }} />
         <View style={{ width: 22, height: 9, borderRadius: 5, backgroundColor: BONE }} />
       </View>
@@ -57,7 +58,7 @@ export function SessionCardSkeleton() {
 export function SessionListSkeleton({ count = 5 }: { count?: number }) {
   const pulse = usePulse();
   return (
-    <Animated.View style={{ opacity: pulse }} className="gap-2.5 px-4 pt-1.5" pointerEvents="none">
+    <Animated.View style={[s.list, { opacity: pulse }]} pointerEvents="none">
       {Array.from({ length: count }).map((_, i) => (
         <SessionCardSkeleton key={i} />
       ))}
@@ -77,13 +78,13 @@ function BubbleBone({ user, lines, width }: { user: boolean; lines: 1 | 2 | 3; w
   return (
     <View style={{ alignItems: user ? "flex-end" : "flex-start" }}>
       <View
-        style={{ width, maxWidth: "86%" }}
-        className={cnBone(
-          "rounded-2xl px-3 py-2.5",
-          user ? "bg-surface-alt" : "border border-border bg-surface",
-        )}
+        style={[
+          { width, maxWidth: "86%" },
+          s.bubble,
+          user ? s.bubbleUser : s.bubbleAgent,
+        ]}
       >
-        <View className="gap-2">
+        <View style={s.bubbleLines}>
           {lineWidths.map((w, i) => (
             <View
               key={i}
@@ -94,11 +95,6 @@ function BubbleBone({ user, lines, width }: { user: boolean; lines: 1 | 2 | 3; w
       </View>
     </View>
   );
-}
-
-// Tiny local join to avoid importing the ui barrel into the skeleton.
-function cnBone(...parts: Array<string | false>): string {
-  return parts.filter(Boolean).join(" ");
 }
 
 /** Chat-shaped bones for the initial history load. The real timeline opens
@@ -122,8 +118,7 @@ export function TimelineSkeleton() {
   ];
   return (
     <Animated.View
-      style={{ opacity: pulse, justifyContent: "flex-end", overflow: "hidden" }}
-      className="flex-1 gap-3 px-3 pb-3"
+      style={[s.timeline, { opacity: pulse }]}
       pointerEvents="none"
     >
       {rows.map((r, i) => (
@@ -132,3 +127,28 @@ export function TimelineSkeleton() {
     </Animated.View>
   );
 }
+
+const s = StyleSheet.create({
+  card: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: T.border,
+    backgroundColor: T.surface,
+    padding: 14,
+  },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  footerRow: { marginTop: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  list: { gap: 10, paddingHorizontal: 16, paddingTop: 6 },
+  bubble: { borderRadius: 16, paddingHorizontal: 12, paddingVertical: 10 },
+  bubbleUser: { backgroundColor: T.surfaceAlt },
+  bubbleAgent: { borderWidth: 1, borderColor: T.border, backgroundColor: T.surface },
+  bubbleLines: { gap: 8 },
+  timeline: {
+    flex: 1,
+    justifyContent: "flex-end",
+    overflow: "hidden",
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+  },
+});

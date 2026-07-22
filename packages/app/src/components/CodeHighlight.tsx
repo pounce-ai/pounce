@@ -1,8 +1,8 @@
 import { memo } from "react";
-import { Text, View } from "react-native";
+import { Text, useColorScheme, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { Highlight, Prism, themes } from "prism-react-renderer";
 import { classifyLine, extOf, splitPatch } from "./diffPatch";
-import { cn } from "../ui";
 
 // prism-react-renderer bundles a limited language set (no bash/ruby/java/…), so
 // a shell command or a non-TS diff would fall back to plain text. Register the
@@ -42,7 +42,8 @@ export function prismLang(tag: string): string {
  * Inline, Prism-highlighted code as nested <Text> — flows inside a flex row and
  * wraps or truncates like normal text. The shared primitive behind the tool-card
  * command line and each diff line, so highlighting stays consistent with the
- * markdown code blocks.
+ * markdown code blocks. The Prism theme wants STRING colors, so the theme +
+ * fallback token color are picked per system scheme, not from T.
  */
 export const HlText = memo(function HlText({
   code,
@@ -55,8 +56,9 @@ export const HlText = memo(function HlText({
   size?: number;
   numberOfLines?: number;
 }) {
+  const light = useColorScheme() === "light";
   return (
-    <Highlight code={code} language={prismLang(language) || "text"} theme={themes.vsDark}>
+    <Highlight code={code} language={prismLang(language) || "text"} theme={light ? themes.github : themes.vsDark}>
       {({ tokens, getTokenProps }) => (
         <Text numberOfLines={numberOfLines} style={{ fontFamily: MONO, fontSize: size, lineHeight: size + 5.5 }}>
           {tokens.map((line, i) => (
@@ -67,7 +69,10 @@ export const HlText = memo(function HlText({
                 return (
                   <Text
                     key={j}
-                    style={{ color: (style?.color as string) ?? "#cdd0d6", fontStyle: style?.fontStyle as "italic" | undefined }}
+                    style={{
+                      color: (style?.color as string) ?? (light ? "#24292e" : "#cdd0d6"),
+                      fontStyle: style?.fontStyle as "italic" | undefined,
+                    }}
                   >
                     {token.content}
                   </Text>
@@ -98,12 +103,13 @@ export const DiffBlock = memo(function DiffBlock({
   maxLines?: number;
   nested?: boolean;
 }) {
+  const light = useColorScheme() === "light";
   const files = splitPatch(patch);
   // Not a `diff --git` multi-file patch (e.g. a bare hunk) — render it as one.
   if (!files.length) files.push({ path: path ?? "diff", text: patch, adds: 0, dels: 0 });
 
   return (
-    <View className={cn("overflow-hidden rounded-xl border border-border bg-[#0d0d12]", nested && "rounded-lg")}>
+    <View style={[s.card, nested && s.cardNested, { backgroundColor: light ? "#f6f8fa" : "#0d0d12" }]}>
       {files.map((file, fi) => {
         const lang = EXT_LANG[extOf(file.path)] ?? "";
         // Drop git-meta lines (diff --git / index / +++ / ---) — the header names the file.
@@ -111,41 +117,40 @@ export const DiffBlock = memo(function DiffBlock({
         const shown = rows.slice(0, maxLines);
         return (
           <View key={fi}>
-            <View className="flex-row items-center gap-2 border-b border-border/70 px-3 py-1.5">
-              <Text numberOfLines={1} className="flex-1 font-mono text-[11px] text-fg-muted">{file.path}</Text>
-              {file.adds ? <Text className="text-[11px] font-semibold text-diff-add-fg">+{file.adds}</Text> : null}
-              {file.dels ? <Text className="text-[11px] font-semibold text-diff-del-fg">−{file.dels}</Text> : null}
+            <View style={s.fileHeader}>
+              <Text numberOfLines={1} style={s.filePath}>{file.path}</Text>
+              {file.adds ? <Text style={s.addCount}>+{file.adds}</Text> : null}
+              {file.dels ? <Text style={s.delCount}>−{file.dels}</Text> : null}
             </View>
-            <View className="py-1">
+            <View style={s.fileBody}>
               {shown.map((line, i) => {
                 const kind = classifyLine(line);
                 if (kind === "hunk") {
-                  return <Text key={i} className="px-2 font-mono text-[11px] text-info">{line}</Text>;
+                  return <Text key={i} style={s.hunk}>{line}</Text>;
                 }
                 const prefix = kind === "add" ? "+" : kind === "del" ? "−" : " ";
                 const content = /^[+\- ]/.test(line) ? line.slice(1) : line;
                 return (
                   <View
                     key={i}
-                    className={cn("flex-row px-2", kind === "add" && "bg-diff-add-bg", kind === "del" && "bg-diff-del-bg")}
+                    style={[s.line, kind === "add" && s.lineAdd, kind === "del" && s.lineDel]}
                   >
                     <Text
-                      style={{ width: 12 }}
-                      className={cn(
-                        "font-mono text-[11px]",
-                        kind === "add" ? "text-diff-add-fg" : kind === "del" ? "text-diff-del-fg" : "text-fg-faint",
-                      )}
+                      style={[
+                        s.prefix,
+                        kind === "add" ? s.prefixAdd : kind === "del" ? s.prefixDel : s.prefixCtx,
+                      ]}
                     >
                       {prefix}
                     </Text>
-                    <View className="flex-1">
+                    <View style={s.lineCode}>
                       <HlText code={content} language={lang} size={11.5} />
                     </View>
                   </View>
                 );
               })}
               {rows.length > maxLines ? (
-                <Text className="px-2 py-1 font-mono text-[11px] text-fg-faint">… {rows.length - maxLines} more lines</Text>
+                <Text style={s.more}>… {rows.length - maxLines} more lines</Text>
               ) : null}
             </View>
           </View>
@@ -164,3 +169,31 @@ const EXT_LANG: Record<string, string> = {
   ".java": "java", ".kt": "kotlin", ".swift": "swift", ".c": "c", ".h": "c", ".cpp": "cpp", ".cc": "cpp",
   ".toml": "toml", ".php": "php", ".rb2": "ruby",
 };
+
+const s = StyleSheet.create((theme) => ({
+  card: { overflow: "hidden", borderRadius: 12, borderWidth: 1, borderColor: theme.colors.border },
+  cardNested: { borderRadius: 8 },
+  fileHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderBottomWidth: 1,
+    borderColor: theme.colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  filePath: { flex: 1, fontFamily: MONO, fontSize: 11, color: theme.colors.fgMuted },
+  addCount: { fontSize: 11, fontWeight: "600", color: theme.colors.diffAddFg },
+  delCount: { fontSize: 11, fontWeight: "600", color: theme.colors.diffDelFg },
+  fileBody: { paddingVertical: 4 },
+  hunk: { paddingHorizontal: 8, fontFamily: MONO, fontSize: 11, color: theme.colors.info },
+  line: { flexDirection: "row", paddingHorizontal: 8 },
+  lineAdd: { backgroundColor: theme.colors.diffAddBg },
+  lineDel: { backgroundColor: theme.colors.diffDelBg },
+  prefix: { width: 12, fontFamily: MONO, fontSize: 11 },
+  prefixAdd: { color: theme.colors.diffAddFg },
+  prefixDel: { color: theme.colors.diffDelFg },
+  prefixCtx: { color: theme.colors.fgFaint },
+  lineCode: { flex: 1 },
+  more: { paddingHorizontal: 8, paddingVertical: 4, fontFamily: MONO, fontSize: 11, color: theme.colors.fgFaint },
+}));

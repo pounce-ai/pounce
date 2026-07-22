@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLOR } from "../ui";
+import { T } from "../ui/theme";
 import type { DroppedFile, DropZoneProps } from "./DropZoneTypes";
 
 export type { DroppedFile, DropZoneProps } from "./DropZoneTypes";
@@ -25,7 +26,7 @@ function uriToPath(uri: string): string {
  * folders from Finder highlights the zone, dropping hands their absolute
  * paths to `onDropFiles`.
  */
-export function DropZone({ children, className, onDropFiles }: DropZoneProps) {
+export function DropZone({ children, style, onDropFiles }: DropZoneProps) {
   const [hovering, setHovering] = useState(false);
 
   const onDrop = (e: MacDragEvent) => {
@@ -53,20 +54,48 @@ export function DropZone({ children, className, onDropFiles }: DropZoneProps) {
   } as object;
 
   return (
-    <View className={className} {...dragProps}>
+    <View style={style} {...dragProps}>
       {children}
       {hovering ? (
         <View
           pointerEvents="none"
-          className="absolute inset-0 items-center justify-center rounded-2xl border-2 border-dashed border-accent bg-bg/80"
+          style={s.overlay}
         >
-          <View className="items-center gap-2 rounded-2xl bg-bg-elevated px-6 py-5">
+          <View style={s.card}>
             <Ionicons name="attach" size={28} color={COLOR.accent} />
-            <Text className="text-[15px] font-semibold text-fg">Drop to add to this chat</Text>
-            <Text className="text-[12px] text-fg-muted">Files and folders become sources the agent can read</Text>
+            <Text style={s.title}>Drop to add to this chat</Text>
+            <Text style={s.body}>Files and folders become sources the agent can read</Text>
           </View>
         </View>
       ) : null}
     </View>
   );
 }
+
+const s = StyleSheet.create({
+  overlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 16,
+    borderWidth: 2,
+    borderStyle: "dashed",
+    borderColor: T.accent,
+    // was bg at 80% — the semantic scrim token is the closest adaptive match.
+    backgroundColor: T.overlay,
+  },
+  card: {
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 16,
+    backgroundColor: T.bgElevated,
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+  },
+  title: { fontSize: 15, fontWeight: "600", color: T.fg },
+  body: { fontSize: 12, color: T.fgMuted },
+});

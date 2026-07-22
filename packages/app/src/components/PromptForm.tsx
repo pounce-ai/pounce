@@ -9,11 +9,12 @@
  */
 import { useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { cn, COLOR } from "../ui";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import { PounceIcon } from "../ui/native/Icon";
+import type { IoniconName } from "../ui/native/icon-map";
 
 /** Header copy + icon per prompt kind — cosmetic only. */
-export const PROMPT_KIND: Record<string, { label: string; icon: keyof typeof Ionicons.glyphMap }> =
+export const PROMPT_KIND: Record<string, { label: string; icon: IoniconName }> =
   {
     trust: { label: "Trust folder", icon: "shield-checkmark-outline" },
     permission: { label: "Permission", icon: "key-outline" },
@@ -42,6 +43,7 @@ export function PromptForm({
   /** Fires after the user submits (either path) — the sheet dismisses on it. */
   onAnswered?: () => void;
 }) {
+  const { theme } = useUnistyles();
   const [selected, setSelected] = useState<number>(prompt.highlighted ?? 0);
   const [submitted, setSubmitted] = useState<string | null>(null);
   const [typing, setTyping] = useState(false);
@@ -62,53 +64,49 @@ export function PromptForm({
   };
 
   return (
-    <View className="gap-3">
-      <View className="flex-row items-center gap-1.5">
-        <Ionicons name={meta.icon} size={14} color={COLOR.accent} />
-        <Text className="text-[12px] font-semibold uppercase tracking-wide text-accent">
+    <View style={s.root}>
+      <View style={s.kindRow}>
+        <PounceIcon name={meta.icon} size={14} color={theme.colors.accent} />
+        <Text style={s.kindLabel}>
           {meta.label}
         </Text>
       </View>
 
       {prompt.title ? (
-        <Text className="text-[13px] font-medium text-fg">{prompt.title}</Text>
+        <Text style={s.title}>{prompt.title}</Text>
       ) : null}
 
       {submitted ? (
-        <Text className="text-[12px] font-medium text-fg-muted">Answered: {submitted}</Text>
+        <Text style={s.answered}>Answered: {submitted}</Text>
       ) : typing ? (
-        <View className="gap-2">
+        <View style={s.typingWrap}>
           <TextInput
             value={text}
             onChangeText={setText}
             autoFocus
             placeholder="Type a reply…"
-            placeholderTextColor={COLOR.fgFaint}
+            placeholderTextColor={theme.colors.fgFaint}
             onSubmitEditing={sendText}
             returnKeyType="send"
-            className="min-h-[40px] rounded-lg border border-border bg-surface px-3 py-2 text-[13px] text-fg"
+            style={s.input}
           />
-          <View className="flex-row gap-2">
+          <View style={s.typingRow}>
             <Pressable
               onPress={() => setTyping(false)}
-              className="active:opacity-80 h-9 flex-1 items-center justify-center rounded-lg bg-surface-alt"
+              style={({ pressed }) => [s.backBtn, pressed && s.pressed80]}
             >
-              <Text className="text-[13px] text-fg-muted">Back to options</Text>
+              <Text style={s.backLabel}>Back to options</Text>
             </Pressable>
             <Pressable
               onPress={sendText}
               disabled={!text.trim()}
-              className={cn(
-                "active:opacity-90 h-9 flex-1 items-center justify-center rounded-lg",
-                text.trim() ? "bg-accent" : "bg-surface-alt",
-              )}
+              style={({ pressed }) => [
+                s.sendBtn,
+                text.trim() ? s.sendBtnEnabled : s.sendBtnDisabled,
+                pressed && s.pressed90,
+              ]}
             >
-              <Text
-                className={cn(
-                  "text-[13px] font-semibold",
-                  text.trim() ? "text-white" : "text-fg-faint",
-                )}
-              >
+              <Text style={[s.sendLabel, text.trim() ? s.sendLabelEnabled : s.sendLabelDisabled]}>
                 Send
               </Text>
             </Pressable>
@@ -116,26 +114,25 @@ export function PromptForm({
         </View>
       ) : (
         <>
-          <View className="gap-1.5">
+          <View style={s.options}>
             {prompt.options.map((o, oi) => {
               const on = selected === oi;
               return (
                 <Pressable
                   key={oi}
                   onPress={() => setSelected(oi)}
-                  className={cn(
-                    "active:opacity-80 flex-row items-center gap-2 rounded-lg border p-2.5",
-                    on ? "border-accent bg-accent/15" : "border-border bg-surface",
-                  )}
+                  style={({ pressed }) => [
+                    s.option,
+                    on ? s.optionOn : s.optionOff,
+                    pressed && s.pressed80,
+                  ]}
                 >
-                  <Ionicons
+                  <PounceIcon
                     name={on ? "radio-button-on" : "radio-button-off"}
                     size={16}
-                    color={on ? COLOR.accent : COLOR.fgFaint}
+                    color={on ? theme.colors.accent : theme.colors.fgFaint}
                   />
-                  <Text
-                    className={cn("flex-1 text-[13px] font-medium", on ? "text-accent" : "text-fg")}
-                  >
+                  <Text style={[s.optionLabel, on ? s.optionLabelOn : s.optionLabelOff]}>
                     {o.label}
                   </Text>
                 </Pressable>
@@ -144,13 +141,16 @@ export function PromptForm({
           </View>
           <Pressable
             onPress={confirm}
-            className="active:opacity-90 h-10 items-center justify-center rounded-lg bg-accent"
+            style={({ pressed }) => [s.confirmBtn, pressed && s.pressed90]}
           >
-            <Text className="text-[13px] font-semibold text-white">Confirm</Text>
+            <Text style={s.confirmLabel}>Confirm</Text>
           </Pressable>
           {onSendInput ? (
-            <Pressable onPress={() => setTyping(true)} className="active:opacity-70 items-center">
-              <Text className="text-[12px] text-fg-muted">Type a reply instead</Text>
+            <Pressable
+              onPress={() => setTyping(true)}
+              style={({ pressed }) => [s.typeInstead, pressed && s.pressed70]}
+            >
+              <Text style={s.typeInsteadLabel}>Type a reply instead</Text>
             </Pressable>
           ) : null}
         </>
@@ -158,3 +158,72 @@ export function PromptForm({
     </View>
   );
 }
+
+const s = StyleSheet.create((theme) => ({
+  root: { gap: 12 },
+  kindRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  kindLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: theme.colors.accent,
+  },
+  title: { fontSize: 13, fontWeight: "500", color: theme.colors.fg },
+  answered: { fontSize: 12, fontWeight: "500", color: theme.colors.fgMuted },
+  typingWrap: { gap: 8 },
+  input: {
+    minHeight: 40,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: theme.colors.fg,
+  },
+  typingRow: { flexDirection: "row", gap: 8 },
+  backBtn: {
+    height: 36,
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+    backgroundColor: theme.colors.surfaceAlt,
+  },
+  backLabel: { fontSize: 13, color: theme.colors.fgMuted },
+  sendBtn: { height: 36, flex: 1, alignItems: "center", justifyContent: "center", borderRadius: 8 },
+  sendBtnEnabled: { backgroundColor: theme.colors.accent },
+  sendBtnDisabled: { backgroundColor: theme.colors.surfaceAlt },
+  sendLabel: { fontSize: 13, fontWeight: "600" },
+  sendLabelEnabled: { color: theme.colors.onAccent },
+  sendLabelDisabled: { color: theme.colors.fgFaint },
+  options: { gap: 6 },
+  option: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 10,
+  },
+  optionOn: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
+  optionOff: { borderColor: theme.colors.border, backgroundColor: theme.colors.surface },
+  optionLabel: { flex: 1, fontSize: 13, fontWeight: "500" },
+  optionLabelOn: { color: theme.colors.accent },
+  optionLabelOff: { color: theme.colors.fg },
+  confirmBtn: {
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+    backgroundColor: theme.colors.accent,
+  },
+  confirmLabel: { fontSize: 13, fontWeight: "600", color: theme.colors.onAccent },
+  typeInstead: { alignItems: "center" },
+  typeInsteadLabel: { fontSize: 12, color: theme.colors.fgMuted },
+  pressed70: { opacity: 0.7 },
+  pressed80: { opacity: 0.8 },
+  pressed90: { opacity: 0.9 },
+}));

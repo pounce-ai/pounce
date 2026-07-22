@@ -1,18 +1,27 @@
 import { memo, useMemo, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View, type TextStyle } from "react-native";
 import { LegendList } from "@legendapp/list/react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   classifyLine,
   DIFF_META_RE,
   extOf,
-  LINE_CLASS,
   splitPatch,
   type LineKind,
   type PatchFile,
 } from "./diffPatch";
-import { cn, COLOR } from "../ui";
+import { COLOR } from "../ui";
+import { T } from "../ui/theme";
 import type { DiffViewProps } from "./DiffViewTypes";
+
+/** Styles per diff-line kind (replaces the old shared Tailwind LINE_CLASS map). */
+const LINE_STYLE: Record<LineKind, TextStyle> = {
+  header: { color: T.fgFaint },
+  hunk: { color: T.info },
+  add: { backgroundColor: T.diffAddBg, color: T.diffAddFg },
+  del: { backgroundColor: T.diffDelBg, color: T.diffDelFg },
+  ctx: { color: T.fgMuted },
+};
 
 /** Flattened rows the list renders: a file separator, a unified line, or a
  *  split (side-by-side) pair. */
@@ -135,7 +144,7 @@ export const DiffView = memo(function DiffView({
           return (
             <Pressable
               onPress={() => toggleCollapsed(item.path)}
-              className="active:bg-surface-hover mb-1 mt-3 flex-row items-center gap-2 border-b border-border bg-bg-elevated px-3 py-2"
+              style={({ pressed }) => [s.fileHeader, pressed && s.pressedHover]}
             >
               <Ionicons
                 name={isCollapsed ? "chevron-forward" : "chevron-down"}
@@ -145,47 +154,41 @@ export const DiffView = memo(function DiffView({
               <Ionicons name="document-text-outline" size={13} color={COLOR.fgMuted} />
               <Text
                 numberOfLines={1}
-                className={cn("flex-1 font-mono text-[12px] font-semibold", isViewed ? "text-fg-faint" : "text-fg")}
+                style={[s.filePath, isViewed ? s.filePathViewed : s.filePathFg]}
               >
                 {item.path}
               </Text>
-              <Text className="text-[12px] font-semibold">
-                <Text className="text-diff-add-fg">+{item.adds}</Text>{" "}
-                <Text className="text-diff-del-fg">-{item.dels}</Text>
+              <Text style={s.fileStats}>
+                <Text style={s.addStat}>+{item.adds}</Text>{" "}
+                <Text style={s.delStat}>-{item.dels}</Text>
               </Text>
               <Pressable
                 onPress={() => toggleViewed(item.path)}
                 hitSlop={6}
-                className="active:opacity-70 flex-row items-center gap-1.5"
+                style={({ pressed }) => [s.viewedBtn, pressed && s.pressed70]}
               >
                 <Ionicons
                   name={isViewed ? "checkbox" : "square-outline"}
                   size={15}
                   color={isViewed ? COLOR.accent : COLOR.fgFaint}
                 />
-                <Text className="text-[12px] text-fg-muted">Viewed</Text>
+                <Text style={s.viewedLabel}>Viewed</Text>
               </Pressable>
             </Pressable>
           );
         }
         if (item.type === "pair") {
           return (
-            <View className="flex-row px-3">
+            <View style={s.pairRow}>
               <Text
                 numberOfLines={1}
-                className={cn(
-                  "flex-1 border-r border-border/40 pr-2 font-mono text-[11px] leading-[18px]",
-                  item.left ? LINE_CLASS[item.left.kind] : "",
-                )}
+                style={[s.pairLeft, item.left ? LINE_STYLE[item.left.kind] : null]}
               >
                 {item.left ? cellText(item.left.text) || " " : " "}
               </Text>
               <Text
                 numberOfLines={1}
-                className={cn(
-                  "flex-1 pl-2 font-mono text-[11px] leading-[18px]",
-                  item.right ? LINE_CLASS[item.right.kind] : "",
-                )}
+                style={[s.pairRight, item.right ? LINE_STYLE[item.right.kind] : null]}
               >
                 {item.right ? cellText(item.right.text) || " " : " "}
               </Text>
@@ -193,7 +196,7 @@ export const DiffView = memo(function DiffView({
           );
         }
         return (
-          <Text className={cn("px-3 font-mono text-[11px] leading-[18px]", LINE_CLASS[item.kind])}>
+          <Text style={[s.diffLine, LINE_STYLE[item.kind]]}>
             {item.text || " "}
           </Text>
         );
@@ -201,4 +204,42 @@ export const DiffView = memo(function DiffView({
       contentContainerStyle={{ paddingBottom: 6 }}
     />
   );
+});
+
+const s = StyleSheet.create({
+  fileHeader: {
+    marginBottom: 4,
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderBottomWidth: 1,
+    borderColor: T.border,
+    backgroundColor: T.bgElevated,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  filePath: { flex: 1, fontFamily: "JetBrainsMono", fontSize: 12, fontWeight: "600" },
+  filePathViewed: { color: T.fgFaint },
+  filePathFg: { color: T.fg },
+  fileStats: { fontSize: 12, fontWeight: "600" },
+  addStat: { color: T.diffAddFg },
+  delStat: { color: T.diffDelFg },
+  viewedBtn: { flexDirection: "row", alignItems: "center", gap: 6 },
+  viewedLabel: { fontSize: 12, color: T.fgMuted },
+  pairRow: { flexDirection: "row", paddingHorizontal: 12 },
+  pairLeft: {
+    flex: 1,
+    borderRightWidth: 1,
+    // was border at 40% opacity; the semantic separator is already subtle.
+    borderColor: T.border,
+    paddingRight: 8,
+    fontFamily: "JetBrainsMono",
+    fontSize: 11,
+    lineHeight: 18,
+  },
+  pairRight: { flex: 1, paddingLeft: 8, fontFamily: "JetBrainsMono", fontSize: 11, lineHeight: 18 },
+  diffLine: { paddingHorizontal: 12, fontFamily: "JetBrainsMono", fontSize: 11, lineHeight: 18 },
+  pressed70: { opacity: 0.7 },
+  pressedHover: { backgroundColor: T.surfaceHover },
 });

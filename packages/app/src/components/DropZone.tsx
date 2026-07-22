@@ -8,6 +8,6 @@ export type { DroppedFile, DropZoneProps } from "./DropZoneTypes";
  * implementation just renders its children; DropZone.macos.tsx overlays the
  * real NSDraggingDestination-backed zone.
  */
-export function DropZone({ children, className }: DropZoneProps) {
-  return <View className={className}>{children}</View>;
+export function DropZone({ children, style }: DropZoneProps) {
+  return <View style={style}>{children}</View>;
 }

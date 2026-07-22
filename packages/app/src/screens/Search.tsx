@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, Platform, Pressable, Text, TextInput, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
-import { Ionicons } from "@expo/vector-icons";
+import { PounceIcon } from "../ui/native/Icon";
 import type { Session } from "@pounce/shared";
 import { searchMessages, type MessageSearchHit } from "../services/bridge";
 import { applyFilters, filters$, rankSession } from "../state/stores";
@@ -15,7 +16,8 @@ import {
 } from "../state/db/hooks";
 import { SessionCard } from "../components/SessionCard";
 import { FilterButton, FilterSheet } from "../components/FilterSheet";
-import { cn, COLOR, inputH } from "../ui";
+import { IS_DESKTOP } from "../ui";
+import { searchQuery$ } from "../state/search";
 
 /** Search only kicks in at this many characters: short fragments match almost
  *  everything (useless results) and every keystroke below it would churn the
@@ -25,16 +27,26 @@ const MIN_QUERY_LENGTH = 5;
 /** Full-screen thread search — matches title, branch, host, agent, repo. */
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
+  const { theme } = useUnistyles();
   // Desktop's sidebar seeds the modal via /search?q=… — start searching
   // immediately instead of making the user retype.
   const { q: seedQuery } = useLocalSearchParams<{ q?: string }>();
-  const [query, setQuery] = useState(seedQuery ? String(seedQuery) : "");
+  // Desktop types into the in-screen TextInput (local state); mobile types into
+  // the native UISearchBar in the navigation bar, which writes searchQuery$.
+  const [localQuery, setLocalQuery] = useState(seedQuery ? String(seedQuery) : "");
+  const nativeQuery = useSelector(() => searchQuery$.get());
+  useEffect(() => {
+    if (!IS_DESKTOP && seedQuery) searchQuery$.set(String(seedQuery));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const query = IS_DESKTOP ? localQuery : nativeQuery;
   // The list filters on a DEBOUNCED query: re-filtering per keystroke changes
   // the LegendList data while the keyboard/layout is still settling, which
   // trips a maintainVisibleContentPosition recalculation loop inside
   // legend-list (max-update-depth crash, repro'd on 3.1.2–3.3.2). One update
   // after typing pauses is also just better UX on large thread lists.
   const [debouncedQuery, setDebouncedQuery] = useState(seedQuery ? String(seedQuery) : "");
+
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query), 250);
     return () => clearTimeout(timer);
@@ -121,30 +133,37 @@ export default function SearchScreen() {
   }, [rawHits, allowedIds]);
 
   return (
-    <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>
-      <View className="flex-row items-center justify-between px-4 pb-2 pt-1">
-        <Text className="text-[26px] font-bold text-fg">Search</Text>
-        <FilterButton active={showFilters} onPress={() => setShowFilters(true)} />
-      </View>
+    <View style={[s.root, IS_DESKTOP ? { paddingTop: insets.top } : undefined]}>
+      {/* Mobile's filter button lives in the navigation bar (search/_layout
+          headerRight) — a row here would hide under the transparent
+          large-title header, which only insets the FlatList below. Desktop
+          keeps its own chrome. */}
+      {IS_DESKTOP ? (
+        <View style={s.desktopHeader}>
+          <Text style={s.title}>Search</Text>
+          <FilterButton active={showFilters} onPress={() => setShowFilters(true)} />
+        </View>
+      ) : null}
 
-      {/* Search field */}
-      <View className="mx-4 mb-2 h-11 flex-row items-center gap-2 rounded-2xl bg-surface-alt px-3">
-        <Ionicons name="search" size={16} color={COLOR.fgFaint} />
-        <TextInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder="Find a thread…"
-          placeholderTextColor={COLOR.fgFaint}
-          autoCapitalize="none"
-          autoCorrect={false}
-          className={cn("flex-1 text-[15px] text-fg", inputH("h-11"))}
-        />
-        {query ? (
-          <Pressable onPress={() => setQuery("")} className="active:opacity-60 p-1">
-            <Ionicons name="close-circle" size={16} color={COLOR.fgFaint} />
-          </Pressable>
-        ) : null}
-      </View>
+      {IS_DESKTOP ? (
+        <View style={s.searchBox}>
+          <PounceIcon name="search" size={16} color={theme.colors.fgFaint} />
+          <TextInput
+            value={localQuery}
+            onChangeText={setLocalQuery}
+            placeholder="Find a thread…"
+            placeholderTextColor={theme.colors.fgFaint}
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={[s.input, IS_DESKTOP && s.inputDesktop]}
+          />
+          {localQuery ? (
+            <Pressable onPress={() => setLocalQuery("")} style={({ pressed }) => [s.clearBtn, pressed && s.pressed60]}>
+              <PounceIcon name="close-circle" size={16} color={theme.colors.fgFaint} />
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
 
 
       {/* Plain FlatList, NOT LegendList: on Fabric, legend-list's synchronous
@@ -155,10 +174,11 @@ export default function SearchScreen() {
           small enough that FlatList virtualization is plenty. */}
       <FlatList
         style={{ flex: 1 }}
+        contentInsetAdjustmentBehavior="automatic"
         data={results}
         keyExtractor={(s) => s.id}
         renderItem={({ item }) => (
-          <View className="px-4 pb-2.5">
+          <View style={s.resultRow}>
             <SessionCard session={item} />
           </View>
         )}
@@ -167,16 +187,16 @@ export default function SearchScreen() {
         // without this, tapping a hit right after typing silently no-ops.
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
-          <Text className="px-4 pb-1.5 pt-1 text-[12px] uppercase tracking-wide text-fg-faint">
+          <Text style={s.listHeader}>
             {showAll ? "All threads" : `${results.length} match${results.length === 1 ? "" : "es"}`}
           </Text>
         }
         ListFooterComponent={
           !showAll && (msgSearching || msgHits.length > 0) ? (
-            <View className="pt-2">
-              <View className="flex-row items-center gap-2 px-4 pb-1.5">
-                <Text className="text-[12px] uppercase tracking-wide text-fg-faint">In messages</Text>
-                {msgSearching ? <ActivityIndicator size="small" color={COLOR.fgFaint} /> : null}
+            <View style={s.footer}>
+              <View style={s.footerHeaderRow}>
+                <Text style={s.sectionLabel}>In messages</Text>
+                {msgSearching ? <ActivityIndicator size="small" color={theme.colors.fgFaint} /> : null}
               </View>
               {msgHits.map((h) => (
                 <MessageHitRow
@@ -194,21 +214,26 @@ export default function SearchScreen() {
           // matches" hero would push the real results off-screen — the section
           // headers already say "0 matches", so show nothing extra.
           !showAll && (msgSearching || msgHits.length > 0) ? null : (
-            <View className="items-center px-8 py-20">
-              <Text className="text-[40px]">{showAll ? "🐾" : "🔍"}</Text>
-              <Text className="mt-3 text-center text-[15px] font-semibold text-fg">
+            <View style={s.empty}>
+              <Text style={s.emptyEmoji}>{showAll ? "🐾" : "🔍"}</Text>
+              <Text style={s.emptyTitle}>
                 {showAll ? "No threads yet" : "No matches"}
               </Text>
-              <Text className="mt-1 text-center text-[13px] text-fg-muted">
+              <Text style={s.emptyBody}>
                 {showAll ? "Start a task to see it here." : "Try another word."}
               </Text>
             </View>
           )
         }
-        contentContainerStyle={{ paddingTop: 4, paddingBottom: insets.bottom + 120 }}
+        // Android ignores contentInsetAdjustmentBehavior (iOS-only), so the
+        // list needs real top padding below the in-flow toolbar + search bar.
+        contentContainerStyle={{
+          paddingTop: Platform.OS === "android" ? 16 : 4,
+          paddingBottom: insets.bottom + 16,
+        }}
       />
 
-      <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
+      {IS_DESKTOP ? <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} /> : null}
     </View>
   );
 }
@@ -237,22 +262,96 @@ function MessageHitRow({
             : `/session/${hit.threadId}`,
         )
       }
-      className="mx-4 mb-2.5 rounded-2xl bg-surface-alt px-3.5 py-3 active:opacity-70"
+      style={({ pressed }) => [s.hitCard, pressed && s.pressed70]}
     >
-      <View className="flex-row items-center gap-2">
-        <Text numberOfLines={1} className="flex-1 text-[14px] font-semibold text-fg">
+      <View style={s.hitTitleRow}>
+        <Text numberOfLines={1} style={s.hitTitle}>
           {session?.title || hit.title || hit.threadId}
         </Text>
         {hit.matches > 1 ? (
-          <Text className="text-[11px] text-fg-faint">{hit.matches} matches</Text>
+          <Text style={s.hitMeta}>{hit.matches} matches</Text>
         ) : null}
       </View>
-      <Text numberOfLines={2} className="mt-1 text-[13px] text-fg-muted">
+      <Text numberOfLines={2} style={s.hitSnippet}>
         {hit.snippet}
       </Text>
-      <Text numberOfLines={1} className="mt-1 text-[11px] text-fg-faint">
+      <Text numberOfLines={1} style={s.hitFooter}>
         {[session?.agent ?? hit.agent, session?.host, session?.branch].filter(Boolean).join(" · ")}
       </Text>
     </Pressable>
   );
 }
+
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
+  desktopHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    paddingTop: 4,
+  },
+  title: { fontSize: 26, fontWeight: "700", color: theme.colors.fg },
+  mobileFilterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    paddingHorizontal: 16,
+    paddingBottom: 4,
+    paddingTop: 8,
+  },
+  searchBox: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    height: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 16,
+    backgroundColor: theme.colors.surfaceAlt,
+    paddingHorizontal: 12,
+  },
+  input: { flex: 1, fontSize: 15, color: theme.colors.fg, height: 44 },
+  // Desktop centers intrinsic-height inputs (see inputH's comment in ui/index.tsx).
+  inputDesktop: { height: "auto" as const, paddingVertical: 0 },
+  clearBtn: { padding: 4 },
+  resultRow: { paddingHorizontal: 16, paddingBottom: 10 },
+  listHeader: {
+    paddingHorizontal: 16,
+    paddingBottom: 6,
+    paddingTop: 4,
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: theme.colors.fgFaint,
+  },
+  footer: { paddingTop: 8 },
+  footerHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 6,
+  },
+  sectionLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
+  empty: { alignItems: "center", paddingHorizontal: 32, paddingVertical: 80 },
+  emptyEmoji: { fontSize: 40 },
+  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
+  hitCard: {
+    marginHorizontal: 16,
+    marginBottom: 10,
+    borderRadius: 16,
+    backgroundColor: theme.colors.surfaceAlt,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  hitTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  hitTitle: { flex: 1, fontSize: 14, fontWeight: "600", color: theme.colors.fg },
+  hitMeta: { fontSize: 11, color: theme.colors.fgFaint },
+  hitSnippet: { marginTop: 4, fontSize: 13, color: theme.colors.fgMuted },
+  hitFooter: { marginTop: 4, fontSize: 11, color: theme.colors.fgFaint },
+  pressed60: { opacity: 0.6 },
+  pressed70: { opacity: 0.7 },
+}));

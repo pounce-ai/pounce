@@ -1,8 +1,17 @@
 import { type ReactNode, useEffect, useState } from "react";
-import { Modal } from "./AppModal";
-import { Image, Pressable, ScrollView, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { NativeSheet } from "./NativeSheet";
+import {
+  Image,
+  Pressable,
+  ScrollView,
+  Text,
+  useWindowDimensions,
+  View,
+  type ColorValue,
+} from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import { PounceIcon } from "../ui/native/Icon";
+import type { IoniconName } from "../ui/native/icon-map";
 import type { Session } from "@pounce/shared";
 import {
   diffTotals,
@@ -12,7 +21,6 @@ import {
   type GitChecks,
 } from "../services/bridge";
 import type { ThreadSource } from "../state/stores";
-import { COLOR } from "../ui";
 
 /** One row in the environment sheet — icon · label · trailing value/chevron. */
 function Row({
@@ -25,7 +33,7 @@ function Row({
   onPress,
 }: {
   icon?: ComponentIcon;
-  iconColor?: string;
+  iconColor?: ColorValue;
   /** Custom leading element (e.g. an image thumbnail) instead of an icon. */
   leading?: ReactNode;
   label: string;
@@ -33,34 +41,36 @@ function Row({
   right?: ReactNode;
   onPress?: () => void;
 }) {
-  const color = danger ? COLOR.danger : COLOR.fg;
+  const { theme } = useUnistyles();
+  const color = danger ? theme.colors.danger : theme.colors.fg;
   return (
     <Pressable
       onPress={onPress}
       disabled={!onPress}
-      className="active:bg-surface-hover flex-row items-center gap-3 rounded-xl px-2 py-2.5"
+      style={({ pressed }) => [s.row, pressed && s.rowPressed]}
     >
       {leading ??
         (icon ? (
-          <Ionicons name={icon} size={18} color={iconColor ?? (danger ? COLOR.danger : COLOR.fgMuted)} />
+          <PounceIcon name={icon} size={18} color={iconColor ?? (danger ? theme.colors.danger : theme.colors.fgMuted)} />
         ) : null)}
-      <Text numberOfLines={1} className="flex-1 text-[15px] font-medium" style={{ color }}>
+      <Text numberOfLines={1} style={[s.rowLabel, { color }]}>
         {label}
       </Text>
       {right}
-      {onPress && !right ? <Ionicons name="chevron-forward" size={15} color={COLOR.fgFaint} /> : null}
+      {onPress && !right ? <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} /> : null}
     </Pressable>
   );
 }
 
 /** Section heading with an optional trailing "+" action. */
 function SectionHeader({ title, onAdd }: { title: string; onAdd?: () => void }) {
+  const { theme } = useUnistyles();
   return (
-    <View className="mb-1 mt-1 flex-row items-center px-1">
-      <Text className="flex-1 text-[12px] uppercase tracking-wide text-fg-faint">{title}</Text>
+    <View style={s.sectionHeader}>
+      <Text style={s.sectionTitle}>{title}</Text>
       {onAdd ? (
-        <Pressable onPress={onAdd} hitSlop={6} className="active:opacity-60">
-          <Ionicons name="add" size={18} color={COLOR.fgFaint} />
+        <Pressable onPress={onAdd} hitSlop={6} style={({ pressed }) => pressed && s.pressed60}>
+          <PounceIcon name="add" size={18} color={theme.colors.fgFaint} />
         </Pressable>
       ) : null}
     </View>
@@ -83,7 +93,7 @@ function sourceFileUri(path: string, cwd: string | null | undefined): string {
   return `file://${encodeURI(abs)}`;
 }
 
-type ComponentIcon = React.ComponentProps<typeof Ionicons>["name"];
+type ComponentIcon = IoniconName;
 
 /**
  * The thread's "Environment" — git changes (with +/- counts), host, branch,
@@ -105,8 +115,6 @@ export function EnvironmentSheet({
   onFixConflicts,
   fav,
   onToggleFavourite,
-  markerCount = 0,
-  onMarkers,
 }: {
   visible: boolean;
   session: Session;
@@ -125,10 +133,9 @@ export function EnvironmentSheet({
    *  the session header to keep it uncluttered. */
   fav?: boolean;
   onToggleFavourite?: () => void;
-  markerCount?: number;
-  onMarkers?: () => void;
 }) {
-  const insets = useSafeAreaInsets();
+  const { theme } = useUnistyles();
+  const { height } = useWindowDimensions();
   const [git, setGit] = useState<GitChanges | null>(null);
   const [checks, setChecks] = useState<GitChecks | null>(null);
   const [allSources, setAllSources] = useState(false);
@@ -152,44 +159,31 @@ export function EnvironmentSheet({
   const needsPush = (git?.ahead ?? 0) > 0;
   const act = (run: () => void) => () => { onClose(); run(); };
 
-  const CHECK_ROW: Record<string, { icon: ComponentIcon; color: string; label: string }> = {
-    passing: { icon: "checkmark-circle-outline", color: COLOR.success, label: "Checks successful" },
-    failing: { icon: "close-circle-outline", color: COLOR.danger, label: `Checks failing (${checks?.failed}/${checks?.total})` },
-    pending: { icon: "time-outline", color: COLOR.fgMuted, label: "Checks running" },
+  const CHECK_ROW: Record<string, { icon: ComponentIcon; color: ColorValue; label: string }> = {
+    passing: { icon: "checkmark-circle-outline", color: theme.colors.success, label: "Checks successful" },
+    failing: { icon: "close-circle-outline", color: theme.colors.danger, label: `Checks failing (${checks?.failed}/${checks?.total})` },
+    pending: { icon: "time-outline", color: theme.colors.fgMuted, label: "Checks running" },
   };
   const checkRow = checks?.checks ? CHECK_ROW[checks.checks] : null;
 
   const shownSources = allSources ? sources : sources.slice(0, SOURCES_COLLAPSED);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable className="flex-1 bg-black/50" onPress={onClose} />
-      <View
-        style={{ paddingBottom: insets.bottom + 12, maxHeight: "80%" }}
-        className="rounded-t-3xl border-t border-border bg-bg-elevated px-4 pt-3"
-      >
-        <View className="mb-3 h-1 w-10 self-center rounded-full bg-border" />
-        <ScrollView bounces={false}>
-        {onToggleFavourite || (onMarkers && markerCount > 0) ? (
+    <NativeSheet visible={visible} onClose={onClose}>
+        <ScrollView bounces={false} style={{ maxHeight: height * 0.7 }}>
+        {/* Markers moved to the composer's pill row (next to the model pill). */}
+        {onToggleFavourite ? (
           <>
             <SectionHeader title="Thread" />
-            {onMarkers && markerCount > 0 ? (
-              <Row
-                icon="bookmark-outline"
-                label="Markers"
-                onPress={act(onMarkers)}
-                right={<Text className="text-[13px] font-semibold text-fg-muted">{markerCount}</Text>}
-              />
-            ) : null}
             {onToggleFavourite ? (
               <Row
                 icon={fav ? "star" : "star-outline"}
-                iconColor={fav ? COLOR.accent : undefined}
+                iconColor={fav ? theme.colors.accent : undefined}
                 label={fav ? "Remove from favourites" : "Add to favourites"}
                 onPress={act(onToggleFavourite)}
               />
             ) : null}
-            <View className="my-2 h-px bg-border/60" />
+            <View style={s.divider} />
           </>
         ) : null}
         <SectionHeader title="Environment" />
@@ -204,12 +198,12 @@ export function EnvironmentSheet({
               onPress={act(onViewChanges)}
               right={
                 add || del ? (
-                  <Text className="text-[14px] font-semibold">
-                    <Text className="text-diff-add-fg">+{add}</Text>{" "}
-                    <Text className="text-diff-del-fg">-{del}</Text>
+                  <Text style={s.diffCounts}>
+                    <Text style={s.diffAdd}>+{add}</Text>{" "}
+                    <Text style={s.diffDel}>-{del}</Text>
                   </Text>
                 ) : (
-                  <Text className="text-[13px] text-fg-faint">No changes</Text>
+                  <Text style={s.noChanges}>No changes</Text>
                 )
               }
             />
@@ -231,7 +225,7 @@ export function EnvironmentSheet({
                 onPress={onFixConflicts ? act(onFixConflicts) : undefined}
                 right={
                   onFixConflicts ? (
-                    <Text className="text-[14px] font-medium text-fg-muted">Fix</Text>
+                    <Text style={s.fixLabel}>Fix</Text>
                   ) : undefined
                 }
               />
@@ -239,37 +233,41 @@ export function EnvironmentSheet({
             <Row icon="terminal-outline" label="Open terminal" onPress={act(onTerminal)} />
           </>
         ) : (
-          <Text className="px-2 py-3 text-[13px] text-fg-muted">
+          <Text style={s.emptyEnv}>
             This session's worktree was removed — no environment to inspect.
           </Text>
         )}
 
-        <View className="my-2 h-px bg-border/60" />
+        <View style={s.divider} />
         <SectionHeader title="Sources" onAdd={onAddSource ? act(onAddSource) : undefined} />
 
         {sources.length === 0 ? (
-          <Text className="px-2 py-2 text-[13px] text-fg-muted">
+          <Text style={s.emptySources}>
             Drop files or folders on the chat — or type @ in the composer — to give the agent context.
           </Text>
         ) : (
           <>
-            {shownSources.map((s) => (
+            {shownSources.map((src) => (
               <Row
-                key={s.path}
-                icon={SOURCE_ICON[s.kind]}
+                key={src.path}
+                icon={SOURCE_ICON[src.kind]}
                 leading={
-                  s.kind === "image" ? (
+                  src.kind === "image" ? (
                     <Image
-                      source={{ uri: sourceFileUri(s.path, session.cwd) }}
-                      className="h-7 w-7 rounded-md bg-surface"
+                      source={{ uri: sourceFileUri(src.path, session.cwd) }}
+                      style={s.sourceThumb}
                     />
                   ) : undefined
                 }
-                label={s.name}
+                label={src.name}
                 right={
                   onRemoveSource ? (
-                    <Pressable onPress={() => onRemoveSource(s.path)} hitSlop={8} className="active:opacity-60">
-                      <Ionicons name="close" size={15} color={COLOR.fgFaint} />
+                    <Pressable
+                      onPress={() => onRemoveSource(src.path)}
+                      hitSlop={8}
+                      style={({ pressed }) => pressed && s.pressed60}
+                    >
+                      <PounceIcon name="close" size={15} color={theme.colors.fgFaint} />
                     </Pressable>
                   ) : undefined
                 }
@@ -285,7 +283,44 @@ export function EnvironmentSheet({
           </>
         )}
         </ScrollView>
-      </View>
-    </Modal>
+    </NativeSheet>
   );
 }
+
+const s = StyleSheet.create((theme) => ({
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+  },
+  rowPressed: { backgroundColor: theme.colors.surfaceHover },
+  rowLabel: { flex: 1, fontSize: 15, fontWeight: "500" },
+  sectionHeader: {
+    marginBottom: 4,
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 4,
+  },
+  sectionTitle: {
+    flex: 1,
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: theme.colors.fgFaint,
+  },
+  divider: { marginVertical: 8, height: 1, backgroundColor: theme.colors.border },
+  markerCount: { fontSize: 13, fontWeight: "600", color: theme.colors.fgMuted },
+  diffCounts: { fontSize: 14, fontWeight: "600" },
+  diffAdd: { color: theme.colors.diffAddFg },
+  diffDel: { color: theme.colors.diffDelFg },
+  noChanges: { fontSize: 13, color: theme.colors.fgFaint },
+  fixLabel: { fontSize: 14, fontWeight: "500", color: theme.colors.fgMuted },
+  emptyEnv: { paddingHorizontal: 8, paddingVertical: 12, fontSize: 13, color: theme.colors.fgMuted },
+  emptySources: { paddingHorizontal: 8, paddingVertical: 8, fontSize: 13, color: theme.colors.fgMuted },
+  sourceThumb: { height: 28, width: 28, borderRadius: 6, backgroundColor: theme.colors.surface },
+  pressed60: { opacity: 0.6 },
+}));

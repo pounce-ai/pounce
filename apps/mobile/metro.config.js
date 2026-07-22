@@ -1,6 +1,6 @@
-// Metro config: monorepo-aware + Uniwind (Tailwind build-time transform).
+// Metro config: monorepo-aware.
 const { getDefaultConfig } = require("expo/metro-config");
-const { withUniwindConfig } = require("uniwind/metro");
+const { getBundleModeMetroConfig } = require("react-native-worklets/bundleMode");
 const path = require("path");
 
 const projectRoot = __dirname;
@@ -15,8 +15,7 @@ config.resolver.nodeModulesPaths = [
 ];
 // Keep hierarchical lookup ON: bun uses symlinked node_modules.
 
-// withUniwindConfig must be the OUTERMOST metro wrapper.
-module.exports = withUniwindConfig(config, {
-  cssEntryFile: "./global.css",
-  dtsFile: "./uniwind-types.d.ts",
-});
+// Worklets Bundle Mode (see babel.config.js): shims react-native/TurboModuleRegistry
+// for secondary runtimes and pins module ids so worklet runtimes can address the
+// shared bundle.
+module.exports = getBundleModeMetroConfig(config);

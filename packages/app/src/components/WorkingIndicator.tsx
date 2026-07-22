@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Text, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import {
   Animated,
   useAnimatedStyle,
@@ -20,6 +21,8 @@ function Dot({ delay }: { delay: number }) {
     );
   }, [o, delay]);
   const style = useAnimatedStyle(() => ({ opacity: o.value }));
+  // Animated.View: keep the static COLOR token — unistyles theme styles must not
+  // mix into reanimated-managed styles.
   return <Animated.View style={[style, { width: 5, height: 5, borderRadius: 3, backgroundColor: COLOR.fgMuted }]} />;
 }
 
@@ -89,6 +92,14 @@ export function WorkingIndicator({
   tokens?: number;
 }) {
   const verb = useMemo(() => VERBS[hashStr(since ?? "") % VERBS.length], [since]);
+  // Hold the indicator back briefly so it doesn't compete with the sent
+  // message's entrance — instant replies never flash it at all.
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    setSettled(false);
+    const t = setTimeout(() => setSettled(true), 450);
+    return () => clearTimeout(t);
+  }, [since]);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!since) return;
@@ -101,14 +112,15 @@ export function WorkingIndicator({
     elapsed != null && Number.isFinite(elapsed)
       ? ` (${fmtDuration(elapsed)}${tokens && tokens > 0 ? ` · ↓ ${fmtTokens(tokens)} tokens` : ""})`
       : "";
+  if (!settled) return null;
   return (
-    <View className="flex-row items-center gap-2 py-1.5">
+    <View style={s.row}>
       {agent ? <AgentLogo agent={agent} size={14} /> : null}
-      <Text className="text-[12px] text-fg-muted">
+      <Text style={s.verb}>
         {verb}…
-        <Text className="text-fg-faint">{detail}</Text>
+        <Text style={s.detail}>{detail}</Text>
       </Text>
-      <View className="flex-row items-center gap-1">
+      <View style={s.dots}>
         <Dot delay={0} />
         <Dot delay={140} />
         <Dot delay={280} />
@@ -116,3 +128,10 @@ export function WorkingIndicator({
     </View>
   );
 }
+
+const s = StyleSheet.create((theme) => ({
+  row: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 },
+  verb: { fontSize: 12, color: theme.colors.fgMuted },
+  detail: { color: theme.colors.fgFaint },
+  dots: { flexDirection: "row", alignItems: "center", gap: 4 },
+}));

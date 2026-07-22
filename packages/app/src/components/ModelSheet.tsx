@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Modal } from "./AppModal";
+import { NativeSheet } from "./NativeSheet";
 import {
   ActivityIndicator,
   Pressable,
@@ -9,12 +9,12 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import { PounceIcon } from "../ui/native/Icon";
 import { warmModels, type ModelInfo } from "../services/bridge";
 import { shortModel } from "../components/ThreadStatusBar";
 import { useAgentModels } from "../state/db/hooks";
-import { cn, COLOR, inputH } from "../ui";
+import { IS_DESKTOP } from "../ui";
 
 /**
  * Searchable model picker. Renders instantly from the warmed cache
@@ -36,6 +36,7 @@ export function ModelSheet({
   pinned = [],
   onSelect,
   effort,
+  mode,
   onClose,
 }: {
   visible: boolean;
@@ -50,9 +51,11 @@ export function ModelSheet({
   onSelect: (id: string) => void;
   /** Reasoning-effort control, shown as a row below the models (null to hide). */
   effort?: { label: string; onPress: () => void } | null;
+  /** Permission-mode control, shown as a row below Effort (null to hide). */
+  mode?: { label: string; onPress: () => void } | null;
   onClose: () => void;
 }) {
-  const insets = useSafeAreaInsets();
+  const { theme } = useUnistyles();
   const { height } = useWindowDimensions();
   const [query, setQuery] = useState("");
   const [attempted, setAttempted] = useState(false);
@@ -86,34 +89,28 @@ export function ModelSheet({
   const loading = merged.length === 0 && models === null && !attempted;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable className="flex-1 bg-black/50" onPress={onClose} />
-      <View
-        style={{ paddingBottom: insets.bottom + 12 }}
-        className="rounded-t-3xl border-t border-border bg-bg-elevated px-4 pt-3"
-      >
-        <View className="mb-3 h-1 w-10 self-center rounded-full bg-border" />
-        <Text className="mb-2 text-[18px] font-bold text-fg">Model</Text>
+    <NativeSheet visible={visible} onClose={onClose}>
+        <Text style={s.title}>Model</Text>
 
-        <View className="mb-2 h-10 flex-row items-center gap-2 rounded-2xl bg-surface-alt px-3">
-          <Ionicons name="search" size={15} color={COLOR.fgFaint} />
+        <View style={s.searchRow}>
+          <PounceIcon name="search" size={15} color={theme.colors.fgFaint} />
           <TextInput
             value={query}
             onChangeText={setQuery}
             placeholder="Search models…"
-            placeholderTextColor={COLOR.fgFaint}
+            placeholderTextColor={theme.colors.fgFaint}
             autoCapitalize="none"
             autoCorrect={false}
-            className={cn("flex-1 text-[15px] text-fg", inputH("h-10"))}
+            style={[s.input, IS_DESKTOP && s.inputDesktop]}
           />
         </View>
 
         {loading ? (
-          <View className="items-center py-10">
-            <ActivityIndicator color={COLOR.accent} />
+          <View style={s.loading}>
+            <ActivityIndicator color={theme.colors.accent} />
           </View>
         ) : merged.length === 0 ? (
-          <Text className="py-8 text-center text-[13px] text-fg-muted">
+          <Text style={s.emptyText}>
             No models reported for this agent.
           </Text>
         ) : (
@@ -124,36 +121,36 @@ export function ModelSheet({
                 <Pressable
                   key={m.id}
                   onPress={() => onSelect(m.id)}
-                  className="active:bg-surface-hover flex-row items-center gap-2.5 rounded-xl px-2 py-2.5"
+                  style={({ pressed }) => [s.row, pressed && s.rowPressed]}
                 >
-                  <View className="flex-1">
-                    <View className="flex-row items-center gap-2">
-                      <Text className={cn("text-[15px] font-semibold", active ? "text-accent" : "text-fg")}>
+                  <View style={s.flex1}>
+                    <View style={s.nameRow}>
+                      <Text style={[s.name, active ? s.nameActive : s.nameIdle]}>
                         {m.name}
                       </Text>
                       {m.isDefault ? (
-                        <Text className="rounded bg-surface-alt px-1.5 py-0.5 text-[10px] uppercase text-fg-faint">
+                        <Text style={s.defaultBadge}>
                           default
                         </Text>
                       ) : null}
                       {m.deprecated ? (
-                        <Text className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] uppercase text-warning">
+                        <Text style={s.deprecatedBadge}>
                           deprecated
                         </Text>
                       ) : null}
                     </View>
                     {m.description ? (
-                      <Text numberOfLines={2} className="mt-0.5 text-[12px] leading-[16px] text-fg-muted">
+                      <Text numberOfLines={2} style={s.desc}>
                         {m.description}
                       </Text>
                     ) : null}
                   </View>
-                  {active ? <Ionicons name="checkmark" size={18} color={COLOR.accent} /> : null}
+                  {active ? <PounceIcon name="checkmark" size={18} color={theme.colors.accent} /> : null}
                 </Pressable>
               );
             })}
             {results.length === 0 ? (
-              <Text className="py-6 text-center text-[13px] text-fg-muted">No matches.</Text>
+              <Text style={s.noMatches}>No matches.</Text>
             ) : null}
           </ScrollView>
         )}
@@ -161,14 +158,107 @@ export function ModelSheet({
         {effort ? (
           <Pressable
             onPress={effort.onPress}
-            className="active:opacity-80 mt-2 flex-row items-center rounded-2xl bg-surface-alt px-4 py-3.5"
+            style={({ pressed }) => [s.effortRow, pressed && s.pressed80]}
           >
-            <Text className="flex-1 text-[15px] font-semibold text-fg">Effort</Text>
-            <Text className="text-[15px] text-fg-muted">{effort.label}</Text>
-            <Ionicons name="chevron-forward" size={16} color={COLOR.fgFaint} style={{ marginLeft: 6 }} />
+            <Text style={s.effortTitle}>Effort</Text>
+            <Text style={s.effortLabel}>{effort.label}</Text>
+            <PounceIcon name="chevron-forward" size={16} color={theme.colors.fgFaint} style={{ marginLeft: 6 }} />
           </Pressable>
         ) : null}
-      </View>
-    </Modal>
+        {mode ? (
+          <Pressable
+            onPress={mode.onPress}
+            style={({ pressed }) => [s.effortRow, pressed && s.pressed80]}
+          >
+            <Text style={s.effortTitle}>Mode</Text>
+            <Text style={s.effortLabel}>{mode.label}</Text>
+            <PounceIcon name="chevron-forward" size={16} color={theme.colors.fgFaint} style={{ marginLeft: 6 }} />
+          </Pressable>
+        ) : null}
+    </NativeSheet>
   );
 }
+
+const s = StyleSheet.create((theme) => ({
+  flex1: { flex: 1 },
+  scrim: { flex: 1, backgroundColor: theme.colors.overlay },
+  sheet: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderTopWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bgElevated,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
+  grabber: {
+    marginBottom: 12,
+    height: 4,
+    width: 40,
+    alignSelf: "center",
+    borderRadius: 999,
+    backgroundColor: theme.colors.border,
+  },
+  title: { marginBottom: 8, fontSize: 18, fontWeight: "700", color: theme.colors.fg },
+  searchRow: {
+    marginBottom: 8,
+    height: 40,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 16,
+    backgroundColor: theme.colors.surfaceAlt,
+    paddingHorizontal: 12,
+  },
+  input: { flex: 1, fontSize: 15, color: theme.colors.fg, height: 40 },
+  // Desktop centers intrinsic-height inputs inside the fixed-height row —
+  // see the inputH helper's comment in ui/index.tsx.
+  inputDesktop: { height: "auto" as unknown as number, paddingVertical: 0 },
+  loading: { alignItems: "center", paddingVertical: 40 },
+  emptyText: { paddingVertical: 32, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+  },
+  rowPressed: { backgroundColor: theme.colors.surfaceHover },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  name: { fontSize: 15, fontWeight: "600" },
+  nameActive: { color: theme.colors.accent },
+  nameIdle: { color: theme.colors.fg },
+  defaultBadge: {
+    borderRadius: 4,
+    backgroundColor: theme.colors.surfaceAlt,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    fontSize: 10,
+    textTransform: "uppercase",
+    color: theme.colors.fgFaint,
+  },
+  deprecatedBadge: {
+    borderRadius: 4,
+    backgroundColor: theme.colors.warningSoft,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    fontSize: 10,
+    textTransform: "uppercase",
+    color: theme.colors.warning,
+  },
+  desc: { marginTop: 2, fontSize: 12, lineHeight: 16, color: theme.colors.fgMuted },
+  noMatches: { paddingVertical: 24, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
+  effortRow: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 16,
+    backgroundColor: theme.colors.surfaceAlt,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  effortTitle: { flex: 1, fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  effortLabel: { fontSize: 15, color: theme.colors.fgMuted },
+  pressed80: { opacity: 0.8 },
+}));

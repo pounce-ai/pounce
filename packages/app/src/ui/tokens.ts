@@ -3,15 +3,18 @@
  * like agent-logos.tsx can import these without a circular dependency.
  */
 
-/** Theme hex values for places that need a color string, not a className. */
+import { T } from "./theme";
+
+/** Semantic color tokens (platform-adaptive — see theme.ts). Kept under the
+ *  COLOR name so existing call sites keep working. */
 export const COLOR = {
-  accent: "#7c6ff0",
-  fg: "#ececf1",
-  fgMuted: "#9a9aa5",
-  fgFaint: "#62626d",
-  success: "#3fb950",
-  warning: "#d29922",
-  danger: "#f85149",
+  accent: T.accent,
+  fg: T.fg,
+  fgMuted: T.fgMuted,
+  fgFaint: T.fgFaint,
+  success: T.success,
+  warning: T.warning,
+  danger: T.danger,
 } as const;
 
 /** Human-facing agent names (brands keep their own casing). */

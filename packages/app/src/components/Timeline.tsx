@@ -1,7 +1,9 @@
-import { memo, useMemo, useState } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
-import { LegendList, type LegendListRef, useViewability } from "@legendapp/list/react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Image, Pressable, Text, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
+import { PounceIcon } from "../ui/native/Icon";
+import { VideoPlayer } from "../ui/native/VideoPlayer";
 import {
   assertNeverEvent,
   type MessageImage,
@@ -13,16 +15,11 @@ import {
 } from "@pounce/shared";
 import { defaultMarked } from "../state/stores";
 import { useThreadMarkers } from "../state/db/hooks";
-import { cn, COLOR } from "../ui";
 import { MessageMarkdown } from "../components/MessageMarkdown";
 import { PromptForm } from "../components/PromptForm";
 import { DiffBlock, HlText } from "../components/CodeHighlight";
 import { Modal } from "../components/AppModal";
-import {
-  cleanAssistantText,
-  isEmptyUserMessage,
-  parseUserMessage,
-} from "@pounce/transcript";
+import { cleanAssistantText, isEmptyUserMessage, parseUserMessage } from "@pounce/transcript";
 // collapseToolResults lives in a pure (RN-free) module so it can be unit-tested;
 // imported for use below and re-exported since Session.tsx imports it from here.
 import { collapseToolResults } from "./timelineEvents";
@@ -75,7 +72,10 @@ function batchHeaders(data: TimelineEvent[]): Map<string, string> {
   const m = new Map<string, string>();
   let i = 0;
   while (i < data.length) {
-    if (data[i].type !== "tool_call") { i++; continue; }
+    if (data[i].type !== "tool_call") {
+      i++;
+      continue;
+    }
     let j = i;
     while (j < data.length && data[j].type === "tool_call") j++;
     if (j - i >= 2) {
@@ -107,6 +107,7 @@ export const Timeline = memo(function Timeline({
   onRespondPrompt,
   onSendInput,
   highlight,
+  anchorToId,
 }: {
   events: TimelineEvent[];
   /** Which agent produced these events — selects the body-cleaning rules. */
@@ -134,6 +135,11 @@ export const Timeline = memo(function Timeline({
   /** Search deep-link: mark this event's row so the user sees WHY they landed
    *  here — yellow accent + the matched term. */
   highlight?: { id: string; term: string };
+  /** The just-sent user message's id. Triggers ONE scroll to the end so the
+   *  turn starts pinned there; from that point `maintainScrollAtEnd` follows
+   *  the streaming reply natively (LegendList's chat pattern) and a user
+   *  scroll-up detaches it. Cleared by the parent when the turn completes. */
+  anchorToId?: string | null;
 }) {
   // Pair each tool result with its call so the call row renders both as one
   // accordion; the paired result rows are dropped from the list data.
@@ -150,63 +156,103 @@ export const Timeline = memo(function Timeline({
   // marked state as a prop (a per-row live query would be far too heavy).
   const markerMap = useThreadMarkers(sessionId);
 
+  // --- Send scroll ----------------------------------------------------------
+  // Timeline needs its own imperative handle for the send scroll, but the
+  // parent also holds one (marker jumps / the Latest pill) — feed both.
+  const innerRef = useRef<LegendListRef | null>(null);
+  const setRefs = useCallback(
+    (r: LegendListRef | null) => {
+      innerRef.current = r;
+      if (typeof listRef === "function") listRef(r);
+      else if (listRef) (listRef as { current: LegendListRef | null }).current = r;
+    },
+    [listRef],
+  );
+  // One-shot per send: land at the end even if the user was reading history.
+  // From there LegendList's own chat behavior (maintainScrollAtEnd + threshold)
+  // follows the streaming reply automatically and detaches when the user
+  // scrolls up — no manual tail-following.
+  const consumedAnchor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!anchorToId || consumedAnchor.current === anchorToId) return;
+    consumedAnchor.current = anchorToId;
+    requestAnimationFrame(() => {
+      // Not animated: while an animated scroll is in flight the first reply
+      // chunks land, the pin's near-end check samples mid-animation, and
+      // following never engages — an atomic jump closes that race.
+      innerRef.current?.scrollToEnd({ animated: false });
+      onAtBottomChange?.(true);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchorToId]);
+
   return (
-    <LegendList
-      ref={listRef}
-      data={data}
-      keyExtractor={(e) => e.id}
-      renderItem={({ item }) => (
-        <Row
-          event={item}
-          agent={agent}
-          marked={markerMap.get(item.id) ?? defaultMarked(item, agent)}
-          onLongPressEvent={onLongPressEvent}
-          onRunCommand={onRunCommand}
-          cwd={cwd}
-          pairedResult={
-            item.type === "tool_call" ? resultByCallId.get(item.call.id || item.id) : undefined
-          }
-          batchHeader={headers.get(item.id)}
-          onRespondPermission={onRespondPermission}
-          onRespondPrompt={onRespondPrompt}
-          onSendInput={onSendInput}
-          highlightTerm={highlight && item.id === highlight.id ? highlight.term : undefined}
-        />
-      )}
-      // A blended average across the row types (short user bubbles / meta lines
-      // vs. taller assistant turns) — closer to reality than 72, so scrolling
-      // through unmeasured history settles with less correction.
-      estimatedItemSize={96}
-      recycleItems
-      // Bottom-anchored streaming chat, Claude-style. Two independent behaviours,
-      // and conflating them was the "random jump" bug:
-      //   • size: true  — keep visible content steady when an item *resizes*
-      //     (the last bubble growing token-by-token, or an accordion above
-      //     expanding). New turns only ever append BELOW the viewport, so a
-      //     scrolled-up reading position stays put without data-anchoring.
-      //   • data: false — do NOT re-anchor to a visible item on every data
-      //     update. Streaming fires one data update per token; with the bare
-      //     `maintainVisibleContentPosition` (which normalizes to
-      //     { data: true, size: true }) each token re-anchored some visible row
-      //     and fought maintainScrollAtEnd's pin-to-tail — the jitter the user
-      //     saw. Tail-following is maintainScrollAtEnd's job alone.
-      maintainVisibleContentPosition={{ data: false, size: true }}
-      alignItemsAtEnd
-      // Open on the newest message (bottom), not the top of the history, and
-      // stay pinned to the end as live turns stream in (dataChange + itemLayout
-      // triggers follow the growing last bubble); only while near the end so a
-      // scrolled-up user isn't yanked down.
-      initialScrollAtEnd
-      maintainScrollAtEnd
-      onScroll={(e) => {
-        const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
-        const fromEnd = contentSize.height - (contentOffset.y + layoutMeasurement.height);
-        onAtBottomChange?.(fromEnd < 80);
-      }}
-      scrollEventThrottle={64}
-      ListFooterComponent={footer}
-      contentContainerStyle={{ padding: 12, gap: 8 }}
-    />
+    <View style={s.flex1}>
+      <LegendList
+        ref={setRefs}
+        data={data}
+        keyExtractor={(e) => e.id}
+        renderItem={({ item }) => (
+          <Row
+            event={item}
+            agent={agent}
+            marked={markerMap.get(item.id) ?? defaultMarked(item, agent)}
+            onLongPressEvent={onLongPressEvent}
+            onRunCommand={onRunCommand}
+            cwd={cwd}
+            pairedResult={
+              item.type === "tool_call" ? resultByCallId.get(item.call.id || item.id) : undefined
+            }
+            batchHeader={headers.get(item.id)}
+            onRespondPermission={onRespondPermission}
+            onRespondPrompt={onRespondPrompt}
+            onSendInput={onSendInput}
+            highlightTerm={highlight && item.id === highlight.id ? highlight.term : undefined}
+          />
+        )}
+        // A blended average across the row types (short user bubbles / meta lines
+        // vs. taller assistant turns) — closer to reality than 72, so scrolling
+        // through unmeasured history settles with less correction.
+        estimatedItemSize={96}
+        recycleItems
+        // Bottom-anchored streaming chat, Claude-style. Two independent behaviours,
+        // and conflating them was the "random jump" bug:
+        //   • size: true  — keep visible content steady when an item *resizes*
+        //     (the last bubble growing token-by-token, or an accordion above
+        //     expanding). New turns only ever append BELOW the viewport, so a
+        //     scrolled-up reading position stays put without data-anchoring.
+        //   • data: false — do NOT re-anchor to a visible item on every data
+        //     update. Streaming fires one data update per token; with the bare
+        //     `maintainVisibleContentPosition` (which normalizes to
+        //     { data: true, size: true }) each token re-anchored some visible row
+        //     and fought maintainScrollAtEnd's pin-to-tail — the jitter the user
+        //     saw. Tail-following is maintainScrollAtEnd's job alone.
+        maintainVisibleContentPosition={{ data: false, size: true }}
+        alignItemsAtEnd
+        // Open on the newest message (bottom), not the top of the history, and
+        // stay pinned to the end as live turns stream in (dataChange + itemLayout
+        // triggers follow the growing last bubble); only while near the end so a
+        // scrolled-up user isn't yanked down.
+        initialScrollAtEnd
+        // The chat pattern from LegendList's own guide: stay pinned to the end
+        // as the streaming reply grows (data + item-layout triggers), but only
+        // while the viewport is within the threshold of the bottom — scrolling
+        // up detaches automatically, riding back down re-attaches.
+        maintainScrollAtEnd
+        // 0.25 viewport: forgiving enough that a chunky growth step (a pasted
+        // paragraph, the settled-row swap at turn end) doesn't spuriously
+        // detach the pin, while a deliberate scroll-up still does.
+        maintainScrollAtEndThreshold={0.25}
+        onScroll={(e) => {
+          const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+          const fromEnd = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+          onAtBottomChange?.(fromEnd < 80);
+        }}
+        scrollEventThrottle={64}
+        ListFooterComponent={footer}
+        contentContainerStyle={{ padding: 12, gap: 8 }}
+      />
+    </View>
   );
 });
 
@@ -295,8 +341,8 @@ const Row = memo(function Row({
           </SearchHighlight>
         );
       return (
-        <View className="gap-2">
-          <Text className="pl-1 text-[12px] text-fg-muted">{batchHeader}</Text>
+        <View style={s.gap8}>
+          <Text style={s.batchHeader}>{batchHeader}</Text>
           <SearchHighlight term={highlightTerm}>
             <ToolAccordion event={event} result={pairedResult} cwd={cwd} />
           </SearchHighlight>
@@ -348,7 +394,9 @@ function AssistantBubble({
   onRun?: (command: string) => void;
 }) {
   const clean = useMemo(() => cleanAssistantText(text, agent), [text, agent]);
-  return <Bubble role="assistant" text={clean} streaming={streaming} marked={marked} onRun={onRun} />;
+  return (
+    <Bubble role="assistant" text={clean} streaming={streaming} marked={marked} onRun={onRun} />
+  );
 }
 
 function UserRow({
@@ -365,7 +413,7 @@ function UserRow({
   // An image-only message (no prose) must still render, so don't bail on empty.
   if (isEmptyUserMessage(p) && !hasImages) return null;
   return (
-    <View className="gap-1.5">
+    <View style={s.gap6}>
       {p.command ? <CommandChip name={p.command.name} args={p.command.args} /> : null}
       {p.output ? <OutputNote text={p.output.text} isError={p.output.isError} /> : null}
       {hasImages ? <InlineImages images={images!} /> : null}
@@ -395,27 +443,28 @@ function PermissionCard({
     onRespond?.(event.requestId, optionId);
   };
   return (
-    <View className="gap-2 rounded-xl border border-warning/40 bg-warning/10 p-3">
-      <View className="flex-row items-center gap-1.5">
-        <Ionicons name="shield-checkmark-outline" size={13} color="#d29922" />
-        <Text className="flex-1 text-[13px] font-medium text-fg">{event.toolTitle}</Text>
+    <View style={s.permCard}>
+      <View style={s.rowCenter6}>
+        <PounceIcon name="shield-checkmark-outline" size={13} color="#d29922" />
+        <Text style={s.permTitle}>{event.toolTitle}</Text>
       </View>
       {answered ? (
-        <Text className="text-[12px] font-medium text-fg-muted">You chose: {chosen}</Text>
+        <Text style={s.permChosen}>You chose: {chosen}</Text>
       ) : (
-        <View className="flex-row flex-wrap gap-2">
+        <View style={s.optionsWrap}>
           {event.options.map((o) => {
             const reject = /reject|deny|no/i.test(o.kind || o.optionId || o.name);
             return (
               <Pressable
                 key={o.optionId}
                 onPress={() => pick(o.optionId, o.name)}
-                className={cn(
-                  "active:opacity-80 rounded-lg px-3 py-2",
-                  reject ? "border border-border bg-surface-alt" : "bg-accent",
-                )}
+                style={({ pressed }) => [
+                  s.optionBtn,
+                  reject ? s.optionBtnReject : s.optionBtnAllow,
+                  pressed && s.pressed80,
+                ]}
               >
-                <Text className={cn("text-[13px] font-semibold", reject ? "text-fg-muted" : "text-white")}>
+                <Text style={[s.optionLabel, reject ? s.optionLabelReject : s.optionLabelAllow]}>
                   {o.name}
                 </Text>
               </Pressable>
@@ -444,7 +493,7 @@ function PromptCard({
   onSendInput?: (data: string) => void;
 }) {
   return (
-    <View className="rounded-xl border border-accent/40 bg-accent/5 p-3">
+    <View style={s.accentCard}>
       <PromptForm prompt={event} onRespond={onRespond} onSendInput={onSendInput} />
     </View>
   );
@@ -453,11 +502,12 @@ function PromptCard({
 /** Plan mode's proposed plan (from ExitPlanMode), rendered as markdown in a
  *  distinct accent card so it reads as a plan, not a buried tool call. */
 function PlanCard({ plan }: { plan: string }) {
+  const { theme } = useUnistyles();
   return (
-    <View className="gap-1.5 rounded-xl border border-accent/40 bg-accent/5 p-3">
-      <View className="flex-row items-center gap-1.5">
-        <Ionicons name="map-outline" size={13} color={COLOR.accent} />
-        <Text className="text-[12px] font-semibold uppercase tracking-wide text-accent">Plan</Text>
+    <View style={[s.accentCard, s.gap6]}>
+      <View style={s.rowCenter6}>
+        <PounceIcon name="map-outline" size={13} color={theme.colors.accent} />
+        <Text style={s.planLabel}>Plan</Text>
       </View>
       <MessageMarkdown text={plan} role="assistant" />
     </View>
@@ -466,30 +516,48 @@ function PlanCard({ plan }: { plan: string }) {
 
 const THUMB = 128;
 
+/** Video attachments by mediaType, with an extension fallback for transcript
+ *  events that only carry a path/uri. */
+function isVideo(att: MessageImage): boolean {
+  if (att.mediaType?.startsWith("video/")) return true;
+  return /\.(mov|mp4|m4v|webm|avi|mkv)(\?|$)/i.test(att.uri ?? "");
+}
+
 /**
- * Attached images as right-aligned thumbnails; tap opens a full-size lightbox.
- * Each thumbnail is lazy — it only fetches once its row scrolls into view
- * (useViewability), so opening a screenshot-heavy thread doesn't pull every
- * image at once. Keyed by uri so a recycled row re-gates the new image.
+ * Attached media as right-aligned thumbnails; tap opens a full-size lightbox
+ * (image viewer, or the native video player for video attachments).
+ * Thumbnails render as soon as their row mounts — the list's virtualization
+ * already bounds mounted rows, and the old useViewability gate never fired for
+ * rows that mounted already-visible (perma-gray thumbnails).
  */
 function InlineImages({ images, eager }: { images: readonly MessageImage[]; eager?: boolean }) {
-  const [preview, setPreview] = useState<string | null>(null);
+  const [preview, setPreview] = useState<MessageImage | null>(null);
   const shown = images.filter((i) => i.uri);
   if (!shown.length) return null;
   return (
-    <View className={cn("flex-row flex-wrap gap-1.5", eager ? "justify-start" : "justify-end")}>
-      {shown.map((img) => (
-        <LazyImage key={img.uri} uri={img.uri!} onPress={() => setPreview(img.uri!)} eager={eager} />
-      ))}
-      <Modal visible={!!preview} transparent animationType="fade" onRequestClose={() => setPreview(null)}>
+    <View style={[s.imagesRow, eager ? s.justifyStart : s.justifyEnd]}>
+      {shown.map((att) =>
+        isVideo(att) ? (
+          <VideoTile key={att.uri} onPress={() => setPreview(att)} />
+        ) : (
+          <LazyImage key={att.uri} uri={att.uri!} onPress={() => setPreview(att)} />
+        ),
+      )}
+      <Modal
+        visible={!!preview}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPreview(null)}
+      >
         <Pressable
           onPress={() => setPreview(null)}
-          style={StyleSheet.absoluteFill}
-          className="items-center justify-center"
+          style={[StyleSheet.absoluteFill, s.centerContent]}
         >
-          <View style={StyleSheet.absoluteFill} className="bg-black/90" />
-          {preview ? (
-            <Image source={{ uri: preview }} style={{ width: "94%", height: "84%" }} resizeMode="contain" />
+          <View style={[StyleSheet.absoluteFill, s.lightboxScrim]} />
+          {preview && isVideo(preview) ? (
+            <VideoPlayer uri={preview.uri!} style={s.lightboxMedia} />
+          ) : preview ? (
+            <Image source={{ uri: preview.uri! }} style={s.lightboxMedia} resizeMode="contain" />
           ) : null}
         </Pressable>
       </Modal>
@@ -497,24 +565,47 @@ function InlineImages({ images, eager }: { images: readonly MessageImage[]; eage
   );
 }
 
+/** A video attachment as a dark tile with a play glyph — no frame extraction
+ *  (thumbnailing would need the player); the lightbox does the real playback. */
+function VideoTile({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [s.thumb, s.videoTile, pressed && s.pressed80]}
+    >
+      <PounceIcon name="play" size={26} color="#fff" />
+    </Pressable>
+  );
+}
+
 /** One thumbnail whose network fetch is deferred until the row is viewable —
  *  unless `eager`, which renders immediately (viewability doesn't fire reliably
  *  for a thumbnail nested inside a tool card, so tool-card previews opt out). */
-function LazyImage({ uri, onPress, eager }: { uri: string; onPress: () => void; eager?: boolean }) {
-  const [visible, setVisible] = useState(!!eager);
-  useViewability((token) => {
-    if (token.isViewable) setVisible(true);
-  });
+function LazyImage({ uri, onPress }: { uri: string; onPress: () => void }) {
+  const { theme } = useUnistyles();
+  // No viewability gating: the list's virtualization already bounds mounted
+  // rows, and legend-list's useViewability doesn't reliably fire an initial
+  // callback for rows that mount already-visible — thumbnails stayed gray
+  // placeholders forever while the tap-through preview (ungated) worked.
+  // Dead URIs (e.g. attachments whose app-container path no longer exists
+  // after a reinstall) get an explicit broken state, not a silent gray box.
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <View style={[s.thumb, s.thumbPlaceholder, s.thumbBrokenWrap]}>
+        <PounceIcon name="image-outline" size={22} color={theme.colors.fgFaint} />
+        <Text style={s.thumbBrokenLabel}>Image unavailable</Text>
+      </View>
+    );
+  }
   return (
-    <Pressable onPress={onPress} className="active:opacity-80">
-      {visible ? (
-        <Image source={{ uri }} style={{ width: THUMB, height: THUMB, borderRadius: 12 }} resizeMode="cover" />
-      ) : (
-        <View
-          style={{ width: THUMB, height: THUMB, borderRadius: 12 }}
-          className="border border-border bg-surface-alt"
-        />
-      )}
+    <Pressable onPress={onPress} style={({ pressed }) => pressed && s.pressed80}>
+      <Image
+        source={{ uri }}
+        style={[s.thumb, s.thumbPlaceholder]}
+        resizeMode="contain"
+        onError={() => setFailed(true)}
+      />
     </Pressable>
   );
 }
@@ -522,13 +613,13 @@ function LazyImage({ uri, onPress, eager }: { uri: string; onPress: () => void; 
 /** A slash command the user ran, as a compact right-aligned pill. */
 function CommandChip({ name, args }: { name: string; args?: string }) {
   return (
-    <View className="flex-row justify-end">
-      <View className="max-w-[86%] flex-row items-center gap-1.5 rounded-full border border-accent/40 bg-accent/15 px-3 py-1.5">
-        <Text className="font-mono text-[13px] font-semibold text-accent">{name}</Text>
+    <View style={s.rowEnd}>
+      <View style={s.commandChip}>
+        <Text style={s.commandName}>{name}</Text>
         {args ? (
           // flexShrink so long args truncate INSIDE the pill instead of pushing
           // the row past its max-width (text was bleeding out of the bubble).
-          <Text numberOfLines={1} style={{ flexShrink: 1 }} className="font-mono text-[12px] text-fg-muted">
+          <Text numberOfLines={1} style={s.commandArgs}>
             {args}
           </Text>
         ) : null}
@@ -540,17 +631,9 @@ function CommandChip({ name, args }: { name: string; args?: string }) {
 /** Captured stdout/stderr from a local command, collapsed to a subtle note. */
 function OutputNote({ text, isError }: { text: string; isError: boolean }) {
   return (
-    <View className="flex-row justify-end">
-      <View
-        className={cn(
-          "max-w-[86%] rounded-xl border px-3 py-1.5",
-          isError ? "border-danger/40 bg-danger/10" : "border-border bg-surface-alt",
-        )}
-      >
-        <Text
-          numberOfLines={6}
-          className={cn("font-mono text-[12px]", isError ? "text-danger" : "text-fg-muted")}
-        >
+    <View style={s.rowEnd}>
+      <View style={[s.outputNote, isError ? s.outputNoteError : s.outputNoteOk]}>
+        <Text numberOfLines={6} style={[s.monoText12, isError ? s.textDanger : s.textMuted]}>
           {text}
         </Text>
       </View>
@@ -574,24 +657,32 @@ function Bubble({
   /** Enables shell "Run" cards on assistant turns (queues !cmd to composer). */
   onRun?: (command: string) => void;
 }) {
+  const { theme } = useUnistyles();
   // User turns are compact right-aligned accent bubbles; assistant turns render
   // full-width (rich markdown/code needs the room), no bubble chrome. Both go
   // through the native md4c renderer — the user composes markdown too.
   if (role === "user") {
     return (
-      <View className="flex-row justify-end">
-        <View className="max-w-[86%] rounded-2xl bg-accent px-3 py-1.5">
+      <View style={s.rowEnd}>
+        <View style={s.userBubble}>
           <MessageMarkdown text={text} role="user" streaming={streaming} />
         </View>
       </View>
     );
   }
   return (
-    <View className="flex-row items-start gap-1">
-      <View className="flex-1">
+    <View style={s.assistantRow}>
+      <View style={s.flex1}>
         <MessageMarkdown text={text} role="assistant" streaming={streaming} onRun={onRun} />
       </View>
-      {marked ? <Ionicons name="bookmark" size={10} color={COLOR.accent} style={{ marginTop: 3 }} /> : null}
+      {marked ? (
+        <PounceIcon
+          name="bookmark"
+          size={10}
+          color={theme.colors.accent}
+          style={{ marginTop: 3 }}
+        />
+      ) : null}
     </View>
   );
 }
@@ -631,7 +722,16 @@ const SHELL_GOLD = "#d29922";
  * Expanding reveals the full command and the tool's output nested in the same
  * card, instead of the output sprawling as its own full-width block.
  */
-function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: ToolResultEvent; cwd?: string | null }) {
+function ToolAccordion({
+  event,
+  result,
+  cwd,
+}: {
+  event: ToolCallEvent;
+  result?: ToolResultEvent;
+  cwd?: string | null;
+}) {
+  const { theme } = useUnistyles();
   // Rows are recycled: key the expansion to the event id so an open accordion
   // can't bleed into whatever event this component instance shows next.
   const [openId, setOpenId] = useState<string | null>(null);
@@ -651,29 +751,29 @@ function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: 
     const raw = String(result.result.content.text ?? "");
     // Strip ANSI escapes and carriage-return progress redraws before tailing.
     const clean = raw.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/^.*\r(?!\n)/gm, "");
-    const lines = clean.trimEnd().split("\n").filter((l) => l.trim().length > 0);
+    const lines = clean
+      .trimEnd()
+      .split("\n")
+      .filter((l) => l.trim().length > 0);
     return lines.length ? lines.slice(-3).join("\n") : null;
   }, [running, open, result]);
   return (
     <Pressable
       disabled={!expandable}
       onPress={() => setOpenId(open ? null : event.id)}
-      className={cn(
-        "rounded-xl border px-3 py-2",
-        failed ? "border-danger/40 bg-danger/10" : "border-border bg-surface-alt",
-      )}
+      style={[s.toolCard, failed ? s.toolCardFailed : s.toolCardOk]}
     >
-      <View className="flex-row items-center gap-2">
+      <View style={s.rowCenter8}>
         {shell ? (
-          <Text style={{ color: failed ? COLOR.danger : SHELL_GOLD }} className="font-mono text-[13px] font-semibold">
+          <Text style={[s.shellDollar, { color: failed ? theme.colors.danger : SHELL_GOLD }]}>
             $
           </Text>
         ) : (
-          <Text className="font-mono text-[12px] text-fg">⚙ {name}</Text>
+          <Text style={s.toolName}>⚙ {name}</Text>
         )}
         {shell ? (
           // Highlight the command as bash — the collapsed row stays one line.
-          <View className="flex-1">
+          <View style={s.flex1}>
             <HlText
               code={open ? preview : preview.replace(/\s+/g, " ")}
               language="bash"
@@ -682,38 +782,39 @@ function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: 
             />
           </View>
         ) : (
-          <Text
-            numberOfLines={open ? undefined : 1}
-            className="flex-1 font-mono text-[12px] leading-[17px] text-fg-muted"
-          >
+          <Text numberOfLines={open ? undefined : 1} style={s.toolPreview}>
             {open ? preview : preview.replace(/\s+/g, " ")}
           </Text>
         )}
         {running ? (
-          <View className="flex-row items-center gap-1">
-            <View className="h-1.5 w-1.5 rounded-full bg-success" />
-            <Text className="text-[10px] font-semibold uppercase tracking-wide text-success">Running</Text>
+          <View style={s.rowCenter4}>
+            <View style={s.runningDot} />
+            <Text style={s.runningLabel}>Running</Text>
           </View>
         ) : expandable ? (
-          <Ionicons name={open ? "chevron-up" : "chevron-down"} size={13} color={COLOR.fgFaint} />
+          <PounceIcon
+            name={open ? "chevron-up" : "chevron-down"}
+            size={13}
+            color={theme.colors.fgFaint}
+          />
         ) : null}
       </View>
       {open && event.call.previewUri ? (
         // A Read of an image → show the picture, not just the path, once the
         // card is expanded. Eager: a nested thumbnail's viewability doesn't
         // fire reliably inside a card.
-        <View className="mt-2">
+        <View style={s.mt8}>
           <InlineImages images={[{ uri: event.call.previewUri, mediaType: "" }]} eager />
         </View>
       ) : null}
       {open && result ? (
-        <View className="mt-2">
+        <View style={s.mt8}>
           <ResultBody content={result.result.content} isError={result.result.isError} nested />
         </View>
       ) : null}
       {tail ? (
-        <View className="mt-2 rounded-lg bg-[#0d0d12] px-2.5 py-1.5">
-          <Text numberOfLines={3} className="font-mono text-[11px] leading-[15px] text-fg-faint">
+        <View style={s.tailBox}>
+          <Text numberOfLines={3} style={s.tailText}>
             {tail}
           </Text>
         </View>
@@ -723,21 +824,35 @@ function ToolAccordion({ event, result, cwd }: { event: ToolCallEvent; result?: 
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function ResultBody({ content, isError, nested }: { content: any; isError: boolean; nested?: boolean }) {
+function ResultBody({
+  content,
+  isError,
+  nested,
+}: {
+  content: any;
+  isError: boolean;
+  nested?: boolean;
+}) {
   if (content?.kind === "diff") {
-    return <DiffBlock patch={content.patch ?? ""} path={content.path} nested={nested} maxLines={nested ? 120 : 40} />;
+    return (
+      <DiffBlock
+        patch={content.patch ?? ""}
+        path={content.path}
+        nested={nested}
+        maxLines={nested ? 120 : 40}
+      />
+    );
   }
-  const text = content?.kind === "text" ? content.text : content?.kind === "json" ? JSON.stringify(content.value) : "";
+  const text =
+    content?.kind === "text"
+      ? content.text
+      : content?.kind === "json"
+        ? JSON.stringify(content.value)
+        : "";
   if (!text) return null;
   return (
-    <View
-      className={cn(
-        "rounded-xl bg-[#0d0d12] px-3 py-2",
-        nested && "rounded-lg border border-border",
-        isError && "border border-danger/40",
-      )}
-    >
-      <Text numberOfLines={nested ? 30 : 12} className="font-mono text-[12px] text-[#cdd0d6]">
+    <View style={[s.resultBox, nested && s.resultBoxNested, isError && s.resultBoxError]}>
+      <Text numberOfLines={nested ? 30 : 12} style={s.resultText}>
         {text}
       </Text>
     </View>
@@ -752,8 +867,11 @@ function ToolResult({ content, isError }: { content: any; isError: boolean }) {
 
 function Term({ data, stream }: { data: string; stream: string }) {
   return (
-    <View className="rounded-xl bg-black p-2">
-      <Text numberOfLines={20} className={cn("font-mono text-[12px]", stream === "stderr" ? "text-danger" : "text-[#d6d6d6]")}>
+    <View style={s.termBox}>
+      <Text
+        numberOfLines={20}
+        style={[s.monoText12, stream === "stderr" ? s.textDanger : s.termTextOut]}
+      >
         {data}
       </Text>
     </View>
@@ -786,9 +904,170 @@ function SearchHighlight({ term, children }: { term?: string; children: React.Re
 }
 
 function Meta({ text, level }: { text: string; level?: "info" | "warning" | "error" }) {
-  return (
-    <Text className={cn("py-0.5 text-center text-[11px]", level === "error" ? "text-danger" : "text-fg-faint")}>
-      {text}
-    </Text>
-  );
+  return <Text style={[s.meta, level === "error" ? s.textDanger : s.textFaint]}>{text}</Text>;
 }
+
+/* Soft accent/warning/danger tints (the old accent/40-style alpha classes) have
+ * no PlatformColor equivalent, so they stay literal rgba of the palette hexes. */
+const ACCENT_BORDER = "rgba(124, 111, 240, 0.4)";
+const ACCENT_TINT = "rgba(124, 111, 240, 0.05)";
+const WARNING_BORDER = "rgba(210, 153, 34, 0.4)";
+const WARNING_TINT = "rgba(210, 153, 34, 0.1)";
+const DANGER_BORDER = "rgba(248, 81, 73, 0.4)";
+const DANGER_TINT = "rgba(248, 81, 73, 0.1)";
+/* Terminal-style output blocks keep their fixed dark look in both schemes. */
+const TERM_BG = "#0d0d12";
+const TERM_FG = "#cdd0d6";
+
+const s = StyleSheet.create((theme) => ({
+  flex1: { flex: 1 },
+  gap6: { gap: 6 },
+  gap8: { gap: 8 },
+  mt8: { marginTop: 8 },
+  pressed80: { opacity: 0.8 },
+  rowEnd: { flexDirection: "row", justifyContent: "flex-end" },
+  rowCenter4: { flexDirection: "row", alignItems: "center", gap: 4 },
+  rowCenter6: { flexDirection: "row", alignItems: "center", gap: 6 },
+  rowCenter8: { flexDirection: "row", alignItems: "center", gap: 8 },
+  centerContent: { alignItems: "center", justifyContent: "center" },
+  textDanger: { color: theme.colors.danger },
+  textMuted: { color: theme.colors.fgMuted },
+  textFaint: { color: theme.colors.fgFaint },
+  monoText12: { fontFamily: "JetBrainsMono", fontSize: 12 },
+  batchHeader: { paddingLeft: 4, fontSize: 12, color: theme.colors.fgMuted },
+  permCard: {
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: WARNING_BORDER,
+    backgroundColor: WARNING_TINT,
+    padding: 12,
+  },
+  permTitle: { flex: 1, fontSize: 13, fontWeight: "500", color: theme.colors.fg },
+  permChosen: { fontSize: 12, fontWeight: "500", color: theme.colors.fgMuted },
+  optionsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  optionBtn: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  optionBtnReject: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceAlt,
+  },
+  optionBtnAllow: { backgroundColor: theme.colors.accent },
+  optionLabel: { fontSize: 13, fontWeight: "600" },
+  optionLabelReject: { color: theme.colors.fgMuted },
+  optionLabelAllow: { color: theme.colors.onAccent },
+  accentCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: ACCENT_BORDER,
+    backgroundColor: ACCENT_TINT,
+    padding: 12,
+  },
+  planLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: theme.colors.accent,
+  },
+  imagesRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  justifyStart: { justifyContent: "flex-start" },
+  justifyEnd: { justifyContent: "flex-end" },
+  lightboxScrim: { backgroundColor: "rgba(0, 0, 0, 0.9)" },
+  thumb: { width: THUMB, height: THUMB, borderRadius: 12 },
+  thumbPlaceholder: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceAlt,
+  },
+  thumbBrokenWrap: { alignItems: "center", justifyContent: "center", gap: 4 },
+  thumbBrokenLabel: { fontSize: 10, color: theme.colors.fgFaint },
+  videoTile: { backgroundColor: "#000", alignItems: "center", justifyContent: "center" },
+  lightboxMedia: { width: "94%", height: "84%" },
+  commandChip: {
+    maxWidth: "86%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: ACCENT_BORDER,
+    backgroundColor: theme.colors.accentSoft,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  commandName: {
+    fontFamily: "JetBrainsMono",
+    fontSize: 13,
+    fontWeight: "600",
+    color: theme.colors.accent,
+  },
+  commandArgs: {
+    flexShrink: 1,
+    fontFamily: "JetBrainsMono",
+    fontSize: 12,
+    color: theme.colors.fgMuted,
+  },
+  outputNote: {
+    maxWidth: "86%",
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  outputNoteError: { borderColor: DANGER_BORDER, backgroundColor: DANGER_TINT },
+  outputNoteOk: { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceAlt },
+  userBubble: {
+    maxWidth: "86%",
+    borderRadius: 16,
+    backgroundColor: theme.colors.accent,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  assistantRow: { flexDirection: "row", alignItems: "flex-start", gap: 4 },
+  toolCard: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
+  toolCardFailed: { borderColor: DANGER_BORDER, backgroundColor: DANGER_TINT },
+  toolCardOk: { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceAlt },
+  shellDollar: { fontFamily: "JetBrainsMono", fontSize: 13, fontWeight: "600" },
+  toolName: { fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fg },
+  toolPreview: {
+    flex: 1,
+    fontFamily: "JetBrainsMono",
+    fontSize: 12,
+    lineHeight: 17,
+    color: theme.colors.fgMuted,
+  },
+  runningDot: { height: 6, width: 6, borderRadius: 999, backgroundColor: theme.colors.success },
+  runningLabel: {
+    fontSize: 10,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: theme.colors.success,
+  },
+  tailBox: {
+    marginTop: 8,
+    borderRadius: 8,
+    backgroundColor: TERM_BG,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  tailText: {
+    fontFamily: "JetBrainsMono",
+    fontSize: 11,
+    lineHeight: 15,
+    color: theme.colors.fgFaint,
+  },
+  resultBox: {
+    borderRadius: 12,
+    backgroundColor: TERM_BG,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  resultBoxNested: { borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border },
+  resultBoxError: { borderWidth: 1, borderColor: DANGER_BORDER },
+  resultText: { fontFamily: "JetBrainsMono", fontSize: 12, color: TERM_FG },
+  termBox: { borderRadius: 12, backgroundColor: "#000000", padding: 8 },
+  termTextOut: { color: "#d6d6d6" },
+  meta: { paddingVertical: 2, textAlign: "center", fontSize: 11 },
+}));

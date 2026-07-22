@@ -22,6 +22,9 @@
       "expo-router": [
         "./src/shims/router.tsx"
       ],
+      "react-native-unistyles": [
+        "./src/shims/unistyles.ts"
+      ],
       "@pounce/app/*": [
         "../packages/app/src/*"
       ],
@@ -76,7 +79,5 @@
     "App.tsx",
     "index.ts",
     "src",
-    "declarations.d.ts",
-    "uniwind-types.d.ts"
   ]
 }

@@ -339,7 +339,11 @@ function repoInfo(cwd) {
   const norm = (cwd || "").replace(/\\/g, "/");
   const isRoot = norm === "/" || /^[A-Za-z]:\/?$/.test(norm);
   if (!norm || isRoot || cwd === os.homedir()) {
-    return { repo: "Scratch", isWorktree: false, isLive: false, worktree: null };
+    // Scratch sessions (homedir/root) are resumable like any other as long as
+    // the directory exists — hardcoding isLive:false made every scratch thread
+    // read-only ("archived") the moment it finished, forcing a NEW session per
+    // follow-up instead of reusing the one thread.
+    return { repo: "Scratch", isWorktree: false, isLive: !!norm && existsSync(cwd), worktree: null };
   }
   const live = existsSync(cwd);
   const m = norm.match(/\/worktrees\/([^/]+)\/(.+)$/);

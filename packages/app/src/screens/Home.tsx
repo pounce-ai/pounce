@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActionSheetIOS, Animated as RNAnimated, Easing, Modal, Pressable, RefreshControl, Text, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import { LinearTransition } from "react-native-reanimated";
 import { useObservable, useSelector } from "@legendapp/state/react";
 import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import { PounceIcon } from "../ui/native/Icon";
 import type { Session } from "@pounce/shared";
 import {
   activeFilterCount,
@@ -34,7 +35,7 @@ import { SessionCard } from "../components/SessionCard";
 import { LiveStrip } from "../components/LiveStrip";
 import { SessionListSkeleton } from "../components/Skeleton";
 import { FilterButton, FilterSheet } from "../components/FilterSheet";
-import { cn, COLOR, DeviceIcon } from "../ui";
+import { DeviceIcon, IS_DESKTOP } from "../ui";
 import { refreshLive } from "../services/runtime";
 
 /** Collapse key for the Favourites pseudo-group (shares the collapsed$ map). */
@@ -62,6 +63,7 @@ type Row =
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { theme } = useUnistyles();
 
   const [refreshing, setRefreshing] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -217,53 +219,59 @@ export default function HomeScreen() {
   // badge (spinner → green tick), so null here = nothing worth a row.
   const subtitle =
     !connected && !loading ? (
-      <Text numberOfLines={1} className="text-[13px] text-fg-faint">Tap to sync a device</Text>
+      <Text numberOfLines={1} style={s.subFaint}>Tap to sync a device</Text>
     ) : attentionCount > 0 ? (
       <>
-        <Ionicons name="alert-circle" size={13} color={COLOR.warning} />
-        <Text numberOfLines={1} className="text-[13px] text-warning">
+        <PounceIcon name="alert-circle" size={13} color={theme.colors.warning} />
+        <Text numberOfLines={1} style={s.subWarning}>
           {attentionCount} need{attentionCount === 1 ? "s" : ""} you
         </Text>
       </>
     ) : null;
 
   return (
-    <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>
+    <View style={[s.root, { paddingTop: insets.top }]}>
       {/* Glance header */}
-      <View className="flex-row items-end justify-between px-4 pb-2 pt-1">
-        <View className="flex-1 pr-2">
-          <View className="flex-row items-start gap-1">
-            <Text className="text-[26px] font-bold text-fg">Pounce</Text>
+      <View style={s.headerRow}>
+        <View style={s.headerLeft}>
+          <View style={s.wordmarkRow}>
+            <Text style={s.wordmark}>Pounce</Text>
             {/* Superscript status badge: spinner while syncing, then a green
                 tick once connected and caught up. */}
             {loading ? (
               <SyncSpinner />
             ) : connected && attentionCount === 0 ? (
-              <Ionicons name="checkmark-circle" size={12} color={COLOR.success} style={{ marginTop: 5 }} />
+              <PounceIcon name="checkmark-circle" size={12} color={theme.colors.success} style={{ marginTop: 5 }} />
             ) : null}
           </View>
           {subtitle || filterCount ? (
             <Pressable
               onPress={() => router.push("/settings")}
-              className="active:opacity-60 mt-0.5 flex-row items-center gap-1"
+              style={({ pressed }) => [s.subtitleRow, pressed && s.pressed60]}
             >
               {subtitle}
-              {filterCount ? <Text className="text-[13px] text-fg-faint">· filtered</Text> : null}
+              {filterCount ? <Text style={s.subFaint}>· filtered</Text> : null}
             </Pressable>
           ) : null}
         </View>
-        <View className="flex-row items-center gap-2 shrink-0">
-          <FilterButton active={showFilters} onPress={() => setShowFilters(true)} />
-          <Pressable onPress={() => router.push("/new")} className="active:opacity-80 h-9 flex-row items-center gap-1 rounded-full bg-accent px-3.5">
-            <Ionicons name="add" size={17} color="#fff" />
-            <Text className="text-[14px] font-semibold text-white">New</Text>
+        <View style={s.headerActions}>
+          <FilterButton
+            active={showFilters}
+            onPress={() => (IS_DESKTOP ? setShowFilters(true) : router.push("/filters"))}
+          />
+          <Pressable onPress={() => router.push("/new")} style={({ pressed }) => [s.newBtn, pressed && s.pressed80]}>
+            <PounceIcon name="add" size={17} color="#fff" />
+            <Text style={s.newBtnLabel}>New</Text>
           </Pressable>
         </View>
       </View>
 
-      <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
+      {IS_DESKTOP ? <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} /> : null}
 
       <AnimatedLegendList
+        // Let UIKit inset the scroll under the translucent system tab bar —
+        // without this the last rows hide beneath the bar.
+        contentInsetAdjustmentBehavior="automatic"
         style={{ flex: 1 }}
         data={rows}
         // Subtle reorder: when a sync bumps a thread/folder's updatedAt and the
@@ -300,7 +308,7 @@ export default function HomeScreen() {
               onLongPress={() => onLongPressRepo(item.repoId, item.name)}
             />
           ) : (
-            <View className="px-4 pb-2.5">
+            <View style={s.sessionRow}>
               <SessionCard session={item.session} onLongPress={onLongPressSession} />
             </View>
           )
@@ -312,33 +320,35 @@ export default function HomeScreen() {
         // survive being offline/mid-reconnect — the strip hides itself when
         // empty. Gating on `connected` made it vanish on every blip.
         ListHeaderComponent={<LiveStrip />}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLOR.accent} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent} />}
         ListEmptyComponent={
           loading ? (
             <SessionListSkeleton />
           ) : !connected ? (
-            <View className="items-center px-8 py-20">
-              <Text className="text-[40px]">🐾</Text>
-              <Text className="mt-3 text-center text-[15px] font-semibold text-fg">Connect your computer</Text>
-              <Text className="mt-1 text-center text-[13px] text-fg-muted">
+            <View style={s.empty}>
+              <Text style={s.emptyEmoji}>🐾</Text>
+              <Text style={s.emptyTitle}>Connect your computer</Text>
+              <Text style={s.emptyBody}>
                 Run Pounce Bridge on your Mac and scan the code to see your agents here.
               </Text>
               <Pressable
                 onPress={() => router.push("/settings")}
-                className="active:opacity-80 mt-5 rounded-full bg-accent px-5 py-2.5"
+                style={({ pressed }) => [s.emptyCta, pressed && s.pressed80]}
               >
-                <Text className="text-[14px] font-semibold text-white">Sync a device</Text>
+                <Text style={s.newBtnLabel}>Sync a device</Text>
               </Pressable>
             </View>
           ) : (
-            <View className="items-center px-8 py-20">
-              <Text className="text-[40px]">🐾</Text>
-              <Text className="mt-3 text-center text-[15px] font-semibold text-fg">All caught up</Text>
-              <Text className="mt-1 text-center text-[13px] text-fg-muted">Nothing needs you right now.</Text>
+            <View style={s.empty}>
+              <Text style={s.emptyEmoji}>🐾</Text>
+              <Text style={s.emptyTitle}>All caught up</Text>
+              <Text style={s.emptyBody}>Nothing needs you right now.</Text>
             </View>
           )
         }
-        contentContainerStyle={{ paddingTop: 6, paddingBottom: insets.bottom + 120 }}
+        // Bottom pad clears the system tab bar (the old floating dock needed
+        // +120; the native bar insets the scroll view itself).
+        contentContainerStyle={{ paddingTop: 6, paddingBottom: insets.bottom + 16 }}
       />
     </View>
   );
@@ -348,6 +358,7 @@ export default function HomeScreen() {
 /** Rotating sync glyph — the wordmark badge's "working" state. Core Animated
  *  so it spins on desktop too (the reanimated seam is static there). */
 function SyncSpinner() {
+  const { theme } = useUnistyles();
   const turn = useRef(new RNAnimated.Value(0)).current;
   useEffect(() => {
     const loop = RNAnimated.loop(
@@ -359,7 +370,7 @@ function SyncSpinner() {
   const rotate = turn.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
   return (
     <RNAnimated.View style={{ marginTop: 5, transform: [{ rotate }] }}>
-      <Ionicons name="sync" size={12} color={COLOR.fgFaint} />
+      <PounceIcon name="sync" size={12} color={theme.colors.fgFaint} />
     </RNAnimated.View>
   );
 }
@@ -373,15 +384,16 @@ function FavHeader({
   collapsed: boolean;
   onPress: () => void;
 }) {
+  const { theme } = useUnistyles();
   return (
     <Pressable
       onPress={onPress}
-      className="active:opacity-70 flex-row items-center gap-2 px-4 pb-1.5 pt-3"
+      style={({ pressed }) => [s.groupHeader, pressed && s.pressed70]}
     >
-      <Ionicons name={collapsed ? "chevron-forward" : "chevron-down"} size={13} color={COLOR.fgFaint} />
-      <Ionicons name="star" size={13} color={COLOR.accent} />
-      <Text className="flex-1 text-[13px] font-semibold text-fg-muted">Favourites</Text>
-      <Text className="text-[12px] text-fg-faint">{count}</Text>
+      <PounceIcon name={collapsed ? "chevron-forward" : "chevron-down"} size={13} color={theme.colors.fgFaint} />
+      <PounceIcon name="star" size={13} color={theme.colors.accent} />
+      <Text style={s.groupTitle}>Favourites</Text>
+      <Text style={s.groupCount}>{count}</Text>
     </Pressable>
   );
 }
@@ -411,39 +423,102 @@ function DirHeader({
   onAdd: () => void;
   onLongPress: () => void;
 }) {
+  const { theme } = useUnistyles();
   return (
     <Pressable
       onPress={onPress}
       onLongPress={onLongPress}
       delayLongPress={350}
-      className="active:opacity-70 flex-row items-center gap-2 px-4 pb-1.5 pt-3"
+      style={({ pressed }) => [s.groupHeader, pressed && s.pressed70]}
     >
-      <Ionicons name={collapsed ? "chevron-forward" : "chevron-down"} size={13} color={COLOR.fgFaint} />
+      <PounceIcon name={collapsed ? "chevron-forward" : "chevron-down"} size={13} color={theme.colors.fgFaint} />
       {fav ? (
-        <Ionicons name="star" size={13} color={COLOR.accent} />
+        <PounceIcon name="star" size={13} color={theme.colors.accent} />
       ) : deviceName ? (
-        <DeviceIcon name={deviceName} emoji={emoji} color={COLOR.fgFaint} size={13} />
+        <DeviceIcon name={deviceName} emoji={emoji} color={theme.colors.fgFaint} size={13} />
       ) : (
-        <Ionicons name="folder-outline" size={13} color={COLOR.fgFaint} />
+        <PounceIcon name="folder-outline" size={13} color={theme.colors.fgFaint} />
       )}
-      <Text numberOfLines={1} className="flex-1 text-[13px] font-semibold text-fg-muted">
+      <Text numberOfLines={1} style={s.groupTitle}>
         {name}
       </Text>
       {attention > 0 ? (
-        <View className="rounded-full bg-warning/15 px-2 py-0.5">
-          <Text className="text-[11px] font-semibold text-warning">{attention}</Text>
+        <View style={s.attentionBadge}>
+          <Text style={s.attentionText}>{attention}</Text>
         </View>
       ) : null}
-      <Text className="text-[12px] text-fg-faint">{count}</Text>
+      <Text style={s.groupCount}>{count}</Text>
       {/* Nested Pressable + its own hit target so tapping "+" starts a task in
           this folder instead of toggling the section. */}
       <Pressable
         onPress={onAdd}
         hitSlop={8}
-        className="active:opacity-60 ml-0.5 h-7 w-7 items-center justify-center"
+        style={({ pressed }) => [s.addBtn, pressed && s.pressed60]}
       >
-        <Ionicons name="add" size={17} color={COLOR.fgMuted} />
+        <PounceIcon name="add" size={17} color={theme.colors.fgMuted} />
       </Pressable>
     </Pressable>
   );
 }
+
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    paddingTop: 4,
+  },
+  headerLeft: { flex: 1, paddingRight: 8 },
+  wordmarkRow: { flexDirection: "row", alignItems: "flex-start", gap: 4 },
+  wordmark: { fontSize: 26, fontWeight: "700", color: theme.colors.fg },
+  subtitleRow: { marginTop: 2, flexDirection: "row", alignItems: "center", gap: 4 },
+  subFaint: { fontSize: 13, color: theme.colors.fgFaint },
+  subWarning: { fontSize: 13, color: theme.colors.warning },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0 },
+  newBtn: {
+    height: 36,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 999,
+    backgroundColor: theme.colors.accent,
+    paddingHorizontal: 14,
+  },
+  newBtnLabel: { fontSize: 14, fontWeight: "600", color: theme.colors.onAccent },
+  sessionRow: { paddingHorizontal: 16, paddingBottom: 10 },
+  empty: { alignItems: "center", paddingHorizontal: 32, paddingVertical: 80 },
+  emptyEmoji: { fontSize: 40 },
+  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
+  emptyCta: {
+    marginTop: 20,
+    borderRadius: 999,
+    backgroundColor: theme.colors.accent,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  groupHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 6,
+    paddingTop: 12,
+  },
+  groupTitle: { flex: 1, fontSize: 13, fontWeight: "600", color: theme.colors.fgMuted },
+  groupCount: { fontSize: 12, color: theme.colors.fgFaint },
+  attentionBadge: {
+    borderRadius: 999,
+    backgroundColor: theme.colors.warningSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  attentionText: { fontSize: 11, fontWeight: "600", color: theme.colors.warning },
+  addBtn: { marginLeft: 2, height: 28, width: 28, alignItems: "center", justifyContent: "center" },
+  pressed60: { opacity: 0.6 },
+  pressed70: { opacity: 0.7 },
+  pressed80: { opacity: 0.8 },
+}));

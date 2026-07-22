@@ -1,5 +1,15 @@
-import { type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { ActionSheetIOS, Alert, Image, Keyboard, Pressable, Text, View } from "react-native";
+import { type Ref, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import {
+  ActionSheetIOS,
+  Alert,
+  Image,
+  Keyboard,
+  Pressable,
+  Text,
+  useColorScheme,
+  View,
+} from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import {
   EnrichedMarkdownTextInput,
   type EnrichedMarkdownTextInputInstance,
@@ -15,12 +25,15 @@ import {
   withSequence,
   withTiming,
 } from "./animation";
-import { Ionicons } from "@expo/vector-icons";
+import { GlassCard } from "../ui/native/GlassCard";
+import { PounceIcon } from "../ui/native/Icon";
+import type { IoniconName } from "../ui/native/icon-map";
 import type { AgentCapabilities, RunImage } from "@pounce/shared";
 import { SLASH_COMMANDS } from "../ui/agent-meta";
 import { fetchFiles, type RepoEntry } from "../services/bridge";
 import { isVoiceAvailable, startDictation, type Dictation } from "../services/voice";
-import { AgentLogo, cn, COLOR } from "../ui";
+import { AgentLogo, COLOR } from "../ui";
+import { hexFor } from "../ui/theme-hex";
 
 const MENTION_RE = /((?:^|\s))@([^\s@]*)$/;
 
@@ -52,14 +65,6 @@ function langForName(name: string): string {
   };
   return map[ext] ?? "";
 }
-
-/** Inline formatting colours for the rich input (base text color/size come from
- *  the `style` prop). */
-const INPUT_MD_STYLE: MarkdownTextInputStyle = {
-  strong: { color: COLOR.fg },
-  em: { color: COLOR.fg },
-  link: { color: COLOR.accent, underline: false },
-};
 
 export interface ComposerSubmit {
   text: string;
@@ -100,8 +105,11 @@ export function Composer({
   cwd,
   onSubmit,
   onStop,
+  onViewChanges,
+  diffStat,
   model,
   mode,
+  markers,
   ref,
 }: {
   agent: string;
@@ -117,18 +125,38 @@ export function Composer({
   onSubmit: (s: ComposerSubmit) => Promise<void> | void;
   /** Interrupt the running turn (from the stop button). */
   onStop?: () => void;
+  /** Open the session's diff review — shows a diff shortcut in the control row. */
+  onViewChanges?: () => void;
+  /** Working-tree +/- totals shown beside the diff shortcut (null/0s hide it). */
+  diffStat?: { add: number; del: number } | null;
   /** Combined model·effort control pill (null to hide). */
   model?: { label: string; onPress: () => void } | null;
   /** Permission-mode control pill (null to hide). */
   mode?: { label: string; active: boolean; onPress: () => void } | null;
+  /** Marker jump-list pill — bookmark glyph + count (null to hide). */
+  markers?: { count: number; onPress: () => void } | null;
   ref?: Ref<ComposerHandle>;
 }) {
+  const { theme } = useUnistyles();
   // The rich input is uncontrolled: `draft` mirrors its plain text (drives the
   // slash/mention menus + canSend), `markdownRef` mirrors the markdown we send,
   // and we push text back through the imperative ref (not a `value` prop).
   const [draft, setDraft] = useState("");
   const inputRef = useRef<EnrichedMarkdownTextInputInstance>(null);
   const markdownRef = useRef("");
+  // The native rich input requires STRING colors — pick literal hexes for the
+  // active scheme (PlatformColor values can't flow into it).
+  const hex = hexFor(useColorScheme());
+  /** Inline formatting colours for the rich input (base text color/size come
+   *  from the `style` prop). */
+  const inputMdStyle = useMemo<MarkdownTextInputStyle>(
+    () => ({
+      strong: { color: hex.fg },
+      em: { color: hex.fg },
+      link: { color: hex.accent, underline: false },
+    }),
+    [hex],
+  );
   const setInput = (next: string) => {
     markdownRef.current = next;
     setDraft(next);
@@ -386,15 +414,15 @@ export function Composer({
     <View>
       {/* Image thumbnails */}
       {images.length ? (
-        <View className="mb-2 flex-row flex-wrap gap-2">
+        <View style={s.thumbRow}>
           {images.map((img, idx) => (
-            <View key={img.uri} className="relative">
-              <Image source={{ uri: img.uri }} className="h-14 w-14 rounded-lg" />
+            <View key={img.uri} style={s.thumbWrap}>
+              <Image source={{ uri: img.uri }} style={s.thumb} />
               <Pressable
                 onPress={() => setImages((cur) => cur.filter((_, i) => i !== idx))}
-                className="absolute -right-1.5 -top-1.5 h-5 w-5 items-center justify-center rounded-full bg-bg"
+                style={s.thumbClose}
               >
-                <Ionicons name="close-circle" size={20} color={COLOR.fgMuted} />
+                <PounceIcon name="close-circle" size={20} color={theme.colors.fgMuted} />
               </Pressable>
             </View>
           ))}
@@ -403,18 +431,15 @@ export function Composer({
 
       {/* Inline slash-command autocomplete (appears as you type "/") */}
       {slashMatches.length ? (
-        <View className="mb-2 overflow-hidden rounded-2xl border border-border bg-surface">
+        <View style={s.menuCard}>
           {slashMatches.map((c, i) => (
             <Pressable
               key={c.cmd}
               onPress={() => applySlash(c.cmd)}
-              className={cn(
-                "flex-row items-center gap-2 px-3 py-2.5 active:bg-surface-hover",
-                i > 0 && "border-t border-border/60",
-              )}
+              style={({ pressed }) => [s.menuRow, i > 0 && s.menuRowDivider, pressed && s.pressedSurface]}
             >
-              <Text className="font-mono text-[13px] text-accent">{c.cmd}</Text>
-              <Text numberOfLines={1} className="flex-1 text-[12px] text-fg-muted">
+              <Text style={s.slashCmd}>{c.cmd}</Text>
+              <Text numberOfLines={1} style={s.slashDesc}>
                 {c.desc}
               </Text>
             </Pressable>
@@ -424,15 +449,15 @@ export function Composer({
 
       {/* Inline @-mention autocomplete (files/folders, appears as you type "@") */}
       {mentionActive ? (
-        <View className="mb-2 max-h-60 overflow-hidden rounded-2xl border border-border bg-surface">
+        <View style={[s.menuCard, s.mentionCard]}>
           {!hostId || !cwd ? (
-            <Text className="px-3 py-2.5 text-[12px] text-fg-faint">
+            <Text style={s.menuHint}>
               Connect a live device to browse this project's files.
             </Text>
           ) : filesLoading && !files.length ? (
-            <Text className="px-3 py-2.5 text-[12px] text-fg-faint">Searching files…</Text>
+            <Text style={s.menuHint}>Searching files…</Text>
           ) : !files.length ? (
-            <Text className="px-3 py-2.5 text-[12px] text-fg-faint">No matching files</Text>
+            <Text style={s.menuHint}>No matching files</Text>
           ) : (
             files.map((f, i) => {
             const base = f.path.replace(/\/$/, "").split("/").pop();
@@ -441,20 +466,17 @@ export function Composer({
               <Pressable
                 key={`${f.type}:${f.path}`}
                 onPress={() => applyMention(f.path)}
-                className={cn(
-                  "flex-row items-center gap-2 px-3 py-2.5 active:bg-surface-hover",
-                  i > 0 && "border-t border-border/60",
-                )}
+                style={({ pressed }) => [s.menuRow, i > 0 && s.menuRowDivider, pressed && s.pressedSurface]}
               >
-                <Ionicons
+                <PounceIcon
                   name={f.type === "dir" ? "folder-outline" : "document-text-outline"}
                   size={15}
-                  color={f.type === "dir" ? COLOR.accent : COLOR.fgMuted}
+                  color={f.type === "dir" ? theme.colors.accent : theme.colors.fgMuted}
                 />
-                <Text numberOfLines={1} className="flex-1 font-mono text-[12px] text-fg">
-                  {dir ? <Text className="text-fg-faint">{dir}</Text> : null}
+                <Text numberOfLines={1} style={s.mentionPath}>
+                  {dir ? <Text style={s.mentionFaint}>{dir}</Text> : null}
                   {base}
-                  {f.type === "dir" ? <Text className="text-fg-faint">/</Text> : null}
+                  {f.type === "dir" ? <Text style={s.mentionFaint}>/</Text> : null}
                 </Text>
               </Pressable>
             );
@@ -466,9 +488,26 @@ export function Composer({
       {/* Live "listening" affordance while dictating. */}
       {listening ? <ListeningBanner /> : null}
 
-      {/* Unified composer card: the text sits above one row of controls —
-          attach · model·effort · mode … mic · send — like the Claude app. */}
-      <View className="rounded-3xl border border-border bg-surface-alt px-2.5 pb-2 pt-1.5">
+      {/* Model / mode / marker pills sit above the glass pill as compact capsules. */}
+      {model || mode || markers ? (
+        <View style={s.pillRow}>
+          {model ? <ControlPill agent={agent} label={model.label} onPress={model.onPress} /> : null}
+          {mode ? (
+            <ControlPill icon="git-branch-outline" label={mode.label} active={mode.active} onPress={mode.onPress} />
+          ) : null}
+          {markers ? (
+            <ControlPill
+              icon="bookmark"
+              label={markers.count > 99 ? "99+" : String(markers.count)}
+              onPress={markers.onPress}
+            />
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* Floating liquid-glass pill: the text sits above one row of controls —
+          attach … mic · send — like iOS 26 Messages. */}
+      <GlassCard radius={24} shadow style={s.card}>
         <EnrichedMarkdownTextInput
           ref={inputRef}
           onChangeText={setDraft}
@@ -479,7 +518,7 @@ export function Composer({
           placeholder={disabled ? "Read-only" : running ? "Queue a follow-up or steer…" : placeholder}
           placeholderTextColor="#62626D"
           multiline
-          markdownStyle={INPUT_MD_STYLE}
+          markdownStyle={inputMdStyle}
           style={{
             minHeight: 38,
             maxHeight: 120,
@@ -488,42 +527,49 @@ export function Composer({
             paddingTop: 6,
             paddingBottom: 4,
             fontSize: 15,
-            color: COLOR.fg,
+            color: hex.fg,
             opacity: disabled ? 0.5 : 1,
           }}
         />
 
-        <View className="mt-1 flex-row items-center gap-1.5">
+        <View style={s.controlRow}>
           {!disabled ? <RoundButton icon="add" onPress={openAttach} /> : null}
-          {model ? <ControlPill agent={agent} label={model.label} onPress={model.onPress} /> : null}
-          {mode ? (
-            <ControlPill icon="git-branch-outline" label={mode.label} active={mode.active} onPress={mode.onPress} />
+          {onViewChanges ? (
+            <Pressable
+              onPress={onViewChanges}
+              style={({ pressed }) => [s.diffBtn, pressed && s.pressed70]}
+            >
+              <PounceIcon name="git-compare-outline" size={19} color={theme.colors.fgMuted} />
+              {diffStat && (diffStat.add > 0 || diffStat.del > 0) ? (
+                <Text style={s.diffStatText}>
+                  <Text style={s.diffAdd}>+{diffStat.add}</Text>{" "}
+                  <Text style={s.diffDel}>-{diffStat.del}</Text>
+                </Text>
+              ) : null}
+            </Pressable>
           ) : null}
 
-          <View className="flex-1" />
+          <View style={s.flex1} />
 
           {!disabled && voiceAvailable ? <MicButton listening={listening} onPress={toggleVoice} /> : null}
           {showStop ? (
             <Pressable
               onPress={onStop}
-              className="active:opacity-80 h-9 w-9 items-center justify-center rounded-full bg-danger"
+              style={({ pressed }) => [s.stopBtn, pressed && s.pressed80]}
             >
-              <Ionicons name="stop" size={15} color="#fff" />
+              <PounceIcon name="stop" size={15} color="#fff" />
             </Pressable>
           ) : (
             <Pressable
               onPress={submit}
               disabled={!canSend}
-              className={cn(
-                "h-9 w-9 items-center justify-center rounded-full bg-accent",
-                !canSend && "opacity-40",
-              )}
+              style={({ pressed }) => [s.sendBtn, !canSend && s.opacity40, pressed && s.pressed80]}
             >
-              <Ionicons name="arrow-up" size={18} color="#fff" />
+              <PounceIcon name="arrow-up" size={18} color="#fff" />
             </Pressable>
           )}
         </View>
-      </View>
+      </GlassCard>
     </View>
   );
 }
@@ -533,15 +579,16 @@ function RoundButton({
   icon,
   onPress,
 }: {
-  icon: React.ComponentProps<typeof Ionicons>["name"];
+  icon: IoniconName;
   onPress: () => void;
 }) {
+  const { theme } = useUnistyles();
   return (
     <Pressable
       onPress={onPress}
-      className="active:opacity-70 h-8 w-8 items-center justify-center rounded-full bg-surface"
+      style={({ pressed }) => [s.roundBtn, pressed && s.pressed70]}
     >
-      <Ionicons name={icon} size={19} color={COLOR.fgMuted} />
+      <PounceIcon name={icon} size={19} color={theme.colors.fgMuted} />
     </Pressable>
   );
 }
@@ -556,29 +603,31 @@ function ControlPill({
   onPress,
 }: {
   agent?: string;
-  icon?: React.ComponentProps<typeof Ionicons>["name"];
+  icon?: IoniconName;
   label: string;
   active?: boolean;
   onPress: () => void;
 }) {
+  const { theme } = useUnistyles();
   return (
     <Pressable
       onPress={onPress}
       hitSlop={4}
-      className={cn(
-        // shrink/min-w-0: yoga's flexShrink defaults to 0, so a long label
-        // ("Accept edits", a long model name) would push the mic/send buttons
-        // off-screen instead of truncating.
-        "active:opacity-70 h-8 min-w-0 shrink flex-row items-center gap-1.5 rounded-full px-2.5",
-        active ? "bg-accent-soft" : "bg-surface",
-      )}
+      // pill flexShrink/minWidth: yoga's flexShrink defaults to 0, so a long
+      // label ("Accept edits", a long model name) would push the mic/send
+      // buttons off-screen instead of truncating.
+      style={({ pressed }) => [
+        s.pill,
+        active ? s.pillActive : s.pillIdle,
+        pressed && s.pressed70,
+      ]}
     >
       {agent ? <AgentLogo agent={agent} size={13} /> : null}
-      {icon ? <Ionicons name={icon} size={12} color={active ? COLOR.accent : COLOR.fgMuted} /> : null}
-      <Text numberOfLines={1} className={cn("max-w-[150px] shrink text-[13px] font-medium", active ? "text-accent" : "text-fg")}>
+      {icon ? <PounceIcon name={icon} size={12} color={active ? theme.colors.accent : theme.colors.fgMuted} /> : null}
+      <Text numberOfLines={1} style={[s.pillLabel, active ? s.pillLabelActive : s.pillLabelIdle]}>
         {label}
       </Text>
-      <Ionicons name="chevron-down" size={11} color={active ? COLOR.accent : COLOR.fgFaint} />
+      <PounceIcon name="chevron-down" size={11} color={active ? theme.colors.accent : theme.colors.fgFaint} />
     </Pressable>
   );
 }
@@ -587,27 +636,29 @@ function ControlPill({
 /** Mic toggle for dictation. Idle: an outline mic. Listening: a pulsing red dot
  *  with a filled mic — unmistakable that the mic is live and how to stop it. */
 function MicButton({ listening, onPress }: { listening: boolean; onPress: () => void }) {
-  const s = useSharedValue(1);
+  const { theme } = useUnistyles();
+  const sc = useSharedValue(1);
   useEffect(() => {
     if (listening) {
-      s.value = withRepeat(withSequence(withTiming(1.15, { duration: 500 }), withTiming(0.85, { duration: 500 })), -1, true);
+      sc.value = withRepeat(withSequence(withTiming(1.15, { duration: 500 }), withTiming(0.85, { duration: 500 })), -1, true);
     } else {
-      cancelAnimation(s);
-      s.value = 1;
+      cancelAnimation(sc);
+      sc.value = 1;
     }
-  }, [listening, s]);
-  const style = useAnimatedStyle(() => ({ transform: [{ scale: s.value }] }));
+  }, [listening, sc]);
+  const style = useAnimatedStyle(() => ({ transform: [{ scale: sc.value }] }));
   return (
-    <Pressable onPress={onPress} hitSlop={6} className="h-10 w-9 items-center justify-center">
+    <Pressable onPress={onPress} hitSlop={6} style={s.micBtn}>
       {listening ? (
+        // Animated.View: keep the static COLOR token — unistyles theme styles
+        // must not mix into reanimated-managed styles.
         <Animated.View
-          style={[style, { width: 28, height: 28, borderRadius: 14, backgroundColor: COLOR.danger }]}
-          className="items-center justify-center"
+          style={[style, s.micLive, { width: 28, height: 28, borderRadius: 14, backgroundColor: COLOR.danger }]}
         >
-          <Ionicons name="mic" size={16} color="#fff" />
+          <PounceIcon name="mic" size={16} color="#fff" />
         </Animated.View>
       ) : (
-        <Ionicons name="mic-outline" size={22} color={COLOR.fgMuted} />
+        <PounceIcon name="mic-outline" size={22} color={theme.colors.fgMuted} />
       )}
     </Pressable>
   );
@@ -620,20 +671,150 @@ function Bar({ delay }: { delay: number }) {
     h.value = withDelay(delay, withRepeat(withSequence(withTiming(15, { duration: 340 }), withTiming(5, { duration: 340 })), -1, true));
   }, [h, delay]);
   const style = useAnimatedStyle(() => ({ height: h.value }));
+  // Animated.View: keep the static COLOR token — unistyles theme styles must not
+  // mix into reanimated-managed styles.
   return <Animated.View style={[style, { width: 3, borderRadius: 2, backgroundColor: COLOR.danger }]} />;
 }
 
 /** "Listening…" pill with an animated equalizer — shown while dictating. */
 function ListeningBanner() {
   return (
-    <View className="mb-2 flex-row items-center gap-2 self-start rounded-full border border-danger/40 bg-danger/10 px-3 py-1.5">
-      <View className="flex-row items-end gap-0.5" style={{ height: 15 }}>
+    <View style={s.listenBanner}>
+      <View style={[s.listenBars, { height: 15 }]}>
         <Bar delay={0} />
         <Bar delay={110} />
         <Bar delay={220} />
         <Bar delay={110} />
       </View>
-      <Text className="text-[12px] font-medium text-danger">Listening… tap the mic to stop</Text>
+      <Text style={s.listenLabel}>Listening… tap the mic to stop</Text>
     </View>
   );
 }
+
+const s = StyleSheet.create((theme) => ({
+  flex1: { flex: 1 },
+  thumbRow: { marginHorizontal: 12, marginBottom: 8, flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  thumbWrap: { position: "relative" },
+  thumb: { height: 56, width: 56, borderRadius: 8 },
+  thumbClose: {
+    position: "absolute",
+    right: -6,
+    top: -6,
+    height: 20,
+    width: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+    backgroundColor: theme.colors.bg,
+  },
+  menuCard: {
+    marginHorizontal: 12,
+    marginBottom: 8,
+    overflow: "hidden",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  mentionCard: { maxHeight: 240 },
+  menuRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  menuRowDivider: { borderTopWidth: 1, borderColor: theme.colors.border },
+  pressedSurface: { backgroundColor: theme.colors.surfaceHover },
+  menuHint: { paddingHorizontal: 12, paddingVertical: 10, fontSize: 12, color: theme.colors.fgFaint },
+  slashCmd: { fontFamily: "JetBrainsMono", fontSize: 13, color: theme.colors.accent },
+  slashDesc: { flex: 1, fontSize: 12, color: theme.colors.fgMuted },
+  mentionPath: { flex: 1, fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fg },
+  mentionFaint: { color: theme.colors.fgFaint },
+  card: {
+    marginHorizontal: 12,
+    marginBottom: 8,
+    paddingHorizontal: 10,
+    paddingBottom: 8,
+    paddingTop: 6,
+  },
+  pillRow: {
+    marginHorizontal: 12,
+    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 6,
+  },
+  controlRow: { marginTop: 4, flexDirection: "row", alignItems: "center", gap: 6 },
+  diffBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    height: 36,
+    paddingHorizontal: 4,
+  },
+  diffStatText: { fontSize: 12, fontWeight: "600" },
+  diffAdd: { color: theme.colors.success },
+  diffDel: { color: theme.colors.danger },
+  roundBtn: {
+    height: 32,
+    width: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+    backgroundColor: "transparent",
+  },
+  pill: {
+    height: 28,
+    minWidth: 0,
+    flexShrink: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+  },
+  pillIdle: { backgroundColor: theme.colors.surfaceAlt },
+  pillActive: { backgroundColor: theme.colors.accentSoft },
+  pillLabel: { maxWidth: 150, flexShrink: 1, fontSize: 13, fontWeight: "500" },
+  pillLabelIdle: { color: theme.colors.fg },
+  pillLabelActive: { color: theme.colors.accent },
+  stopBtn: {
+    height: 36,
+    width: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+    backgroundColor: theme.colors.danger,
+  },
+  sendBtn: {
+    height: 36,
+    width: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+    backgroundColor: theme.colors.accent,
+  },
+  opacity40: { opacity: 0.4 },
+  pressed70: { opacity: 0.7 },
+  pressed80: { opacity: 0.8 },
+  micBtn: { height: 40, width: 36, alignItems: "center", justifyContent: "center" },
+  micLive: { alignItems: "center", justifyContent: "center" },
+  listenBanner: {
+    marginHorizontal: 12,
+    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(248, 81, 73, 0.4)",
+    backgroundColor: "rgba(248, 81, 73, 0.1)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  listenBars: { flexDirection: "row", alignItems: "flex-end", gap: 2 },
+  listenLabel: { fontSize: 12, fontWeight: "500", color: theme.colors.danger },
+}));

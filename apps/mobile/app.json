@@ -40,6 +40,7 @@
     },
     "plugins": [
       "expo-router",
+      "./plugins/withPrecompiledOff",
       "expo-secure-store",
       [
         "expo-sqlite",
@@ -50,7 +51,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/icon.png",
+          "image": "./assets/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#f5eafb"
@@ -65,7 +66,8 @@
       ],
       "expo-status-bar",
       "react-native-enriched-markdown",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true,

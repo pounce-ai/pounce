@@ -5,7 +5,7 @@
  * (loopback-only endpoint), so this screen just displays it.
  */
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { SvgXml } from "react-native-svg";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -15,6 +15,7 @@ import {
   type LocalBridgeInfo,
 } from "../services/localBridge";
 import { COLOR } from "@pounce/app/ui";
+import { T } from "@pounce/app/ui/theme";
 
 export default function PairScreen() {
   const router = useRouter();
@@ -49,19 +50,22 @@ export default function PairScreen() {
   }, []);
 
   return (
-    <View className="flex-1 bg-bg">
-      <View className="h-12 flex-row items-center border-b border-border px-4">
-        <Text className="flex-1 text-[15px] font-semibold text-fg">Pair your phone</Text>
-        <Pressable onPress={() => router.back()} className="active:opacity-60 h-8 w-8 items-center justify-center">
+    <View style={s.root}>
+      <View style={s.header}>
+        <Text style={s.headerTitle}>Pair your phone</Text>
+        <Pressable
+          onPress={() => router.back()}
+          style={({ pressed }) => [s.closeBtn, pressed && s.pressed60]}
+        >
           <Ionicons name="close" size={18} color={COLOR.fgMuted} />
         </Pressable>
       </View>
 
-      <View className="flex-1 items-center justify-center gap-4 px-8 py-6">
+      <View style={s.content}>
         {failed ? (
           <>
             <Ionicons name="cloud-offline-outline" size={40} color={COLOR.fgFaint} />
-            <Text className="text-center text-[14px] text-fg-muted">
+            <Text style={s.hintText}>
               The local bridge isn't reachable yet. Give it a few seconds after launch, then reopen this window.
             </Text>
           </>
@@ -70,32 +74,27 @@ export default function PairScreen() {
         ) : (
           <>
             {qr ? (
-              <View
-                style={{ width: 248, height: 248 }}
-                className="items-center justify-center overflow-hidden rounded-2xl bg-white"
-              >
+              <View style={s.qrCard}>
                 <SvgXml xml={qr} width={216} height={216} style={{ width: 216, height: 216 }} />
               </View>
             ) : (
               <ActivityIndicator color={COLOR.accent} />
             )}
-            <Text className="text-center text-[14px] text-fg-muted">
+            <Text style={s.hintText}>
               Scan with your iPhone camera to open Pounce and connect to this Mac.
             </Text>
-            <View className="items-center gap-1 rounded-xl bg-surface px-4 py-3">
-              <Text className="text-[12px] text-fg-faint">or add it manually in the app</Text>
-              <Text selectable className="font-mono text-[13px] text-fg">
+            <View style={s.manualCard}>
+              <Text style={s.manualHint}>or add it manually in the app</Text>
+              <Text selectable style={s.manualUrl}>
                 {info.pairUrl}
               </Text>
-              <Text selectable className="font-mono text-[12px] text-fg-muted">
+              <Text selectable style={s.manualToken}>
                 token: {info.token}
               </Text>
             </View>
-            <View className="flex-row items-center gap-2">
-              <View
-                className={`h-2 w-2 rounded-full ${info.connected ? "bg-success" : "bg-fg-faint"}`}
-              />
-              <Text className="text-[12px] text-fg-muted">
+            <View style={s.statusRow}>
+              <View style={[s.statusDot, info.connected ? s.dotConnected : s.dotIdle]} />
+              <Text style={s.statusText}>
                 {info.connected
                   ? "Phone connected"
                   : info.daemonOk
@@ -109,3 +108,53 @@ export default function PairScreen() {
     </View>
   );
 }
+
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: T.bg },
+  header: {
+    height: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomWidth: 1,
+    borderColor: T.border,
+    paddingHorizontal: 16,
+  },
+  headerTitle: { flex: 1, fontSize: 15, fontWeight: "600", color: T.fg },
+  closeBtn: { height: 32, width: 32, alignItems: "center", justifyContent: "center" },
+  pressed60: { opacity: 0.6 },
+  content: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    paddingHorizontal: 32,
+    paddingVertical: 24,
+  },
+  hintText: { textAlign: "center", fontSize: 14, color: T.fgMuted },
+  qrCard: {
+    width: 248,
+    height: 248,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    borderRadius: 16,
+    // The QR stays on a literal white tile in both appearances so cameras scan it.
+    backgroundColor: "#ffffff",
+  },
+  manualCard: {
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 12,
+    backgroundColor: T.surface,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  manualHint: { fontSize: 12, color: T.fgFaint },
+  manualUrl: { fontFamily: "JetBrainsMono", fontSize: 13, color: T.fg },
+  manualToken: { fontFamily: "JetBrainsMono", fontSize: 12, color: T.fgMuted },
+  statusRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  statusDot: { height: 8, width: 8, borderRadius: 999 },
+  dotConnected: { backgroundColor: T.success },
+  dotIdle: { backgroundColor: T.fgFaint },
+  statusText: { fontSize: 12, color: T.fgMuted },
+});

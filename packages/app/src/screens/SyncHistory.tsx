@@ -1,11 +1,12 @@
 import { useMemo } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import { PounceIcon } from "../ui/native/Icon";
 import type { SyncLogEntry } from "../state/stores";
 import { useSyncLog } from "../state/db/hooks";
-import { COLOR, timeAgo } from "../ui";
+import { IS_DESKTOP, timeAgo } from "../ui";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -58,6 +59,7 @@ function groupByDay(log: SyncLogEntry[]): DaySection[] {
 export default function SyncHistoryScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { theme } = useUnistyles();
   const rows = useSyncLog();
   // The collection isn't intrinsically ordered — present newest-first.
   const log = useMemo(
@@ -67,56 +69,56 @@ export default function SyncHistoryScreen() {
   const sections = useMemo(() => groupByDay(log), [log]);
 
   return (
-    <View className="flex-1 bg-bg" style={{ paddingTop: insets.top + 8 }}>
-      <View className="flex-row items-center justify-between px-4 pb-3">
-        <Text className="text-[22px] font-bold text-fg">Sync history</Text>
-        <Pressable onPress={() => router.back()} className="active:opacity-60">
-          <Text className="text-[15px] text-fg-muted">Done</Text>
-        </Pressable>
-      </View>
+    <View style={[s.root, IS_DESKTOP ? { paddingTop: insets.top + 8 } : { paddingTop: 8 }]}>
+      {/* Mobile shows the native modal navigation bar; this row is desktop chrome. */}
+      {IS_DESKTOP ? (
+        <View style={s.headerRow}>
+          <Text style={s.headerTitle}>Sync history</Text>
+          <Pressable onPress={() => router.back()} style={({ pressed }) => pressed && s.pressed60}>
+            <Text style={s.doneLabel}>Done</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       {log.length === 0 ? (
-        <View className="flex-1 items-center justify-center px-8">
-          <Text className="text-[40px]">🕓</Text>
-          <Text className="mt-3 text-center text-[15px] font-semibold text-fg">Nothing synced yet</Text>
-          <Text className="mt-1 text-center text-[13px] text-fg-muted">
+        <View style={s.empty}>
+          <Text style={s.emptyEmoji}>🕓</Text>
+          <Text style={s.emptyTitle}>Nothing synced yet</Text>
+          <Text style={s.emptyBody}>
             Each time new agent activity reaches this device, it'll show up here — grouped by folder.
           </Text>
         </View>
       ) : (
         <ScrollView
-          className="flex-1 px-4"
+          style={s.scroll}
           contentContainerStyle={{ paddingTop: 4, paddingBottom: insets.bottom + 24, gap: 18 }}
         >
           {sections.map((section) => (
-            <View key={section.label} className="gap-2">
-              <Text className="text-[12px] uppercase tracking-wide text-fg-faint">{section.label}</Text>
+            <View key={section.label} style={s.section}>
+              <Text style={s.sectionLabel}>{section.label}</Text>
               {section.entries.map((entry) => {
                 const total = entry.repos.reduce((n, r) => n + r.count, 0);
                 return (
-                  <View
-                    key={entry.at}
-                    className="gap-2.5 rounded-2xl border border-border bg-surface px-4 py-3.5"
-                  >
-                    <View className="flex-row items-center gap-2">
-                      <Ionicons name="sync" size={14} color={COLOR.accent} />
-                      <Text className="flex-1 text-[14px] font-semibold text-fg">
+                  <View key={entry.at} style={s.card}>
+                    <View style={s.cardHeader}>
+                      <PounceIcon name="sync" size={14} color={theme.colors.accent} />
+                      <Text style={s.cardTime}>
                         {clock(new Date(entry.at))}
                       </Text>
-                      <Text className="text-[12px] text-fg-faint">{timeAgo(entry.at)} ago</Text>
+                      <Text style={s.cardAgo}>{timeAgo(entry.at)} ago</Text>
                     </View>
-                    <Text className="text-[12px] text-fg-muted">
+                    <Text style={s.cardSummary}>
                       {total} new update{total === 1 ? "" : "s"} across {entry.repos.length} folder
                       {entry.repos.length === 1 ? "" : "s"}
                     </Text>
-                    <View className="gap-1.5">
+                    <View style={s.repoList}>
                       {entry.repos.map((r) => (
-                        <View key={r.repoId} className="flex-row items-center gap-2">
-                          <Ionicons name="folder-outline" size={13} color={COLOR.fgFaint} />
-                          <Text numberOfLines={1} className="flex-1 text-[13px] text-fg">
+                        <View key={r.repoId} style={s.repoRow}>
+                          <PounceIcon name="folder-outline" size={13} color={theme.colors.fgFaint} />
+                          <Text numberOfLines={1} style={s.repoName}>
                             {r.name}
                           </Text>
-                          <Text className="text-[12px] font-medium text-fg-muted">{r.count}</Text>
+                          <Text style={s.repoCount}>{r.count}</Text>
                         </View>
                       ))}
                     </View>
@@ -130,3 +132,41 @@ export default function SyncHistoryScreen() {
     </View>
   );
 }
+
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  headerTitle: { fontSize: 22, fontWeight: "700", color: theme.colors.fg },
+  doneLabel: { fontSize: 15, color: theme.colors.fgMuted },
+  pressed60: { opacity: 0.6 },
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
+  emptyEmoji: { fontSize: 40 },
+  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
+  scroll: { flex: 1, paddingHorizontal: 16 },
+  section: { gap: 8 },
+  sectionLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
+  card: {
+    gap: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  cardHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+  cardTime: { flex: 1, fontSize: 14, fontWeight: "600", color: theme.colors.fg },
+  cardAgo: { fontSize: 12, color: theme.colors.fgFaint },
+  cardSummary: { fontSize: 12, color: theme.colors.fgMuted },
+  repoList: { gap: 6 },
+  repoRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  repoName: { flex: 1, fontSize: 13, color: theme.colors.fg },
+  repoCount: { fontSize: 12, fontWeight: "500", color: theme.colors.fgMuted },
+}));

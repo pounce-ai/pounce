@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, AppState, Pressable, Text, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { PounceIcon } from "../ui/native/Icon";
 import * as Updates from "expo-updates";
-import { COLOR } from "../ui";
 
 /** Re-check for updates when the app foregrounds, at most this often.
  *  Cold starts are covered natively by EXUpdatesCheckOnLaunch=ALWAYS. */
@@ -16,6 +16,7 @@ const FOREGROUND_CHECK_MS = 15 * 60 * 1000;
  * can apply it immediately — or ignore it and get it on next launch anyway.
  */
 export function UpdateBanner() {
+  const { theme } = useUnistyles();
   const { isUpdatePending } = Updates.useUpdates();
   const insets = useSafeAreaInsets();
   const [dismissed, setDismissed] = useState(false);
@@ -55,29 +56,58 @@ export function UpdateBanner() {
         position: "absolute",
         left: 0,
         right: 0,
-        bottom: insets.bottom + 76, // clear the floating tab bar
+        bottom: insets.bottom + 60, // clear the system tab bar
         alignItems: "center",
         opacity: slide,
         transform: [{ translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
       }}
     >
-      <View className="flex-row items-center gap-2 rounded-full border border-accent/40 bg-bg-elevated py-2 pl-4 pr-2 shadow-lg">
-        <Ionicons name="sparkles" size={14} color={COLOR.accent} />
-        <Text className="text-[13px] font-medium text-fg">Update ready</Text>
+      <View style={s.pill}>
+        <PounceIcon name="sparkles" size={14} color={theme.colors.accent} />
+        <Text style={s.label}>Update ready</Text>
         <Pressable
           onPress={() => void Updates.reloadAsync().catch(() => {})}
-          className="active:opacity-80 h-8 items-center justify-center rounded-full bg-accent px-3.5"
+          style={({ pressed }) => [s.restartBtn, pressed && s.pressed80]}
         >
-          <Text className="text-[13px] font-semibold text-white">Restart</Text>
+          <Text style={s.restartText}>Restart</Text>
         </Pressable>
         <Pressable
           onPress={() => setDismissed(true)}
           hitSlop={8}
-          className="active:opacity-60 h-8 w-8 items-center justify-center"
+          style={({ pressed }) => [s.closeBtn, pressed && s.pressed60]}
         >
-          <Ionicons name="close" size={16} color={COLOR.fgMuted} />
+          <PounceIcon name="close" size={16} color={theme.colors.fgMuted} />
         </Pressable>
       </View>
     </Animated.View>
   );
 }
+
+const s = StyleSheet.create((theme) => ({
+  pill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    // accent at 40% — no soft-accent border token; literal from the accent hex.
+    borderColor: "rgba(124, 111, 240, 0.4)",
+    backgroundColor: theme.colors.bgElevated,
+    paddingVertical: 8,
+    paddingLeft: 16,
+    paddingRight: 8,
+  },
+  label: { fontSize: 13, fontWeight: "500", color: theme.colors.fg },
+  restartBtn: {
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+    backgroundColor: theme.colors.accent,
+    paddingHorizontal: 14,
+  },
+  restartText: { fontSize: 13, fontWeight: "600", color: theme.colors.onAccent },
+  closeBtn: { height: 32, width: 32, alignItems: "center", justifyContent: "center" },
+  pressed60: { opacity: 0.6 },
+  pressed80: { opacity: 0.8 },
+}));

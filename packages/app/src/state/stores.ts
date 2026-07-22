@@ -72,7 +72,15 @@ export const filters$ = observable<{
   branchQuery: string; // substring match over branch + worktree; "" = all
   needsOnly: boolean;
   favOnly: boolean;
-}>({ device: null, agent: null, repos: [], statuses: [], branchQuery: "", needsOnly: true, favOnly: false });
+}>({
+  device: null,
+  agent: null,
+  repos: [],
+  statuses: [],
+  branchQuery: "",
+  needsOnly: true,
+  favOnly: false,
+});
 
 /** The zero state for every filter — a single source for "Clear all". */
 export const CLEARED_FILTERS = {
@@ -165,6 +173,14 @@ export function setSeenFile(threadId: string, path: string, seen: boolean): void
  *  fresh headless turn, so a test thread stays one thread and its prompts stay
  *  answerable. Persisted so the routing survives restarts. */
 export const interactiveThreads$ = observable<Record<string, true>>({});
+
+/** Route aliases for threads re-keyed mid-visit (temporary new_* → the real id
+ *  the daemon assigned after the first turn). The open Session screen resolves
+ *  its route param through this so it can follow the swap in place — replacing
+ *  the route instead remounts the screen and visibly blanks the timeline right
+ *  as the reply finishes. In-memory only: stale new_* routes don't survive an
+ *  app restart. */
+export const rekeyedThreadIds$ = observable<Record<string, string>>({});
 
 /** Mark a thread as interactive (called when it's launched from New → Interactive). */
 export function markInteractive(threadId: string): void {
@@ -271,10 +287,14 @@ export function statusBucket(s: Session): StatusBucket {
 
 /** A message is marked by default if it carries prose — and an interactive
  *  prompt (trust / permission / plan / question) is ALWAYS marked, so a prompt
- *  the agent is blocked on is a jump-to point you can always find. */
+ *  the agent is blocked on is a jump-to point you can always find.
+ *  "[Request interrupted by user]" is a CLI-written artifact, not something
+ *  the user said — never a marker. */
 export function defaultMarked(ev: TimelineEvent, agent?: string): boolean {
   if (ev.type === "prompt_request") return true;
-  return ev.type === "user_message" && parseUserMessage(ev.text, agent).text.trim().length > 0;
+  if (ev.type !== "user_message") return false;
+  if (/^\s*\[Request interrupted by user/i.test(ev.text)) return false;
+  return parseUserMessage(ev.text, agent).text.trim().length > 0;
 }
 
 export interface FilterContext {
@@ -350,7 +370,11 @@ export function reposByActivity(
     filters.device || filters.agent
       ? new Set(
           sessions
-            .filter((s) => (!filters.device || s.hostId === filters.device) && (!filters.agent || s.agent === filters.agent))
+            .filter(
+              (s) =>
+                (!filters.device || s.hostId === filters.device) &&
+                (!filters.agent || s.agent === filters.agent),
+            )
             .map((s) => s.repoId),
         )
       : null;
@@ -504,7 +528,11 @@ function recordSync(
   }
   if (counts.size === 0) return;
   const repos = [...counts.entries()]
-    .map(([repoId, count]) => ({ repoId, name: reposById[repoId]?.name ?? repoId.replace(/^repo:/, ""), count }))
+    .map(([repoId, count]) => ({
+      repoId,
+      name: reposById[repoId]?.name ?? repoId.replace(/^repo:/, ""),
+      count,
+    }))
     .sort((a, b) => b.count - a.count);
   syncLog.insert([{ id: `${at}:${Math.random().toString(36).slice(2, 8)}`, at, repos }]);
   const overflow = syncLog.toArray
@@ -531,7 +559,9 @@ export function saveThreadMessages(threadId: string, events: TimelineEvent[]): v
   const mine = messages.toArray
     .filter((m) => m.threadId === threadId)
     .sort((a, b) => (a.event.ts ?? "").localeCompare(b.event.ts ?? ""));
-  const overflow = mine.slice(0, Math.max(0, mine.length - MESSAGES_PER_THREAD_CAP)).map((m) => m.id);
+  const overflow = mine
+    .slice(0, Math.max(0, mine.length - MESSAGES_PER_THREAD_CAP))
+    .map((m) => m.id);
   if (overflow.length) messages.delete(overflow);
 }
 
@@ -567,6 +597,7 @@ export function insertThread(s: Session): void {
  *  drop the temporary row, insert the real one, and carry over any recents /
  *  favourite / model / marker state so nothing is lost across the swap. */
 export function rekeyThread(oldId: string, s: Session): void {
+  rekeyedThreadIds$[oldId].set(s.id);
   if (threads.has(oldId)) threads.delete(oldId);
   upsertRows(threads, [s]);
   if (recents.has(oldId)) {
@@ -607,13 +638,25 @@ export function cascadeCleanup(): void {
   const liveAgents = new Set<string>(threadList.map((s) => s.agent));
 
   // Projects with no remaining thread.
-  deleteIds(projects, projects.toArray.filter((r) => !liveRepoIds.has(r.id)).map((r) => r.id));
+  deleteIds(
+    projects,
+    projects.toArray.filter((r) => !liveRepoIds.has(r.id)).map((r) => r.id),
+  );
 
   // Per-thread state.
   sweepThreadObservables(liveThreadIds);
-  deleteIds(recents, recents.toArray.filter((r) => !liveThreadIds.has(r.id)).map((r) => r.id));
-  deleteIds(threadModels, threadModels.toArray.filter((t) => !liveThreadIds.has(t.id)).map((t) => t.id));
-  deleteIds(markers, markers.toArray.filter((m) => !liveThreadIds.has(m.id.split("|")[0])).map((m) => m.id));
+  deleteIds(
+    recents,
+    recents.toArray.filter((r) => !liveThreadIds.has(r.id)).map((r) => r.id),
+  );
+  deleteIds(
+    threadModels,
+    threadModels.toArray.filter((t) => !liveThreadIds.has(t.id)).map((t) => t.id),
+  );
+  deleteIds(
+    markers,
+    markers.toArray.filter((m) => !liveThreadIds.has(m.id.split("|")[0])).map((m) => m.id),
+  );
   // favourites: threads must still exist; repo favourites tolerated only if the repo does.
   deleteIds(
     favorites,
@@ -622,15 +665,23 @@ export function cascadeCleanup(): void {
       .map((f) => f.id),
   );
   // messages for dead threads.
-  deleteIds(messages, messages.toArray.filter((m) => !liveThreadIds.has(m.threadId)).map((m) => m.id));
+  deleteIds(
+    messages,
+    messages.toArray.filter((m) => !liveThreadIds.has(m.threadId)).map((m) => m.id),
+  );
 
   // Per-host / per-agent caches. agentModels keys are `${hostId}:${agent}` and
   // hostId itself contains a colon (dev:…), so split on the LAST colon.
   deleteIds(
     agentModels,
-    agentModels.toArray.filter((a) => !liveHostIds.has(a.id.slice(0, a.id.lastIndexOf(":")))).map((a) => a.id),
+    agentModels.toArray
+      .filter((a) => !liveHostIds.has(a.id.slice(0, a.id.lastIndexOf(":"))))
+      .map((a) => a.id),
   );
-  deleteIds(agentCaps, agentCaps.toArray.filter((a) => !liveAgents.has(a.id)).map((a) => a.id));
+  deleteIds(
+    agentCaps,
+    agentCaps.toArray.filter((a) => !liveAgents.has(a.id)).map((a) => a.id),
+  );
 
   // syncLog is deliberately KEPT — it's a historical record of past syncs
   // (rendered from its own rows, never joined against live repos), so entries
@@ -648,7 +699,10 @@ export function forgetDevice(id: string): void {
   if (devices.has(id)) devices.delete(id);
   if (hosts.has(id)) hosts.delete(id);
   if (deviceOverrides.has(id)) deviceOverrides.delete(id);
-  deleteIds(threads, threads.toArray.filter((s) => s.hostId === id).map((s) => s.id));
+  deleteIds(
+    threads,
+    threads.toArray.filter((s) => s.hostId === id).map((s) => s.id),
+  );
   cascadeCleanup();
 }
 
@@ -661,10 +715,22 @@ export function forgetDevice(id: string): void {
  *  clear a now-unpaired active host, and go disconnected when nothing's paired. */
 export function reconcileDevices(validIds: string[]): void {
   const valid = new Set(validIds);
-  deleteIds(devices, keyList(devices).filter((id) => !valid.has(id)));
-  deleteIds(hosts, keyList(hosts).filter((id) => !valid.has(id)));
-  deleteIds(deviceOverrides, keyList(deviceOverrides).filter((id) => !valid.has(id)));
-  deleteIds(threads, threads.toArray.filter((s) => !valid.has(s.hostId)).map((s) => s.id));
+  deleteIds(
+    devices,
+    keyList(devices).filter((id) => !valid.has(id)),
+  );
+  deleteIds(
+    hosts,
+    keyList(hosts).filter((id) => !valid.has(id)),
+  );
+  deleteIds(
+    deviceOverrides,
+    keyList(deviceOverrides).filter((id) => !valid.has(id)),
+  );
+  deleteIds(
+    threads,
+    threads.toArray.filter((s) => !valid.has(s.hostId)).map((s) => s.id),
+  );
   cascadeCleanup();
 
   if (valid.size === 0) connection$.status.set("disconnected");
@@ -698,10 +764,23 @@ export function mergeWorkspace(data: WorkspaceData): void {
  *  read is not evidence the work is gone, and deleting here would cascade away
  *  recents ("Jump back in"), markers, favorites and cached messages that can't
  *  be rebuilt from the host. Omitting syncedHostIds means every host synced. */
-export function syncWorkspace(data: WorkspaceData, opts?: { syncedHostIds?: readonly string[] }): void {
+export function syncWorkspace(
+  data: WorkspaceData,
+  opts?: { syncedHostIds?: readonly string[] },
+): void {
   const prev = new Map(threads.toArray.map((s) => [s.id, s] as const));
   const synced = opts?.syncedHostIds ? new Set(opts.syncedHostIds) : null;
-  const preserved = synced ? threads.toArray.filter((s) => !synced.has(s.hostId)) : [];
+  // Local optimistic drafts (`new_*`, awaiting their first turn's real id) are
+  // OUR records, not the host's — a host sync can't vouch for an id it has never
+  // seen, and deleting one mid-turn blanks the open session ("Session not
+  // found") until rekey. Age-capped so a turn that died pre-rekey can't leave a
+  // "Queued" ghost forever.
+  const now = Date.now();
+  const isLocalDraft = (s: { id: string; createdAt?: string | null }) =>
+    s.id.startsWith("new_") && now - Date.parse(s.createdAt ?? "") < 60 * 60 * 1000;
+  const preserved = threads.toArray.filter(
+    (s) => (synced ? !synced.has(s.hostId) : false) || isLocalDraft(s),
+  );
   const preservedRepoIds = new Set(preserved.map((s) => s.repoId));
   // Preserved rows first: when a host half-streamed before failing, the fresher
   // incoming row for the same id wins the upsert.

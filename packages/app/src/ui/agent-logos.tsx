@@ -4,8 +4,9 @@
  * Grok from svgl. Agents without a public mark fall back to a letter badge.
  */
 import { Text, View } from "react-native";
+import { useUnistyles } from "react-native-unistyles";
 import Svg, { Path } from "react-native-svg";
-import { AGENT_HEX, agentLabel, COLOR } from "./tokens";
+import { AGENT_HEX, agentLabel } from "./tokens";
 
 type MarkProps = { size: number; color: string };
 
@@ -87,7 +88,8 @@ export function AgentLogo({
   size?: number;
   color?: string;
 }) {
-  const c = color ?? AGENT_HEX[agent] ?? COLOR.fgMuted;
+  const { theme } = useUnistyles();
+  const c = color ?? AGENT_HEX[agent] ?? theme.colors.fgMuted;
   switch (agent) {
     case "claude":
       return <ClaudeMark size={size} color={c} />;

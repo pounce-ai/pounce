@@ -10,9 +10,10 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSelector } from "@legendapp/state/react";
-import { Ionicons } from "@expo/vector-icons";
+import { PounceIcon } from "../ui/native/Icon";
 import {
   activeFilterCount,
   availAgentsForDevices,
@@ -36,7 +37,7 @@ import {
   useProjects,
   useThreads,
 } from "../state/db/hooks";
-import { agentLabel, cn, COLOR, DeviceIcon, inputH } from "../ui";
+import { agentLabel, DeviceIcon, IS_DESKTOP } from "../ui";
 
 /**
  * The one filter trigger used in every header (Home, Search). Highlights when a
@@ -44,20 +45,18 @@ import { agentLabel, cn, COLOR, DeviceIcon, inputH } from "../ui";
  * share the exact same control instead of drifting.
  */
 export function FilterButton({ active, onPress }: { active: boolean; onPress: () => void }) {
+  const { theme } = useUnistyles();
   const count = useSelector(() => activeFilterCount());
   const on = active || count > 0;
   return (
     <Pressable
       onPress={onPress}
-      className={cn(
-        "active:opacity-80 h-9 w-9 items-center justify-center rounded-full",
-        on ? "bg-accent/15" : "bg-surface-alt",
-      )}
+      style={({ pressed }) => [s.filterBtn, on ? s.filterBtnOn : s.filterBtnOff, pressed && s.pressed80]}
     >
-      <Ionicons name="filter" size={17} color={on ? COLOR.accent : COLOR.fgMuted} />
+      <PounceIcon name="filter" size={17} color={on ? theme.colors.accent : theme.colors.fgMuted} />
       {count > 0 ? (
-        <View className="absolute -right-0.5 -top-0.5 h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1">
-          <Text className="text-[10px] font-bold text-white">{count}</Text>
+        <View style={s.badge}>
+          <Text style={s.badgeText}>{count}</Text>
         </View>
       ) : null}
     </Pressable>
@@ -79,24 +78,22 @@ function FilterChip({
   return (
     <Pressable
       onPress={onPress}
-      className={cn(
-        "active:opacity-80 h-8 flex-row items-center gap-1.5 rounded-full border px-3",
-        active ? "border-accent bg-accent/15" : "border-border bg-surface-alt",
-      )}
+      style={({ pressed }) => [s.chip, active ? s.chipOn : s.chipOff, pressed && s.pressed80]}
     >
       {icon}
-      <Text numberOfLines={1} className={cn("max-w-[180px] text-[13px]", active ? "text-accent" : "text-fg")}>
+      <Text numberOfLines={1} style={[s.chipLabel, active ? s.textAccent : s.textFg]}>
         {label}
       </Text>
     </Pressable>
   );
 }
 
-/** The three coarse status buckets, each with the dot colour ActivityDot uses. */
-const STATUS_CHIPS: { bucket: StatusBucket; label: string; dot: string }[] = [
-  { bucket: "active", label: "Active", dot: "bg-success" },
-  { bucket: "idle", label: "Idle", dot: "bg-fg-faint" },
-  { bucket: "done", label: "Done", dot: "bg-info" },
+/** The three coarse status buckets, each with the dot colour ActivityDot uses.
+ *  Theme token keys — resolved against the live theme at render time. */
+const STATUS_CHIPS: { bucket: StatusBucket; label: string; dot: "success" | "fgFaint" | "info" }[] = [
+  { bucket: "active", label: "Active", dot: "success" },
+  { bucket: "idle", label: "Idle", dot: "fgFaint" },
+  { bucket: "done", label: "Done", dot: "info" },
 ];
 
 /**
@@ -106,6 +103,31 @@ const STATUS_CHIPS: { bucket: StatusBucket; label: string; dot: string }[] = [
  */
 export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      {/* KeyboardAvoidingView (RN, not keyboard-controller) — reliable inside an
+          RN Modal window; lifts the sheet so the folder search isn't covered. */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={s.kav}
+      >
+        <Pressable style={s.backdrop} onPress={onClose} />
+        <View
+          style={[s.sheet, { paddingBottom: insets.bottom + 16, maxHeight: Math.round(height * 0.92) }]}
+        >
+          <FilterSheetContent onClose={onClose} />
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+/** The sheet's body — shared by the RN-Modal variant above (desktop) and the
+ *  native formSheet route on mobile (apps/mobile app/filters.tsx). The parent
+ *  supplies the container (backdrop/sheet chrome) and vertical gap. */
+export function FilterSheetContent({ onClose }: { onClose: () => void }) {
+  const { theme } = useUnistyles();
   const { height } = useWindowDimensions();
   const f = useSelector(() => filters$.get());
   const devices = useDevices();
@@ -147,64 +169,56 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
   }, [branchOptions, f.branchQuery]);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      {/* KeyboardAvoidingView (RN, not keyboard-controller) — reliable inside an
-          RN Modal window; lifts the sheet so the folder search isn't covered. */}
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        className="flex-1 justify-end"
-      >
-        <Pressable className="absolute inset-0 bg-black/50" onPress={onClose} />
-        <View
-          style={{ paddingBottom: insets.bottom + 16, maxHeight: Math.round(height * 0.92) }}
-          className="gap-4 rounded-t-3xl border-t border-border bg-bg-elevated px-4 pt-3"
-        >
-        {/* Grabber doubles as an expand/collapse toggle. */}
-        <Pressable onPress={() => setExpanded((v) => !v)} hitSlop={12} className="items-center gap-1 pb-0.5 pt-0.5">
-          <View className="h-1 w-10 rounded-full bg-border" />
-          <Ionicons name={expanded ? "chevron-down" : "chevron-up"} size={12} color={COLOR.fgFaint} />
-        </Pressable>
-        <View className="flex-row items-center justify-between">
-          <Text className="text-[18px] font-bold text-fg">Filter</Text>
+    <>
+      {/* Grabber doubles as an expand/collapse toggle — phone sheets only;
+          the desktop modal card has a fixed height. */}
+        {IS_DESKTOP ? null : (
+          <Pressable onPress={() => setExpanded((v) => !v)} hitSlop={12} style={s.grabber}>
+            <View style={s.grabberBar} />
+            <PounceIcon name={expanded ? "chevron-down" : "chevron-up"} size={12} color={theme.colors.fgFaint} />
+          </Pressable>
+        )}
+        <View style={s.rowBetween}>
+          <Text style={s.title}>Filter</Text>
           {hasFilter ? (
             <Pressable
               onPress={() => filters$.set(CLEARED_FILTERS)}
-              className="active:opacity-60 flex-row items-center gap-1.5"
+              style={({ pressed }) => [s.clearRow, pressed && s.pressed60]}
             >
-              <Ionicons name="close-circle-outline" size={15} color={COLOR.fgMuted} />
-              <Text className="text-[13px] text-fg-muted">Clear all</Text>
+              <PounceIcon name="close-circle-outline" size={15} color={theme.colors.fgMuted} />
+              <Text style={s.clearText}>Clear all</Text>
             </Pressable>
           ) : null}
         </View>
 
-        <View className="gap-1.5">
-          <Text className="text-[11px] uppercase tracking-wide text-fg-faint">Show</Text>
-          <View className="flex-row flex-wrap gap-2">
+        <View style={s.section}>
+          <Text style={s.sectionLabel}>Show</Text>
+          <View style={s.chipsWrap}>
             <FilterChip label="Needs you" active={f.needsOnly} onPress={() => filters$.needsOnly.set(true)} />
             <FilterChip label="Everything" active={!f.needsOnly} onPress={() => filters$.needsOnly.set(false)} />
           </View>
         </View>
 
         {/* Status — coarse buckets over the activity axis (multi-select; none = all). */}
-        <View className="gap-1.5">
-          <Text className="text-[11px] uppercase tracking-wide text-fg-faint">Status</Text>
-          <View className="flex-row flex-wrap gap-2">
+        <View style={s.section}>
+          <Text style={s.sectionLabel}>Status</Text>
+          <View style={s.chipsWrap}>
             {STATUS_CHIPS.map((c) => (
               <FilterChip
                 key={c.bucket}
                 label={c.label}
                 active={f.statuses.includes(c.bucket)}
                 onPress={() => toggleStatus(c.bucket)}
-                icon={<View className={cn("h-2 w-2 rounded-full", c.dot)} />}
+                icon={<View style={[s.statusDot, { backgroundColor: theme.colors[c.dot] }]} />}
               />
             ))}
           </View>
         </View>
 
         {devices.length > 1 ? (
-          <View className="gap-1.5">
-            <Text className="text-[11px] uppercase tracking-wide text-fg-faint">Device</Text>
-            <View className="flex-row flex-wrap gap-2">
+          <View style={s.section}>
+            <Text style={s.sectionLabel}>Device</Text>
+            <View style={s.chipsWrap}>
               {devices.map((d) => (
                 <FilterChip
                   key={d.id}
@@ -215,7 +229,7 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
                     <DeviceIcon
                       name={d.name}
                       emoji={deviceEmoji(d.id)}
-                      color={f.device === d.id ? COLOR.accent : COLOR.fgMuted}
+                      color={f.device === d.id ? theme.colors.accent : theme.colors.fgMuted}
                       size={13}
                     />
                   }
@@ -226,9 +240,9 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
         ) : null}
 
         {agents.length > 1 ? (
-          <View className="gap-1.5">
-            <Text className="text-[11px] uppercase tracking-wide text-fg-faint">Agent</Text>
-            <View className="flex-row flex-wrap gap-2">
+          <View style={s.section}>
+            <Text style={s.sectionLabel}>Agent</Text>
+            <View style={s.chipsWrap}>
               {agents.map((a) => (
                 <FilterChip
                   key={a}
@@ -245,29 +259,29 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
             worktrees in scope. Typing narrows the list and (as before) live-
             filters threads by substring; tapping a row pins that exact value. */}
         {branchOptions.length ? (
-          <View className="gap-1.5">
-            <View className="flex-row items-center justify-between">
-              <Text className="text-[11px] uppercase tracking-wide text-fg-faint">Branch / worktree</Text>
+          <View style={s.section}>
+            <View style={s.rowBetween}>
+              <Text style={s.sectionLabel}>Branch / worktree</Text>
               {f.branchQuery ? (
-                <Pressable onPress={() => filters$.branchQuery.set("")} className="active:opacity-60">
-                  <Text className="text-[12px] text-fg-muted">Clear</Text>
+                <Pressable onPress={() => filters$.branchQuery.set("")} style={({ pressed }) => pressed && s.pressed60}>
+                  <Text style={s.clearSmall}>Clear</Text>
                 </Pressable>
               ) : null}
             </View>
-            <View className="h-9 flex-row items-center gap-2 rounded-xl bg-surface-alt px-3">
-              <Ionicons name="git-branch-outline" size={14} color={COLOR.fgFaint} />
+            <View style={s.searchRow}>
+              <PounceIcon name="git-branch-outline" size={14} color={theme.colors.fgFaint} />
               <TextInput
                 value={f.branchQuery}
                 onChangeText={(t) => filters$.branchQuery.set(t)}
                 placeholder="Search branch or worktree…"
-                placeholderTextColor={COLOR.fgFaint}
+                placeholderTextColor={theme.colors.fgFaint}
                 autoCapitalize="none"
                 autoCorrect={false}
-                className={cn("flex-1 text-[14px] text-fg", inputH("h-9"))}
+                style={[s.input, IS_DESKTOP && s.inputDesktop]}
               />
               {f.branchQuery ? (
-                <Pressable onPress={() => filters$.branchQuery.set("")} hitSlop={8} className="active:opacity-60">
-                  <Ionicons name="close-circle" size={15} color={COLOR.fgFaint} />
+                <Pressable onPress={() => filters$.branchQuery.set("")} hitSlop={8} style={({ pressed }) => pressed && s.pressed60}>
+                  <PounceIcon name="close-circle" size={15} color={theme.colors.fgFaint} />
                 </Pressable>
               ) : null}
             </View>
@@ -278,16 +292,16 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
                   <Pressable
                     key={b}
                     onPress={() => filters$.branchQuery.set(active ? "" : b)}
-                    className="active:bg-surface-hover flex-row items-center gap-2 rounded-lg py-2 pl-1 pr-2"
+                    style={({ pressed }) => [s.optionRow, pressed && s.pressedHover]}
                   >
-                    <Ionicons
+                    <PounceIcon
                       name={active ? "checkmark-circle" : "git-branch-outline"}
                       size={16}
-                      color={active ? COLOR.accent : COLOR.fgMuted}
+                      color={active ? theme.colors.accent : theme.colors.fgMuted}
                     />
                     <Text
                       numberOfLines={1}
-                      className={cn("flex-1 text-[14px]", active ? "text-accent" : "text-fg")}
+                      style={[s.optionText, active ? s.textAccent : s.textFg]}
                     >
                       {b}
                     </Text>
@@ -295,7 +309,7 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
                 );
               })}
               {shownBranches.length === 0 ? (
-                <Text className="py-3 text-center text-[13px] text-fg-muted">No branches match.</Text>
+                <Text style={s.emptyText}>No branches match.</Text>
               ) : null}
             </ScrollView>
           </View>
@@ -304,27 +318,27 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
         {/* Project last — its searchable, scrollable list is the tallest section,
             so the compact Device/Agent chips read first above it. */}
         {repos.length > 1 ? (
-          <View className="gap-1.5">
-            <View className="flex-row items-center justify-between">
-              <Text className="text-[11px] uppercase tracking-wide text-fg-faint">Project</Text>
+          <View style={s.section}>
+            <View style={s.rowBetween}>
+              <Text style={s.sectionLabel}>Project</Text>
               {f.repos.length ? (
-                <Pressable onPress={() => filters$.repos.set([])} className="active:opacity-60">
-                  <Text className="text-[12px] text-fg-muted">Clear ({f.repos.length})</Text>
+                <Pressable onPress={() => filters$.repos.set([])} style={({ pressed }) => pressed && s.pressed60}>
+                  <Text style={s.clearSmall}>Clear ({f.repos.length})</Text>
                 </Pressable>
               ) : null}
             </View>
             {/* Searchable, multi-select folder list. Tap a row to toggle it in the
                 filter; tap the eye to permanently hide a folder everywhere. */}
-            <View className="h-9 flex-row items-center gap-2 rounded-xl bg-surface-alt px-3">
-              <Ionicons name="search" size={14} color={COLOR.fgFaint} />
+            <View style={s.searchRow}>
+              <PounceIcon name="search" size={14} color={theme.colors.fgFaint} />
               <TextInput
                 value={repoQuery}
                 onChangeText={setRepoQuery}
                 placeholder="Search folders…"
-                placeholderTextColor={COLOR.fgFaint}
+                placeholderTextColor={theme.colors.fgFaint}
                 autoCapitalize="none"
                 autoCorrect={false}
-                className={cn("flex-1 text-[14px] text-fg", inputH("h-9"))}
+                style={[s.input, IS_DESKTOP && s.inputDesktop]}
               />
             </View>
             <ScrollView style={{ maxHeight: folderMax }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
@@ -332,7 +346,7 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
                 const ignored = isRepoIgnored(r.id);
                 const selected = f.repos.includes(r.id);
                 return (
-                  <View key={r.id} className="flex-row items-center">
+                  <View key={r.id} style={s.repoRow}>
                     <Pressable
                       disabled={ignored}
                       onPress={() =>
@@ -340,36 +354,36 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
                           selected ? f.repos.filter((id) => id !== r.id) : [...f.repos, r.id],
                         )
                       }
-                      className="active:bg-surface-hover flex-1 flex-row items-center gap-2 rounded-lg py-2 pl-1 pr-2"
+                      style={({ pressed }) => [s.optionRow, s.flex1, pressed && s.pressedHover]}
                     >
-                      <Ionicons
+                      <PounceIcon
                         name={selected ? "checkbox" : "square-outline"}
                         size={18}
-                        color={ignored ? COLOR.fgFaint : selected ? COLOR.accent : COLOR.fgMuted}
+                        color={ignored ? theme.colors.fgFaint : selected ? theme.colors.accent : theme.colors.fgMuted}
                       />
-                      <Ionicons name="folder-outline" size={13} color={ignored ? COLOR.fgFaint : COLOR.fgMuted} />
+                      <PounceIcon name="folder-outline" size={13} color={ignored ? theme.colors.fgFaint : theme.colors.fgMuted} />
                       <Text
                         numberOfLines={1}
-                        className={cn(
-                          "flex-1 text-[14px]",
-                          ignored ? "text-fg-faint line-through" : selected ? "text-accent" : "text-fg",
-                        )}
+                        style={[
+                          s.optionText,
+                          ignored ? s.textIgnored : selected ? s.textAccent : s.textFg,
+                        ]}
                       >
                         {r.name}
                       </Text>
                     </Pressable>
-                    <Pressable onPress={() => toggleRepoIgnore(r.id)} hitSlop={8} className="active:opacity-60 px-2 py-2">
-                      <Ionicons
+                    <Pressable onPress={() => toggleRepoIgnore(r.id)} hitSlop={8} style={({ pressed }) => [s.eyeBtn, pressed && s.pressed60]}>
+                      <PounceIcon
                         name={ignored ? "eye-off" : "eye-outline"}
                         size={15}
-                        color={ignored ? COLOR.accent : COLOR.fgFaint}
+                        color={ignored ? theme.colors.accent : theme.colors.fgFaint}
                       />
                     </Pressable>
                   </View>
                 );
               })}
               {shownRepos.length === 0 ? (
-                <Text className="py-3 text-center text-[13px] text-fg-muted">No folders match.</Text>
+                <Text style={s.emptyText}>No folders match.</Text>
               ) : null}
             </ScrollView>
           </View>
@@ -377,12 +391,108 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
 
         <Pressable
           onPress={onClose}
-          className="active:opacity-90 mt-1 h-12 items-center justify-center rounded-xl bg-accent"
+          style={({ pressed }) => [s.doneBtn, pressed && s.pressed90]}
         >
-          <Text className="text-[15px] font-semibold text-white">Done</Text>
+          <Text style={s.doneText}>Done</Text>
         </Pressable>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
+    </>
   );
 }
+
+const s = StyleSheet.create((theme) => ({
+  filterBtn: { height: 36, width: 36, alignItems: "center", justifyContent: "center", borderRadius: 999 },
+  filterBtnOn: { backgroundColor: theme.colors.accentSoft },
+  filterBtnOff: { backgroundColor: theme.colors.surfaceAlt },
+  badge: {
+    position: "absolute",
+    right: -2,
+    top: -2,
+    height: 16,
+    minWidth: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+    backgroundColor: theme.colors.accent,
+    paddingHorizontal: 4,
+  },
+  badgeText: { fontSize: 10, fontWeight: "700", color: theme.colors.onAccent },
+  chip: {
+    height: 32,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+  },
+  chipOn: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
+  chipOff: { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceAlt },
+  chipLabel: { maxWidth: 180, fontSize: 13 },
+  textAccent: { color: theme.colors.accent },
+  textFg: { color: theme.colors.fg },
+  textIgnored: { color: theme.colors.fgFaint, textDecorationLine: "line-through" },
+  kav: { flex: 1, justifyContent: "flex-end" },
+  backdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: theme.colors.overlay },
+  sheet: {
+    gap: 16,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderTopWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bgElevated,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
+  grabber: { alignItems: "center", gap: 4, paddingBottom: 2, paddingTop: 2 },
+  grabberBar: { height: 4, width: 40, borderRadius: 999, backgroundColor: theme.colors.border },
+  rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  title: { fontSize: 18, fontWeight: "700", color: theme.colors.fg },
+  clearRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  clearText: { fontSize: 13, color: theme.colors.fgMuted },
+  clearSmall: { fontSize: 12, color: theme.colors.fgMuted },
+  section: { gap: 6 },
+  sectionLabel: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
+  chipsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  statusDot: { height: 8, width: 8, borderRadius: 999 },
+  searchRow: {
+    height: 36,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 12,
+    backgroundColor: theme.colors.surfaceAlt,
+    paddingHorizontal: 12,
+  },
+  input: { flex: 1, fontSize: 14, color: theme.colors.fg, height: 36 },
+  // react-native-macos top-aligns text inside a fixed-height field, so on
+  // desktop the input keeps its intrinsic height (centered by the row's
+  // alignItems) and the fixed height lives on the container row instead.
+  inputDesktop: { height: "auto" as unknown as number, paddingVertical: 0 },
+  optionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingLeft: 4,
+    paddingRight: 8,
+  },
+  optionText: { flex: 1, fontSize: 14 },
+  emptyText: { paddingVertical: 12, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
+  repoRow: { flexDirection: "row", alignItems: "center" },
+  flex1: { flex: 1 },
+  eyeBtn: { paddingHorizontal: 8, paddingVertical: 8 },
+  doneBtn: {
+    marginTop: 4,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    backgroundColor: theme.colors.accent,
+  },
+  doneText: { fontSize: 15, fontWeight: "600", color: theme.colors.onAccent },
+  pressed60: { opacity: 0.6 },
+  pressed80: { opacity: 0.8 },
+  pressed90: { opacity: 0.9 },
+  pressedHover: { backgroundColor: theme.colors.surfaceHover },
+}));

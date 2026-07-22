@@ -1,16 +1,44 @@
 import "@pounce/app/polyfills"; // crypto.getRandomValues for @tanstack/db — must load first
-import "../global.css";
 import { useEffect } from "react";
-import { router, Stack } from "expo-router";
+import { useColorScheme } from "react-native";
+import { router, withLayoutContext } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import type { ParamListBase } from "@react-navigation/native";
+import {
+  createTrueSheetNavigator,
+  type TrueSheetNavigationEventMap,
+  type TrueSheetNavigationOptions,
+  type TrueSheetNavigationState,
+} from "@lodev09/react-native-true-sheet/navigation";
+import { hexFor } from "@pounce/app/ui/theme-hex";
+import { applyAppearance } from "@pounce/app/state/appearance";
 import { Providers } from "@pounce/app/components/Providers";
 import { UpdateBanner } from "@pounce/app/components/UpdateBanner";
 import { bootstrap } from "@pounce/app/services/runtime";
 import { attachPushNavigation } from "@pounce/app/services/push";
 import { attachNotificationTapHandler, initLocalNotifications } from "@pounce/app/services/notify";
 
+// Root navigator = TrueSheet: `(main)` renders as the base screen (the whole
+// stack lives inside it), and sibling routes present as REAL native sheets
+// (UISheetPresentationController / BottomSheetDialog) — draggable, dimmed,
+// with a grabber. Groups don't change URLs, so /changes and /filters keep
+// their paths and every router.push call site works unchanged.
+const { Navigator } = createTrueSheetNavigator();
+
+const Sheet = withLayoutContext<
+  TrueSheetNavigationOptions,
+  typeof Navigator,
+  TrueSheetNavigationState<ParamListBase>,
+  TrueSheetNavigationEventMap
+>(Navigator);
+
 export default function RootLayout() {
+  // Sheet backgrounds get LITERAL scheme-picked hexes, not PlatformColors:
+  // the sheet's background resolves against the presented VC's traits, which
+  // ignore the forced light/dark toggle (see NativeSheetTrue for the same trap).
+  const hex = hexFor(useColorScheme());
   useEffect(() => {
+    applyAppearance(); // restore the persisted light/dark override before anything renders twice
     void bootstrap();
     void initLocalNotifications();
     const detachPush = attachPushNavigation();
@@ -27,33 +55,30 @@ export default function RootLayout() {
 
   return (
     <Providers>
-      <StatusBar style="light" />
-      <Stack
+      <StatusBar style="auto" />
+      <Sheet
+        initialRouteName="(main)" // base screen — deep links to a sheet inject (main) underneath (ensureBaseRoute)
         screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: "#0B0B0F" },
+          dimmed: true,
+          grabber: true,
+          cornerRadius: 24,
+          backgroundColor: hex.bgElevated,
         }}
       >
-        <Stack.Screen name="(app)" />
-        <Stack.Screen name="session/[id]" />
-        <Stack.Screen name="sessions" options={{ presentation: "modal" }} />
-        <Stack.Screen name="new" options={{ presentation: "modal" }} />
-        <Stack.Screen name="changes" options={{ presentation: "modal" }} />
-        <Stack.Screen name="terminal" options={{ presentation: "modal" }} />
-        <Stack.Screen name="connect" options={{ presentation: "modal" }} />
-        <Stack.Screen name="help" options={{ presentation: "modal" }} />
-        <Stack.Screen name="sync-history" options={{ presentation: "modal" }} />
-        {/* Native form sheet (not an RN Modal) — sizes to the prompt's options. */}
-        <Stack.Screen
-          name="prompt/[id]"
-          options={{
-            presentation: "formSheet",
-            sheetAllowedDetents: "fitToContents",
-            sheetCornerRadius: 24,
-            contentStyle: { backgroundColor: "#101016" }, // --color-bg-elevated
-          }}
+        <Sheet.Screen name="(main)" />
+        {/* Filters as a native sheet; state is global (filters$), so the
+            sheet needs no params and Home/Search react live as chips toggle. */}
+        <Sheet.Screen name="filters" options={{ detents: ["auto", 1] }} />
+        {/* Changes is a FULL screen (diff WebView + commit bar) presented as a
+            draggable sheet — a large fixed detent, never 'auto' (a WebView has
+            no intrinsic height to measure; the route wrapper sizes content). */}
+        {/* No grabber: the header's chevron-down is the dismiss affordance and
+            the reserved grabber strip read as an ugly dead band above it. */}
+        <Sheet.Screen
+          name="changes"
+          options={{ detents: [0.99], backgroundColor: hex.bg, grabber: false }}
         />
-      </Stack>
+      </Sheet>
       <UpdateBanner />
     </Providers>
   );

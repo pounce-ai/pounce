@@ -23,7 +23,7 @@ import type {
   TimelineEvent,
 } from "@pounce/shared";
 import { parseUserMessage } from "@pounce/transcript";
-import { cachedModels, connection$, firstUserMessages, mergeWorkspace, setAgentCaps, setCachedModels, syncWorkspace, upsertHosts } from "../state/stores";
+import { cachedModels, connection$, firstUserMessages, forgetDevice, mergeWorkspace, reconcileDevices, setAgentCaps, setCachedModels, syncWorkspace, upsertHosts } from "../state/stores";
 import { clearNotify, notifyOnce } from "./notify";
 import { alertAwaitingSessions } from "./promptAlerts";
 import { streamTurn } from "./streamTurn";
@@ -1257,6 +1257,31 @@ export async function streamLiveMessage(
   return { threadId: realThreadId };
 }
 
+/** One machine, one row. Device ids are URL-derived, so re-pairing the same
+ *  machine under a new port/bridge instance piles up duplicate device entries.
+ *  After a device connects, any OTHER config that answers /v1/pair with the
+ *  SAME tunnel nodeId (the machine-stable identity in ~/.pounce, shared by
+ *  every bridge instance on that host) is that machine under a stale URL —
+ *  remove it. Unreachable devices are never touched: a failed read is not
+ *  authoritative (it may be a different, sleeping machine). */
+export async function forgetSameHostDuplicates(keepId: string): Promise<void> {
+  const keep = await deviceForHost(keepId);
+  if (!keep) return;
+  const keepPairing = await fetchPairing(keep);
+  if (!keepPairing?.nodeId) return;
+  const stale: string[] = [];
+  for (const d of (await listDeviceConfigs()).filter((d) => d.id !== keepId)) {
+    const p = await fetchPairing(d);
+    if (p?.nodeId && p.nodeId === keepPairing.nodeId) stale.push(d.id);
+  }
+  if (!stale.length) return;
+  for (const id of stale) {
+    await removeDeviceConfig(id);
+    forgetDevice(id);
+  }
+  reconcileDevices((await listDeviceConfigs()).map((c) => c.id));
+}
+
 /** Add a device (a machine's bridge) and load all devices' live data. */
 export async function connectBridge(cfg: BridgeConfig): Promise<boolean> {
   connection$.status.set("connecting");
@@ -1283,6 +1308,9 @@ export async function connectBridge(cfg: BridgeConfig): Promise<boolean> {
     // Fall back to the batch sync if the stream path errors (older bridge, etc.).
     await syncLiveDataStreaming().catch(() => syncLiveData().catch(() => {}));
     connection$.status.set("connected");
+    // Sweep same-machine duplicates (old ports/bridge instances) now that this
+    // one is confirmed live. Best-effort, off the critical path.
+    void forgetSameHostDuplicates(dev.id).catch(() => {});
     return true;
   } catch {
     if (!wasPaired) await removeDeviceConfig(id);

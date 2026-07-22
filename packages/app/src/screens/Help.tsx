@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { Linking, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
-import { cn, COLOR, INPUT_TWEAKS, inputH } from "../ui";
+import { PounceIcon } from "../ui/native/Icon";
+import { INPUT_TWEAKS, IS_DESKTOP } from "../ui";
 
 const DOCS_URL = "https://use-pounce.com/how-it-works.html";
 
@@ -64,6 +65,7 @@ const FAQS: Faq[] = [
 export default function HelpScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { theme } = useUnistyles();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<Set<number>>(new Set());
 
@@ -82,35 +84,41 @@ export default function HelpScreen() {
   }, [query]);
 
   return (
-    <View className="flex-1 bg-bg" style={{ paddingTop: insets.top + 8 }}>
-      <View className="flex-row items-center justify-between px-4 pb-3">
-        <Text className="text-[22px] font-bold text-fg">Help</Text>
-        <Pressable onPress={() => router.back()} className="active:opacity-60">
-          <Text className="text-[15px] text-fg-muted">Done</Text>
-        </Pressable>
-      </View>
+    <View style={[s.root, IS_DESKTOP ? { paddingTop: insets.top + 8 } : { paddingTop: 8 }]}>
+      {/* Mobile shows the native modal navigation bar; this row is desktop chrome. */}
+      {IS_DESKTOP ? (
+        <View style={s.headerRow}>
+          <Text style={s.headerTitle}>Help</Text>
+          <Pressable onPress={() => router.back()} style={({ pressed }) => pressed && s.pressed60}>
+            <Text style={s.doneLabel}>Done</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       {/* Search */}
-      <View className="mx-4 mb-2 h-11 flex-row items-center gap-2 rounded-2xl bg-surface-alt px-3">
-        <Ionicons name="search" size={16} color={COLOR.fgFaint} />
+      <View style={s.searchRow}>
+        <PounceIcon name="search" size={16} color={theme.colors.fgFaint} />
         <TextInput {...INPUT_TWEAKS}
           value={query}
           onChangeText={setQuery}
           placeholder="Search help…"
-          placeholderTextColor={COLOR.fgFaint}
+          placeholderTextColor={theme.colors.fgFaint}
           autoCapitalize="none"
           autoCorrect={false}
-          className={cn("flex-1 text-[15px] text-fg", inputH("h-11"))}
+          style={[s.searchInput, IS_DESKTOP && s.inputDesktop]}
         />
         {query ? (
-          <Pressable onPress={() => setQuery("")} className="active:opacity-60 p-1">
-            <Ionicons name="close-circle" size={16} color={COLOR.fgFaint} />
+          <Pressable
+            onPress={() => setQuery("")}
+            style={({ pressed }) => [s.clearBtn, pressed && s.pressed60]}
+          >
+            <PounceIcon name="close-circle" size={16} color={theme.colors.fgFaint} />
           </Pressable>
         ) : null}
       </View>
 
       <ScrollView
-        className="flex-1 px-4"
+        style={s.scroll}
         contentContainerStyle={{ paddingTop: 4, paddingBottom: insets.bottom + 24, gap: 8 }}
         keyboardDismissMode="on-drag"
       >
@@ -121,27 +129,27 @@ export default function HelpScreen() {
               <Pressable
                 key={f.i}
                 onPress={() => toggle(f.i)}
-                className="active:opacity-90 rounded-2xl border border-border bg-surface px-4 py-3.5"
+                style={({ pressed }) => [s.card, pressed && s.pressed90]}
               >
-                <View className="flex-row items-center gap-2">
-                  <Text className="flex-1 text-[15px] font-semibold text-fg">{f.q}</Text>
-                  <Ionicons
+                <View style={s.cardHeader}>
+                  <Text style={s.question}>{f.q}</Text>
+                  <PounceIcon
                     name={isOpen ? "chevron-up" : "chevron-down"}
                     size={16}
-                    color={COLOR.fgFaint}
+                    color={theme.colors.fgFaint}
                   />
                 </View>
                 {isOpen ? (
-                  <Text className="mt-2 text-[14px] leading-[21px] text-fg-muted">{f.a}</Text>
+                  <Text style={s.answer}>{f.a}</Text>
                 ) : null}
               </Pressable>
             );
           })
         ) : (
-          <View className="items-center px-8 py-16">
-            <Text className="text-[40px]">🔍</Text>
-            <Text className="mt-3 text-center text-[15px] font-semibold text-fg">No matches</Text>
-            <Text className="mt-1 text-center text-[13px] text-fg-muted">
+          <View style={s.empty}>
+            <Text style={s.emptyEmoji}>🔍</Text>
+            <Text style={s.emptyTitle}>No matches</Text>
+            <Text style={s.emptyBody}>
               Try another word, or open the full docs below.
             </Text>
           </View>
@@ -149,14 +157,73 @@ export default function HelpScreen() {
 
         <Pressable
           onPress={() => void Linking.openURL(DOCS_URL)}
-          className={cn(
-            "active:opacity-80 mt-2 flex-row items-center justify-center gap-2 rounded-2xl border border-border bg-surface px-4 py-3.5",
-          )}
+          style={({ pressed }) => [s.docsBtn, pressed && s.pressed80]}
         >
-          <Ionicons name="book-outline" size={16} color={COLOR.accent} />
-          <Text className="text-[14px] font-medium text-accent">Open the full docs</Text>
+          <PounceIcon name="book-outline" size={16} color={theme.colors.accent} />
+          <Text style={s.docsLabel}>Open the full docs</Text>
         </Pressable>
       </ScrollView>
     </View>
   );
 }
+
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  headerTitle: { fontSize: 22, fontWeight: "700", color: theme.colors.fg },
+  doneLabel: { fontSize: 15, color: theme.colors.fgMuted },
+  pressed60: { opacity: 0.6 },
+  pressed80: { opacity: 0.8 },
+  pressed90: { opacity: 0.9 },
+  searchRow: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    height: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 16,
+    backgroundColor: theme.colors.surfaceAlt,
+    paddingHorizontal: 12,
+  },
+  searchInput: { flex: 1, fontSize: 15, color: theme.colors.fg, height: 44 },
+  // Desktop keeps the input's intrinsic height (centered by the row) — see inputH in ui/index.tsx.
+  inputDesktop: { height: "auto" as const, paddingVertical: 0 },
+  clearBtn: { padding: 4 },
+  scroll: { flex: 1, paddingHorizontal: 16 },
+  card: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  cardHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+  question: { flex: 1, fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  answer: { marginTop: 8, fontSize: 14, lineHeight: 21, color: theme.colors.fgMuted },
+  empty: { alignItems: "center", paddingHorizontal: 32, paddingVertical: 64 },
+  emptyEmoji: { fontSize: 40 },
+  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
+  docsBtn: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  docsLabel: { fontSize: 14, fontWeight: "500", color: theme.colors.accent },
+}));

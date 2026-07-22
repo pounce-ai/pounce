@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { KeyboardAvoidingView } from "../components/kav";
+import {
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import { PounceIcon } from "../ui/native/Icon";
 import type { AgentId } from "@pounce/shared";
 import {
   availAgentsForDevices,
@@ -16,7 +24,7 @@ import { useAgentCaps, useDevices, useProjects, useThreads } from "../state/db/h
 import { Composer, type ComposerSubmit } from "../components/Composer";
 import { FolderBrowser } from "../components/FolderBrowser";
 import { startInteractive } from "../services/bridge";
-import { AgentLogo, agentLabel, cn, COLOR } from "../ui";
+import { AgentLogo, agentLabel, IS_DESKTOP } from "../ui";
 import { effectiveCaps } from "../ui/agent-meta";
 
 // Fallback order when the selected device hasn't reported its agents yet
@@ -34,6 +42,7 @@ function repoIdForCwd(cwd: string | null): string {
 export default function NewTaskScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { theme } = useUnistyles();
   const { repoId } = useLocalSearchParams<{ repoId?: string }>();
   const devices = useDevices();
   const rawThreads = useThreads();
@@ -166,21 +175,23 @@ export default function NewTaskScreen() {
 
   return (
     <KeyboardAvoidingView
-      className="flex-1 bg-bg"
       behavior={Platform.OS === "ios" ? "padding" : undefined}
-      style={{ paddingTop: insets.top + 8 }}
+      style={[s.root, IS_DESKTOP ? { paddingTop: insets.top + 8 } : { paddingTop: 8 }]}
     >
-      <View className="flex-row items-center justify-between px-4 pb-3">
-        <Text className="text-[22px] font-bold text-fg">New task</Text>
-        <Pressable onPress={() => router.back()} className="active:opacity-60">
-          <Text className="text-[15px] text-fg-muted">Cancel</Text>
-        </Pressable>
-      </View>
+      {/* Mobile shows the native modal navigation bar; this row is desktop chrome. */}
+      {IS_DESKTOP ? (
+        <View style={s.headerRow}>
+          <Text style={s.headerTitle}>New task</Text>
+          <Pressable onPress={() => router.back()} style={({ pressed }) => pressed && s.pressed60}>
+            <Text style={s.cancelLabel}>Cancel</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
-      <ScrollView className="flex-1 px-4" contentContainerStyle={{ gap: 16, paddingBottom: 16 }}>
+      <ScrollView style={s.scroll} contentContainerStyle={{ gap: 16, paddingBottom: 16 }}>
         {devices.length > 1 ? (
           <Field label="Device">
-            <View className="flex-row flex-wrap gap-2">
+            <View style={s.chipRow}>
               {devices.map((d) => (
                 <Chip key={d.id} active={hostId === d.id} onPress={() => setHostId(d.id)} label={d.name} />
               ))}
@@ -191,44 +202,46 @@ export default function NewTaskScreen() {
         <Field label="Folder">
           <Pressable
             onPress={() => setBrowsing(true)}
-            className="active:opacity-80 flex-row items-center gap-2 rounded-xl border border-border bg-surface px-3.5 py-3"
+            style={({ pressed }) => [s.folderBtn, pressed && s.pressed80]}
           >
-            <Ionicons name="folder-outline" size={17} color={cwd ? COLOR.accent : COLOR.fgFaint} />
-            <View className="flex-1">
-              <Text numberOfLines={1} className={cn("text-[14px]", cwd ? "text-fg" : "text-fg-faint")}>
+            <PounceIcon name="folder-outline" size={17} color={cwd ? theme.colors.accent : theme.colors.fgFaint} />
+            <View style={s.flex1}>
+              <Text numberOfLines={1} style={[s.folderLabel, cwd ? s.fgText : s.faintText]}>
                 {folderLabel ?? "Choose a folder…"}
               </Text>
               {cwd ? (
-                <Text numberOfLines={1} className="font-mono text-[11px] text-fg-faint">
+                <Text numberOfLines={1} style={s.folderPath}>
                   {cwd}
                 </Text>
               ) : null}
             </View>
-            <Ionicons name="chevron-forward" size={15} color={COLOR.fgFaint} />
+            <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} />
           </Pressable>
 
           {repos.length ? (
-            <View className="mt-2 flex-row flex-wrap gap-2">
-              {repos.map((r) => (
-                <Chip key={r.id} active={activeRepoId === r.id} onPress={() => pickRepo(r.id)} label={r.name} />
-              ))}
+            <View style={[s.chipRow, s.mt2]}>
+              {/* Quick-picks only — the 3 most recently active; the browser
+                  above covers everything else. A selected repo outside the top
+                  3 still shows so the choice stays visible. */}
+              {repos
+                .filter((r, i) => i < 3 || activeRepoId === r.id)
+                .map((r) => (
+                  <Chip key={r.id} active={activeRepoId === r.id} onPress={() => pickRepo(r.id)} label={r.name} />
+                ))}
             </View>
           ) : null}
         </Field>
 
         <Field label="Agent">
-          <View className="flex-row flex-wrap gap-2">
+          <View style={s.chipRow}>
             {availAgents.map((a) => (
               <Pressable
                 key={a}
                 onPress={() => setAgent(a)}
-                className={cn(
-                  "flex-row items-center gap-1.5 rounded-full border px-3 py-1.5",
-                  agent === a ? "border-accent bg-accent-soft" : "border-border bg-surface",
-                )}
+                style={[s.agentPill, agent === a ? s.pillActive : s.pillIdle]}
               >
                 <AgentLogo agent={a} size={14} />
-                <Text className={cn("text-[13px]", agent === a ? "text-accent" : "text-fg-muted")}>
+                <Text style={[s.pillText, agent === a ? s.accentText : s.mutedText]}>
                   {agentLabel(a)}
                 </Text>
               </Pressable>
@@ -238,21 +251,22 @@ export default function NewTaskScreen() {
       </ScrollView>
 
       {/* Same composer as the session view — mode / effort / image / slash */}
-      <View style={{ paddingBottom: insets.bottom + 8 }} className="border-t border-border bg-bg-elevated px-3 pt-2">
+      <View style={[s.footer, { paddingBottom: insets.bottom + 8 }]}>
         {agent === "claude" ? (
           <Pressable
             onPress={() => setInteractive((v) => !v)}
-            className={cn(
-              "active:opacity-80 mb-2 flex-row items-center gap-1.5 self-start rounded-full border px-3 py-1.5",
-              interactive ? "border-accent bg-accent-soft" : "border-border bg-surface",
-            )}
+            style={({ pressed }) => [
+              s.interactiveBtn,
+              interactive ? s.interactiveActive : s.interactiveIdle,
+              pressed && s.pressed80,
+            ]}
           >
-            <Ionicons
+            <PounceIcon
               name={interactive ? "flash" : "flash-outline"}
               size={13}
-              color={interactive ? COLOR.accent : COLOR.fgMuted}
+              color={interactive ? theme.colors.accent : theme.colors.fgMuted}
             />
-            <Text className={cn("text-[12px]", interactive ? "text-accent" : "text-fg-muted")}>
+            <Text style={[s.interactiveText, interactive ? s.accentText : s.mutedText]}>
               Interactive{interactive ? " · answerable prompts" : ""}
             </Text>
           </Pressable>
@@ -284,8 +298,8 @@ export default function NewTaskScreen() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <View className="gap-2">
-      <Text className="text-[12px] uppercase tracking-wide text-fg-faint">{label}</Text>
+    <View style={s.field}>
+      <Text style={s.fieldLabel}>{label}</Text>
       {children}
     </View>
   );
@@ -293,8 +307,78 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function Chip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} className={cn("rounded-full border px-3.5 py-1.5", active ? "border-accent bg-accent-soft" : "border-border bg-surface")}>
-      <Text className={cn("text-[13px]", active ? "text-accent" : "text-fg-muted")}>{label}</Text>
+    <Pressable onPress={onPress} style={[s.chip, active ? s.pillActive : s.pillIdle]}>
+      <Text style={[s.pillText, active ? s.accentText : s.mutedText]}>{label}</Text>
     </Pressable>
   );
 }
+
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  headerTitle: { fontSize: 22, fontWeight: "700", color: theme.colors.fg },
+  cancelLabel: { fontSize: 15, color: theme.colors.fgMuted },
+  pressed60: { opacity: 0.6 },
+  pressed80: { opacity: 0.8 },
+  scroll: { flex: 1, paddingHorizontal: 16 },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  mt2: { marginTop: 8 },
+  folderBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  flex1: { flex: 1 },
+  folderLabel: { fontSize: 14 },
+  fgText: { color: theme.colors.fg },
+  faintText: { color: theme.colors.fgFaint },
+  folderPath: { fontFamily: "JetBrainsMono", fontSize: 11, color: theme.colors.fgFaint },
+  agentPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  pillActive: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
+  pillIdle: { borderColor: theme.colors.border, backgroundColor: theme.colors.surface },
+  pillText: { fontSize: 13 },
+  accentText: { color: theme.colors.accent },
+  mutedText: { color: theme.colors.fgMuted },
+  // Transparent, borderless bar — the Composer's floating glass pill carries
+  // its own margins and chrome now.
+  footer: {
+    paddingTop: 8,
+  },
+  interactiveBtn: {
+    height: 28,
+    marginHorizontal: 12,
+    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+  },
+  interactiveActive: { backgroundColor: theme.colors.accentSoft },
+  interactiveIdle: { backgroundColor: theme.colors.surfaceAlt },
+  interactiveText: { fontSize: 12 },
+  field: { gap: 8 },
+  fieldLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
+  chip: { borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 6 },
+}));

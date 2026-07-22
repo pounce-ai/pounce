@@ -1,9 +1,9 @@
 import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
-import { Modal } from "./AppModal";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import { NativeSheet } from "./NativeSheet";
+import { PounceIcon } from "../ui/native/Icon";
 import { cleanAssistantText, parseUserMessage } from "@pounce/transcript";
-import { AgentLogo, COLOR, timeAgo } from "../ui";
+import { AgentLogo, timeAgo } from "../ui";
 
 /** A marked message, resolved against the current event list. */
 export interface Marker {
@@ -31,20 +31,14 @@ export function MarkerSheet({
   onJump: (index: number) => void;
   onClose: () => void;
 }) {
-  const insets = useSafeAreaInsets();
+  const { theme } = useUnistyles();
   const { height } = useWindowDimensions();
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable className="flex-1 bg-black/50" onPress={onClose} />
-      <View
-        style={{ paddingBottom: insets.bottom + 16 }}
-        className="rounded-t-3xl border-t border-border bg-bg-elevated px-4 pt-3"
-      >
-        <View className="mb-3 h-1 w-10 self-center rounded-full bg-border" />
-        <View className="mb-2 flex-row items-center justify-between">
-          <Text className="text-[18px] font-bold text-fg">Markers</Text>
-          <Text className="text-[13px] text-fg-muted">{markers.length}</Text>
+    <NativeSheet visible={visible} onClose={onClose}>
+        <View style={s.headerRow}>
+          <Text style={s.headerTitle}>Markers</Text>
+          <Text style={s.headerCount}>{markers.length}</Text>
         </View>
         <ScrollView style={{ maxHeight: height * 0.6 }}>
           {markers.map((m) => {
@@ -57,23 +51,22 @@ export function MarkerSheet({
                   onJump(m.index);
                   onClose();
                 }}
-                className="active:bg-surface-hover flex-row items-center gap-2.5 rounded-xl px-2 py-2.5"
+                style={({ pressed }) => [s.row, pressed && s.rowPressed]}
               >
                 {user ? (
-                  <Ionicons name="person-circle-outline" size={18} color={COLOR.accent} />
+                  <PounceIcon name="person-circle-outline" size={18} color={theme.colors.accent} />
                 ) : (
                   <AgentLogo agent={agent} size={16} />
                 )}
-                <Text numberOfLines={2} className="flex-1 text-[14px] leading-[19px] text-fg">
+                <Text numberOfLines={2} style={s.preview}>
                   {preview}
                 </Text>
-                <Text className="text-[11px] text-fg-faint">{timeAgo(m.ts)}</Text>
+                <Text style={s.time}>{timeAgo(m.ts)}</Text>
               </Pressable>
             );
           })}
         </ScrollView>
-      </View>
-    </Modal>
+    </NativeSheet>
   );
 }
 
@@ -84,3 +77,25 @@ function userPreview(text: string, agent: string): string {
   if (p.command) return `${p.command.name}${p.command.args ? ` ${p.command.args}` : ""}`;
   return text;
 }
+
+const s = StyleSheet.create((theme) => ({
+  headerRow: {
+    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  headerTitle: { fontSize: 18, fontWeight: "700", color: theme.colors.fg },
+  headerCount: { fontSize: 13, color: theme.colors.fgMuted },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+  },
+  rowPressed: { backgroundColor: theme.colors.surfaceHover },
+  preview: { flex: 1, fontSize: 14, lineHeight: 19, color: theme.colors.fg },
+  time: { fontSize: 11, color: theme.colors.fgFaint },
+}));
