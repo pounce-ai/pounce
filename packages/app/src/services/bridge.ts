@@ -820,6 +820,48 @@ export async function fetchActivity(days = 365, opts?: { fresh?: boolean }): Pro
   return mergeActivity(pages);
 }
 
+/** One rolling rate-limit window as an agent reports it. */
+export interface QuotaWindow {
+  label: string;
+  usedPercent: number;
+  windowMinutes: number | null;
+  resetsAt: string | null;
+}
+
+export interface AgentQuota {
+  hostId: string;
+  agent: string;
+  planType: string | null;
+  /** When the agent last reported this — it can be days stale. */
+  observedAt: string | null;
+  windows: QuotaWindow[];
+}
+
+/**
+ * Plan quota across every paired device. On a subscription this is the number
+ * that actually means something — dollars don't exist to report. Agents with
+ * nothing to say are simply absent.
+ */
+export async function fetchQuota(): Promise<AgentQuota[]> {
+  const devices = await listDeviceConfigs();
+  const pages = await Promise.all(
+    devices.map(async (cfg) => {
+      try {
+        const { quota } = await get<{
+          quota: Record<string, Omit<AgentQuota, "hostId" | "agent">>;
+        }>(cfg, "/v1/quota", 15_000);
+        return Object.entries(quota ?? {}).map(([agent, q]) => ({ ...q, agent, hostId: cfg.id }));
+      } catch {
+        return [];
+      }
+    }),
+  );
+  // Most-consumed window first: the one closest to biting is the one to show.
+  return pages
+    .flat()
+    .sort((a, b) => (b.windows[0]?.usedPercent ?? 0) - (a.windows[0]?.usedPercent ?? 0));
+}
+
 /** One selectable model for an agent, from the daemon's model/list. */
 export interface ModelInfo {
   id: string;
@@ -1115,7 +1157,14 @@ export async function fetchHostConfig(hostId: string): Promise<PounceConfig | nu
  *  key); the host re-detects agents on the next sync. Returns the new config. */
 export async function saveHostConfig(
   hostId: string,
-  patch: { bins?: Record<string, string>; extraPath?: string[]; env?: Record<string, string> },
+  patch: {
+    bins?: Record<string, string>;
+    extraPath?: string[];
+    env?: Record<string, string>;
+    /** Anthropic Admin API key for official org spend; "" clears it. Write-only —
+     *  the response reports `adminApiKeySet`, never the value. */
+    adminApiKey?: string;
+  },
 ): Promise<PounceConfig | null> {
   const cfg = await deviceForHost(hostId);
   if (!cfg) return null;

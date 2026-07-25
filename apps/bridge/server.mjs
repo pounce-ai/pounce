@@ -45,6 +45,8 @@ import { agentEnv, binPath, binVersion, primaryLanIp } from "./agents/env.mjs";
 import { readConfig, writeConfig } from "./agents/config.mjs";
 import { createHistorySearch } from "./agents/search.mjs";
 import { createActivityIndex } from "./agents/activity-index.mjs";
+import { readQuota } from "./agents/quota.mjs";
+import { dailyCost, resetCostCache } from "./agents/admin-cost.mjs";
 
 const IS_WIN = process.platform === "win32";
 
@@ -674,6 +676,64 @@ const activity = createActivityIndex({
 const ACTIVITY_POPULATE_MS = Number(process.env.ACTIVITY_POPULATE_MS || 10 * 60_000);
 
 /**
+ * Config as it may leave this machine. The Admin API key is a bearer credential
+ * for the org's BILLING account, so it is write-only: settable over /v1/config,
+ * never readable back. A paired phone gets a boolean and nothing else — the
+ * same reasoning that keeps /v1/file image-only.
+ */
+function publicConfig(config) {
+  const { adminApiKey, ...rest } = config || {};
+  return { ...rest, adminApiKeySet: typeof adminApiKey === "string" && adminApiKey.length > 0 };
+}
+
+/**
+ * Overlay the organization's official daily spend onto the activity series,
+ * when the user has opted in with an Admin API key (~/.pounce/config.json).
+ *
+ * The org's billing report is authoritative for dollars, so where it has a day
+ * it REPLACES the ledger's figure rather than adding to it — the ledger only
+ * ever sees turns Pounce drove, which are a subset of the same spend. Days the
+ * report doesn't cover keep whatever the ledger knew, and stay null if neither
+ * source has a number.
+ *
+ * Cost here is org-wide, not per-agent: it's the billing account's spend, which
+ * may include work done outside Pounce entirely. `costSource` says so.
+ */
+async function withAdminCost(series, days) {
+  const apiKey = readConfig().adminApiKey;
+  if (!apiKey) return series;
+  const report = await dailyCost(apiKey, { days }).catch(() => ({ available: false }));
+  if (!report.available) return series;
+  const byDay = report.byDay || {};
+  let total = null;
+  const daysOut = series.days.map((d) =>
+    byDay[d.date] == null ? d : { ...d, cost: byDay[d.date] },
+  );
+  // Include reported days the transcripts never saw (spend from another machine
+  // on the same billing account) so the total isn't quietly short.
+  const known = new Set(daysOut.map((d) => d.date));
+  for (const [date, cost] of Object.entries(byDay)) {
+    if (!known.has(date)) {
+      daysOut.push({ date, sessions: 0, messages: 0, tokens: 0, cost, byAgent: {} });
+    }
+  }
+  for (const d of daysOut) if (d.cost != null) total = (total ?? 0) + d.cost;
+  daysOut.sort((a, b) => a.date.localeCompare(b.date));
+  return {
+    ...series,
+    days: daysOut,
+    totals: {
+      ...series.totals,
+      cost: total == null ? null : Math.round(total * 100) / 100,
+      // The billing report covers the whole org for the window, so what it
+      // returns is complete for the days it answered for.
+      costComplete: true,
+      costSource: "admin-api",
+    },
+  };
+}
+
+/**
  * Keep the activity index warm in the background.
  *
  * Without this the FIRST dashboard open pays a full cold scan of every
@@ -1212,7 +1272,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { report: await host.doctor() });
     }
     if (url.pathname === "/v1/config" && req.method === "GET") {
-      return send(res, 200, { config: readConfig() });
+      return send(res, 200, { config: publicConfig(readConfig()) });
     }
     if (url.pathname === "/v1/config" && req.method === "POST") {
       // Manual overrides for custom setups: pin a binary's absolute path, add
@@ -1224,7 +1284,13 @@ const server = http.createServer(async (req, res) => {
       // next doctor/threads call reflects the new paths immediately.
       cache.delete("agents");
       cache.delete("threads");
-      return send(res, 200, { config });
+      // A changed billing key invalidates both the memoized report and every
+      // activity window that was built without (or with the old) one.
+      if (patch && "adminApiKey" in patch) {
+        resetCostCache();
+        for (const k of [...cache.keys()]) if (k.startsWith("activity:")) cache.delete(k);
+      }
+      return send(res, 200, { config: publicConfig(config) });
     }
     if (url.pathname === "/v1/usage") {
       const agent = url.searchParams.get("agent");
@@ -1246,7 +1312,19 @@ const server = http.createServer(async (req, res) => {
       return send(
         res,
         200,
-        await cached(key, CACHE_MS, async () => activity.series(await getThreads(fresh), { days })),
+        await cached(key, CACHE_MS, async () => {
+          const series = await activity.series(await getThreads(fresh), { days });
+          return withAdminCost(series, days);
+        }),
+      );
+    }
+    // Plan quota — how much of a rolling rate-limit window is spent. For a
+    // subscription this is the meaningful number; "dollars" doesn't exist.
+    if (url.pathname === "/v1/quota") {
+      return send(
+        res,
+        200,
+        await cached("quota", 60_000, async () => ({ quota: await readQuota() })),
       );
     }
     if (url.pathname === "/v1/warm" && req.method === "POST") {

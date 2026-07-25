@@ -193,6 +193,13 @@ export interface PounceConfig {
   readonly extraPath: readonly string[];
   /** Extra environment variables for agent spawns. */
   readonly env: Readonly<Record<string, string>>;
+  /**
+   * Whether an Anthropic Admin API key is stored on the host, enabling official
+   * org spend in the activity series. Read-only and boolean by design: the key
+   * itself is a billing credential and never leaves the machine it's set on.
+   * Set it by POSTing `adminApiKey`; clear it by POSTing an empty string.
+   */
+  readonly adminApiKeySet?: boolean;
 }
 
 /** The host's runtime health — what's installed, found, and reachable. Drives

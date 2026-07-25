@@ -15,7 +15,7 @@ import { PounceIcon } from "../ui/native/Icon";
 import { AgentLogo, IS_DESKTOP } from "../ui";
 import { agentLabel } from "../ui/tokens";
 import { fmtCost, fmtCount, fmtDayLabel, fmtDelta, fmtTokens } from "../ui/format";
-import { fetchActivity } from "../services/bridge";
+import { fetchActivity, fetchQuota } from "../services/bridge";
 import {
   type ActivityDay,
   PERIOD_DAYS,
@@ -30,6 +30,7 @@ import {
   zeroFill,
 } from "../services/activity";
 import { ContributionGraph } from "../components/ContributionGraph";
+import { QuotaCard } from "../components/QuotaCard";
 import { MiniBarChart } from "../components/MiniBarChart";
 import { StatTile } from "../components/StatTile";
 import {
@@ -64,6 +65,15 @@ export default function DashboardScreen() {
   const q = useQuery({
     queryKey: ["activity", YEAR],
     queryFn: () => fetchActivity(YEAR),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+
+  // Plan quota is a separate, much cheaper read than the year series, and it
+  // matters most when it's near a limit — so it refreshes on its own cadence.
+  const quotaQ = useQuery({
+    queryKey: ["quota"],
+    queryFn: fetchQuota,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
@@ -216,6 +226,8 @@ export default function DashboardScreen() {
                 icon="git-commit-outline"
               />
             </View>
+
+            <QuotaCard quotas={quotaQ.data ?? []} />
 
             <View style={s.streakRow}>
               <View style={s.streakItem}>
