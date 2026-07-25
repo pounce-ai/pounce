@@ -26,6 +26,7 @@ import {
   systemEvent,
 } from "./events.mjs";
 import { agentEnv, binVersion, binPath } from "./env.mjs";
+import { noUsage, usageResult } from "./usage.mjs";
 
 const DATA_DIR = path.join(os.homedir(), ".local", "share", "opencode");
 const DB_FILE = path.join(DATA_DIR, "opencode.db");
@@ -122,6 +123,59 @@ export class OpencodeAdapter {
       } catch {}
     }
     return this._listThreadsFiles();
+  }
+
+  /**
+   * The one adapter with fully official USD: opencode computes and stores
+   * `cost` on every assistant message alongside its token breakdown, for the
+   * whole thread — no live capture needed, and nothing for us to price. Works
+   * over either backing store since both yield the same message `data`.
+   */
+  async getUsage(threadId) {
+    const db = await this.db();
+    const messages = db ? this._messagesDb(db, threadId) : this._messagesFiles(threadId);
+    const tokens = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, reasoning: 0 };
+    const models = new Set();
+    let cost = 0,
+      costRows = 0,
+      count = 0,
+      contextUsed = null;
+    for (const { data } of messages) {
+      if (!data || data.role !== "assistant") continue;
+      const t = data.tokens;
+      if (!t) continue;
+      count++;
+      // opencode's per-message `total` is that request's whole footprint, so
+      // the newest one is the current fill. Older records predate that field —
+      // sum the same parts it covers rather than losing the reading. opencode
+      // stores no context window, so this is a raw number with nothing to take
+      // a percentage against.
+      contextUsed =
+        typeof t.total === "number"
+          ? t.total
+          : (t.input || 0) + (t.output || 0) + (t.cache?.read || 0) + (t.cache?.write || 0);
+      tokens.input += t.input || 0;
+      tokens.output += t.output || 0;
+      tokens.reasoning += t.reasoning || 0;
+      tokens.cacheRead += t.cache?.read || 0;
+      tokens.cacheCreation += t.cache?.write || 0;
+      if (typeof data.cost === "number" && Number.isFinite(data.cost)) {
+        cost += data.cost;
+        costRows++;
+      }
+      if (data.modelID) models.add(data.modelID);
+    }
+    if (!count) return noUsage("no-usage");
+    return usageResult({
+      tokens,
+      cost: costRows ? cost : null,
+      costComplete: costRows === count,
+      costSource: costRows ? "agent" : null,
+      model: [...models].pop() || null,
+      models: [...models],
+      messages: count,
+      contextUsed,
+    });
   }
 
   async getEvents(threadId, { limit } = {}) {

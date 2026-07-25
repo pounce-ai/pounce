@@ -29,6 +29,8 @@ import {
   contentText,
 } from "./events.mjs";
 import { agentEnv, binVersion, binPath, liveAgentCwds } from "./env.mjs";
+import { recordTurn, threadTotals } from "./cost-ledger.mjs";
+import { noUsage, usageResult } from "./usage.mjs";
 
 const ROOT = path.join(os.homedir(), ".claude", "projects");
 // Claude Code's permission-mode names → the app's canonical PermissionMode.
@@ -74,6 +76,43 @@ function imageRefs(content, uuid) {
     }
   });
   return out;
+}
+
+/**
+ * Pull the official metrics out of a stream-json `result` envelope.
+ *
+ * Every number here is copied verbatim — we never price tokens ourselves. The
+ * envelope looks like:
+ *   { total_cost_usd, duration_ms, uuid, usage:{ input_tokens, … },
+ *     modelUsage:{ "claude-opus-5[1m]": { costUSD, contextWindow, … } } }
+ *
+ * `modelUsage` keys are the exact model strings the CLI billed against
+ * (including variant suffixes like `[1m]`), so we keep the busiest one rather
+ * than the tidier `canonicalModel` — it's what actually ran.
+ */
+function turnMetrics(sessionId, o) {
+  const u = o.usage || {};
+  const mu = o.modelUsage && typeof o.modelUsage === "object" ? o.modelUsage : {};
+  const byOutput = Object.entries(mu).sort(
+    (a, b) => (b[1]?.outputTokens || 0) - (a[1]?.outputTokens || 0),
+  );
+  const [model, top] = byOutput[0] || [null, null];
+  return {
+    agent: "claude",
+    threadId: o.session_id || sessionId,
+    turnId: o.uuid || null,
+    model,
+    costUsd: typeof o.total_cost_usd === "number" ? o.total_cost_usd : null,
+    contextWindow: top?.contextWindow ?? null,
+    durationMs: o.duration_ms ?? null,
+    tokens: {
+      input: u.input_tokens || 0,
+      output: u.output_tokens || 0,
+      cacheRead: u.cache_read_input_tokens || 0,
+      cacheCreation: u.cache_creation_input_tokens || 0,
+    },
+    source: "claude-result",
+  };
 }
 
 /** Is this user record an actual human message (not meta, not a tool result)? */
@@ -134,6 +173,86 @@ export class ClaudeAdapter {
       if (existsSync(p)) return p;
     }
     return null;
+  }
+
+  /**
+   * Token totals from the transcript, plus real USD for whatever slice of the
+   * thread the bridge itself drove.
+   *
+   * Claude Code records `message.usage` on every assistant line but never a
+   * dollar figure — `total_cost_usd` exists only on the live stream-json result
+   * envelope, which we bank in the cost ledger as turns complete. So tokens
+   * always cover the whole thread while cost covers only bridge-driven turns;
+   * `costComplete: false` says so, and a thread taken entirely in a terminal
+   * reports tokens with `cost: null` rather than a guess.
+   */
+  async getUsage(threadId) {
+    const file = await this.findFile(threadId);
+    if (!file) return noUsage("no-transcript");
+    const tokens = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
+    const outByModel = new Map();
+    let messages = 0;
+    let contextUsed = null;
+    let rl;
+    // Stream it: a multi-million-token thread's JSONL must never be slurped.
+    try {
+      rl = createInterface({ input: createReadStream(file, "utf8"), crlfDelay: Infinity });
+    } catch {
+      return noUsage("no-transcript");
+    }
+    for await (const line of rl) {
+      if (!line) continue;
+      let o;
+      try {
+        o = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (o.type !== "assistant") continue;
+      const u = o.message?.usage;
+      if (!u) continue;
+      messages++;
+      tokens.input += u.input_tokens || 0;
+      tokens.output += u.output_tokens || 0;
+      tokens.cacheRead += u.cache_read_input_tokens || 0;
+      tokens.cacheCreation += u.cache_creation_input_tokens || 0;
+      // "<synthetic>" is Claude Code's marker for locally-generated records
+      // (API error text, interrupt notices) — not a model anyone ran, so it
+      // must not show up in the thread's model list.
+      const m = o.message?.model;
+      if (m && m !== "<synthetic>")
+        outByModel.set(m, (outByModel.get(m) || 0) + (u.output_tokens || 0));
+      // Context fill = the prompt of the most recent real request. Sidechains
+      // (Task-tool subagents) carry their own separate context, and synthetic
+      // records aren't requests at all — either would understate the main
+      // thread's fill if it happened to land last.
+      if (!o.isSidechain && m !== "<synthetic>") {
+        contextUsed =
+          (u.input_tokens || 0) +
+          (u.cache_read_input_tokens || 0) +
+          (u.cache_creation_input_tokens || 0);
+      }
+    }
+    if (!messages) return noUsage("no-usage");
+    const ledger = await threadTotals("claude", threadId).catch(() => null);
+    const models = [...outByModel.keys()];
+    return usageResult({
+      tokens,
+      // Official only: whatever the CLI billed for turns we ran, or nothing.
+      cost: ledger?.cost ?? null,
+      // The ledger holds bridge-driven turns; the transcript holds all of them.
+      // Equal output-token counts is the signal that we saw the whole thread.
+      costComplete: !!ledger && ledger.costComplete && ledger.tokens.output >= tokens.output,
+      costSource: ledger?.cost != null ? "agent" : null,
+      model: models.slice().sort((a, b) => outByModel.get(b) - outByModel.get(a))[0] || null,
+      models,
+      messages,
+      // Claude Code never writes the context window to its transcript — the
+      // only official source is the live result envelope, so the window is
+      // known once a turn has been taken from Pounce and not before.
+      contextWindow: ledger?.contextWindow ?? null,
+      contextUsed,
+    });
   }
 
   /**
@@ -624,6 +743,10 @@ export class ClaudeAdapter {
         // no-op (the original "step 3 didn't work" bug).
         if (!o.is_error && o.subtype === "success" && o.num_turns === 0) return;
         sawResult = true;
+        // The ONLY place Claude Code reports real dollars: total_cost_usd rides
+        // this envelope and is never written to ~/.claude/projects/**.jsonl, so
+        // it's gone the moment this process exits. Persist it before finishing.
+        recordTurn(turnMetrics(sessionId, o));
         // Surface any non-success outcome — "no conversation found", API
         // errors, execution errors — or the app just sees a silent no-op.
         if (o.is_error || (o.subtype && o.subtype !== "success")) {

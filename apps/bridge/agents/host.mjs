@@ -82,6 +82,16 @@ export function createHost({ version = () => null } = {}) {
       return adapter(agent).getActivity(threadId);
     },
 
+    /** Per-thread token usage, and cost only where the agent itself reports it
+     *  (see ./usage.mjs). Adapters without a usage source say so rather than
+     *  having the bridge estimate one. */
+    getUsage(agent, threadId) {
+      const a = adapter(agent);
+      return a.getUsage
+        ? a.getUsage(threadId)
+        : Promise.resolve({ available: false, reason: "unsupported-agent" });
+    },
+
     /** Diagnostic report: node, agent CLIs, sessions, git, tunnel. */
     doctor() {
       return buildDoctorReport([...adapters.values()]);

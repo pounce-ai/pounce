@@ -28,7 +28,7 @@ export default defineConfig({
         },
         {
           label: "Help",
-          items: ["docs/troubleshooting"],
+          items: ["docs/faq", "docs/troubleshooting"],
         },
       ],
       editLink: {
