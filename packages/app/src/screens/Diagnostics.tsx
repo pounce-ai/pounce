@@ -6,14 +6,7 @@
  * "Set path…" editor that pins an absolute binary path the host then honors.
  */
 import { useCallback, useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -100,9 +93,7 @@ function PathEditor({
         style={({ pressed }) => [s.editLink, pressed && s.pressed60]}
       >
         <PounceIcon name="create-outline" size={13} color={theme.colors.accent} />
-        <Text style={s.editLinkText}>
-          {override ? "Change path" : "Set path manually"}
-        </Text>
+        <Text style={s.editLinkText}>{override ? "Change path" : "Set path manually"}</Text>
       </Pressable>
     );
   }
@@ -127,7 +118,11 @@ function PathEditor({
         <Pressable
           onPress={save}
           disabled={saving}
-          style={({ pressed }) => [s.saveBtn, pressed && s.pressed80, { opacity: saving ? 0.6 : 1 }]}
+          style={({ pressed }) => [
+            s.saveBtn,
+            pressed && s.pressed80,
+            { opacity: saving ? 0.6 : 1 },
+          ]}
         >
           <Text style={s.saveText}>{saving ? "Saving…" : "Save"}</Text>
         </Pressable>
@@ -226,8 +221,8 @@ export default function DiagnosticsScreen() {
           <PounceIcon name="medkit-outline" size={34} color={theme.colors.fgFaint} />
           <Text style={s.emptyTitle}>Can't reach this machine's engine</Text>
           <Text style={s.emptyBody}>
-            Pounce runs a small local service (needs Node.js). If it isn't starting, install Node.js and relaunch
-            Pounce, then try again.
+            Pounce runs a small local service (needs Node.js). If it isn't starting, install Node.js
+            and relaunch Pounce, then try again.
           </Text>
         </View>
       ) : (
@@ -246,7 +241,11 @@ export default function DiagnosticsScreen() {
               warn={(report.network.ips?.length ?? 0) > 1}
               alwaysHint
               title="Phone pairing (same Wi-Fi)"
-              detail={report.network.advertised ? `${report.network.advertised}:${report.network.port}` : "no LAN address"}
+              detail={
+                report.network.advertised
+                  ? `${report.network.advertised}:${report.network.port}`
+                  : "no LAN address"
+              }
               hint={
                 !report.network.reachable
                   ? "No local network address found — connect this Mac to Wi-Fi/Ethernet."
@@ -301,7 +300,12 @@ export default function DiagnosticsScreen() {
                 alwaysHint={!!override}
               >
                 {a.bin ? (
-                  <PathEditor bin={a.bin} detectedPath={a.path} override={override} onSaved={savePath} />
+                  <PathEditor
+                    bin={a.bin}
+                    detectedPath={a.path}
+                    override={override}
+                    onSaved={savePath}
+                  />
                 ) : null}
               </Row>
             );
@@ -317,32 +321,35 @@ export default function DiagnosticsScreen() {
             />
           ) : null}
 
-          <Row ok={!!report.git?.ok} title="git" detail={report.git?.version?.replace(/^git version /, "")} hint="git isn't found — some repo features (diffs, commits) won't work." />
+          <Row
+            ok={!!report.git?.ok}
+            title="git"
+            detail={report.git?.version?.replace(/^git version /, "")}
+            hint="git isn't found — some repo features (diffs, commits) won't work."
+          />
 
           {report.gh ? (
-          <Row
-            ok={report.gh.ok && report.gh.authed !== false}
-            warn={report.gh.ok && report.gh.authed === false}
-            title="GitHub CLI (gh)"
-            detail={
-              !report.gh.ok
-                ? undefined
-                : report.gh.authed === false
-                  ? `${report.gh.version ?? ""} · not signed in`.trim()
-                  : report.gh.version ?? undefined
-            }
-            hint={
-              !report.gh.ok
-                ? "gh isn't installed — creating PRs and CI check status won't work. brew install gh"
-                : "gh isn't signed in — run `gh auth login` on this machine to enable PRs and checks."
-            }
-          />
+            <Row
+              ok={report.gh.ok && report.gh.authed !== false}
+              warn={report.gh.ok && report.gh.authed === false}
+              title="GitHub CLI (gh)"
+              detail={
+                !report.gh.ok
+                  ? undefined
+                  : report.gh.authed === false
+                    ? `${report.gh.version ?? ""} · not signed in`.trim()
+                    : (report.gh.version ?? undefined)
+              }
+              hint={
+                !report.gh.ok
+                  ? "gh isn't installed — creating PRs and CI check status won't work. brew install gh"
+                  : "gh isn't signed in — run `gh auth login` on this machine to enable PRs and checks."
+              }
+            />
           ) : null}
 
           {report.configFile ? (
-            <Text style={s.configNote}>
-              Custom paths are saved to {report.configFile}.
-            </Text>
+            <Text style={s.configNote}>Custom paths are saved to {report.configFile}.</Text>
           ) : null}
         </ScrollView>
       )}
@@ -365,7 +372,12 @@ const s = StyleSheet.create((theme) => ({
   },
   rowHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   rowTitle: { fontSize: 14, fontWeight: "500", color: theme.colors.fg },
-  rowDetail: { marginLeft: 8, fontFamily: "JetBrainsMono", fontSize: 11, color: theme.colors.fgMuted },
+  rowDetail: {
+    marginLeft: 8,
+    fontFamily: "JetBrainsMono",
+    fontSize: 11,
+    color: theme.colors.fgMuted,
+  },
   rowHint: { marginTop: 4, fontSize: 12, lineHeight: 17, color: theme.colors.fgMuted },
   editLink: { marginTop: 6, flexDirection: "row", alignItems: "center", gap: 4 },
   editLinkText: { fontSize: 12, fontWeight: "500", color: theme.colors.accent },
@@ -407,8 +419,20 @@ const s = StyleSheet.create((theme) => ({
   doneLabel: { fontSize: 15, color: theme.colors.fgMuted },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
-  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
-  emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, lineHeight: 19, color: theme.colors.fgMuted },
+  emptyTitle: {
+    marginTop: 12,
+    textAlign: "center",
+    fontSize: 15,
+    fontWeight: "600",
+    color: theme.colors.fg,
+  },
+  emptyBody: {
+    marginTop: 4,
+    textAlign: "center",
+    fontSize: 13,
+    lineHeight: 19,
+    color: theme.colors.fgMuted,
+  },
   summary: {
     paddingHorizontal: 16,
     paddingBottom: 8,

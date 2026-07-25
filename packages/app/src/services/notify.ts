@@ -53,7 +53,10 @@ export async function notifyOnce(
   lastFired.set(key, now);
   try {
     await initLocalNotifications();
-    await Notifications.scheduleNotificationAsync({ content: { title, body, data }, trigger: null });
+    await Notifications.scheduleNotificationAsync({
+      content: { title, body, data },
+      trigger: null,
+    });
   } catch {
     lastFired.delete(key); // let a real retry through once the module lands
   }

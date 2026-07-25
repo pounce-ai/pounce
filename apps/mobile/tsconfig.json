@@ -3,31 +3,15 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "moduleResolution": "Bundler",
-    "lib": [
-      "ESNext",
-      "DOM"
-    ],
+    "lib": ["ESNext", "DOM"],
     "composite": false,
-    "types": [
-      "react",
-      "jest"
-    ],
+    "types": ["react", "jest"],
     "paths": {
-      "@pounce/shared": [
-        "../../packages/shared/src/index.ts"
-      ],
-      "@pounce/runtime": [
-        "../../packages/runtime/src/index.ts"
-      ],
-      "@pounce/ui": [
-        "../../packages/ui/src/index.ts"
-      ],
-      "@pounce/transcript": [
-        "../../packages/transcript/src/index.d.ts"
-      ],
-      "@pounce/app/*": [
-        "../../packages/app/src/*"
-      ]
+      "@pounce/shared": ["../../packages/shared/src/index.ts"],
+      "@pounce/runtime": ["../../packages/runtime/src/index.ts"],
+      "@pounce/ui": ["../../packages/ui/src/index.ts"],
+      "@pounce/transcript": ["../../packages/transcript/src/index.d.ts"],
+      "@pounce/app/*": ["../../packages/app/src/*"]
     }
   },
   "include": [

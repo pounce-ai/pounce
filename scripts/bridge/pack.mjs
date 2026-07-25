@@ -14,7 +14,15 @@
  * ~/.pounce/bin/ on the host to enable off-LAN access (the bridge auto-detects).
  */
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, rmSync, chmodSync, writeFileSync, readFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  rmSync,
+  chmodSync,
+  writeFileSync,
+  readFileSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,7 +44,15 @@ mkdirSync(OUT, { recursive: true });
 // 1. Launcher: server.mjs + workspace deps → one file. zigpty is kept external
 //    (it loads a native .node the bundler can't follow) and shipped in step 3.
 step("Bundling launcher");
-run(["build", path.join(REPO, "apps/bridge/desktop-launcher.mjs"), "--target=node", "--external", "zigpty", "--outfile", path.join(OUT, "launcher.mjs")]);
+run([
+  "build",
+  path.join(REPO, "apps/bridge/desktop-launcher.mjs"),
+  "--target=node",
+  "--external",
+  "zigpty",
+  "--outfile",
+  path.join(OUT, "launcher.mjs"),
+]);
 
 // 2. ACP adapters (claude, codex) beside the launcher — the bridge spawns these
 //    for richer live-turn status when BRIDGE_ACP=1; the stream-json path works
@@ -49,7 +65,9 @@ for (const pkg of ["claude-agent-acp", "codex-acp"]) {
   if (existsSync(entry)) {
     run(["build", entry, "--target=node", "--outfile", path.join(adaptersDir, `${pkg}.mjs`)]);
   } else {
-    console.warn(`  ! ${pkg} not found (${entry}) — skipping; ACP for that agent will be unavailable`);
+    console.warn(
+      `  ! ${pkg} not found (${entry}) — skipping; ACP for that agent will be unavailable`,
+    );
   }
 }
 
@@ -88,8 +106,13 @@ for (const f of ["install.sh", "uninstall.sh"]) chmodSync(path.join(OUT, f), 0o7
 //    tracks the app users already know) for the installer + logs.
 let version = "0.0.0";
 try {
-  const plist = readFileSync(path.join(REPO, "desktop/macos/PounceDesktop-macOS/Info.plist"), "utf8");
-  version = plist.match(/<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/)?.[1] || version;
+  const plist = readFileSync(
+    path.join(REPO, "desktop/macos/PounceDesktop-macOS/Info.plist"),
+    "utf8",
+  );
+  version =
+    plist.match(/<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/)?.[1] ||
+    version;
 } catch {}
 writeFileSync(path.join(OUT, "VERSION"), `${version}\n`);
 

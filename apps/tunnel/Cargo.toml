@@ -12,7 +12,14 @@ crate-type = ["staticlib", "rlib"]
 [dependencies]
 # iroh p2p — proven to hole-punch from the user's real networks.
 iroh = "0.98.2"
-tokio = { version = "1", features = ["rt-multi-thread", "io-util", "net", "macros", "time", "sync"] }
+tokio = { version = "1", features = [
+  "rt-multi-thread",
+  "io-util",
+  "net",
+  "macros",
+  "time",
+  "sync",
+] }
 anyhow = "1"
 serde_json = "1"
 n0-watcher = "0.6"

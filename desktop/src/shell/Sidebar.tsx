@@ -22,7 +22,14 @@ import { GlassSurface } from "@pounce/app/ui/native/GlassSurface";
 import { nav$ } from "../shims/router";
 
 type Row =
-  | { type: "header"; repoId: string; name: string; count: number; attention: number; collapsed: boolean }
+  | {
+      type: "header";
+      repoId: string;
+      name: string;
+      count: number;
+      attention: number;
+      collapsed: boolean;
+    }
   | { type: "session"; session: Session };
 
 /** Sort order: needs-you → running → other live → archived; newest within each. */
@@ -40,8 +47,7 @@ export function Sidebar() {
   // the same mutated reference, so toggles never re-render (the classic
   // object-selector gotcha) — and this is purely local UI state anyway.
   const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>({});
-  const toggleGroup = (repoId: string) =>
-    setCollapsedMap((m) => ({ ...m, [repoId]: !m[repoId] }));
+  const toggleGroup = (repoId: string) => setCollapsedMap((m) => ({ ...m, [repoId]: !m[repoId] }));
 
   const status = useSelector(() => connection$.status.get());
   const selectedId = useSelector(() => nav$.detail.get()?.params.id ?? null);
@@ -125,7 +131,8 @@ export function Sidebar() {
       <View style={s.topBar}>
         <View style={s.searchBox}>
           <Ionicons name="search" size={13} color={COLOR.fgFaint} />
-          <TextInput {...INPUT_TWEAKS}
+          <TextInput
+            {...INPUT_TWEAKS}
             value={query}
             onChangeText={setQuery}
             placeholder="Search threads"
@@ -244,18 +251,28 @@ export function Sidebar() {
           />
           <Text numberOfLines={1} style={s.footerStatusText}>
             {connected
-              ? deviceList.filter((d) => d.online).map((d) => d.name).join(", ") || "Connected"
+              ? deviceList
+                  .filter((d) => d.online)
+                  .map((d) => d.name)
+                  .join(", ") || "Connected"
               : loading
                 ? "Connecting…"
                 : "Offline"}
           </Text>
         </View>
         <FooterIcon name="qr-code-outline" hint="Pair phone" onPress={() => router.push("/pair")} />
-        <FooterIcon name="time-outline" hint="Sync history" onPress={() => router.push("/sync-history")} />
+        <FooterIcon
+          name="time-outline"
+          hint="Sync history"
+          onPress={() => router.push("/sync-history")}
+        />
         <FooterIcon name="help-circle-outline" hint="Help" onPress={() => router.push("/help")} />
-        <FooterIcon name="settings-outline" hint="Settings" onPress={() => router.push("/settings")} />
+        <FooterIcon
+          name="settings-outline"
+          hint="Settings"
+          onPress={() => router.push("/settings")}
+        />
       </View>
-
     </View>
   );
 }
@@ -285,13 +302,20 @@ function filterRows(rows: Row[], q: string): Row[] {
   return out;
 }
 
-function GroupHeader({ row, onPress }: { row: Extract<Row, { type: "header" }>; onPress: () => void }) {
+function GroupHeader({
+  row,
+  onPress,
+}: {
+  row: Extract<Row, { type: "header" }>;
+  onPress: () => void;
+}) {
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [s.groupHeader, pressed && s.pressed70]}
-    >
-      <Ionicons name={row.collapsed ? "chevron-forward" : "chevron-down"} size={11} color={COLOR.fgFaint} />
+    <Pressable onPress={onPress} style={({ pressed }) => [s.groupHeader, pressed && s.pressed70]}>
+      <Ionicons
+        name={row.collapsed ? "chevron-forward" : "chevron-down"}
+        size={11}
+        color={COLOR.fgFaint}
+      />
       <Ionicons name="folder-outline" size={12} color={COLOR.fgFaint} />
       <Text numberOfLines={1} style={s.groupName}>
         {row.name}
@@ -347,7 +371,9 @@ function ThreadRow({
             {s2.host}
           </Text>
         )}
-        {s2.worktree ? <Ionicons name="git-branch-outline" size={10} color={COLOR.fgFaint} /> : null}
+        {s2.worktree ? (
+          <Ionicons name="git-branch-outline" size={10} color={COLOR.fgFaint} />
+        ) : null}
       </View>
     </Pressable>
   );

@@ -57,10 +57,7 @@ export function DropZone({ children, style, onDropFiles }: DropZoneProps) {
     <View style={style} {...dragProps}>
       {children}
       {hovering ? (
-        <View
-          pointerEvents="none"
-          style={s.overlay}
-        >
+        <View pointerEvents="none" style={s.overlay}>
           <View style={s.card}>
             <Ionicons name="attach" size={28} color={COLOR.accent} />
             <Text style={s.title}>Drop to add to this chat</Text>

@@ -6,7 +6,14 @@
  */
 import { useMemo } from "react";
 import { eq, useLiveQuery } from "@tanstack/react-db";
-import type { AgentCapabilities, Device, Host, Repository, Session, TimelineEvent } from "@pounce/shared";
+import type {
+  AgentCapabilities,
+  Device,
+  Host,
+  Repository,
+  Session,
+  TimelineEvent,
+} from "@pounce/shared";
 import type { ModelInfo } from "../../services/bridge";
 import {
   agentCaps,
@@ -51,7 +58,9 @@ export function useHosts(): Host[] {
 
 /** deviceId → { name?, emoji? } presentation overrides. */
 export function useDeviceOverrides(): Record<string, DeviceOverrideRow> {
-  const rows = (useLiveQuery((q) => q.from({ o: deviceOverrides })).data as DeviceOverrideRow[] | undefined) ?? [];
+  const rows =
+    (useLiveQuery((q) => q.from({ o: deviceOverrides })).data as DeviceOverrideRow[] | undefined) ??
+    [];
   return useMemo(() => Object.fromEntries(rows.map((o) => [o.id, o])), [rows]);
 }
 
@@ -101,48 +110,67 @@ export function useSyncLog(): SyncLogRow[] {
 }
 
 export function useFavThreadSet(): Set<string> {
-  const rows = (useLiveQuery((q) => q.from({ f: favorites })).data as { kind: string; ref: string }[] | undefined) ?? [];
+  const rows =
+    (useLiveQuery((q) => q.from({ f: favorites })).data as
+      | { kind: string; ref: string }[]
+      | undefined) ?? [];
   return useMemo(() => new Set(rows.filter((f) => f.kind === "thread").map((f) => f.ref)), [rows]);
 }
 export function useFavRepoSet(): Set<string> {
-  const rows = (useLiveQuery((q) => q.from({ f: favorites })).data as { kind: string; ref: string }[] | undefined) ?? [];
+  const rows =
+    (useLiveQuery((q) => q.from({ f: favorites })).data as
+      | { kind: string; ref: string }[]
+      | undefined) ?? [];
   return useMemo(() => new Set(rows.filter((f) => f.kind === "repo").map((f) => f.ref)), [rows]);
 }
 
 export function useIgnoredSet(): Set<string> {
-  const rows = (useLiveQuery((q) => q.from({ i: ignoredRepos })).data as { id: string }[] | undefined) ?? [];
+  const rows =
+    (useLiveQuery((q) => q.from({ i: ignoredRepos })).data as { id: string }[] | undefined) ?? [];
   return useMemo(() => new Set(rows.map((r) => r.id)), [rows]);
 }
 
 export function useThread(id: string | undefined): Session | undefined {
   const rows =
-    (useLiveQuery((q) => (id ? q.from({ t: threads }).where(({ t }) => eq(t.id, id)) : q.from({ t: threads })), [id])
-      .data as Session[] | undefined) ?? [];
+    (useLiveQuery(
+      (q) => (id ? q.from({ t: threads }).where(({ t }) => eq(t.id, id)) : q.from({ t: threads })),
+      [id],
+    ).data as Session[] | undefined) ?? [];
   return id ? rows.find((s) => s.id === id) : undefined;
 }
 
 export function useThreadModel(id: string | undefined): string | undefined {
   const rows =
-    (useLiveQuery((q) => q.from({ m: threadModels }), []).data as { id: string; model: string }[] | undefined) ?? [];
+    (useLiveQuery((q) => q.from({ m: threadModels }), []).data as
+      | { id: string; model: string }[]
+      | undefined) ?? [];
   return id ? rows.find((r) => r.id === id)?.model : undefined;
 }
 
 /** Reactive capabilities for one agent (null until reported). */
 export function useAgentCaps(agent: string | undefined): AgentCapabilities | null {
-  const rows = (useLiveQuery((q) => q.from({ a: agentCaps })).data as (AgentCapabilities & { id: string })[] | undefined) ?? [];
-  return useMemo(() => (agent ? rows.find((a) => a.id === agent) ?? null : null), [rows, agent]);
+  const rows =
+    (useLiveQuery((q) => q.from({ a: agentCaps })).data as
+      | (AgentCapabilities & { id: string })[]
+      | undefined) ?? [];
+  return useMemo(() => (agent ? (rows.find((a) => a.id === agent) ?? null) : null), [rows, agent]);
 }
 
 /** Reactive cached model catalog for a host+agent (null until warmed). */
 export function useAgentModels(hostId: string, agent: string): ModelInfo[] | null {
   const key = `${hostId}:${agent}`;
-  const rows = (useLiveQuery((q) => q.from({ a: agentModels }), []).data as AgentModelsRow[] | undefined) ?? [];
+  const rows =
+    (useLiveQuery((q) => q.from({ a: agentModels }), []).data as AgentModelsRow[] | undefined) ??
+    [];
   return useMemo(() => rows.find((r) => r.id === key)?.models ?? null, [rows, key]);
 }
 
 /** messageId → explicit marked override, for one session. */
 export function useThreadMarkers(sessionId: string | undefined): Map<string, boolean> {
-  const rows = (useLiveQuery((q) => q.from({ m: markers }), []).data as { id: string; marked: boolean }[] | undefined) ?? [];
+  const rows =
+    (useLiveQuery((q) => q.from({ m: markers }), []).data as
+      | { id: string; marked: boolean }[]
+      | undefined) ?? [];
   return useMemo(() => {
     const map = new Map<string, boolean>();
     if (!sessionId) return map;
@@ -157,8 +185,13 @@ export function useThreadMarkers(sessionId: string | undefined): Map<string, boo
 /** Persisted chat events for a thread (raw, unsorted — caller orders). */
 export function useMessages(threadId: string | undefined): TimelineEvent[] {
   const rows =
-    (useLiveQuery((q) => (threadId ? q.from({ m: messages }).where(({ m }) => eq(m.threadId, threadId)) : q.from({ m: messages })), [threadId])
-      .data as MessageRow[] | undefined) ?? [];
+    (useLiveQuery(
+      (q) =>
+        threadId
+          ? q.from({ m: messages }).where(({ m }) => eq(m.threadId, threadId))
+          : q.from({ m: messages }),
+      [threadId],
+    ).data as MessageRow[] | undefined) ?? [];
   return useMemo(
     () => (threadId ? rows.filter((m) => m.threadId === threadId).map((m) => m.event) : []),
     [rows, threadId],

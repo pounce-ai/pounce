@@ -25,17 +25,17 @@ Platform divergence uses React Native's platform-file mechanism inside the
 shared package — `.macos.ts` / `.windows.ts` forks (re-exporting a single
 `.desktop.ts` impl) exist only where a library has no desktop build:
 
-| Seam | Mobile | Desktop |
-|---|---|---|
-| `services/persistence` | MMKV | AsyncStorage |
-| `services/secureStore` | expo-secure-store | AsyncStorage (Keychain follow-up) |
-| `services/streamTurn` | nitro-fetch streaming | XHR progressive events |
-| `services/transport` | Iroh (nitro) or HTTP | HTTP only |
-| `services/voice` | expo-speech-recognition | hidden |
-| `services/imagePicker` | expo-image-picker | stub |
-| `components/Skeleton` | Boneyard + Reanimated | core Animated |
-| `components/Providers` | gesture/keyboard/HeroUI | safe-area + query |
-| `components/QrScanner` | expo-camera | manual-entry notice |
+| Seam                   | Mobile                  | Desktop                           |
+| ---------------------- | ----------------------- | --------------------------------- |
+| `services/persistence` | MMKV                    | AsyncStorage                      |
+| `services/secureStore` | expo-secure-store       | AsyncStorage (Keychain follow-up) |
+| `services/streamTurn`  | nitro-fetch streaming   | XHR progressive events            |
+| `services/transport`   | Iroh (nitro) or HTTP    | HTTP only                         |
+| `services/voice`       | expo-speech-recognition | hidden                            |
+| `services/imagePicker` | expo-image-picker       | stub                              |
+| `components/Skeleton`  | Boneyard + Reanimated   | core Animated                     |
+| `components/Providers` | gesture/keyboard/HeroUI | safe-area + query                 |
+| `components/QrScanner` | expo-camera             | manual-entry notice               |
 
 Everything else — uniwind styling, Legend State/List, the Timeline (with the
 shared pure-JS Markdown renderer), Composer, git flows, stores — is byte-for-byte
@@ -79,7 +79,7 @@ bridge-spawn build phase equivalent hasn't been wired into the `.vcxproj` yet.
   to `aarch64-apple-darwin`, but Nitro Modules has no macOS runtime — desktop
   would need a small hand-written native module over the same C FFI, behind
   the existing `services/transport` seam. The bridge covers all current
-  functionality locally; Iroh matters for controlling *other* machines off-LAN.
+  functionality locally; Iroh matters for controlling _other_ machines off-LAN.
 - Secure storage is AsyncStorage-backed on desktop (plaintext at rest).
 - Reanimated 4 needs the New Architecture, which this project doesn't enable
   on react-native-macos yet — motion-tabs and Boneyard skeletons stay mobile-only.

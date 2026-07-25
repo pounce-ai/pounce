@@ -2,8 +2,8 @@
   "name": "@pounce/app",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "description": "Shared Pounce application source — screens, components, state, and services consumed by both the mobile (apps/mobile) and desktop (desktop/) apps. Ships raw TS/TSX; each app's Metro compiles it against its own React Native version. Platform divergence lives in .macos/.windows platform files, never in per-app copies.",
+  "type": "module",
   "exports": {
     "./*": "./src/*"
   },

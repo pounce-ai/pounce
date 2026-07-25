@@ -31,11 +31,7 @@ import type {
   RunControlRequest,
   WireEnvelope,
 } from "@pounce/shared";
-import type {
-  ConnectionState,
-  SubscribeOptions,
-  Transport,
-} from "./types";
+import type { ConnectionState, SubscribeOptions, Transport } from "./types";
 
 export interface HttpTransportConfig {
   /** Base URL of the daemon, e.g. http://192.168.1.10:8389 or a tunnel. */
@@ -198,9 +194,7 @@ export class TransportError extends Error {
 
 function parseSseData(frame: string): unknown | null {
   const lines = frame.split("\n");
-  const dataLines = lines
-    .filter((l) => l.startsWith("data:"))
-    .map((l) => l.slice(5).trimStart());
+  const dataLines = lines.filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trimStart());
   if (dataLines.length === 0) return null;
   const raw = dataLines.join("\n");
   if (raw === "[DONE]") return null;

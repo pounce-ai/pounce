@@ -36,36 +36,36 @@ export function MarkerSheet({
 
   return (
     <NativeSheet visible={visible} onClose={onClose}>
-        <View style={s.headerRow}>
-          <Text style={s.headerTitle}>Markers</Text>
-          <Text style={s.headerCount}>{markers.length}</Text>
-        </View>
-        <ScrollView style={{ maxHeight: height * 0.6 }}>
-          {markers.map((m) => {
-            const user = m.type === "user_message";
-            const preview = user ? userPreview(m.text, agent) : cleanAssistantText(m.text, agent);
-            return (
-              <Pressable
-                key={m.id}
-                onPress={() => {
-                  onJump(m.index);
-                  onClose();
-                }}
-                style={({ pressed }) => [s.row, pressed && s.rowPressed]}
-              >
-                {user ? (
-                  <PounceIcon name="person-circle-outline" size={18} color={theme.colors.accent} />
-                ) : (
-                  <AgentLogo agent={agent} size={16} />
-                )}
-                <Text numberOfLines={2} style={s.preview}>
-                  {preview}
-                </Text>
-                <Text style={s.time}>{timeAgo(m.ts)}</Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+      <View style={s.headerRow}>
+        <Text style={s.headerTitle}>Markers</Text>
+        <Text style={s.headerCount}>{markers.length}</Text>
+      </View>
+      <ScrollView style={{ maxHeight: height * 0.6 }}>
+        {markers.map((m) => {
+          const user = m.type === "user_message";
+          const preview = user ? userPreview(m.text, agent) : cleanAssistantText(m.text, agent);
+          return (
+            <Pressable
+              key={m.id}
+              onPress={() => {
+                onJump(m.index);
+                onClose();
+              }}
+              style={({ pressed }) => [s.row, pressed && s.rowPressed]}
+            >
+              {user ? (
+                <PounceIcon name="person-circle-outline" size={18} color={theme.colors.accent} />
+              ) : (
+                <AgentLogo agent={agent} size={16} />
+              )}
+              <Text numberOfLines={2} style={s.preview}>
+                {preview}
+              </Text>
+              <Text style={s.time}>{timeAgo(m.ts)}</Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
     </NativeSheet>
   );
 }

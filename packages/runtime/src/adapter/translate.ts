@@ -13,10 +13,7 @@ interface TranslateCtx {
   readonly conversationId: string;
 }
 
-export function translate(
-  env: WireEnvelope,
-  ctx: TranslateCtx,
-): readonly TimelineEvent[] {
+export function translate(env: WireEnvelope, ctx: TranslateCtx): readonly TimelineEvent[] {
   const base = {
     conversationId: ctx.conversationId,
     seq: env.seq,

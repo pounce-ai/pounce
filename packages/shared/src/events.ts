@@ -6,13 +6,7 @@
  * The spec's event taxonomy maps 1:1 onto the `type` discriminant below.
  */
 
-import type {
-  Id,
-  ISODateString,
-  TaskState,
-  ToolCall,
-  ToolResult,
-} from "./domain";
+import type { Id, ISODateString, TaskState, ToolCall, ToolResult } from "./domain";
 
 interface TimelineBase {
   readonly id: Id;

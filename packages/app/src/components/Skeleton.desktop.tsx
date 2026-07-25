@@ -45,7 +45,9 @@ export function SessionCardSkeleton() {
         <View style={{ flex: 1, height: 14, borderRadius: 7, backgroundColor: BONE }} />
         <View style={{ width: 50, height: 18, borderRadius: 9, backgroundColor: BONE }} />
       </View>
-      <View style={{ marginTop: 10, width: "55%", height: 10, borderRadius: 5, backgroundColor: BONE }} />
+      <View
+        style={{ marginTop: 10, width: "55%", height: 10, borderRadius: 5, backgroundColor: BONE }}
+      />
       <View style={s.footerRow}>
         <View style={{ width: 84, height: 9, borderRadius: 5, backgroundColor: BONE }} />
         <View style={{ width: 22, height: 9, borderRadius: 5, backgroundColor: BONE }} />
@@ -70,20 +72,20 @@ export function SessionListSkeleton({ count = 5 }: { count?: number }) {
  *  the skeleton dissolves into actual messages instead of giant blobs.
  *  Widths are percentages of the pane so the skeleton adapts to any window
  *  size instead of assuming a fixed-width column. */
-function BubbleBone({ user, lines, width }: { user: boolean; lines: 1 | 2 | 3; width: `${number}%` }) {
+function BubbleBone({
+  user,
+  lines,
+  width,
+}: {
+  user: boolean;
+  lines: 1 | 2 | 3;
+  width: `${number}%`;
+}) {
   // Vary the last line so consecutive bones don't look stamped.
-  const lineWidths = Array.from({ length: lines }, (_, i) =>
-    i === lines - 1 ? "62%" : "100%",
-  );
+  const lineWidths = Array.from({ length: lines }, (_, i) => (i === lines - 1 ? "62%" : "100%"));
   return (
     <View style={{ alignItems: user ? "flex-end" : "flex-start" }}>
-      <View
-        style={[
-          { width, maxWidth: "86%" },
-          s.bubble,
-          user ? s.bubbleUser : s.bubbleAgent,
-        ]}
-      >
+      <View style={[{ width, maxWidth: "86%" }, s.bubble, user ? s.bubbleUser : s.bubbleAgent]}>
         <View style={s.bubbleLines}>
           {lineWidths.map((w, i) => (
             <View
@@ -117,10 +119,7 @@ export function TimelineSkeleton() {
     { user: false, lines: 2, width: "68%" },
   ];
   return (
-    <Animated.View
-      style={[s.timeline, { opacity: pulse }]}
-      pointerEvents="none"
-    >
+    <Animated.View style={[s.timeline, { opacity: pulse }]} pointerEvents="none">
       {rows.map((r, i) => (
         <BubbleBone key={i} user={r.user} lines={r.lines} width={r.width} />
       ))}
@@ -137,7 +136,12 @@ const s = StyleSheet.create({
     padding: 14,
   },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  footerRow: { marginTop: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  footerRow: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   list: { gap: 10, paddingHorizontal: 16, paddingTop: 6 },
   bubble: { borderRadius: 16, paddingHorizontal: 12, paddingVertical: 10 },
   bubbleUser: { backgroundColor: T.surfaceAlt },

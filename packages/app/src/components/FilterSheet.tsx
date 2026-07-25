@@ -51,7 +51,11 @@ export function FilterButton({ active, onPress }: { active: boolean; onPress: ()
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [s.filterBtn, on ? s.filterBtnOn : s.filterBtnOff, pressed && s.pressed80]}
+      style={({ pressed }) => [
+        s.filterBtn,
+        on ? s.filterBtnOn : s.filterBtnOff,
+        pressed && s.pressed80,
+      ]}
     >
       <PounceIcon name="filter" size={17} color={on ? theme.colors.accent : theme.colors.fgMuted} />
       {count > 0 ? (
@@ -90,11 +94,12 @@ function FilterChip({
 
 /** The three coarse status buckets, each with the dot colour ActivityDot uses.
  *  Theme token keys — resolved against the live theme at render time. */
-const STATUS_CHIPS: { bucket: StatusBucket; label: string; dot: "success" | "fgFaint" | "info" }[] = [
-  { bucket: "active", label: "Active", dot: "success" },
-  { bucket: "idle", label: "Idle", dot: "fgFaint" },
-  { bucket: "done", label: "Done", dot: "info" },
-];
+const STATUS_CHIPS: { bucket: StatusBucket; label: string; dot: "success" | "fgFaint" | "info" }[] =
+  [
+    { bucket: "active", label: "Active", dot: "success" },
+    { bucket: "idle", label: "Idle", dot: "fgFaint" },
+    { bucket: "done", label: "Done", dot: "info" },
+  ];
 
 /**
  * Shared filter bottom sheet — show · status · device · agent · branch · project
@@ -108,13 +113,13 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       {/* KeyboardAvoidingView (RN, not keyboard-controller) — reliable inside an
           RN Modal window; lifts the sheet so the folder search isn't covered. */}
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={s.kav}
-      >
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={s.kav}>
         <Pressable style={s.backdrop} onPress={onClose} />
         <View
-          style={[s.sheet, { paddingBottom: insets.bottom + 16, maxHeight: Math.round(height * 0.92) }]}
+          style={[
+            s.sheet,
+            { paddingBottom: insets.bottom + 16, maxHeight: Math.round(height * 0.92) },
+          ]}
         >
           <FilterSheetContent onClose={onClose} />
         </View>
@@ -137,7 +142,11 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
   // that appear in existing threads (so you can still filter old sessions of an
   // agent that's since been uninstalled). Respects the selected device.
   const agents = useMemo(
-    () => sortAgents([...availAgentsForDevices(devices, f.device), ...availableAgents(rawThreads, f.device)]),
+    () =>
+      sortAgents([
+        ...availAgentsForDevices(devices, f.device),
+        ...availableAgents(rawThreads, f.device),
+      ]),
     [devices, rawThreads, f.device],
   );
   const repos = useMemo(
@@ -172,235 +181,277 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
     <>
       {/* Grabber doubles as an expand/collapse toggle — phone sheets only;
           the desktop modal card has a fixed height. */}
-        {IS_DESKTOP ? null : (
-          <Pressable onPress={() => setExpanded((v) => !v)} hitSlop={12} style={s.grabber}>
-            <View style={s.grabberBar} />
-            <PounceIcon name={expanded ? "chevron-down" : "chevron-up"} size={12} color={theme.colors.fgFaint} />
+      {IS_DESKTOP ? null : (
+        <Pressable onPress={() => setExpanded((v) => !v)} hitSlop={12} style={s.grabber}>
+          <View style={s.grabberBar} />
+          <PounceIcon
+            name={expanded ? "chevron-down" : "chevron-up"}
+            size={12}
+            color={theme.colors.fgFaint}
+          />
+        </Pressable>
+      )}
+      <View style={s.rowBetween}>
+        <Text style={s.title}>Filter</Text>
+        {hasFilter ? (
+          <Pressable
+            onPress={() => filters$.set(CLEARED_FILTERS)}
+            style={({ pressed }) => [s.clearRow, pressed && s.pressed60]}
+          >
+            <PounceIcon name="close-circle-outline" size={15} color={theme.colors.fgMuted} />
+            <Text style={s.clearText}>Clear all</Text>
           </Pressable>
-        )}
-        <View style={s.rowBetween}>
-          <Text style={s.title}>Filter</Text>
-          {hasFilter ? (
-            <Pressable
-              onPress={() => filters$.set(CLEARED_FILTERS)}
-              style={({ pressed }) => [s.clearRow, pressed && s.pressed60]}
-            >
-              <PounceIcon name="close-circle-outline" size={15} color={theme.colors.fgMuted} />
-              <Text style={s.clearText}>Clear all</Text>
-            </Pressable>
-          ) : null}
-        </View>
+        ) : null}
+      </View>
 
-        <View style={s.section}>
-          <Text style={s.sectionLabel}>Show</Text>
-          <View style={s.chipsWrap}>
-            <FilterChip label="Needs you" active={f.needsOnly} onPress={() => filters$.needsOnly.set(true)} />
-            <FilterChip label="Everything" active={!f.needsOnly} onPress={() => filters$.needsOnly.set(false)} />
-          </View>
+      <View style={s.section}>
+        <Text style={s.sectionLabel}>Show</Text>
+        <View style={s.chipsWrap}>
+          <FilterChip
+            label="Needs you"
+            active={f.needsOnly}
+            onPress={() => filters$.needsOnly.set(true)}
+          />
+          <FilterChip
+            label="Everything"
+            active={!f.needsOnly}
+            onPress={() => filters$.needsOnly.set(false)}
+          />
         </View>
+      </View>
 
-        {/* Status — coarse buckets over the activity axis (multi-select; none = all). */}
+      {/* Status — coarse buckets over the activity axis (multi-select; none = all). */}
+      <View style={s.section}>
+        <Text style={s.sectionLabel}>Status</Text>
+        <View style={s.chipsWrap}>
+          {STATUS_CHIPS.map((c) => (
+            <FilterChip
+              key={c.bucket}
+              label={c.label}
+              active={f.statuses.includes(c.bucket)}
+              onPress={() => toggleStatus(c.bucket)}
+              icon={<View style={[s.statusDot, { backgroundColor: theme.colors[c.dot] }]} />}
+            />
+          ))}
+        </View>
+      </View>
+
+      {devices.length > 1 ? (
         <View style={s.section}>
-          <Text style={s.sectionLabel}>Status</Text>
+          <Text style={s.sectionLabel}>Device</Text>
           <View style={s.chipsWrap}>
-            {STATUS_CHIPS.map((c) => (
+            {devices.map((d) => (
               <FilterChip
-                key={c.bucket}
-                label={c.label}
-                active={f.statuses.includes(c.bucket)}
-                onPress={() => toggleStatus(c.bucket)}
-                icon={<View style={[s.statusDot, { backgroundColor: theme.colors[c.dot] }]} />}
+                key={d.id}
+                label={deviceLabel(d.id, d.name)}
+                active={f.device === d.id}
+                onPress={() => filters$.device.set(f.device === d.id ? null : d.id)}
+                icon={
+                  <DeviceIcon
+                    name={d.name}
+                    emoji={deviceEmoji(d.id)}
+                    color={f.device === d.id ? theme.colors.accent : theme.colors.fgMuted}
+                    size={13}
+                  />
+                }
               />
             ))}
           </View>
         </View>
+      ) : null}
 
-        {devices.length > 1 ? (
-          <View style={s.section}>
-            <Text style={s.sectionLabel}>Device</Text>
-            <View style={s.chipsWrap}>
-              {devices.map((d) => (
-                <FilterChip
-                  key={d.id}
-                  label={deviceLabel(d.id, d.name)}
-                  active={f.device === d.id}
-                  onPress={() => filters$.device.set(f.device === d.id ? null : d.id)}
-                  icon={
-                    <DeviceIcon
-                      name={d.name}
-                      emoji={deviceEmoji(d.id)}
-                      color={f.device === d.id ? theme.colors.accent : theme.colors.fgMuted}
-                      size={13}
-                    />
-                  }
-                />
-              ))}
-            </View>
+      {agents.length > 1 ? (
+        <View style={s.section}>
+          <Text style={s.sectionLabel}>Agent</Text>
+          <View style={s.chipsWrap}>
+            {agents.map((a) => (
+              <FilterChip
+                key={a}
+                label={agentLabel(a)}
+                active={f.agent === a}
+                onPress={() => filters$.agent.set(f.agent === a ? null : a)}
+              />
+            ))}
           </View>
-        ) : null}
+        </View>
+      ) : null}
 
-        {agents.length > 1 ? (
-          <View style={s.section}>
-            <Text style={s.sectionLabel}>Agent</Text>
-            <View style={s.chipsWrap}>
-              {agents.map((a) => (
-                <FilterChip
-                  key={a}
-                  label={agentLabel(a)}
-                  active={f.agent === a}
-                  onPress={() => filters$.agent.set(f.agent === a ? null : a)}
-                />
-              ))}
-            </View>
-          </View>
-        ) : null}
-
-        {/* Branch / worktree — a searchable list of the distinct branches and
+      {/* Branch / worktree — a searchable list of the distinct branches and
             worktrees in scope. Typing narrows the list and (as before) live-
             filters threads by substring; tapping a row pins that exact value. */}
-        {branchOptions.length ? (
-          <View style={s.section}>
-            <View style={s.rowBetween}>
-              <Text style={s.sectionLabel}>Branch / worktree</Text>
-              {f.branchQuery ? (
-                <Pressable onPress={() => filters$.branchQuery.set("")} style={({ pressed }) => pressed && s.pressed60}>
-                  <Text style={s.clearSmall}>Clear</Text>
+      {branchOptions.length ? (
+        <View style={s.section}>
+          <View style={s.rowBetween}>
+            <Text style={s.sectionLabel}>Branch / worktree</Text>
+            {f.branchQuery ? (
+              <Pressable
+                onPress={() => filters$.branchQuery.set("")}
+                style={({ pressed }) => pressed && s.pressed60}
+              >
+                <Text style={s.clearSmall}>Clear</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          <View style={s.searchRow}>
+            <PounceIcon name="git-branch-outline" size={14} color={theme.colors.fgFaint} />
+            <TextInput
+              value={f.branchQuery}
+              onChangeText={(t) => filters$.branchQuery.set(t)}
+              placeholder="Search branch or worktree…"
+              placeholderTextColor={theme.colors.fgFaint}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={[s.input, IS_DESKTOP && s.inputDesktop]}
+            />
+            {f.branchQuery ? (
+              <Pressable
+                onPress={() => filters$.branchQuery.set("")}
+                hitSlop={8}
+                style={({ pressed }) => pressed && s.pressed60}
+              >
+                <PounceIcon name="close-circle" size={15} color={theme.colors.fgFaint} />
+              </Pressable>
+            ) : null}
+          </View>
+          <ScrollView
+            style={{ maxHeight: 180 }}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
+            {shownBranches.map((b) => {
+              const active = f.branchQuery === b;
+              return (
+                <Pressable
+                  key={b}
+                  onPress={() => filters$.branchQuery.set(active ? "" : b)}
+                  style={({ pressed }) => [s.optionRow, pressed && s.pressedHover]}
+                >
+                  <PounceIcon
+                    name={active ? "checkmark-circle" : "git-branch-outline"}
+                    size={16}
+                    color={active ? theme.colors.accent : theme.colors.fgMuted}
+                  />
+                  <Text numberOfLines={1} style={[s.optionText, active ? s.textAccent : s.textFg]}>
+                    {b}
+                  </Text>
                 </Pressable>
-              ) : null}
-            </View>
-            <View style={s.searchRow}>
-              <PounceIcon name="git-branch-outline" size={14} color={theme.colors.fgFaint} />
-              <TextInput
-                value={f.branchQuery}
-                onChangeText={(t) => filters$.branchQuery.set(t)}
-                placeholder="Search branch or worktree…"
-                placeholderTextColor={theme.colors.fgFaint}
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={[s.input, IS_DESKTOP && s.inputDesktop]}
-              />
-              {f.branchQuery ? (
-                <Pressable onPress={() => filters$.branchQuery.set("")} hitSlop={8} style={({ pressed }) => pressed && s.pressed60}>
-                  <PounceIcon name="close-circle" size={15} color={theme.colors.fgFaint} />
-                </Pressable>
-              ) : null}
-            </View>
-            <ScrollView style={{ maxHeight: 180 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
-              {shownBranches.map((b) => {
-                const active = f.branchQuery === b;
-                return (
+              );
+            })}
+            {shownBranches.length === 0 ? (
+              <Text style={s.emptyText}>No branches match.</Text>
+            ) : null}
+          </ScrollView>
+        </View>
+      ) : null}
+
+      {/* Project last — its searchable, scrollable list is the tallest section,
+            so the compact Device/Agent chips read first above it. */}
+      {repos.length > 1 ? (
+        <View style={s.section}>
+          <View style={s.rowBetween}>
+            <Text style={s.sectionLabel}>Project</Text>
+            {f.repos.length ? (
+              <Pressable
+                onPress={() => filters$.repos.set([])}
+                style={({ pressed }) => pressed && s.pressed60}
+              >
+                <Text style={s.clearSmall}>Clear ({f.repos.length})</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {/* Searchable, multi-select folder list. Tap a row to toggle it in the
+                filter; tap the eye to permanently hide a folder everywhere. */}
+          <View style={s.searchRow}>
+            <PounceIcon name="search" size={14} color={theme.colors.fgFaint} />
+            <TextInput
+              value={repoQuery}
+              onChangeText={setRepoQuery}
+              placeholder="Search folders…"
+              placeholderTextColor={theme.colors.fgFaint}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={[s.input, IS_DESKTOP && s.inputDesktop]}
+            />
+          </View>
+          <ScrollView
+            style={{ maxHeight: folderMax }}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
+            {shownRepos.map((r) => {
+              const ignored = isRepoIgnored(r.id);
+              const selected = f.repos.includes(r.id);
+              return (
+                <View key={r.id} style={s.repoRow}>
                   <Pressable
-                    key={b}
-                    onPress={() => filters$.branchQuery.set(active ? "" : b)}
-                    style={({ pressed }) => [s.optionRow, pressed && s.pressedHover]}
+                    disabled={ignored}
+                    onPress={() =>
+                      filters$.repos.set(
+                        selected ? f.repos.filter((id) => id !== r.id) : [...f.repos, r.id],
+                      )
+                    }
+                    style={({ pressed }) => [s.optionRow, s.flex1, pressed && s.pressedHover]}
                   >
                     <PounceIcon
-                      name={active ? "checkmark-circle" : "git-branch-outline"}
-                      size={16}
-                      color={active ? theme.colors.accent : theme.colors.fgMuted}
+                      name={selected ? "checkbox" : "square-outline"}
+                      size={18}
+                      color={
+                        ignored
+                          ? theme.colors.fgFaint
+                          : selected
+                            ? theme.colors.accent
+                            : theme.colors.fgMuted
+                      }
+                    />
+                    <PounceIcon
+                      name="folder-outline"
+                      size={13}
+                      color={ignored ? theme.colors.fgFaint : theme.colors.fgMuted}
                     />
                     <Text
                       numberOfLines={1}
-                      style={[s.optionText, active ? s.textAccent : s.textFg]}
+                      style={[
+                        s.optionText,
+                        ignored ? s.textIgnored : selected ? s.textAccent : s.textFg,
+                      ]}
                     >
-                      {b}
+                      {r.name}
                     </Text>
                   </Pressable>
-                );
-              })}
-              {shownBranches.length === 0 ? (
-                <Text style={s.emptyText}>No branches match.</Text>
-              ) : null}
-            </ScrollView>
-          </View>
-        ) : null}
+                  <Pressable
+                    onPress={() => toggleRepoIgnore(r.id)}
+                    hitSlop={8}
+                    style={({ pressed }) => [s.eyeBtn, pressed && s.pressed60]}
+                  >
+                    <PounceIcon
+                      name={ignored ? "eye-off" : "eye-outline"}
+                      size={15}
+                      color={ignored ? theme.colors.accent : theme.colors.fgFaint}
+                    />
+                  </Pressable>
+                </View>
+              );
+            })}
+            {shownRepos.length === 0 ? <Text style={s.emptyText}>No folders match.</Text> : null}
+          </ScrollView>
+        </View>
+      ) : null}
 
-        {/* Project last — its searchable, scrollable list is the tallest section,
-            so the compact Device/Agent chips read first above it. */}
-        {repos.length > 1 ? (
-          <View style={s.section}>
-            <View style={s.rowBetween}>
-              <Text style={s.sectionLabel}>Project</Text>
-              {f.repos.length ? (
-                <Pressable onPress={() => filters$.repos.set([])} style={({ pressed }) => pressed && s.pressed60}>
-                  <Text style={s.clearSmall}>Clear ({f.repos.length})</Text>
-                </Pressable>
-              ) : null}
-            </View>
-            {/* Searchable, multi-select folder list. Tap a row to toggle it in the
-                filter; tap the eye to permanently hide a folder everywhere. */}
-            <View style={s.searchRow}>
-              <PounceIcon name="search" size={14} color={theme.colors.fgFaint} />
-              <TextInput
-                value={repoQuery}
-                onChangeText={setRepoQuery}
-                placeholder="Search folders…"
-                placeholderTextColor={theme.colors.fgFaint}
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={[s.input, IS_DESKTOP && s.inputDesktop]}
-              />
-            </View>
-            <ScrollView style={{ maxHeight: folderMax }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
-              {shownRepos.map((r) => {
-                const ignored = isRepoIgnored(r.id);
-                const selected = f.repos.includes(r.id);
-                return (
-                  <View key={r.id} style={s.repoRow}>
-                    <Pressable
-                      disabled={ignored}
-                      onPress={() =>
-                        filters$.repos.set(
-                          selected ? f.repos.filter((id) => id !== r.id) : [...f.repos, r.id],
-                        )
-                      }
-                      style={({ pressed }) => [s.optionRow, s.flex1, pressed && s.pressedHover]}
-                    >
-                      <PounceIcon
-                        name={selected ? "checkbox" : "square-outline"}
-                        size={18}
-                        color={ignored ? theme.colors.fgFaint : selected ? theme.colors.accent : theme.colors.fgMuted}
-                      />
-                      <PounceIcon name="folder-outline" size={13} color={ignored ? theme.colors.fgFaint : theme.colors.fgMuted} />
-                      <Text
-                        numberOfLines={1}
-                        style={[
-                          s.optionText,
-                          ignored ? s.textIgnored : selected ? s.textAccent : s.textFg,
-                        ]}
-                      >
-                        {r.name}
-                      </Text>
-                    </Pressable>
-                    <Pressable onPress={() => toggleRepoIgnore(r.id)} hitSlop={8} style={({ pressed }) => [s.eyeBtn, pressed && s.pressed60]}>
-                      <PounceIcon
-                        name={ignored ? "eye-off" : "eye-outline"}
-                        size={15}
-                        color={ignored ? theme.colors.accent : theme.colors.fgFaint}
-                      />
-                    </Pressable>
-                  </View>
-                );
-              })}
-              {shownRepos.length === 0 ? (
-                <Text style={s.emptyText}>No folders match.</Text>
-              ) : null}
-            </ScrollView>
-          </View>
-        ) : null}
-
-        <Pressable
-          onPress={onClose}
-          style={({ pressed }) => [s.doneBtn, pressed && s.pressed90]}
-        >
-          <Text style={s.doneText}>Done</Text>
-        </Pressable>
+      <Pressable onPress={onClose} style={({ pressed }) => [s.doneBtn, pressed && s.pressed90]}>
+        <Text style={s.doneText}>Done</Text>
+      </Pressable>
     </>
   );
 }
 
 const s = StyleSheet.create((theme) => ({
-  filterBtn: { height: 36, width: 36, alignItems: "center", justifyContent: "center", borderRadius: 999 },
+  filterBtn: {
+    height: 36,
+    width: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+  },
   filterBtnOn: { backgroundColor: theme.colors.accentSoft },
   filterBtnOff: { backgroundColor: theme.colors.surfaceAlt },
   badge: {
@@ -432,7 +483,14 @@ const s = StyleSheet.create((theme) => ({
   textFg: { color: theme.colors.fg },
   textIgnored: { color: theme.colors.fgFaint, textDecorationLine: "line-through" },
   kav: { flex: 1, justifyContent: "flex-end" },
-  backdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: theme.colors.overlay },
+  backdrop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: theme.colors.overlay,
+  },
   sheet: {
     gap: 16,
     borderTopLeftRadius: 24,
@@ -451,7 +509,12 @@ const s = StyleSheet.create((theme) => ({
   clearText: { fontSize: 13, color: theme.colors.fgMuted },
   clearSmall: { fontSize: 12, color: theme.colors.fgMuted },
   section: { gap: 6 },
-  sectionLabel: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
+  sectionLabel: {
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: theme.colors.fgFaint,
+  },
   chipsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   statusDot: { height: 8, width: 8, borderRadius: 999 },
   searchRow: {
@@ -478,7 +541,12 @@ const s = StyleSheet.create((theme) => ({
     paddingRight: 8,
   },
   optionText: { flex: 1, fontSize: 14 },
-  emptyText: { paddingVertical: 12, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
+  emptyText: {
+    paddingVertical: 12,
+    textAlign: "center",
+    fontSize: 13,
+    color: theme.colors.fgMuted,
+  },
   repoRow: { flexDirection: "row", alignItems: "center" },
   flex1: { flex: 1 },
   eyeBtn: { paddingHorizontal: 8, paddingVertical: 8 },

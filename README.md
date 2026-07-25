@@ -20,18 +20,18 @@ server, the shared packages, and the landing page.
 
 ## Repo layout
 
-| Path | What |
-|---|---|
-| `apps/mobile` | The Pounce **Expo / React Native** app (iOS & Android) |
-| `apps/bridge` | The **bridge server** (`server.mjs`) — the native agent host + LAN HTTP surface the apps talk to |
-| `desktop` | The **Pounce desktop app** (expo‑desktop → react‑native‑macos / windows) — the full app UI with the bridge embedded |
-| `packages/{shared,runtime,ui}` | Shared types, runtime/transport, and UI primitives |
-| `apps/web` | The website — landing pages, docs & changelog at [use-pounce.com](https://use-pounce.com/) (Astro + Starlight, deployed to Cloudflare via Alchemy — see `apps/web/alchemy.run.ts`) |
-| `scripts/` | Release + host install helpers |
+| Path                           | What                                                                                                                                                                               |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/mobile`                  | The Pounce **Expo / React Native** app (iOS & Android)                                                                                                                             |
+| `apps/bridge`                  | The **bridge server** (`server.mjs`) — the native agent host + LAN HTTP surface the apps talk to                                                                                   |
+| `desktop`                      | The **Pounce desktop app** (expo‑desktop → react‑native‑macos / windows) — the full app UI with the bridge embedded                                                                |
+| `packages/{shared,runtime,ui}` | Shared types, runtime/transport, and UI primitives                                                                                                                                 |
+| `apps/web`                     | The website — landing pages, docs & changelog at [use-pounce.com](https://use-pounce.com/) (Astro + Starlight, deployed to Cloudflare via Alchemy — see `apps/web/alchemy.run.ts`) |
+| `scripts/`                     | Release + host install helpers                                                                                                                                                     |
 
 ## How it works
 
-Your agents run behind an Iroh‑based daemon (the *agent host*) that a phone can't reach
+Your agents run behind an Iroh‑based daemon (the _agent host_) that a phone can't reach
 directly. The **Bridge** runs on your computer: it starts the host, exposes a small
 token‑protected HTTP surface on your LAN, and shows a QR. The **app** scans it once and
 syncs — then keeps a direct identity to reach your machine afterward.
@@ -43,7 +43,7 @@ run it, and scan the QR:
 
 - **macOS (Apple Silicon):** `Pounce.dmg` (signed + notarized) — open, drag to Applications, launch.
 - **Windows (x64):** `Pounce-Setup-Windows.zip` — extract, run `Pounce-Setup.exe`. Unsigned for
-  now: if SmartScreen appears, choose *More info → Run anyway*.
+  now: if SmartScreen appears, choose _More info → Run anyway_.
 - **Linux (x64 / arm64):** `Pounce-Setup-Linux-<arch>.tar.gz` — extract, run `./installer`
   (installs to `~/.local/share` and adds a desktop entry).
 - **iOS / Android:** in private beta — see the [website](https://use-pounce.com/).

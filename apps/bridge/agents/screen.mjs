@@ -33,22 +33,35 @@ export class Screen {
     WasmBridge.load()
       .then((b) => {
         b.init(this._cols, this._rows);
-        for (const d of this._pending) { try { b.writeString(d); } catch {} }
+        for (const d of this._pending) {
+          try {
+            b.writeString(d);
+          } catch {}
+        }
         this._pending = null;
         this._bridge = b;
       })
-      .catch(() => { this._pending = null; }); // degrade to "no detection" if WASM won't load
+      .catch(() => {
+        this._pending = null;
+      }); // degrade to "no detection" if WASM won't load
   }
 
   write(data) {
-    if (this._bridge) { try { this._bridge.writeString(data); } catch {} }
-    else if (this._pending) this._pending.push(data);
+    if (this._bridge) {
+      try {
+        this._bridge.writeString(data);
+      } catch {}
+    } else if (this._pending) this._pending.push(data);
   }
 
   resize(cols, rows) {
     this._cols = cols;
     this._rows = rows;
-    if (this._bridge) { try { this._bridge.resize(cols, rows); } catch {} }
+    if (this._bridge) {
+      try {
+        this._bridge.resize(cols, rows);
+      } catch {}
+    }
   }
 
   /**
@@ -70,12 +83,14 @@ export class Screen {
         const cp = cell?.char || 0;
         const ch = cp >= 32 ? String.fromCodePoint(cp) : " ";
         text += ch;
-        if (ch !== " " && (cell.flags & FLAG_INVERSE)) inverse = true;
+        if (ch !== " " && cell.flags & FLAG_INVERSE) inverse = true;
       }
       out.push({ text: text.replace(/\s+$/u, ""), inverse });
     }
     return out;
   }
 
-  dispose() { this._bridge = null; }
+  dispose() {
+    this._bridge = null;
+  }
 }

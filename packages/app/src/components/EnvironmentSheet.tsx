@@ -51,13 +51,19 @@ function Row({
     >
       {leading ??
         (icon ? (
-          <PounceIcon name={icon} size={18} color={iconColor ?? (danger ? theme.colors.danger : theme.colors.fgMuted)} />
+          <PounceIcon
+            name={icon}
+            size={18}
+            color={iconColor ?? (danger ? theme.colors.danger : theme.colors.fgMuted)}
+          />
         ) : null)}
       <Text numberOfLines={1} style={[s.rowLabel, { color }]}>
         {label}
       </Text>
       {right}
-      {onPress && !right ? <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} /> : null}
+      {onPress && !right ? (
+        <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} />
+      ) : null}
     </Pressable>
   );
 }
@@ -144,12 +150,18 @@ export function EnvironmentSheet({
     if (!visible || !session.cwd) return;
     let cancelled = false;
     fetchGitChanges(session.hostId, session.cwd)
-      .then((g) => { if (!cancelled) setGit(g); })
+      .then((g) => {
+        if (!cancelled) setGit(g);
+      })
       .catch(() => {});
     fetchGitChecks(session.hostId, session.cwd)
-      .then((c) => { if (!cancelled) setChecks(c); })
+      .then((c) => {
+        if (!cancelled) setChecks(c);
+      })
       .catch(() => {});
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [visible, session.hostId, session.cwd]);
 
   const { add, del } = diffTotals(git?.files ?? []);
@@ -157,11 +169,22 @@ export function EnvironmentSheet({
   const conflicts = git?.conflicts ?? 0;
   const needsCommit = (git?.files.length ?? 0) > 0;
   const needsPush = (git?.ahead ?? 0) > 0;
-  const act = (run: () => void) => () => { onClose(); run(); };
+  const act = (run: () => void) => () => {
+    onClose();
+    run();
+  };
 
   const CHECK_ROW: Record<string, { icon: ComponentIcon; color: ColorValue; label: string }> = {
-    passing: { icon: "checkmark-circle-outline", color: theme.colors.success, label: "Checks successful" },
-    failing: { icon: "close-circle-outline", color: theme.colors.danger, label: `Checks failing (${checks?.failed}/${checks?.total})` },
+    passing: {
+      icon: "checkmark-circle-outline",
+      color: theme.colors.success,
+      label: "Checks successful",
+    },
+    failing: {
+      icon: "close-circle-outline",
+      color: theme.colors.danger,
+      label: `Checks failing (${checks?.failed}/${checks?.total})`,
+    },
     pending: { icon: "time-outline", color: theme.colors.fgMuted, label: "Checks running" },
   };
   const checkRow = checks?.checks ? CHECK_ROW[checks.checks] : null;
@@ -170,7 +193,7 @@ export function EnvironmentSheet({
 
   return (
     <NativeSheet visible={visible} onClose={onClose}>
-        <ScrollView bounces={false} style={{ maxHeight: height * 0.7 }}>
+      <ScrollView bounces={false} style={{ maxHeight: height * 0.7 }}>
         {/* Markers moved to the composer's pill row (next to the model pill). */}
         {onToggleFavourite ? (
           <>
@@ -188,7 +211,9 @@ export function EnvironmentSheet({
         ) : null}
         <SectionHeader title="Environment" />
 
-        {running ? <Row icon="stop-circle-outline" label="Stop agent" danger onPress={act(onStop)} /> : null}
+        {running ? (
+          <Row icon="stop-circle-outline" label="Stop agent" danger onPress={act(onStop)} />
+        ) : null}
 
         {session.cwd ? (
           <>
@@ -199,8 +224,7 @@ export function EnvironmentSheet({
               right={
                 add || del ? (
                   <Text style={s.diffCounts}>
-                    <Text style={s.diffAdd}>+{add}</Text>{" "}
-                    <Text style={s.diffDel}>-{del}</Text>
+                    <Text style={s.diffAdd}>+{add}</Text> <Text style={s.diffDel}>-{del}</Text>
                   </Text>
                 ) : (
                   <Text style={s.noChanges}>No changes</Text>
@@ -216,18 +240,16 @@ export function EnvironmentSheet({
                 onPress={act(onViewChanges)}
               />
             ) : null}
-            {checkRow ? <Row icon={checkRow.icon} iconColor={checkRow.color} label={checkRow.label} /> : null}
+            {checkRow ? (
+              <Row icon={checkRow.icon} iconColor={checkRow.color} label={checkRow.label} />
+            ) : null}
             {conflicts > 0 ? (
               <Row
                 icon="close-circle-outline"
                 label="Merge conflicts"
                 danger
                 onPress={onFixConflicts ? act(onFixConflicts) : undefined}
-                right={
-                  onFixConflicts ? (
-                    <Text style={s.fixLabel}>Fix</Text>
-                  ) : undefined
-                }
+                right={onFixConflicts ? <Text style={s.fixLabel}>Fix</Text> : undefined}
               />
             ) : null}
             <Row icon="terminal-outline" label="Open terminal" onPress={act(onTerminal)} />
@@ -243,7 +265,8 @@ export function EnvironmentSheet({
 
         {sources.length === 0 ? (
           <Text style={s.emptySources}>
-            Drop files or folders on the chat — or type @ in the composer — to give the agent context.
+            Drop files or folders on the chat — or type @ in the composer — to give the agent
+            context.
           </Text>
         ) : (
           <>
@@ -282,7 +305,7 @@ export function EnvironmentSheet({
             ) : null}
           </>
         )}
-        </ScrollView>
+      </ScrollView>
     </NativeSheet>
   );
 }
@@ -319,8 +342,18 @@ const s = StyleSheet.create((theme) => ({
   diffDel: { color: theme.colors.diffDelFg },
   noChanges: { fontSize: 13, color: theme.colors.fgFaint },
   fixLabel: { fontSize: 14, fontWeight: "500", color: theme.colors.fgMuted },
-  emptyEnv: { paddingHorizontal: 8, paddingVertical: 12, fontSize: 13, color: theme.colors.fgMuted },
-  emptySources: { paddingHorizontal: 8, paddingVertical: 8, fontSize: 13, color: theme.colors.fgMuted },
+  emptyEnv: {
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+    fontSize: 13,
+    color: theme.colors.fgMuted,
+  },
+  emptySources: {
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: theme.colors.fgMuted,
+  },
   sourceThumb: { height: 28, width: 28, borderRadius: 6, backgroundColor: theme.colors.surface },
   pressed60: { opacity: 0.6 },
 }));

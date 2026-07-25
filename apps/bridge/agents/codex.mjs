@@ -16,7 +16,12 @@ import path from "node:path";
 import { stripNoise } from "@pounce/transcript";
 import { SessionIndex } from "./session-index.mjs";
 import {
-  userMessage, thinking, assistantMessage, toolCall, toolResult, systemEvent,
+  userMessage,
+  thinking,
+  assistantMessage,
+  toolCall,
+  toolResult,
+  systemEvent,
   readTailLines,
 } from "./events.mjs";
 import { agentEnv, binVersion, binPath, liveAgentCwds } from "./env.mjs";
@@ -35,7 +40,14 @@ export class CodexAdapter {
     this.id = "codex";
     this.displayName = "Codex";
     this.description = "OpenAI's Codex CLI";
-    this.capabilities = { streaming: true, tools: true, images: false, thinking: true, terminal: true, git: true };
+    this.capabilities = {
+      streaming: true,
+      tools: true,
+      images: false,
+      thinking: true,
+      terminal: true,
+      git: true,
+    };
     this.turns = turns;
     this._titles = null; // id -> thread_name, lazily loaded from session_index.jsonl
     this.index = new SessionIndex({
@@ -45,7 +57,9 @@ export class CodexAdapter {
     });
   }
 
-  onDirty(cb) { this.index.onDirty(cb); }
+  onDirty(cb) {
+    this.index.onDirty(cb);
+  }
 
   async isAvailable() {
     // The binary must actually run — sessions on disk without a working CLI
@@ -90,7 +104,9 @@ export class CodexAdapter {
       const id = m[2];
       // rollout-2026-03-21T16-58-58 → local timestamp; line 1's payload.timestamp is
       // authoritative when present.
-      let createdAt = null, cwd = null, preview = null;
+      let createdAt = null,
+        cwd = null,
+        preview = null;
       let lines = 0;
       const stream = createReadStream(file, "utf8");
       const rl = createInterface({ input: stream, crlfDelay: Infinity });
@@ -98,10 +114,15 @@ export class CodexAdapter {
         rl.close();
         stream.destroy();
         resolve({
-          id, filePath: file, cwd, name: null, preview,
+          id,
+          filePath: file,
+          cwd,
+          name: null,
+          preview,
           createdAt: createdAt || new Date(st.birthtimeMs || st.mtimeMs).toISOString(),
           updatedAt: new Date(st.mtimeMs).toISOString(),
-          gitBranch: null, sizeBytes: st.size,
+          gitBranch: null,
+          sizeBytes: st.size,
         });
       };
       rl.on("line", (line) => {
@@ -129,7 +150,10 @@ export class CodexAdapter {
     const turns = [];
     let cur = null;
     const add = (ev, startsTurn = false) => {
-      if (startsTurn || !cur) { cur = []; turns.push(cur); }
+      if (startsTurn || !cur) {
+        cur = [];
+        turns.push(cur);
+      }
       cur.push(ev);
       if (limit && turns.length > limit) turns.shift();
     };
@@ -150,11 +174,17 @@ export class CodexAdapter {
     let rl;
     try {
       rl = createInterface({ input: createReadStream(file, "utf8"), crlfDelay: Infinity });
-    } catch { return []; }
+    } catch {
+      return [];
+    }
     for await (const line of rl) {
       if (!line) continue;
       let o;
-      try { o = JSON.parse(line); } catch { continue; }
+      try {
+        o = JSON.parse(line);
+      } catch {
+        continue;
+      }
       const ts = o.timestamp || new Date().toISOString();
       const p = o.payload || {};
       const base = (id) => ({ id, conversationId: threadId, seq: 0, ts });
@@ -172,18 +202,23 @@ export class CodexAdapter {
           }
           // developer role: injected instructions — skip.
         } else if (p.type === "reasoning") {
-          const text = (p.summary || []).map((s) => s?.text || "").join("\n").trim();
+          const text = (p.summary || [])
+            .map((s) => s?.text || "")
+            .join("\n")
+            .trim();
           if (text) add(thinking(base(uniq(p.id || `r:${ts}`)), text));
         } else if (p.type === "function_call" || p.type === "custom_tool_call") {
           const callId = p.call_id || p.id || `c:${ts}`;
           add(toolCall(base(callId), codexCall(p)));
         } else if (p.type === "function_call_output" || p.type === "custom_tool_call_output") {
           const callId = p.call_id || `c:${ts}`;
-          add(toolResult(base(`${callId}:o`), {
-            toolCallId: callId,
-            content: { kind: "text", text: codexOutput(p.output) },
-            isError: false,
-          }));
+          add(
+            toolResult(base(`${callId}:o`), {
+              toolCallId: callId,
+              content: { kind: "text", text: codexOutput(p.output) },
+              isError: false,
+            }),
+          );
         }
         continue;
       }
@@ -193,7 +228,9 @@ export class CodexAdapter {
     }
 
     const events = turns.flat();
-    events.forEach((ev, i) => { ev.seq = i + 1; });
+    events.forEach((ev, i) => {
+      ev.seq = i + 1;
+    });
     return events;
   }
 
@@ -202,28 +239,36 @@ export class CodexAdapter {
       return { activity: "running", lastActivityAt: new Date().toISOString() };
     }
     const cwd = this.index.metas.get(threadId)?.cwd;
-    const [file, live] = await Promise.all([
-      this.findFile(threadId),
-      cwd ? liveAgentCwds() : null,
-    ]);
+    const [file, live] = await Promise.all([this.findFile(threadId), cwd ? liveAgentCwds() : null]);
     if (!file) return { activity: "idle", lastActivityAt: null };
     let mtimeMs;
-    try { mtimeMs = statSync(file).mtimeMs; } catch { return { activity: "idle", lastActivityAt: null }; }
+    try {
+      mtimeMs = statSync(file).mtimeMs;
+    } catch {
+      return { activity: "idle", lastActivityAt: null };
+    }
     const lastActivityAt = new Date(mtimeMs).toISOString();
     // Same liveness refinement as the claude adapter: a live codex process in
     // the thread's cwd keeps a quiet mid-turn "running"; its absence demotes
     // immediately; unknown falls back to the mtime window.
     const liveInCwd = cwd && live ? (live.get("codex")?.has(cwd) ?? false) : null;
-    const recent = liveInCwd !== false && Date.now() - mtimeMs < (liveInCwd ? LIVE_EXTENDED_WINDOW_MS : RUNNING_WINDOW_MS);
+    const recent =
+      liveInCwd !== false &&
+      Date.now() - mtimeMs < (liveInCwd ? LIVE_EXTENDED_WINDOW_MS : RUNNING_WINDOW_MS);
     // Last task marker wins: started-without-complete while fresh → running.
     for (const line of readTailLines(file).reverse()) {
       let o;
-      try { o = JSON.parse(line); } catch { continue; }
+      try {
+        o = JSON.parse(line);
+      } catch {
+        continue;
+      }
       if (o.type !== "event_msg") continue;
       const t = o.payload?.type;
       if (t === "task_complete") return { activity: "completed", lastActivityAt };
       if (t === "turn_aborted") return { activity: "completed", lastActivityAt };
-      if (t === "task_started") return { activity: recent ? "running" : "completed", lastActivityAt };
+      if (t === "task_started")
+        return { activity: recent ? "running" : "completed", lastActivityAt };
     }
     return { activity: "completed", lastActivityAt };
   }
@@ -232,8 +277,20 @@ export class CodexAdapter {
     // No daemon to ask and `codex exec` picks its own default; expose the
     // common choices. Harmless if the CLI knows more.
     return [
-      { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", description: null, isDefault: true, deprecated: false },
-      { id: "gpt-5.1-codex-mini", name: "GPT-5.1 Codex Mini", description: null, isDefault: false, deprecated: false },
+      {
+        id: "gpt-5.2-codex",
+        name: "GPT-5.2 Codex",
+        description: null,
+        isDefault: true,
+        deprecated: false,
+      },
+      {
+        id: "gpt-5.1-codex-mini",
+        name: "GPT-5.1 Codex Mini",
+        description: null,
+        isDefault: false,
+        deprecated: false,
+      },
     ];
   }
 
@@ -251,14 +308,20 @@ export class CodexAdapter {
     if (resume) args.push("resume", threadId);
     if (cwd && existsSync(cwd)) args.push("-C", cwd);
     if (model) args.push("-m", model);
-    args.push(permissionMode === "bypassPermissions" ? "--dangerously-bypass-approvals-and-sandbox" : "--full-auto");
+    args.push(
+      permissionMode === "bypassPermissions"
+        ? "--dangerously-bypass-approvals-and-sandbox"
+        : "--full-auto",
+    );
     args.push(text);
 
     let child;
     try {
       child = spawn(binPath("codex"), args, {
         cwd: cwd && existsSync(cwd) ? cwd : os.homedir(),
-        env: agentEnv(), stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
+        env: agentEnv(),
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
       });
     } catch (e) {
       return failedTurn(threadId, `codex failed to start: ${e?.message || e}`, onEvent);
@@ -269,11 +332,17 @@ export class CodexAdapter {
     let realThreadId = threadId || null;
     const now = () => new Date().toISOString();
     const base = (id) => ({ id, conversationId: realThreadId, seq: ++seq, ts: now() });
-    const emit = (ev) => { try { onEvent(ev); } catch {} };
+    const emit = (ev) => {
+      try {
+        onEvent(ev);
+      } catch {}
+    };
     emit(userMessage(base(`codex:input:${Date.now()}`), text));
 
     let resolveDone;
-    const done = new Promise((res) => { resolveDone = res; });
+    const done = new Promise((res) => {
+      resolveDone = res;
+    });
     let settled = false;
     const finish = () => {
       if (settled) return;
@@ -283,7 +352,9 @@ export class CodexAdapter {
     };
 
     let stderrTail = "";
-    child.stderr.on("data", (d) => { stderrTail = (stderrTail + d).slice(-8192); });
+    child.stderr.on("data", (d) => {
+      stderrTail = (stderrTail + d).slice(-8192);
+    });
 
     const handle = (o) => {
       if (o.type === "thread.started" && (o.thread_id || o.threadId)) {
@@ -292,7 +363,10 @@ export class CodexAdapter {
         return;
       }
       const it = o.item;
-      if ((o.type === "item.updated" || o.type === "item.completed" || o.type === "item.started") && it) {
+      if (
+        (o.type === "item.updated" || o.type === "item.completed" || o.type === "item.started") &&
+        it
+      ) {
         const streaming = o.type !== "item.completed";
         const id = it.id || `codex:${seq}`;
         if (it.item_type === "agent_message" || it.type === "agent_message") {
@@ -300,21 +374,46 @@ export class CodexAdapter {
         } else if (it.item_type === "reasoning" || it.type === "reasoning") {
           if (it.text) emit(thinking(base(id), it.text));
         } else if (it.item_type === "command_execution" || it.type === "command_execution") {
-          emit(toolCall(base(id), { name: "shell", input: { command: it.command || "" }, status: streaming ? "running" : "success" }));
+          emit(
+            toolCall(base(id), {
+              name: "shell",
+              input: { command: it.command || "" },
+              status: streaming ? "running" : "success",
+            }),
+          );
           // item.updated carries the output aggregated SO FAR — forward it under
           // a stable id so the app updates the running card's output in place
           // (live terminal tail), instead of waiting for completion.
           if (it.aggregated_output) {
-            emit(toolResult(base(`${id}:o`), { toolCallId: id, content: { kind: "text", text: it.aggregated_output }, isError: !streaming && it.exit_code ? it.exit_code !== 0 : false }));
+            emit(
+              toolResult(base(`${id}:o`), {
+                toolCallId: id,
+                content: { kind: "text", text: it.aggregated_output },
+                isError: !streaming && it.exit_code ? it.exit_code !== 0 : false,
+              }),
+            );
           }
         } else if (it.item_type === "file_change" || it.type === "file_change") {
           const patch = (it.changes || []).map((c) => c.diff || "").join("\n");
-          if (patch) emit(toolResult(base(`${id}:d`), { toolCallId: id, content: { kind: "diff", path: it.changes?.[0]?.path || "", patch }, isError: false }));
+          if (patch)
+            emit(
+              toolResult(base(`${id}:d`), {
+                toolCallId: id,
+                content: { kind: "diff", path: it.changes?.[0]?.path || "", patch },
+                isError: false,
+              }),
+            );
         }
         return;
       }
       if (o.type === "turn.failed" || o.type === "error") {
-        emit(systemEvent(base(`codex:err:${seq}`), String(o.error?.message || o.message || "turn failed"), "error"));
+        emit(
+          systemEvent(
+            base(`codex:err:${seq}`),
+            String(o.error?.message || o.message || "turn failed"),
+            "error",
+          ),
+        );
         finish();
         return;
       }
@@ -325,16 +424,33 @@ export class CodexAdapter {
     let timer;
     const arm = () => {
       clearTimeout(timer);
-      timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, TURN_TIMEOUT_MS);
+      timer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {}
+      }, TURN_TIMEOUT_MS);
     };
     arm();
     const rl = createInterface({ input: child.stdout });
-    rl.on("line", (line) => { arm(); if (line) { try { handle(JSON.parse(line)); } catch {} } });
+    rl.on("line", (line) => {
+      arm();
+      if (line) {
+        try {
+          handle(JSON.parse(line));
+        } catch {}
+      }
+    });
 
     child.on("close", (code) => {
       clearTimeout(timer);
       if (code !== 0 && !settled) {
-        emit(systemEvent(base(`codex:err`), `codex exited (${code}): ${stderrTail.trim().slice(-500)}`, "error"));
+        emit(
+          systemEvent(
+            base(`codex:err`),
+            `codex exited (${code}): ${stderrTail.trim().slice(-500)}`,
+            "error",
+          ),
+        );
       }
       finish();
     });
@@ -344,7 +460,19 @@ export class CodexAdapter {
       finish();
     });
 
-    return { stop: () => { try { child.kill("SIGINT"); } catch {} setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 5000).unref?.(); }, done };
+    return {
+      stop: () => {
+        try {
+          child.kill("SIGINT");
+        } catch {}
+        setTimeout(() => {
+          try {
+            child.kill("SIGKILL");
+          } catch {}
+        }, 5000).unref?.();
+      },
+      done,
+    };
   }
 }
 
@@ -352,9 +480,15 @@ export class CodexAdapter {
 function codexCall(p) {
   const name = p.name || p.tool || "tool";
   let input = {};
-  try { input = typeof p.arguments === "string" ? JSON.parse(p.arguments) : p.arguments || {}; } catch { input = { arguments: p.arguments }; }
+  try {
+    input = typeof p.arguments === "string" ? JSON.parse(p.arguments) : p.arguments || {};
+  } catch {
+    input = { arguments: p.arguments };
+  }
   if ((name === "shell" || name === "exec_command" || name === "container.exec") && input) {
-    const cmd = Array.isArray(input.command) ? input.command.join(" ") : input.command || input.cmd || "";
+    const cmd = Array.isArray(input.command)
+      ? input.command.join(" ")
+      : input.command || input.cmd || "";
     return { name: "shell", input: { command: String(cmd) }, status: "success" };
   }
   return { name, input, status: "success" };
@@ -373,8 +507,13 @@ function codexOutput(raw) {
 function failedTurn(threadId, message, onEvent) {
   try {
     onEvent({
-      id: `${threadId || "codex"}:spawn-err`, conversationId: threadId || null, seq: 1,
-      ts: new Date().toISOString(), type: "system_event", message, level: "error",
+      id: `${threadId || "codex"}:spawn-err`,
+      conversationId: threadId || null,
+      seq: 1,
+      ts: new Date().toISOString(),
+      type: "system_event",
+      message,
+      level: "error",
     });
   } catch {}
   return { stop: () => {}, done: Promise.resolve(threadId || null) };

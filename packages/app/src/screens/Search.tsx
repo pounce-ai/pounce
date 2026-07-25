@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Platform, Pressable, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  FlatList,
+  Platform,
+  Pressable,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -8,12 +16,7 @@ import { PounceIcon } from "../ui/native/Icon";
 import type { Session } from "@pounce/shared";
 import { searchMessages, type MessageSearchHit } from "../services/bridge";
 import { applyFilters, filters$, rankSession } from "../state/stores";
-import {
-  useFavThreadSet,
-  useIgnoredSet,
-  useProjectNames,
-  useThreads,
-} from "../state/db/hooks";
+import { useFavThreadSet, useIgnoredSet, useProjectNames, useThreads } from "../state/db/hooks";
 import { SessionCard } from "../components/SessionCard";
 import { FilterButton, FilterSheet } from "../components/FilterSheet";
 import { IS_DESKTOP } from "../ui";
@@ -75,7 +78,10 @@ export default function SearchScreen() {
         );
       });
     }
-    return [...list].sort((a, b) => rankSession(a) - rankSession(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+    return [...list].sort(
+      (a, b) =>
+        rankSession(a) - rankSession(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+    );
   }, [raw, repoNames, ignored, debouncedQuery, filters, favSet]);
 
   // Keyed to the debounced query so the header/footer/empty views swap in the
@@ -158,13 +164,15 @@ export default function SearchScreen() {
             style={[s.input, IS_DESKTOP && s.inputDesktop]}
           />
           {localQuery ? (
-            <Pressable onPress={() => setLocalQuery("")} style={({ pressed }) => [s.clearBtn, pressed && s.pressed60]}>
+            <Pressable
+              onPress={() => setLocalQuery("")}
+              style={({ pressed }) => [s.clearBtn, pressed && s.pressed60]}
+            >
               <PounceIcon name="close-circle" size={16} color={theme.colors.fgFaint} />
             </Pressable>
           ) : null}
         </View>
       ) : null}
-
 
       {/* Plain FlatList, NOT LegendList: on Fabric, legend-list's synchronous
           layout-effect measure loop turns fatal (max-update-depth, kills the
@@ -196,7 +204,9 @@ export default function SearchScreen() {
             <View style={s.footer}>
               <View style={s.footerHeaderRow}>
                 <Text style={s.sectionLabel}>In messages</Text>
-                {msgSearching ? <ActivityIndicator size="small" color={theme.colors.fgFaint} /> : null}
+                {msgSearching ? (
+                  <ActivityIndicator size="small" color={theme.colors.fgFaint} />
+                ) : null}
               </View>
               {msgHits.map((h) => (
                 <MessageHitRow
@@ -216,9 +226,7 @@ export default function SearchScreen() {
           !showAll && (msgSearching || msgHits.length > 0) ? null : (
             <View style={s.empty}>
               <Text style={s.emptyEmoji}>{showAll ? "🐾" : "🔍"}</Text>
-              <Text style={s.emptyTitle}>
-                {showAll ? "No threads yet" : "No matches"}
-              </Text>
+              <Text style={s.emptyTitle}>{showAll ? "No threads yet" : "No matches"}</Text>
               <Text style={s.emptyBody}>
                 {showAll ? "Start a task to see it here." : "Try another word."}
               </Text>
@@ -233,7 +241,9 @@ export default function SearchScreen() {
         }}
       />
 
-      {IS_DESKTOP ? <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} /> : null}
+      {IS_DESKTOP ? (
+        <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
+      ) : null}
     </View>
   );
 }
@@ -268,9 +278,7 @@ function MessageHitRow({
         <Text numberOfLines={1} style={s.hitTitle}>
           {session?.title || hit.title || hit.threadId}
         </Text>
-        {hit.matches > 1 ? (
-          <Text style={s.hitMeta}>{hit.matches} matches</Text>
-        ) : null}
+        {hit.matches > 1 ? <Text style={s.hitMeta}>{hit.matches} matches</Text> : null}
       </View>
       <Text numberOfLines={2} style={s.hitSnippet}>
         {hit.snippet}
@@ -334,10 +342,21 @@ const s = StyleSheet.create((theme) => ({
     paddingHorizontal: 16,
     paddingBottom: 6,
   },
-  sectionLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
+  sectionLabel: {
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: theme.colors.fgFaint,
+  },
   empty: { alignItems: "center", paddingHorizontal: 32, paddingVertical: 80 },
   emptyEmoji: { fontSize: 40 },
-  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyTitle: {
+    marginTop: 12,
+    textAlign: "center",
+    fontSize: 15,
+    fontWeight: "600",
+    color: theme.colors.fg,
+  },
   emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   hitCard: {
     marginHorizontal: 16,

@@ -62,10 +62,7 @@ export default function SyncHistoryScreen() {
   const { theme } = useUnistyles();
   const rows = useSyncLog();
   // The collection isn't intrinsically ordered — present newest-first.
-  const log = useMemo(
-    () => [...rows].sort((a, b) => Date.parse(b.at) - Date.parse(a.at)),
-    [rows],
-  );
+  const log = useMemo(() => [...rows].sort((a, b) => Date.parse(b.at) - Date.parse(a.at)), [rows]);
   const sections = useMemo(() => groupByDay(log), [log]);
 
   return (
@@ -85,7 +82,8 @@ export default function SyncHistoryScreen() {
           <Text style={s.emptyEmoji}>🕓</Text>
           <Text style={s.emptyTitle}>Nothing synced yet</Text>
           <Text style={s.emptyBody}>
-            Each time new agent activity reaches this device, it'll show up here — grouped by folder.
+            Each time new agent activity reaches this device, it'll show up here — grouped by
+            folder.
           </Text>
         </View>
       ) : (
@@ -102,9 +100,7 @@ export default function SyncHistoryScreen() {
                   <View key={entry.at} style={s.card}>
                     <View style={s.cardHeader}>
                       <PounceIcon name="sync" size={14} color={theme.colors.accent} />
-                      <Text style={s.cardTime}>
-                        {clock(new Date(entry.at))}
-                      </Text>
+                      <Text style={s.cardTime}>{clock(new Date(entry.at))}</Text>
                       <Text style={s.cardAgo}>{timeAgo(entry.at)} ago</Text>
                     </View>
                     <Text style={s.cardSummary}>
@@ -114,7 +110,11 @@ export default function SyncHistoryScreen() {
                     <View style={s.repoList}>
                       {entry.repos.map((r) => (
                         <View key={r.repoId} style={s.repoRow}>
-                          <PounceIcon name="folder-outline" size={13} color={theme.colors.fgFaint} />
+                          <PounceIcon
+                            name="folder-outline"
+                            size={13}
+                            color={theme.colors.fgFaint}
+                          />
                           <Text numberOfLines={1} style={s.repoName}>
                             {r.name}
                           </Text>
@@ -147,11 +147,22 @@ const s = StyleSheet.create((theme) => ({
   pressed60: { opacity: 0.6 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
   emptyEmoji: { fontSize: 40 },
-  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyTitle: {
+    marginTop: 12,
+    textAlign: "center",
+    fontSize: 15,
+    fontWeight: "600",
+    color: theme.colors.fg,
+  },
   emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   scroll: { flex: 1, paddingHorizontal: 16 },
   section: { gap: 8 },
-  sectionLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
+  sectionLabel: {
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: theme.colors.fgFaint,
+  },
   card: {
     gap: 10,
     borderRadius: 16,

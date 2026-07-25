@@ -16,7 +16,8 @@ const OPTION_RE = /^\s*(❯|›|»|▶|❭|◆|●|>)?\s*(\d{1,2})[.)]\s+(\S.*?)
 
 /** Footer hints a selection prompt shows — the gate that says "this really is an
  *  awaiting-input menu", not just numbered text scrolling by in tool output. */
-const HINT_RE = /(esc\s+to\s+(cancel|exit|go\s*back))|((enter|↵|⏎|return)\s+to\s+(select|confirm|submit|continue))|(↑\s*\/?\s*↓)|(to\s+navigate)/iu;
+const HINT_RE =
+  /(esc\s+to\s+(cancel|exit|go\s*back))|((enter|↵|⏎|return)\s+to\s+(select|confirm|submit|continue))|(↑\s*\/?\s*↓)|(to\s+navigate)/iu;
 
 /** Separators / chrome we never treat as a title. */
 const CHROME_RE = /^[\s─—–—=_·•]*$/u;
@@ -31,7 +32,12 @@ export function detectPrompt(lines) {
   for (let y = 0; y < lines.length; y++) {
     const m = lines[y].text.match(OPTION_RE);
     if (!m) continue;
-    opts.push({ y, num: parseInt(m[2], 10), label: m[3].trim(), marked: !!m[1] || lines[y].inverse });
+    opts.push({
+      y,
+      num: parseInt(m[2], 10),
+      label: m[3].trim(),
+      marked: !!m[1] || lines[y].inverse,
+    });
   }
   // Need a real menu (≥2 options) AND a nav/confirm hint on screen.
   if (opts.length < 2) return null;
@@ -47,7 +53,10 @@ export function detectPrompt(lines) {
   const titleLines = [];
   for (let y = firstY - 1; y >= 0 && titleLines.length < 4; y--) {
     const t = lines[y].text.trim();
-    if (!t) { if (titleLines.length) break; else continue; } // stop at the blank above the block
+    if (!t) {
+      if (titleLines.length) break;
+      else continue;
+    } // stop at the blank above the block
     if (CHROME_RE.test(t) || HINT_RE.test(t) || OPTION_RE.test(lines[y].text)) continue;
     if (/^(security guide|learn more|read more|docs?|documentation)\b/i.test(t)) continue; // doc links
     if (t.length < 3) continue;
@@ -80,11 +89,19 @@ function promptKind(title, opts) {
  * written one at a time with a gap (a burst write picks the default).
  */
 export function answerKeys(highlighted, target) {
-  const DOWN = "\x1b[B", UP = "\x1b[A", ENTER = "\r";
+  const DOWN = "\x1b[B",
+    UP = "\x1b[A",
+    ENTER = "\r";
   const seq = [];
   let delta = target - highlighted;
-  while (delta > 0) { seq.push(DOWN); delta--; }
-  while (delta < 0) { seq.push(UP); delta++; }
+  while (delta > 0) {
+    seq.push(DOWN);
+    delta--;
+  }
+  while (delta < 0) {
+    seq.push(UP);
+    delta++;
+  }
   seq.push(ENTER);
   return seq;
 }

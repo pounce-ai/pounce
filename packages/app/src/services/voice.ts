@@ -65,23 +65,35 @@ export async function startDictation(cb: {
   let best = "";
   let done = false;
   const subs: { remove: () => void }[] = [];
-  const cleanup = () => { subs.forEach((s) => s.remove()); subs.length = 0; };
+  const cleanup = () => {
+    subs.forEach((s) => s.remove());
+    subs.length = 0;
+  };
   const finish = () => {
     if (done) return;
     done = true;
     cleanup();
-    try { ExpoSpeechRecognitionModule.stop(); } catch {}
+    try {
+      ExpoSpeechRecognitionModule.stop();
+    } catch {}
     cb.onFinal(best.trim());
   };
 
   subs.push(
     ExpoSpeechRecognitionModule.addListener("result", (e: ExpoSpeechRecognitionResultEvent) => {
       const t = e.results?.[0]?.transcript ?? "";
-      if (t) { best = t; cb.onPartial(t); }
+      if (t) {
+        best = t;
+        cb.onPartial(t);
+      }
     }),
     ExpoSpeechRecognitionModule.addListener("error", (e: ExpoSpeechRecognitionErrorEvent) => {
       if (e.error === "no-speech" || e.error === "aborted") finish();
-      else if (!done) { done = true; cleanup(); cb.onError("error"); }
+      else if (!done) {
+        done = true;
+        cleanup();
+        cb.onError("error");
+      }
     }),
     ExpoSpeechRecognitionModule.addListener("end", () => finish()),
   );

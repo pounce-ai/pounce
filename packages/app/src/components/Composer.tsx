@@ -47,7 +47,8 @@ const TEXT_EXT =
 /** True when a picked document is plain text we can read and embed. */
 function isTextual(mime: string, name: string): boolean {
   if (mime.startsWith("text/")) return true;
-  if (/^application\/(json|xml|.*\+xml|x-yaml|yaml|javascript|x-sh|toml|x-ndjson)/.test(mime)) return true;
+  if (/^application\/(json|xml|.*\+xml|x-yaml|yaml|javascript|x-sh|toml|x-ndjson)/.test(mime))
+    return true;
   return TEXT_EXT.test(name);
 }
 
@@ -55,13 +56,46 @@ function isTextual(mime: string, name: string): boolean {
 function langForName(name: string): string {
   const ext = name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? "";
   const map: Record<string, string> = {
-    ts: "ts", tsx: "tsx", js: "js", jsx: "jsx", mjs: "js", cjs: "js", py: "python",
-    rb: "ruby", go: "go", rs: "rust", java: "java", kt: "kotlin", swift: "swift",
-    c: "c", h: "c", cc: "cpp", cpp: "cpp", hpp: "cpp", cs: "csharp", php: "php",
-    sh: "bash", bash: "bash", zsh: "bash", sql: "sql", html: "html", htm: "html",
-    css: "css", scss: "scss", json: "json", jsonl: "json", md: "markdown",
-    markdown: "markdown", yml: "yaml", yaml: "yaml", toml: "toml", xml: "xml",
-    graphql: "graphql", proto: "proto", vue: "vue", svelte: "svelte",
+    ts: "ts",
+    tsx: "tsx",
+    js: "js",
+    jsx: "jsx",
+    mjs: "js",
+    cjs: "js",
+    py: "python",
+    rb: "ruby",
+    go: "go",
+    rs: "rust",
+    java: "java",
+    kt: "kotlin",
+    swift: "swift",
+    c: "c",
+    h: "c",
+    cc: "cpp",
+    cpp: "cpp",
+    hpp: "cpp",
+    cs: "csharp",
+    php: "php",
+    sh: "bash",
+    bash: "bash",
+    zsh: "bash",
+    sql: "sql",
+    html: "html",
+    htm: "html",
+    css: "css",
+    scss: "scss",
+    json: "json",
+    jsonl: "json",
+    md: "markdown",
+    markdown: "markdown",
+    yml: "yaml",
+    yaml: "yaml",
+    toml: "toml",
+    xml: "xml",
+    graphql: "graphql",
+    proto: "proto",
+    vue: "vue",
+    svelte: "svelte",
   };
   return map[ext] ?? "";
 }
@@ -216,8 +250,12 @@ export function Composer({
   const [voiceAvailable, setVoiceAvailable] = useState(true);
   useEffect(() => {
     let alive = true;
-    isVoiceAvailable().then((ok) => alive && setVoiceAvailable(ok)).catch(() => alive && setVoiceAvailable(false));
-    return () => { alive = false; };
+    isVoiceAvailable()
+      .then((ok) => alive && setVoiceAvailable(ok))
+      .catch(() => alive && setVoiceAvailable(false));
+    return () => {
+      alive = false;
+    };
   }, []);
   const dictationRef = useRef<Dictation | null>(null);
   const voiceBaseRef = useRef("");
@@ -241,9 +279,15 @@ export function Composer({
         dictationRef.current = null;
         setListening(false);
         if (kind === "permission") {
-          Alert.alert("Microphone access needed", "Enable Microphone and Speech Recognition for Pounce in Settings to dictate.");
+          Alert.alert(
+            "Microphone access needed",
+            "Enable Microphone and Speech Recognition for Pounce in Settings to dictate.",
+          );
         } else if (kind === "unavailable") {
-          Alert.alert("Voice unavailable", "Rebuild the dev client (expo run:ios) to enable dictation.");
+          Alert.alert(
+            "Voice unavailable",
+            "Rebuild the dev client (expo run:ios) to enable dictation.",
+          );
         } else {
           Alert.alert("Voice error", "Couldn't hear that — try again.");
         }
@@ -312,10 +356,16 @@ export function Composer({
       if (res.canceled || !res.assets?.length) return;
       const a = res.assets[0];
       if (!a.base64) return;
-      setImages((cur) => [...cur, { uri: a.uri, data: a.base64!, mediaType: a.mimeType || "image/jpeg" }]);
+      setImages((cur) => [
+        ...cur,
+        { uri: a.uri, data: a.base64!, mediaType: a.mimeType || "image/jpeg" },
+      ]);
     } catch {
       // Native module not in this dev client build yet.
-      Alert.alert("Attachments unavailable", "Rebuild the dev client (expo run:ios) to enable photo attachments.");
+      Alert.alert(
+        "Attachments unavailable",
+        "Rebuild the dev client (expo run:ios) to enable photo attachments.",
+      );
     }
   };
 
@@ -331,7 +381,10 @@ export function Composer({
   const pickDocument = async () => {
     try {
       const DocumentPicker = await import("../services/documentPicker");
-      const res = await DocumentPicker.getDocumentAsync({ type: "*/*", copyToCacheDirectory: true });
+      const res = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        copyToCacheDirectory: true,
+      });
       if (res.canceled || !res.assets?.length) return;
       const a = res.assets[0];
       const mime = a.mimeType ?? "";
@@ -348,15 +401,24 @@ export function Composer({
       }
       if (isTextual(mime, a.name)) {
         if ((a.size ?? 0) > MAX_DOC_BYTES) {
-          Alert.alert("File too large", `${a.name} is over 256 KB — reference it with @path or paste the relevant part.`);
+          Alert.alert(
+            "File too large",
+            `${a.name} is over 256 KB — reference it with @path or paste the relevant part.`,
+          );
           return;
         }
         appendDoc(a.name, await file.text());
         return;
       }
-      Alert.alert("Unsupported file", `Can't attach ${a.name}. Only images and text files are supported.`);
+      Alert.alert(
+        "Unsupported file",
+        `Can't attach ${a.name}. Only images and text files are supported.`,
+      );
     } catch {
-      Alert.alert("Attachments unavailable", "Rebuild the dev client (expo run:ios) to enable file attachments.");
+      Alert.alert(
+        "Attachments unavailable",
+        "Rebuild the dev client (expo run:ios) to enable file attachments.",
+      );
     }
   };
 
@@ -372,7 +434,9 @@ export function Composer({
     }
     ActionSheetIOS.showActionSheetWithOptions(
       { options: [...opts.map((o) => o.label), "Cancel"], cancelButtonIndex: opts.length },
-      (i) => { if (i >= 0 && i < opts.length) opts[i].run(); },
+      (i) => {
+        if (i >= 0 && i < opts.length) opts[i].run();
+      },
     );
   };
 
@@ -406,7 +470,10 @@ export function Composer({
       setInput(snapMarkdown);
       setImages(snapImages);
       const detail = err instanceof Error ? err.message : "";
-      Alert.alert("Message not sent", detail || "Couldn't reach the host — your message was put back in the box.");
+      Alert.alert(
+        "Message not sent",
+        detail || "Couldn't reach the host — your message was put back in the box.",
+      );
     }
   };
 
@@ -436,7 +503,11 @@ export function Composer({
             <Pressable
               key={c.cmd}
               onPress={() => applySlash(c.cmd)}
-              style={({ pressed }) => [s.menuRow, i > 0 && s.menuRowDivider, pressed && s.pressedSurface]}
+              style={({ pressed }) => [
+                s.menuRow,
+                i > 0 && s.menuRowDivider,
+                pressed && s.pressedSurface,
+              ]}
             >
               <Text style={s.slashCmd}>{c.cmd}</Text>
               <Text numberOfLines={1} style={s.slashDesc}>
@@ -451,35 +522,37 @@ export function Composer({
       {mentionActive ? (
         <View style={[s.menuCard, s.mentionCard]}>
           {!hostId || !cwd ? (
-            <Text style={s.menuHint}>
-              Connect a live device to browse this project's files.
-            </Text>
+            <Text style={s.menuHint}>Connect a live device to browse this project's files.</Text>
           ) : filesLoading && !files.length ? (
             <Text style={s.menuHint}>Searching files…</Text>
           ) : !files.length ? (
             <Text style={s.menuHint}>No matching files</Text>
           ) : (
             files.map((f, i) => {
-            const base = f.path.replace(/\/$/, "").split("/").pop();
-            const dir = f.path.slice(0, f.path.length - (base?.length ?? 0));
-            return (
-              <Pressable
-                key={`${f.type}:${f.path}`}
-                onPress={() => applyMention(f.path)}
-                style={({ pressed }) => [s.menuRow, i > 0 && s.menuRowDivider, pressed && s.pressedSurface]}
-              >
-                <PounceIcon
-                  name={f.type === "dir" ? "folder-outline" : "document-text-outline"}
-                  size={15}
-                  color={f.type === "dir" ? theme.colors.accent : theme.colors.fgMuted}
-                />
-                <Text numberOfLines={1} style={s.mentionPath}>
-                  {dir ? <Text style={s.mentionFaint}>{dir}</Text> : null}
-                  {base}
-                  {f.type === "dir" ? <Text style={s.mentionFaint}>/</Text> : null}
-                </Text>
-              </Pressable>
-            );
+              const base = f.path.replace(/\/$/, "").split("/").pop();
+              const dir = f.path.slice(0, f.path.length - (base?.length ?? 0));
+              return (
+                <Pressable
+                  key={`${f.type}:${f.path}`}
+                  onPress={() => applyMention(f.path)}
+                  style={({ pressed }) => [
+                    s.menuRow,
+                    i > 0 && s.menuRowDivider,
+                    pressed && s.pressedSurface,
+                  ]}
+                >
+                  <PounceIcon
+                    name={f.type === "dir" ? "folder-outline" : "document-text-outline"}
+                    size={15}
+                    color={f.type === "dir" ? theme.colors.accent : theme.colors.fgMuted}
+                  />
+                  <Text numberOfLines={1} style={s.mentionPath}>
+                    {dir ? <Text style={s.mentionFaint}>{dir}</Text> : null}
+                    {base}
+                    {f.type === "dir" ? <Text style={s.mentionFaint}>/</Text> : null}
+                  </Text>
+                </Pressable>
+              );
             })
           )}
         </View>
@@ -493,7 +566,12 @@ export function Composer({
         <View style={s.pillRow}>
           {model ? <ControlPill agent={agent} label={model.label} onPress={model.onPress} /> : null}
           {mode ? (
-            <ControlPill icon="git-branch-outline" label={mode.label} active={mode.active} onPress={mode.onPress} />
+            <ControlPill
+              icon="git-branch-outline"
+              label={mode.label}
+              active={mode.active}
+              onPress={mode.onPress}
+            />
           ) : null}
           {markers ? (
             <ControlPill
@@ -515,7 +593,9 @@ export function Composer({
             markdownRef.current = md;
           }}
           editable={!disabled}
-          placeholder={disabled ? "Read-only" : running ? "Queue a follow-up or steer…" : placeholder}
+          placeholder={
+            disabled ? "Read-only" : running ? "Queue a follow-up or steer…" : placeholder
+          }
           placeholderTextColor="#62626D"
           multiline
           markdownStyle={inputMdStyle}
@@ -551,7 +631,9 @@ export function Composer({
 
           <View style={s.flex1} />
 
-          {!disabled && voiceAvailable ? <MicButton listening={listening} onPress={toggleVoice} /> : null}
+          {!disabled && voiceAvailable ? (
+            <MicButton listening={listening} onPress={toggleVoice} />
+          ) : null}
           {showStop ? (
             <Pressable
               onPress={onStop}
@@ -575,19 +657,10 @@ export function Composer({
 }
 
 /** A circular icon button (e.g. attach) sized for the composer control row. */
-function RoundButton({
-  icon,
-  onPress,
-}: {
-  icon: IoniconName;
-  onPress: () => void;
-}) {
+function RoundButton({ icon, onPress }: { icon: IoniconName; onPress: () => void }) {
   const { theme } = useUnistyles();
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [s.roundBtn, pressed && s.pressed70]}
-    >
+    <Pressable onPress={onPress} style={({ pressed }) => [s.roundBtn, pressed && s.pressed70]}>
       <PounceIcon name={icon} size={19} color={theme.colors.fgMuted} />
     </Pressable>
   );
@@ -616,22 +689,27 @@ function ControlPill({
       // pill flexShrink/minWidth: yoga's flexShrink defaults to 0, so a long
       // label ("Accept edits", a long model name) would push the mic/send
       // buttons off-screen instead of truncating.
-      style={({ pressed }) => [
-        s.pill,
-        active ? s.pillActive : s.pillIdle,
-        pressed && s.pressed70,
-      ]}
+      style={({ pressed }) => [s.pill, active ? s.pillActive : s.pillIdle, pressed && s.pressed70]}
     >
       {agent ? <AgentLogo agent={agent} size={13} /> : null}
-      {icon ? <PounceIcon name={icon} size={12} color={active ? theme.colors.accent : theme.colors.fgMuted} /> : null}
+      {icon ? (
+        <PounceIcon
+          name={icon}
+          size={12}
+          color={active ? theme.colors.accent : theme.colors.fgMuted}
+        />
+      ) : null}
       <Text numberOfLines={1} style={[s.pillLabel, active ? s.pillLabelActive : s.pillLabelIdle]}>
         {label}
       </Text>
-      <PounceIcon name="chevron-down" size={11} color={active ? theme.colors.accent : theme.colors.fgFaint} />
+      <PounceIcon
+        name="chevron-down"
+        size={11}
+        color={active ? theme.colors.accent : theme.colors.fgFaint}
+      />
     </Pressable>
   );
 }
-
 
 /** Mic toggle for dictation. Idle: an outline mic. Listening: a pulsing red dot
  *  with a filled mic — unmistakable that the mic is live and how to stop it. */
@@ -640,7 +718,11 @@ function MicButton({ listening, onPress }: { listening: boolean; onPress: () => 
   const sc = useSharedValue(1);
   useEffect(() => {
     if (listening) {
-      sc.value = withRepeat(withSequence(withTiming(1.15, { duration: 500 }), withTiming(0.85, { duration: 500 })), -1, true);
+      sc.value = withRepeat(
+        withSequence(withTiming(1.15, { duration: 500 }), withTiming(0.85, { duration: 500 })),
+        -1,
+        true,
+      );
     } else {
       cancelAnimation(sc);
       sc.value = 1;
@@ -653,7 +735,11 @@ function MicButton({ listening, onPress }: { listening: boolean; onPress: () => 
         // Animated.View: keep the static COLOR token — unistyles theme styles
         // must not mix into reanimated-managed styles.
         <Animated.View
-          style={[style, s.micLive, { width: 28, height: 28, borderRadius: 14, backgroundColor: COLOR.danger }]}
+          style={[
+            style,
+            s.micLive,
+            { width: 28, height: 28, borderRadius: 14, backgroundColor: COLOR.danger },
+          ]}
         >
           <PounceIcon name="mic" size={16} color="#fff" />
         </Animated.View>
@@ -668,12 +754,21 @@ function MicButton({ listening, onPress }: { listening: boolean; onPress: () => 
 function Bar({ delay }: { delay: number }) {
   const h = useSharedValue(5);
   useEffect(() => {
-    h.value = withDelay(delay, withRepeat(withSequence(withTiming(15, { duration: 340 }), withTiming(5, { duration: 340 })), -1, true));
+    h.value = withDelay(
+      delay,
+      withRepeat(
+        withSequence(withTiming(15, { duration: 340 }), withTiming(5, { duration: 340 })),
+        -1,
+        true,
+      ),
+    );
   }, [h, delay]);
   const style = useAnimatedStyle(() => ({ height: h.value }));
   // Animated.View: keep the static COLOR token — unistyles theme styles must not
   // mix into reanimated-managed styles.
-  return <Animated.View style={[style, { width: 3, borderRadius: 2, backgroundColor: COLOR.danger }]} />;
+  return (
+    <Animated.View style={[style, { width: 3, borderRadius: 2, backgroundColor: COLOR.danger }]} />
+  );
 }
 
 /** "Listening…" pill with an animated equalizer — shown while dictating. */
@@ -693,7 +788,13 @@ function ListeningBanner() {
 
 const s = StyleSheet.create((theme) => ({
   flex1: { flex: 1 },
-  thumbRow: { marginHorizontal: 12, marginBottom: 8, flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  thumbRow: {
+    marginHorizontal: 12,
+    marginBottom: 8,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
   thumbWrap: { position: "relative" },
   thumb: { height: 56, width: 56, borderRadius: 8 },
   thumbClose: {
@@ -726,7 +827,12 @@ const s = StyleSheet.create((theme) => ({
   },
   menuRowDivider: { borderTopWidth: 1, borderColor: theme.colors.border },
   pressedSurface: { backgroundColor: theme.colors.surfaceHover },
-  menuHint: { paddingHorizontal: 12, paddingVertical: 10, fontSize: 12, color: theme.colors.fgFaint },
+  menuHint: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 12,
+    color: theme.colors.fgFaint,
+  },
   slashCmd: { fontFamily: "JetBrainsMono", fontSize: 13, color: theme.colors.accent },
   slashDesc: { flex: 1, fontSize: 12, color: theme.colors.fgMuted },
   mentionPath: { flex: 1, fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fg },

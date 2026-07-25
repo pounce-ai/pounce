@@ -65,15 +65,11 @@ export class PounceRuntime {
    * Send a message — every send is a run/turn, and therefore a Task. Returns
    * the runId so the caller can create/track the Task and subscribe.
    */
-  async sendMessage(
-    input: SendMessageInput,
-  ): Promise<{ runId: string; threadId: string }> {
+  async sendMessage(input: SendMessageInput): Promise<{ runId: string; threadId: string }> {
     const res = await this.#adapter.createRun({
       agent: input.conversation.agent,
       cwd: input.project.path,
-      ...(input.conversation.threadId
-        ? { threadId: input.conversation.threadId }
-        : {}),
+      ...(input.conversation.threadId ? { threadId: input.conversation.threadId } : {}),
       input: {
         text: input.text,
         ...(input.images ? { images: input.images } : {}),

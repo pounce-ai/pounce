@@ -23,7 +23,18 @@ import type {
   TimelineEvent,
 } from "@pounce/shared";
 import { parseUserMessage } from "@pounce/transcript";
-import { cachedModels, connection$, firstUserMessages, forgetDevice, mergeWorkspace, reconcileDevices, setAgentCaps, setCachedModels, syncWorkspace, upsertHosts } from "../state/stores";
+import {
+  cachedModels,
+  connection$,
+  firstUserMessages,
+  forgetDevice,
+  mergeWorkspace,
+  reconcileDevices,
+  setAgentCaps,
+  setCachedModels,
+  syncWorkspace,
+  upsertHosts,
+} from "../state/stores";
 import { clearNotify, notifyOnce } from "./notify";
 import { alertAwaitingSessions } from "./promptAlerts";
 import { streamTurn } from "./streamTurn";
@@ -72,7 +83,11 @@ function deviceId(url: string): string {
   return `dev:${url.replace(/[^a-z0-9]/gi, "")}`;
 }
 function nameFromUrl(url: string): string {
-  try { return new URL(url).hostname; } catch { return "device"; }
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "device";
+  }
 }
 
 export async function listDeviceConfigs(): Promise<DeviceConfig[]> {
@@ -369,7 +384,11 @@ async function streamThreadsFromBridge(
  * Used only on connect — pull-to-refresh/periodic stay on the atomic batch path
  * to avoid a shrink-then-grow flicker over already-shown data.
  */
-export async function syncLiveDataStreaming(): Promise<{ repos: number; sessions: number; devices: number }> {
+export async function syncLiveDataStreaming(): Promise<{
+  repos: number;
+  sessions: number;
+  devices: number;
+}> {
   const configs = await listDeviceConfigs();
   const now = new Date().toISOString();
   const firstMsg = firstUserMessages(); // scan the message store once, not per page
@@ -408,23 +427,37 @@ export async function syncLiveDataStreaming(): Promise<{ repos: number; sessions
         for (const a of agents || []) if (a.capabilities) setAgentCaps(a.id, a.capabilities);
         threadsByDevice[cfg.id].name = deviceName;
         devices[cfg.id] = {
-          id: cfg.id, name: deviceName, url: cfg.url, online,
-          agents: agentsAvail as Device["agents"], sessionCount: 0, lastSyncAt: now,
+          id: cfg.id,
+          name: deviceName,
+          url: cfg.url,
+          online,
+          agents: agentsAvail as Device["agents"],
+          sessionCount: 0,
+          lastSyncAt: now,
         };
-        upsertHosts([{ id: cfg.id, nodeId: cfg.id, name: deviceName, online, lastSeenAt: now } satisfies Host]);
+        upsertHosts([
+          { id: cfg.id, nodeId: cfg.id, name: deviceName, online, lastSeenAt: now } satisfies Host,
+        ]);
         // Stream threads; rebuild after each page so the list grows live.
         await streamThreadsFromBridge(cfg, (batch) => {
           threadsByDevice[cfg.id].threads.push(...batch);
-          devices[cfg.id] = { ...devices[cfg.id], sessionCount: threadsByDevice[cfg.id].threads.length };
+          devices[cfg.id] = {
+            ...devices[cfg.id],
+            sessionCount: threadsByDevice[cfg.id].threads.length,
+          };
           merge();
         });
         syncedHostIds.push(cfg.id);
       } catch {
         online = false;
         devices[cfg.id] = {
-          id: cfg.id, name: deviceName, url: cfg.url, online: false,
+          id: cfg.id,
+          name: deviceName,
+          url: cfg.url,
+          online: false,
           agents: agentsAvail as Device["agents"],
-          sessionCount: threadsByDevice[cfg.id].threads.length, lastSyncAt: now,
+          sessionCount: threadsByDevice[cfg.id].threads.length,
+          lastSyncAt: now,
         };
       }
       if (online && agentsReported === 0) daemonDown.push(deviceName);
@@ -442,12 +475,16 @@ export async function syncLiveDataStreaming(): Promise<{ repos: number; sessions
     warmed.add(key);
     void warmModels(s.hostId, s.agent);
   }
-  return { repos: Object.keys(repos).length, sessions: Object.keys(sessions).length, devices: Object.keys(devices).length };
+  return {
+    repos: Object.keys(repos).length,
+    sessions: Object.keys(sessions).length,
+    devices: Object.keys(devices).length,
+  };
 }
 
-export async function syncLiveData(
-  opts?: { fresh?: boolean },
-): Promise<{ repos: number; sessions: number; devices: number }> {
+export async function syncLiveData(opts?: {
+  fresh?: boolean;
+}): Promise<{ repos: number; sessions: number; devices: number }> {
   // On an explicit pull-to-refresh we bypass the bridge's 20s cache so a
   // just-opened session shows up immediately.
   const q = opts?.fresh ? "?fresh=1" : "";
@@ -502,9 +539,15 @@ export async function syncLiveData(
         sessionCount: threads.length,
         lastSyncAt: now,
       };
-      upsertHosts([{
-        id: cfg.id, nodeId: cfg.id, name: deviceName, online, lastSeenAt: now,
-      } satisfies Host]);
+      upsertHosts([
+        {
+          id: cfg.id,
+          nodeId: cfg.id,
+          name: deviceName,
+          online,
+          lastSeenAt: now,
+        } satisfies Host,
+      ]);
 
       for (const t of threads) {
         const repoId = `repo:${t.repo}`;
@@ -564,7 +607,11 @@ export async function syncLiveData(
     warmed.add(key);
     void warmModels(s.hostId, s.agent);
   }
-  return { repos: Object.keys(repos).length, sessions: Object.keys(sessions).length, devices: Object.keys(devices).length };
+  return {
+    repos: Object.keys(repos).length,
+    sessions: Object.keys(sessions).length,
+    devices: Object.keys(devices).length,
+  };
 }
 
 /** One full-text hit from a device's history index. threadId matches the
@@ -616,8 +663,12 @@ export async function searchMessages(
   // In-thread hits read top-to-bottom (chronological); cross-thread results
   // stay newest-first.
   return opts?.thread
-    ? hits.sort((a, b) => (Date.parse(a.timestamp ?? "") || 0) - (Date.parse(b.timestamp ?? "") || 0))
-    : hits.sort((a, b) => (Date.parse(b.timestamp ?? "") || 0) - (Date.parse(a.timestamp ?? "") || 0));
+    ? hits.sort(
+        (a, b) => (Date.parse(a.timestamp ?? "") || 0) - (Date.parse(b.timestamp ?? "") || 0),
+      )
+    : hits.sort(
+        (a, b) => (Date.parse(b.timestamp ?? "") || 0) - (Date.parse(a.timestamp ?? "") || 0),
+      );
 }
 
 /** Fetch a session's real message history from its device. */
@@ -663,7 +714,10 @@ export async function fetchMessages(
       if (typeof fp === "string" && IMG_EXT.test(fp)) {
         return {
           ...e,
-          call: { ...e.call, previewUri: `${base}/v1/file?path=${encodeURIComponent(fp)}&token=${encodeURIComponent(cfg.token)}` },
+          call: {
+            ...e.call,
+            previewUri: `${base}/v1/file?path=${encodeURIComponent(fp)}&token=${encodeURIComponent(cfg.token)}`,
+          },
         };
       }
     }
@@ -676,7 +730,13 @@ export interface ThreadUsage {
   available: boolean;
   model?: string | null;
   models?: string[];
-  tokens?: { input: number; output: number; cacheRead: number; cacheCreation: number; total: number };
+  tokens?: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheCreation: number;
+    total: number;
+  };
   cost?: number;
   costComplete?: boolean;
   messages?: number;
@@ -792,10 +852,10 @@ export interface GitChecks {
 
 /** Summed additions/deletions across changed files. */
 export function diffTotals(files: GitFile[]): { add: number; del: number } {
-  return files.reduce(
-    (t, f) => ({ add: t.add + f.additions, del: t.del + f.deletions }),
-    { add: 0, del: 0 },
-  );
+  return files.reduce((t, f) => ({ add: t.add + f.additions, del: t.del + f.deletions }), {
+    add: 0,
+    del: 0,
+  });
 }
 
 /** Uncommitted changes in a session's worktree. */
@@ -836,13 +896,23 @@ async function gitPost<T>(hostId: string, path: string, body: object): Promise<T
 }
 
 export function gitCommit(hostId: string, cwd: string, message: string) {
-  return gitPost<{ ok: boolean; sha?: string; error?: string }>(hostId, "/v1/git/commit", { cwd, message });
+  return gitPost<{ ok: boolean; sha?: string; error?: string }>(hostId, "/v1/git/commit", {
+    cwd,
+    message,
+  });
 }
 export function gitPush(hostId: string, cwd: string) {
   return gitPost<{ ok: boolean; output?: string }>(hostId, "/v1/git/push", { cwd });
 }
-export function gitPR(hostId: string, cwd: string, opts?: { title?: string; body?: string; draft?: boolean }) {
-  return gitPost<{ ok: boolean; url?: string; error?: string }>(hostId, "/v1/git/pr", { cwd, ...opts });
+export function gitPR(
+  hostId: string,
+  cwd: string,
+  opts?: { title?: string; body?: string; draft?: boolean },
+) {
+  return gitPost<{ ok: boolean; url?: string; error?: string }>(hostId, "/v1/git/pr", {
+    cwd,
+    ...opts,
+  });
 }
 
 /** Create + switch to a new branch (before committing work made on main). */
@@ -928,10 +998,13 @@ export async function restartDaemon(
   const cfg = await deviceForHost(hostId);
   if (!cfg) return { ok: false };
   try {
-    const res = await fetch(`${await bridgeBase(cfg)}/v1/daemon/restart${force ? "?force=1" : ""}`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${cfg.token}` },
-    });
+    const res = await fetch(
+      `${await bridgeBase(cfg)}/v1/daemon/restart${force ? "?force=1" : ""}`,
+      {
+        method: "POST",
+        headers: { authorization: `Bearer ${cfg.token}` },
+      },
+    );
     const j = (await res.json()) as { restarted?: boolean; daemon?: DaemonInfo; error?: string };
     if (res.status === 409) return { ok: false, busy: true, daemon: j.daemon };
     return { ok: !!j.restarted, daemon: j.daemon };
@@ -1106,11 +1179,7 @@ export interface RepoEntry {
 }
 
 /** List files/folders under a session's cwd for @-mention autocomplete. */
-export async function fetchFiles(
-  hostId: string,
-  cwd: string,
-  query: string,
-): Promise<RepoEntry[]> {
+export async function fetchFiles(hostId: string, cwd: string, query: string): Promise<RepoEntry[]> {
   const cfg = await deviceForHost(hostId);
   if (!cfg) return [];
   try {
@@ -1140,10 +1209,7 @@ export interface DirListing {
 }
 
 /** Browse folders on a device to pick a working directory for a new thread. */
-export async function browseDirs(
-  hostId: string,
-  dirPath?: string,
-): Promise<DirListing | null> {
+export async function browseDirs(hostId: string, dirPath?: string): Promise<DirListing | null> {
   const cfg = await deviceForHost(hostId);
   if (!cfg) return null;
   try {
@@ -1295,15 +1361,19 @@ export async function connectBridge(cfg: BridgeConfig): Promise<boolean> {
     // Reachability (health) is the sole gate for "connected". Sync is best-effort:
     // a cold daemon returning nothing for a tick must not fail the connection or
     // unpair the device — it just retries on the next sync.
-    await get<{ ok: boolean }>(dev, "/health", 8_000).catch(() => { throw new Error("bridge unreachable"); });
+    await get<{ ok: boolean }>(dev, "/health", 8_000).catch(() => {
+      throw new Error("bridge unreachable");
+    });
     connection$.demo.set(false);
     connection$.activeHostId.set(dev.id);
     // Capture the host's off-LAN identity (tunnel nodeId/relay) while we CAN
     // reach it — bridgeBase needs it later at the gym, when the LAN URL is dead
     // and /v1/pair is unreachable. Best-effort and non-blocking.
-    void fetchPairing(dev).then(async (p) => {
-      if (p?.nodeId) await SecureStore.setItemAsync(PAIRING_KEY, JSON.stringify(p));
-    }).catch(() => {});
+    void fetchPairing(dev)
+      .then(async (p) => {
+        if (p?.nodeId) await SecureStore.setItemAsync(PAIRING_KEY, JSON.stringify(p));
+      })
+      .catch(() => {});
     // Progressive connect: stream threads so the list fills in as pages land.
     // Fall back to the batch sync if the stream path errors (older bridge, etc.).
     await syncLiveDataStreaming().catch(() => syncLiveData().catch(() => {}));

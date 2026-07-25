@@ -9,25 +9,54 @@ import { openSync, readSync, closeSync, fstatSync } from "node:fs";
 // --- event constructors ------------------------------------------------------
 // `base` = { id, conversationId, seq, ts }
 
-export const userMessage = (base, text, images) =>
-  ({ ...base, type: "user_message", text, ...(images && images.length ? { images } : {}) });
+export const userMessage = (base, text, images) => ({
+  ...base,
+  type: "user_message",
+  text,
+  ...(images && images.length ? { images } : {}),
+});
 
-export const thinking = (base, text) => ({ ...base, type: "thinking_finished", text, durationMs: 0 });
+export const thinking = (base, text) => ({
+  ...base,
+  type: "thinking_finished",
+  text,
+  durationMs: 0,
+});
 
-export const assistantMessage = (base, text, streaming = false) =>
-  ({ ...base, type: "assistant_message", text, streaming });
+export const assistantMessage = (base, text, streaming = false) => ({
+  ...base,
+  type: "assistant_message",
+  text,
+  streaming,
+});
 
-export const toolCall = (base, { name, input, status = "success" }) =>
-  ({ ...base, type: "tool_call", call: { id: base.id, name, input, status, startedAt: base.ts } });
+export const toolCall = (base, { name, input, status = "success" }) => ({
+  ...base,
+  type: "tool_call",
+  call: { id: base.id, name, input, status, startedAt: base.ts },
+});
 
-export const toolResult = (base, { toolCallId, content, isError = false }) =>
-  ({ ...base, type: "tool_result", result: { toolCallId, content, isError, durationMs: null } });
+export const toolResult = (base, { toolCallId, content, isError = false }) => ({
+  ...base,
+  type: "tool_result",
+  result: { toolCallId, content, isError, durationMs: null },
+});
 
-export const systemEvent = (base, message, level = "warning") =>
-  ({ ...base, type: "system_event", message, level });
+export const systemEvent = (base, message, level = "warning") => ({
+  ...base,
+  type: "system_event",
+  message,
+  level,
+});
 
-export const permissionRequest = (base, { requestId, toolName, toolTitle, options }) =>
-  ({ ...base, type: "permission_request", requestId, toolName, toolTitle, options });
+export const permissionRequest = (base, { requestId, toolName, toolTitle, options }) => ({
+  ...base,
+  type: "permission_request",
+  requestId,
+  toolName,
+  toolTitle,
+  options,
+});
 
 // --- bounded reads -----------------------------------------------------------
 
@@ -51,7 +80,11 @@ export function readTailLines(filePath, bytes = 64 * 1024) {
   } catch {
     return [];
   } finally {
-    if (fd !== undefined) { try { closeSync(fd); } catch {} }
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {}
+    }
   }
 }
 

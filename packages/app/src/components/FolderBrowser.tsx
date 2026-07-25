@@ -56,7 +56,12 @@ export function FolderBrowser({
   const home = listing?.home ?? "";
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
       <View style={[s.root, { paddingTop: insets.top + 8 }]}>
         <View style={s.headerRow}>
           <Text style={s.headerTitle}>Choose a folder</Text>
@@ -118,7 +123,9 @@ export function FolderBrowser({
             ]}
           >
             <Text style={[s.pickText, listing ? s.pickTextEnabled : s.pickTextDisabled]}>
-              {listing ? `Use ${pretty(listing.path, home).split("/").pop() || "this folder"}` : "Use this folder"}
+              {listing
+                ? `Use ${pretty(listing.path, home).split("/").pop() || "this folder"}`
+                : "Use this folder"}
             </Text>
           </Pressable>
         </View>
@@ -142,11 +149,12 @@ function Row({
 }) {
   const { theme } = useUnistyles();
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [s.row, pressed && s.pressedHover]}
-    >
-      <PounceIcon name={icon} size={17} color={accentIcon ? theme.colors.accent : theme.colors.fgMuted} />
+    <Pressable onPress={onPress} style={({ pressed }) => [s.row, pressed && s.pressedHover]}>
+      <PounceIcon
+        name={icon}
+        size={17}
+        color={accentIcon ? theme.colors.accent : theme.colors.fgMuted}
+      />
       <Text numberOfLines={1} style={[s.rowLabel, muted ? s.rowLabelMuted : s.rowLabelFg]}>
         {label}
       </Text>
@@ -183,7 +191,13 @@ const s = StyleSheet.create((theme) => ({
   errorWrap: { alignItems: "center", paddingHorizontal: 32, paddingVertical: 64 },
   errorText: { textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   entries: { gap: 6 },
-  emptyText: { paddingHorizontal: 4, paddingVertical: 24, textAlign: "center", fontSize: 13, color: theme.colors.fgFaint },
+  emptyText: {
+    paddingHorizontal: 4,
+    paddingVertical: 24,
+    textAlign: "center",
+    fontSize: 13,
+    color: theme.colors.fgFaint,
+  },
   footer: {
     borderTopWidth: 1,
     borderColor: theme.colors.border,

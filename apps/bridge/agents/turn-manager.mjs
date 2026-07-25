@@ -10,7 +10,9 @@ export class TurnManager {
     this.turns = new Map(); // "agent:threadId" -> entry; several keys may share one entry
   }
 
-  key(agent, threadId) { return `${agent}:${threadId}`; }
+  key(agent, threadId) {
+    return `${agent}:${threadId}`;
+  }
 
   count() {
     return new Set(this.turns.values()).size;
@@ -66,5 +68,7 @@ export class TurnManager {
 }
 
 function kill(child, sig) {
-  try { child.kill(sig); } catch {}
+  try {
+    child.kill(sig);
+  } catch {}
 }

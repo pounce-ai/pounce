@@ -1,12 +1,5 @@
 import { useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Platform } from "react-native";
 import { KeyboardAvoidingView } from "../components/kav";
@@ -57,7 +50,10 @@ export default function TerminalScreen() {
       style={[s.root, { paddingTop: insets.top + 6 }]}
     >
       <View style={s.header}>
-        <Pressable onPress={() => router.back()} style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}>
+        <Pressable
+          onPress={() => router.back()}
+          style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
+        >
           <PounceIcon name="chevron-down" size={22} color={theme.colors.fg} />
         </Pressable>
         <View style={s.flex1}>
@@ -68,11 +64,7 @@ export default function TerminalScreen() {
         </View>
       </View>
 
-      <ScrollView
-        ref={scrollRef}
-        style={s.scroll}
-        contentContainerStyle={{ padding: 12, gap: 12 }}
-      >
+      <ScrollView ref={scrollRef} style={s.scroll} contentContainerStyle={{ padding: 12, gap: 12 }}>
         {history.length === 0 ? (
           <Text style={s.emptyHint}>
             Run a command on {session?.host ?? "the host"} — e.g. `git status`, `npm test`, `ls`.
@@ -83,13 +75,9 @@ export default function TerminalScreen() {
             <View style={s.cmdRow}>
               <Text style={s.promptGlyph}>❯</Text>
               <Text style={s.cmdText}>{e.command}</Text>
-              {e.code !== 0 ? (
-                <Text style={s.exitCode}>exit {e.code}</Text>
-              ) : null}
+              {e.code !== 0 ? <Text style={s.exitCode}>exit {e.code}</Text> : null}
             </View>
-            {e.output ? (
-              <Text style={s.output}>{e.output}</Text>
-            ) : null}
+            {e.output ? <Text style={s.output}>{e.output}</Text> : null}
           </View>
         ))}
         {running ? (
@@ -163,7 +151,12 @@ const s = StyleSheet.create((theme) => ({
     paddingTop: 8,
   },
   inputRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
-  inputPrompt: { paddingBottom: 8, fontFamily: "JetBrainsMono", fontSize: 14, color: theme.colors.accent },
+  inputPrompt: {
+    paddingBottom: 8,
+    fontFamily: "JetBrainsMono",
+    fontSize: 14,
+    color: theme.colors.accent,
+  },
   input: {
     maxHeight: 90,
     minHeight: 40,

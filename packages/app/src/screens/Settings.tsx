@@ -1,7 +1,16 @@
 import type { ComponentType, ReactNode } from "react";
 import { Modal } from "../components/AppModal";
 import { Component, useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -57,7 +66,10 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     void loadBridgeConfig().then((c) => {
-      if (c) { setUrl(c.url); setToken(c.token); }
+      if (c) {
+        setUrl(c.url);
+        setToken(c.token);
+      }
     });
   }, []);
 
@@ -72,10 +84,18 @@ export default function SettingsScreen() {
       // save it BEFORE connecting so bridgeBase() can fall back to the Iroh
       // tunnel when the LAN address is unreachable (npx-on-a-server flow).
       if (cfg.nodeId) {
-        await savePairing({ nodeId: cfg.nodeId, token: clean.token, hostName: pairingHostName(cfg), relay: cfg.relay ?? null });
+        await savePairing({
+          nodeId: cfg.nodeId,
+          token: clean.token,
+          hostName: pairingHostName(cfg),
+          relay: cfg.relay ?? null,
+        });
       }
       const ok = await connectBridge(clean);
-      if (!ok) throw new Error("Couldn't reach that computer. Make sure it's on and you're both on the same Wi-Fi.");
+      if (!ok)
+        throw new Error(
+          "Couldn't reach that computer. Make sure it's on and you're both on the same Wi-Fi.",
+        );
       // Also capture the host's direct-sync identity so it works off-Wi-Fi later.
       const pairing = await fetchPairing(clean);
       if (pairing?.nodeId) await savePairing(pairing);
@@ -92,7 +112,10 @@ export default function SettingsScreen() {
   const scanFailed = () => {
     setScanning(false);
     setScanner(null);
-    Alert.alert("Scanning needs an update", "Update the app to scan codes. For now, tap “Enter code manually”.");
+    Alert.alert(
+      "Scanning needs an update",
+      "Update the app to scan codes. For now, tap “Enter code manually”.",
+    );
     setManual(true);
   };
 
@@ -170,139 +193,147 @@ export default function SettingsScreen() {
   // view — wrapped in a View, the title never collapses and content scrolls
   // over it. Desktop keeps its chrome wrapper.
   const body = (
-      <ScrollView
-        style={s.scroll}
-        contentInsetAdjustmentBehavior="automatic"
-        // contentInsetAdjustmentBehavior is iOS-only: Android's toolbar header
-        // is in-flow with NO automatic content inset, so the first row sits
-        // flush against it without the explicit top padding.
-        contentContainerStyle={{
-          gap: 14,
-          paddingTop: Platform.OS === "android" ? 16 : 0,
-          paddingBottom: insets.bottom + 16,
-        }}
-      >
-        <View style={s.statusRow}>
-          <View style={[s.dot, live ? s.dotOn : s.dotOff]} />
-          <Text style={s.statusText}>
-            {live ? "Connected" : "Not connected"}
-          </Text>
-        </View>
+    <ScrollView
+      style={s.scroll}
+      contentInsetAdjustmentBehavior="automatic"
+      // contentInsetAdjustmentBehavior is iOS-only: Android's toolbar header
+      // is in-flow with NO automatic content inset, so the first row sits
+      // flush against it without the explicit top padding.
+      contentContainerStyle={{
+        gap: 14,
+        paddingTop: Platform.OS === "android" ? 16 : 0,
+        paddingBottom: insets.bottom + 16,
+      }}
+    >
+      <View style={s.statusRow}>
+        <View style={[s.dot, live ? s.dotOn : s.dotOff]} />
+        <Text style={s.statusText}>{live ? "Connected" : "Not connected"}</Text>
+      </View>
 
-        {/* Device setup: pairing on mobile, resync/reset on desktop (platform fork). */}
-        <DeviceSetupCard
-          busy={busy}
-          onScan={startScan}
-          manual={manual}
-          setManual={setManual}
-          url={url}
-          setUrl={setUrl}
-          token={token}
-          setToken={setToken}
-          onSync={doSync}
-        />
+      {/* Device setup: pairing on mobile, resync/reset on desktop (platform fork). */}
+      <DeviceSetupCard
+        busy={busy}
+        onScan={startScan}
+        manual={manual}
+        setManual={setManual}
+        url={url}
+        setUrl={setUrl}
+        token={token}
+        setToken={setToken}
+        onSync={doSync}
+      />
 
-
-        {/* Paired devices */}
-        {devices.length ? (
-          <View style={s.section}>
-            <Text style={s.sectionLabel}>Your devices</Text>
-            {devices.map((d) => (
-              <View key={d.id} style={s.deviceCard}>
-                <View style={s.deviceRow}>
-                  <DeviceIcon
-                    name={d.name}
-                    emoji={deviceEmoji(d.id)}
-                    color={d.online ? theme.colors.fg : theme.colors.fgFaint}
-                    size={18}
-                  />
-                  <Text style={s.deviceName} numberOfLines={1}>
-                    {deviceLabel(d.id, d.name)}
-                  </Text>
-                  <View style={[s.dot, d.online ? s.dotOn : s.dotOff]} />
-                  <Pressable onPress={() => setEditing(d)} hitSlop={8} style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}>
-                    <PounceIcon name="pencil-outline" size={15} color={theme.colors.fgFaint} />
-                  </Pressable>
-                  <Pressable onPress={() => forget(d)} hitSlop={8} style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}>
-                    <PounceIcon name="trash-outline" size={16} color={theme.colors.fgFaint} />
-                  </Pressable>
-                </View>
-                <DeviceDaemon hostId={d.id} hostName={deviceLabel(d.id, d.name)} online={d.online} />
-              </View>
-            ))}
-            <Pressable
-              onPress={refresh}
-              disabled={busy}
-              style={({ pressed }) => [s.refreshBtn, pressed && s.pressed60]}
-            >
-              {syncState === "syncing" ? (
-                <ActivityIndicator size="small" color={theme.colors.accent} />
-              ) : syncState === "done" ? (
-                <PounceIcon name="checkmark-circle" size={15} color={theme.colors.success} />
-              ) : null}
-              <Text style={[s.refreshLabel, syncState === "idle" ? s.accentText : s.mutedText]}>
-                {syncState === "syncing" ? "Syncing…" : syncState === "done" ? "Up to date" : "Sync now"}
-              </Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        {/* Appearance: mobile has the sun/moon header button; desktop has no
-            navigation bar, so it keeps the explicit chips. */}
-        {IS_DESKTOP ? (
-          <View style={s.section}>
-            <Text style={s.sectionLabel}>Appearance</Text>
-            <View style={s.appearanceRow}>
-              {(["system", "light", "dark"] as const).map((m) => (
+      {/* Paired devices */}
+      {devices.length ? (
+        <View style={s.section}>
+          <Text style={s.sectionLabel}>Your devices</Text>
+          {devices.map((d) => (
+            <View key={d.id} style={s.deviceCard}>
+              <View style={s.deviceRow}>
+                <DeviceIcon
+                  name={d.name}
+                  emoji={deviceEmoji(d.id)}
+                  color={d.online ? theme.colors.fg : theme.colors.fgFaint}
+                  size={18}
+                />
+                <Text style={s.deviceName} numberOfLines={1}>
+                  {deviceLabel(d.id, d.name)}
+                </Text>
+                <View style={[s.dot, d.online ? s.dotOn : s.dotOff]} />
                 <Pressable
-                  key={m}
-                  onPress={() => setAppearance(m)}
-                  style={({ pressed }) => [
-                    s.appearanceChip,
-                    appearanceMode === m ? s.appearanceChipOn : s.appearanceChipOff,
-                    pressed && s.pressed80,
-                  ]}
+                  onPress={() => setEditing(d)}
+                  hitSlop={8}
+                  style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
                 >
-                  <Text style={appearanceMode === m ? s.appearanceLabelOn : s.appearanceLabel}>
-                    {m === "system" ? "System" : m === "light" ? "Light" : "Dark"}
-                  </Text>
+                  <PounceIcon name="pencil-outline" size={15} color={theme.colors.fgFaint} />
                 </Pressable>
-              ))}
+                <Pressable
+                  onPress={() => forget(d)}
+                  hitSlop={8}
+                  style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
+                >
+                  <PounceIcon name="trash-outline" size={16} color={theme.colors.fgFaint} />
+                </Pressable>
+              </View>
+              <DeviceDaemon hostId={d.id} hostName={deviceLabel(d.id, d.name)} online={d.online} />
             </View>
+          ))}
+          <Pressable
+            onPress={refresh}
+            disabled={busy}
+            style={({ pressed }) => [s.refreshBtn, pressed && s.pressed60]}
+          >
+            {syncState === "syncing" ? (
+              <ActivityIndicator size="small" color={theme.colors.accent} />
+            ) : syncState === "done" ? (
+              <PounceIcon name="checkmark-circle" size={15} color={theme.colors.success} />
+            ) : null}
+            <Text style={[s.refreshLabel, syncState === "idle" ? s.accentText : s.mutedText]}>
+              {syncState === "syncing"
+                ? "Syncing…"
+                : syncState === "done"
+                  ? "Up to date"
+                  : "Sync now"}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {/* Appearance: mobile has the sun/moon header button; desktop has no
+            navigation bar, so it keeps the explicit chips. */}
+      {IS_DESKTOP ? (
+        <View style={s.section}>
+          <Text style={s.sectionLabel}>Appearance</Text>
+          <View style={s.appearanceRow}>
+            {(["system", "light", "dark"] as const).map((m) => (
+              <Pressable
+                key={m}
+                onPress={() => setAppearance(m)}
+                style={({ pressed }) => [
+                  s.appearanceChip,
+                  appearanceMode === m ? s.appearanceChipOn : s.appearanceChipOff,
+                  pressed && s.pressed80,
+                ]}
+              >
+                <Text style={appearanceMode === m ? s.appearanceLabelOn : s.appearanceLabel}>
+                  {m === "system" ? "System" : m === "light" ? "Light" : "Dark"}
+                </Text>
+              </Pressable>
+            ))}
           </View>
-        ) : null}
+        </View>
+      ) : null}
 
-        {/* Diagnostics (Pounce Doctor) */}
-        <Pressable
-          onPress={() => router.push("/diagnostics")}
-          style={({ pressed }) => [s.navRow, pressed && s.pressed80]}
-        >
-          <PounceIcon name="medkit-outline" size={18} color={theme.colors.fgMuted} />
-          <Text style={s.navLabel}>Diagnostics</Text>
-          <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} />
-        </Pressable>
+      {/* Diagnostics (Pounce Doctor) */}
+      <Pressable
+        onPress={() => router.push("/diagnostics")}
+        style={({ pressed }) => [s.navRow, pressed && s.pressed80]}
+      >
+        <PounceIcon name="medkit-outline" size={18} color={theme.colors.fgMuted} />
+        <Text style={s.navLabel}>Diagnostics</Text>
+        <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} />
+      </Pressable>
 
-        {/* Sync history */}
-        <Pressable
-          onPress={() => router.push("/sync-history")}
-          style={({ pressed }) => [s.navRow, pressed && s.pressed80]}
-        >
-          <PounceIcon name="time-outline" size={18} color={theme.colors.fgMuted} />
-          <Text style={s.navLabel}>Sync history</Text>
-          <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} />
-        </Pressable>
+      {/* Sync history */}
+      <Pressable
+        onPress={() => router.push("/sync-history")}
+        style={({ pressed }) => [s.navRow, pressed && s.pressed80]}
+      >
+        <PounceIcon name="time-outline" size={18} color={theme.colors.fgMuted} />
+        <Text style={s.navLabel}>Sync history</Text>
+        <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} />
+      </Pressable>
 
-        {/* Help & FAQ */}
-        <Pressable
-          onPress={() => router.push("/help")}
-          style={({ pressed }) => [s.navRow, pressed && s.pressed80]}
-        >
-          <PounceIcon name="help-circle-outline" size={18} color={theme.colors.fgMuted} />
-          <Text style={s.navLabel}>Help &amp; FAQ</Text>
-          <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} />
-        </Pressable>
-
-      </ScrollView>
+      {/* Help & FAQ */}
+      <Pressable
+        onPress={() => router.push("/help")}
+        style={({ pressed }) => [s.navRow, pressed && s.pressed80]}
+      >
+        <PounceIcon name="help-circle-outline" size={18} color={theme.colors.fgMuted} />
+        <Text style={s.navLabel}>Help &amp; FAQ</Text>
+        <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} />
+      </Pressable>
+    </ScrollView>
   );
 
   if (IS_DESKTOP) {
@@ -330,45 +361,74 @@ export default function SettingsScreen() {
  * missing). Renders nothing when the host is offline or its bridge is too old to
  * report a daemon — so it never clutters a device that can't use it.
  */
-function DeviceDaemon({ hostId, hostName, online }: { hostId: string; hostName: string; online: boolean }) {
+function DeviceDaemon({
+  hostId,
+  hostName,
+  online,
+}: {
+  hostId: string;
+  hostName: string;
+  online: boolean;
+}) {
   const { theme } = useUnistyles();
   const [info, setInfo] = useState<DaemonInfo | null>(null);
   const [restarting, setRestarting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    if (!online) { setInfo(null); return; }
-    void fetchDaemon(hostId).then((d) => { if (!cancelled) setInfo(d); });
-    return () => { cancelled = true; };
+    if (!online) {
+      setInfo(null);
+      return;
+    }
+    void fetchDaemon(hostId).then((d) => {
+      if (!cancelled) setInfo(d);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [hostId, online]);
 
-  const doRestart = useCallback(async (force: boolean) => {
-    setRestarting(true);
-    try {
-      const r = await restartDaemon(hostId, force);
-      if (r.busy) {
-        Alert.alert("Agent is busy", "A reply is still being written. Rescan anyway? It will interrupt it.", [
-          { text: "Cancel", style: "cancel" },
-          { text: "Rescan anyway", style: "destructive", onPress: () => void doRestart(true) },
-        ]);
-        return;
+  const doRestart = useCallback(
+    async (force: boolean) => {
+      setRestarting(true);
+      try {
+        const r = await restartDaemon(hostId, force);
+        if (r.busy) {
+          Alert.alert(
+            "Agent is busy",
+            "A reply is still being written. Rescan anyway? It will interrupt it.",
+            [
+              { text: "Cancel", style: "cancel" },
+              { text: "Rescan anyway", style: "destructive", onPress: () => void doRestart(true) },
+            ],
+          );
+          return;
+        }
+        if (r.ok) {
+          setInfo(r.daemon ?? null);
+          Alert.alert(
+            "Daemon restarted",
+            "Re-indexing sessions — pull to refresh in a few seconds.",
+          );
+        } else {
+          Alert.alert("Couldn't restart", `Make sure ${hostName} is reachable.`);
+        }
+      } finally {
+        setRestarting(false);
       }
-      if (r.ok) {
-        setInfo(r.daemon ?? null);
-        Alert.alert("Daemon restarted", "Re-indexing sessions — pull to refresh in a few seconds.");
-      } else {
-        Alert.alert("Couldn't restart", `Make sure ${hostName} is reachable.`);
-      }
-    } finally {
-      setRestarting(false);
-    }
-  }, [hostId, hostName]);
+    },
+    [hostId, hostName],
+  );
 
   const confirm = () =>
-    Alert.alert("Rescan sessions?", `${hostName} will take a fresh look at its agent sessions. Takes a few seconds.`, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Rescan", onPress: () => void doRestart(false) },
-    ]);
+    Alert.alert(
+      "Rescan sessions?",
+      `${hostName} will take a fresh look at its agent sessions. Takes a few seconds.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Rescan", onPress: () => void doRestart(false) },
+      ],
+    );
 
   // Only show for hosts whose bridge actually reports a running daemon. The
   // Restart pill sits bottom-left — diagonally away from the edit/delete icons in
@@ -397,7 +457,24 @@ function DeviceDaemon({ hostId, hostName, online }: { hostId: string; hostName: 
 }
 
 /** Quick-pick emoji palette for device icons — common machine / vibe glyphs. */
-const DEVICE_EMOJI = ["💻", "🖥️", "📱", "🖲️", "☁️", "🐧", "🍎", "🚀", "🔥", "⚡️", "🐳", "🦊", "🐱", "🐢", "🌙", "⭐️"];
+const DEVICE_EMOJI = [
+  "💻",
+  "🖥️",
+  "📱",
+  "🖲️",
+  "☁️",
+  "🐧",
+  "🍎",
+  "🚀",
+  "🔥",
+  "⚡️",
+  "🐳",
+  "🦊",
+  "🐱",
+  "🐢",
+  "🌙",
+  "⭐️",
+];
 
 /** Bottom-sheet editor: rename a device and optionally pick an emoji icon. */
 function DeviceEditModal({ device, onClose }: { device: Device | null; onClose: () => void }) {
@@ -431,7 +508,12 @@ function DeviceEditModal({ device, onClose }: { device: Device | null; onClose: 
 
         <View style={s.editRow}>
           <View style={s.iconBox}>
-            <DeviceIcon name={name || device.name} emoji={emoji} color={theme.colors.fg} size={24} />
+            <DeviceIcon
+              name={name || device.name}
+              emoji={emoji}
+              color={theme.colors.fg}
+              size={24}
+            />
           </View>
           <TextInput
             value={name}
@@ -458,16 +540,15 @@ function DeviceEditModal({ device, onClose }: { device: Device | null; onClose: 
                 onPress={() => setEmoji(e)}
                 style={[s.emojiCell, emoji === e ? s.emojiCellOn : s.emojiCellOff]}
               >
-                <Text style={s.emojiGlyph} allowFontScaling={false}>{e}</Text>
+                <Text style={s.emojiGlyph} allowFontScaling={false}>
+                  {e}
+                </Text>
               </Pressable>
             ))}
           </View>
         </View>
 
-        <Pressable
-          onPress={save}
-          style={({ pressed }) => [s.saveBtn, pressed && s.pressed90]}
-        >
+        <Pressable onPress={save} style={({ pressed }) => [s.saveBtn, pressed && s.pressed90]}>
           <Text style={s.saveLabel}>Save</Text>
         </Pressable>
       </View>
@@ -509,7 +590,12 @@ const s = StyleSheet.create((theme) => ({
   // as ONE rhythm across the whole screen (device cards were 8 while the
   // standalone nav cards sat 14 apart — visibly inconsistent).
   section: { gap: 14 },
-  sectionLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
+  sectionLabel: {
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: theme.colors.fgFaint,
+  },
   appearanceRow: { flexDirection: "row", gap: 8 },
   appearanceChip: {
     height: 32,
@@ -594,7 +680,13 @@ const s = StyleSheet.create((theme) => ({
     paddingHorizontal: 16,
     paddingTop: 12,
   },
-  grabber: { height: 4, width: 40, alignSelf: "center", borderRadius: 999, backgroundColor: theme.colors.border },
+  grabber: {
+    height: 4,
+    width: 40,
+    alignSelf: "center",
+    borderRadius: 999,
+    backgroundColor: theme.colors.border,
+  },
   sheetTitle: { fontSize: 18, fontWeight: "700", color: theme.colors.fg },
   editRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   iconBox: {

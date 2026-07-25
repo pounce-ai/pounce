@@ -26,11 +26,7 @@ import type {
   WireEnvelope,
 } from "@pounce/shared";
 
-export type ConnectionState =
-  | "disconnected"
-  | "connecting"
-  | "connected"
-  | "reconnecting";
+export type ConnectionState = "disconnected" | "connecting" | "connected" | "reconnecting";
 
 export interface SubscribeOptions {
   readonly runId?: string;

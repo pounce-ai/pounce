@@ -26,12 +26,47 @@ const MONO = "JetBrainsMono";
 
 /** Language tags / file extensions → Prism language ids. Unknown → plain. */
 const PRISM_LANG: Record<string, string> = {
-  ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", mjs: "javascript", cjs: "javascript",
-  py: "python", rb: "ruby", sh: "bash", shell: "bash", zsh: "bash", bash: "bash", console: "bash",
-  "shell-session": "bash", yml: "yaml", yaml: "yaml", json: "json", md: "markdown", markdown: "markdown",
-  "c++": "cpp", cpp: "cpp", cc: "cpp", "c#": "csharp", cs: "csharp", c: "c", h: "c", rs: "rust",
-  go: "go", java: "java", kt: "kotlin", swift: "swift", css: "css", scss: "scss", html: "markup",
-  xml: "markup", svg: "markup", sql: "sql", toml: "toml", diff: "diff", rb2: "ruby", php: "php",
+  ts: "typescript",
+  tsx: "tsx",
+  js: "javascript",
+  jsx: "jsx",
+  mjs: "javascript",
+  cjs: "javascript",
+  py: "python",
+  rb: "ruby",
+  sh: "bash",
+  shell: "bash",
+  zsh: "bash",
+  bash: "bash",
+  console: "bash",
+  "shell-session": "bash",
+  yml: "yaml",
+  yaml: "yaml",
+  json: "json",
+  md: "markdown",
+  markdown: "markdown",
+  "c++": "cpp",
+  cpp: "cpp",
+  cc: "cpp",
+  "c#": "csharp",
+  cs: "csharp",
+  c: "c",
+  h: "c",
+  rs: "rust",
+  go: "go",
+  java: "java",
+  kt: "kotlin",
+  swift: "swift",
+  css: "css",
+  scss: "scss",
+  html: "markup",
+  xml: "markup",
+  svg: "markup",
+  sql: "sql",
+  toml: "toml",
+  diff: "diff",
+  rb2: "ruby",
+  php: "php",
 };
 export function prismLang(tag: string): string {
   const t = tag.replace(/^\./, "").toLowerCase();
@@ -58,9 +93,16 @@ export const HlText = memo(function HlText({
 }) {
   const light = useColorScheme() === "light";
   return (
-    <Highlight code={code} language={prismLang(language) || "text"} theme={light ? themes.github : themes.vsDark}>
+    <Highlight
+      code={code}
+      language={prismLang(language) || "text"}
+      theme={light ? themes.github : themes.vsDark}
+    >
       {({ tokens, getTokenProps }) => (
-        <Text numberOfLines={numberOfLines} style={{ fontFamily: MONO, fontSize: size, lineHeight: size + 5.5 }}>
+        <Text
+          numberOfLines={numberOfLines}
+          style={{ fontFamily: MONO, fontSize: size, lineHeight: size + 5.5 }}
+        >
           {tokens.map((line, i) => (
             <Text key={i}>
               {i > 0 ? "\n" : ""}
@@ -109,7 +151,9 @@ export const DiffBlock = memo(function DiffBlock({
   if (!files.length) files.push({ path: path ?? "diff", text: patch, adds: 0, dels: 0 });
 
   return (
-    <View style={[s.card, nested && s.cardNested, { backgroundColor: light ? "#f6f8fa" : "#0d0d12" }]}>
+    <View
+      style={[s.card, nested && s.cardNested, { backgroundColor: light ? "#f6f8fa" : "#0d0d12" }]}
+    >
       {files.map((file, fi) => {
         const lang = EXT_LANG[extOf(file.path)] ?? "";
         // Drop git-meta lines (diff --git / index / +++ / ---) — the header names the file.
@@ -118,7 +162,9 @@ export const DiffBlock = memo(function DiffBlock({
         return (
           <View key={fi}>
             <View style={s.fileHeader}>
-              <Text numberOfLines={1} style={s.filePath}>{file.path}</Text>
+              <Text numberOfLines={1} style={s.filePath}>
+                {file.path}
+              </Text>
               {file.adds ? <Text style={s.addCount}>+{file.adds}</Text> : null}
               {file.dels ? <Text style={s.delCount}>−{file.dels}</Text> : null}
             </View>
@@ -126,7 +172,11 @@ export const DiffBlock = memo(function DiffBlock({
               {shown.map((line, i) => {
                 const kind = classifyLine(line);
                 if (kind === "hunk") {
-                  return <Text key={i} style={s.hunk}>{line}</Text>;
+                  return (
+                    <Text key={i} style={s.hunk}>
+                      {line}
+                    </Text>
+                  );
                 }
                 const prefix = kind === "add" ? "+" : kind === "del" ? "−" : " ";
                 const content = /^[+\- ]/.test(line) ? line.slice(1) : line;
@@ -162,12 +212,39 @@ export const DiffBlock = memo(function DiffBlock({
 
 /** File extension (`.ts`, `.json`, or `other`) → Prism language. */
 const EXT_LANG: Record<string, string> = {
-  ".ts": "typescript", ".tsx": "tsx", ".js": "javascript", ".jsx": "jsx", ".mjs": "javascript",
-  ".cjs": "javascript", ".py": "python", ".rb": "ruby", ".sh": "bash", ".zsh": "bash", ".bash": "bash",
-  ".yml": "yaml", ".yaml": "yaml", ".json": "json", ".md": "markdown", ".css": "css", ".scss": "scss",
-  ".html": "markup", ".xml": "markup", ".svg": "markup", ".sql": "sql", ".go": "go", ".rs": "rust",
-  ".java": "java", ".kt": "kotlin", ".swift": "swift", ".c": "c", ".h": "c", ".cpp": "cpp", ".cc": "cpp",
-  ".toml": "toml", ".php": "php", ".rb2": "ruby",
+  ".ts": "typescript",
+  ".tsx": "tsx",
+  ".js": "javascript",
+  ".jsx": "jsx",
+  ".mjs": "javascript",
+  ".cjs": "javascript",
+  ".py": "python",
+  ".rb": "ruby",
+  ".sh": "bash",
+  ".zsh": "bash",
+  ".bash": "bash",
+  ".yml": "yaml",
+  ".yaml": "yaml",
+  ".json": "json",
+  ".md": "markdown",
+  ".css": "css",
+  ".scss": "scss",
+  ".html": "markup",
+  ".xml": "markup",
+  ".svg": "markup",
+  ".sql": "sql",
+  ".go": "go",
+  ".rs": "rust",
+  ".java": "java",
+  ".kt": "kotlin",
+  ".swift": "swift",
+  ".c": "c",
+  ".h": "c",
+  ".cpp": "cpp",
+  ".cc": "cpp",
+  ".toml": "toml",
+  ".php": "php",
+  ".rb2": "ruby",
 };
 
 const s = StyleSheet.create((theme) => ({
@@ -195,5 +272,11 @@ const s = StyleSheet.create((theme) => ({
   prefixDel: { color: theme.colors.diffDelFg },
   prefixCtx: { color: theme.colors.fgFaint },
   lineCode: { flex: 1 },
-  more: { paddingHorizontal: 8, paddingVertical: 4, fontFamily: MONO, fontSize: 11, color: theme.colors.fgFaint },
+  more: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontFamily: MONO,
+    fontSize: 11,
+    color: theme.colors.fgFaint,
+  },
 }));

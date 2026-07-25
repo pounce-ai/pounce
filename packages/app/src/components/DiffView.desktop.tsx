@@ -28,7 +28,11 @@ const LINE_STYLE: Record<LineKind, TextStyle> = {
 type Row =
   | { type: "file"; path: string; adds: number; dels: number }
   | { type: "line"; kind: LineKind; text: string }
-  | { type: "pair"; left: { kind: LineKind; text: string } | null; right: { kind: LineKind; text: string } | null };
+  | {
+      type: "pair";
+      left: { kind: LineKind; text: string } | null;
+      right: { kind: LineKind; text: string } | null;
+    };
 
 /** Body lines of one file's patch, with git metadata headers dropped. */
 function bodyLines(text: string): string[] {
@@ -195,11 +199,7 @@ export const DiffView = memo(function DiffView({
             </View>
           );
         }
-        return (
-          <Text style={[s.diffLine, LINE_STYLE[item.kind]]}>
-            {item.text || " "}
-          </Text>
-        );
+        return <Text style={[s.diffLine, LINE_STYLE[item.kind]]}>{item.text || " "}</Text>;
       }}
       contentContainerStyle={{ paddingBottom: 6 }}
     />

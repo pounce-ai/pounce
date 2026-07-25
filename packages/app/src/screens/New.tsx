@@ -1,12 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { KeyboardAvoidingView } from "../components/kav";
-import {
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from "react-native";
+import { Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -193,7 +187,12 @@ export default function NewTaskScreen() {
           <Field label="Device">
             <View style={s.chipRow}>
               {devices.map((d) => (
-                <Chip key={d.id} active={hostId === d.id} onPress={() => setHostId(d.id)} label={d.name} />
+                <Chip
+                  key={d.id}
+                  active={hostId === d.id}
+                  onPress={() => setHostId(d.id)}
+                  label={d.name}
+                />
               ))}
             </View>
           </Field>
@@ -204,7 +203,11 @@ export default function NewTaskScreen() {
             onPress={() => setBrowsing(true)}
             style={({ pressed }) => [s.folderBtn, pressed && s.pressed80]}
           >
-            <PounceIcon name="folder-outline" size={17} color={cwd ? theme.colors.accent : theme.colors.fgFaint} />
+            <PounceIcon
+              name="folder-outline"
+              size={17}
+              color={cwd ? theme.colors.accent : theme.colors.fgFaint}
+            />
             <View style={s.flex1}>
               <Text numberOfLines={1} style={[s.folderLabel, cwd ? s.fgText : s.faintText]}>
                 {folderLabel ?? "Choose a folder…"}
@@ -226,7 +229,12 @@ export default function NewTaskScreen() {
               {repos
                 .filter((r, i) => i < 3 || activeRepoId === r.id)
                 .map((r) => (
-                  <Chip key={r.id} active={activeRepoId === r.id} onPress={() => pickRepo(r.id)} label={r.name} />
+                  <Chip
+                    key={r.id}
+                    active={activeRepoId === r.id}
+                    onPress={() => pickRepo(r.id)}
+                    label={r.name}
+                  />
                 ))}
             </View>
           ) : null}
@@ -379,6 +387,11 @@ const s = StyleSheet.create((theme) => ({
   interactiveIdle: { backgroundColor: theme.colors.surfaceAlt },
   interactiveText: { fontSize: 12 },
   field: { gap: 8 },
-  fieldLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
+  fieldLabel: {
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: theme.colors.fgFaint,
+  },
   chip: { borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 6 },
 }));

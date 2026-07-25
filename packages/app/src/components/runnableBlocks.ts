@@ -41,7 +41,9 @@ function stripPrompts(body: string): string {
  *  plausible command token — generous on purpose: "Run" only inserts the
  *  command into the composer for the user to review and send, never executes. */
 function looksLikeCommand(body: string): boolean {
-  const lines = stripPrompts(body).split("\n").filter((l) => l.trim());
+  const lines = stripPrompts(body)
+    .split("\n")
+    .filter((l) => l.trim());
   if (lines.length !== 1) return false;
   const line = lines[0].trim();
   return line.length < 300 && /^[A-Za-z_.~/][\w.~/+-]*(\s|$)/.test(line);

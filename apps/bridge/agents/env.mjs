@@ -25,9 +25,14 @@ export function agentEnv() {
         process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Volta", "bin"),
       ]
     : [
-        "/opt/homebrew/bin", "/usr/local/bin", `${home}/.local/bin`,
-        `${home}/.volta/bin`, `${home}/.bun/bin`, `${home}/.claude/local`,
-        `${home}/.nvm/current/bin`, `${home}/.fnm/aliases/default/bin`,
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        `${home}/.local/bin`,
+        `${home}/.volta/bin`,
+        `${home}/.bun/bin`,
+        `${home}/.claude/local`,
+        `${home}/.nvm/current/bin`,
+        `${home}/.fnm/aliases/default/bin`,
       ];
   // A user-pinned binary's directory goes on the FRONT so both the binary itself
   // and any `#!/usr/bin/env node` shebang inside a wrapper resolve to the pinned
@@ -85,12 +90,26 @@ function runCollect(cmd, args, { env, maxBytes = Infinity } = {}) {
     let p;
     try {
       p = spawn(cmd, args, { env, stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
-    } catch { return resolve({ code: -1, out: "" }); }
+    } catch {
+      return resolve({ code: -1, out: "" });
+    }
     let out = "";
-    const t = setTimeout(() => { try { p.kill("SIGKILL"); } catch {} }, 5000);
-    p.stdout.on("data", (d) => { if (out.length < maxBytes) out += d; });
-    p.on("close", (code) => { clearTimeout(t); resolve({ code, out }); });
-    p.on("error", () => { clearTimeout(t); resolve({ code: -1, out: "" }); });
+    const t = setTimeout(() => {
+      try {
+        p.kill("SIGKILL");
+      } catch {}
+    }, 5000);
+    p.stdout.on("data", (d) => {
+      if (out.length < maxBytes) out += d;
+    });
+    p.on("close", (code) => {
+      clearTimeout(t);
+      resolve({ code, out });
+    });
+    p.on("error", () => {
+      clearTimeout(t);
+      resolve({ code: -1, out: "" });
+    });
   });
 }
 
@@ -133,11 +152,20 @@ async function scanLiveAgentCwds() {
     if (pids.length) {
       if (existsSync("/proc")) {
         for (const [pid, name] of pids) {
-          try { addCwd(value, name, readlinkSync(`/proc/${pid}/cwd`)); } catch {}
+          try {
+            addCwd(value, name, readlinkSync(`/proc/${pid}/cwd`));
+          } catch {}
         }
       } else {
         // macOS: one batched lsof for all agent pids. -Fpn = p<pid> / n<path>.
-        const { out } = await runCollect("lsof", ["-a", "-p", pids.map(([p]) => p).join(","), "-d", "cwd", "-Fpn"]);
+        const { out } = await runCollect("lsof", [
+          "-a",
+          "-p",
+          pids.map(([p]) => p).join(","),
+          "-d",
+          "cwd",
+          "-Fpn",
+        ]);
         let cur = null;
         for (const line of out.split("\n")) {
           if (line.startsWith("p")) cur = line.slice(1);

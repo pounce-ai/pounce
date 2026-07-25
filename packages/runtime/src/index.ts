@@ -10,8 +10,4 @@ export { PounceAdapter } from "./adapter/pounceAdapter";
 export { translate, HANDLED_WIRE_TYPES } from "./adapter/translate";
 export { HttpTransport, TransportError } from "./transport/httpTransport";
 export type { HttpTransportConfig } from "./transport/httpTransport";
-export type {
-  Transport,
-  ConnectionState,
-  SubscribeOptions,
-} from "./transport/types";
+export type { Transport, ConnectionState, SubscribeOptions } from "./transport/types";

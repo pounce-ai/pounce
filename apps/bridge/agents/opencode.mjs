@@ -17,7 +17,14 @@ import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { userMessage, thinking, assistantMessage, toolCall, toolResult, systemEvent } from "./events.mjs";
+import {
+  userMessage,
+  thinking,
+  assistantMessage,
+  toolCall,
+  toolResult,
+  systemEvent,
+} from "./events.mjs";
 import { agentEnv, binVersion, binPath } from "./env.mjs";
 
 const DATA_DIR = path.join(os.homedir(), ".local", "share", "opencode");
@@ -31,7 +38,14 @@ export class OpencodeAdapter {
     this.id = "opencode";
     this.displayName = "OpenCode";
     this.description = "SST's OpenCode CLI";
-    this.capabilities = { streaming: true, tools: true, images: false, thinking: false, terminal: true, git: true };
+    this.capabilities = {
+      streaming: true,
+      tools: true,
+      images: false,
+      thinking: false,
+      terminal: true,
+      git: true,
+    };
     this.turns = turns;
     this._db = undefined; // undefined = not tried, null = unavailable
     this._dirty = new Set();
@@ -39,7 +53,9 @@ export class OpencodeAdapter {
     this._watchTimer = null;
   }
 
-  onDirty(cb) { this._dirty.add(cb); }
+  onDirty(cb) {
+    this._dirty.add(cb);
+  }
 
   async isAvailable() {
     return (await binVersion("opencode")) != null;
@@ -71,7 +87,11 @@ export class OpencodeAdapter {
         if (!f || !f.startsWith("opencode.db")) return;
         clearTimeout(this._watchTimer);
         this._watchTimer = setTimeout(() => {
-          for (const cb of this._dirty) { try { cb(""); } catch {} }
+          for (const cb of this._dirty) {
+            try {
+              cb("");
+            } catch {}
+          }
         }, 1000);
       });
     } catch {}
@@ -81,16 +101,23 @@ export class OpencodeAdapter {
     const db = await this.db();
     if (db) {
       try {
-        const rows = db.prepare(
-          `SELECT id, directory, title, time_created, time_updated
+        const rows = db
+          .prepare(
+            `SELECT id, directory, title, time_created, time_updated
              FROM session WHERE parent_id IS NULL AND time_archived IS NULL
              ORDER BY time_updated DESC LIMIT 1000`,
-        ).all();
+          )
+          .all();
         return rows.map((r) => ({
-          id: r.id, filePath: null, cwd: r.directory || null,
-          name: r.title || null, preview: r.title || null,
-          createdAt: msIso(r.time_created), updatedAt: msIso(r.time_updated),
-          gitBranch: null, sizeBytes: 0,
+          id: r.id,
+          filePath: null,
+          cwd: r.directory || null,
+          name: r.title || null,
+          preview: r.title || null,
+          createdAt: msIso(r.time_created),
+          updatedAt: msIso(r.time_updated),
+          gitBranch: null,
+          sizeBytes: 0,
         }));
       } catch {}
     }
@@ -105,7 +132,10 @@ export class OpencodeAdapter {
     const turns = [];
     let cur = null;
     const add = (ev, startsTurn = false) => {
-      if (startsTurn || !cur) { cur = []; turns.push(cur); }
+      if (startsTurn || !cur) {
+        cur = [];
+        turns.push(cur);
+      }
       cur.push(ev);
       if (limit && turns.length > limit) turns.shift();
     };
@@ -124,17 +154,27 @@ export class OpencodeAdapter {
         } else if (d.type === "tool") {
           const callId = d.callID || part.id;
           const st = d.state || {};
-          add(toolCall({ ...base, id: callId }, {
-            name: d.tool === "bash" ? "shell" : d.tool || "tool",
-            input: d.tool === "bash" ? { command: st.input?.command || "" } : st.input ?? {},
-            status: st.status === "error" ? "error" : "success",
-          }));
+          add(
+            toolCall(
+              { ...base, id: callId },
+              {
+                name: d.tool === "bash" ? "shell" : d.tool || "tool",
+                input: d.tool === "bash" ? { command: st.input?.command || "" } : (st.input ?? {}),
+                status: st.status === "error" ? "error" : "success",
+              },
+            ),
+          );
           if (st.output) {
-            add(toolResult({ ...base, id: `${callId}:o` }, {
-              toolCallId: callId,
-              content: { kind: "text", text: String(st.output).slice(0, 200_000) },
-              isError: st.status === "error",
-            }));
+            add(
+              toolResult(
+                { ...base, id: `${callId}:o` },
+                {
+                  toolCallId: callId,
+                  content: { kind: "text", text: String(st.output).slice(0, 200_000) },
+                  isError: st.status === "error",
+                },
+              ),
+            );
           }
         }
         // step-start / step-finish / snapshot parts: plumbing, skipped.
@@ -142,28 +182,40 @@ export class OpencodeAdapter {
     }
 
     const events = turns.flat();
-    events.forEach((ev, i) => { ev.seq = i + 1; });
+    events.forEach((ev, i) => {
+      ev.seq = i + 1;
+    });
     return events;
   }
 
   _messagesDb(db, threadId) {
     try {
-      const msgs = db.prepare(
-        `SELECT id, data FROM message WHERE session_id = ? ORDER BY time_created, id`,
-      ).all(threadId);
-      const parts = db.prepare(
-        `SELECT id, message_id, data FROM part WHERE session_id = ? ORDER BY time_created, id`,
-      ).all(threadId);
+      const msgs = db
+        .prepare(`SELECT id, data FROM message WHERE session_id = ? ORDER BY time_created, id`)
+        .all(threadId);
+      const parts = db
+        .prepare(
+          `SELECT id, message_id, data FROM part WHERE session_id = ? ORDER BY time_created, id`,
+        )
+        .all(threadId);
       const bucket = new Map();
       for (const p of parts) {
         let data;
-        try { data = JSON.parse(p.data); } catch { continue; }
+        try {
+          data = JSON.parse(p.data);
+        } catch {
+          continue;
+        }
         const arr = bucket.get(p.message_id) || bucket.set(p.message_id, []).get(p.message_id);
         arr.push({ id: p.id, data });
       }
       return msgs.map((m) => {
         let data;
-        try { data = JSON.parse(m.data); } catch { data = {}; }
+        try {
+          data = JSON.parse(m.data);
+        } catch {
+          data = {};
+        }
         return { data, parts: bucket.get(m.id) || [] };
       });
     } catch {
@@ -178,14 +230,22 @@ export class OpencodeAdapter {
     const db = await this.db();
     if (db) {
       try {
-        const row = db.prepare(
-          `SELECT data, time_updated FROM message WHERE session_id = ? ORDER BY time_created DESC, id DESC LIMIT 1`,
-        ).get(threadId);
+        const row = db
+          .prepare(
+            `SELECT data, time_updated FROM message WHERE session_id = ? ORDER BY time_created DESC, id DESC LIMIT 1`,
+          )
+          .get(threadId);
         if (!row) return { activity: "idle", lastActivityAt: null };
         let data = {};
-        try { data = JSON.parse(row.data); } catch {}
-        const lastActivityAt = msIso(data.time?.completed || data.time?.created || row.time_updated);
-        const running = data.role === "assistant" && !data.time?.completed &&
+        try {
+          data = JSON.parse(row.data);
+        } catch {}
+        const lastActivityAt = msIso(
+          data.time?.completed || data.time?.created || row.time_updated,
+        );
+        const running =
+          data.role === "assistant" &&
+          !data.time?.completed &&
           Date.now() - (data.time?.created || 0) < RUNNING_WINDOW_MS;
         const failed = !!data.error;
         return { activity: running ? "running" : failed ? "failed" : "completed", lastActivityAt };
@@ -199,20 +259,44 @@ export class OpencodeAdapter {
     return new Promise((resolve) => {
       let p;
       try {
-        p = spawn(binPath("opencode"), ["models"], { env: agentEnv(), stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
-      } catch { return resolve([]); }
+        p = spawn(binPath("opencode"), ["models"], {
+          env: agentEnv(),
+          stdio: ["ignore", "pipe", "ignore"],
+          windowsHide: true,
+        });
+      } catch {
+        return resolve([]);
+      }
       let out = "";
-      const t = setTimeout(() => { try { p.kill("SIGKILL"); } catch {} }, 10_000);
-      p.stdout.on("data", (d) => { if (out.length < 262_144) out += d; });
+      const t = setTimeout(() => {
+        try {
+          p.kill("SIGKILL");
+        } catch {}
+      }, 10_000);
+      p.stdout.on("data", (d) => {
+        if (out.length < 262_144) out += d;
+      });
       p.on("close", () => {
         clearTimeout(t);
-        resolve(out.split("\n")
-          .map((l) => l.trim())
-          .filter((l) => l && l.includes("/") && !l.includes(" "))
-          .slice(0, 200)
-          .map((id) => ({ id, name: id, description: null, isDefault: false, deprecated: false })));
+        resolve(
+          out
+            .split("\n")
+            .map((l) => l.trim())
+            .filter((l) => l && l.includes("/") && !l.includes(" "))
+            .slice(0, 200)
+            .map((id) => ({
+              id,
+              name: id,
+              description: null,
+              isDefault: false,
+              deprecated: false,
+            })),
+        );
       });
-      p.on("error", () => { clearTimeout(t); resolve([]); });
+      p.on("error", () => {
+        clearTimeout(t);
+        resolve([]);
+      });
     });
   }
 
@@ -233,7 +317,9 @@ export class OpencodeAdapter {
     try {
       child = spawn(binPath("opencode"), args, {
         cwd: cwd && existsSync(cwd) ? cwd : os.homedir(),
-        env: agentEnv(), stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
+        env: agentEnv(),
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
       });
     } catch (e) {
       return failedTurn(threadId, `opencode failed to start: ${e?.message || e}`, onEvent);
@@ -244,11 +330,17 @@ export class OpencodeAdapter {
     let realThreadId = resume ? threadId : null;
     const now = () => new Date().toISOString();
     const base = (id) => ({ id, conversationId: realThreadId, seq: ++seq, ts: now() });
-    const emit = (ev) => { try { onEvent(ev); } catch {} };
+    const emit = (ev) => {
+      try {
+        onEvent(ev);
+      } catch {}
+    };
     emit(userMessage(base(`opencode:input:${Date.now()}`), text));
 
     let resolveDone;
-    const done = new Promise((res) => { resolveDone = res; });
+    const done = new Promise((res) => {
+      resolveDone = res;
+    });
     let settled = false;
     const finish = () => {
       if (settled) return;
@@ -258,7 +350,9 @@ export class OpencodeAdapter {
     };
 
     let stderrTail = "";
-    child.stderr.on("data", (d) => { stderrTail = (stderrTail + d).slice(-8192); });
+    child.stderr.on("data", (d) => {
+      stderrTail = (stderrTail + d).slice(-8192);
+    });
 
     const acc = new Map(); // part id -> text so far
     const handle = (o) => {
@@ -279,17 +373,29 @@ export class OpencodeAdapter {
         emit(thinking(base(id), part.text));
       } else if (part.type === "tool" && part.state) {
         const callId = part.callID || id;
-        emit(toolCall(base(callId), {
-          name: part.tool === "bash" ? "shell" : part.tool || "tool",
-          input: part.tool === "bash" ? { command: part.state.input?.command || "" } : part.state.input ?? {},
-          status: part.state.status === "completed" ? "success" : part.state.status === "error" ? "error" : "running",
-        }));
+        emit(
+          toolCall(base(callId), {
+            name: part.tool === "bash" ? "shell" : part.tool || "tool",
+            input:
+              part.tool === "bash"
+                ? { command: part.state.input?.command || "" }
+                : (part.state.input ?? {}),
+            status:
+              part.state.status === "completed"
+                ? "success"
+                : part.state.status === "error"
+                  ? "error"
+                  : "running",
+          }),
+        );
         if (part.state.output && part.state.status !== "running") {
-          emit(toolResult(base(`${callId}:o`), {
-            toolCallId: callId,
-            content: { kind: "text", text: String(part.state.output).slice(0, 200_000) },
-            isError: part.state.status === "error",
-          }));
+          emit(
+            toolResult(base(`${callId}:o`), {
+              toolCallId: callId,
+              content: { kind: "text", text: String(part.state.output).slice(0, 200_000) },
+              isError: part.state.status === "error",
+            }),
+          );
         }
       }
     };
@@ -298,27 +404,58 @@ export class OpencodeAdapter {
     let timer;
     const arm = () => {
       clearTimeout(timer);
-      timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, TURN_TIMEOUT_MS);
+      timer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {}
+      }, TURN_TIMEOUT_MS);
     };
     arm();
     const rl = createInterface({ input: child.stdout });
-    rl.on("line", (line) => { arm(); if (line) { try { handle(JSON.parse(line)); } catch {} } });
+    rl.on("line", (line) => {
+      arm();
+      if (line) {
+        try {
+          handle(JSON.parse(line));
+        } catch {}
+      }
+    });
 
     child.on("close", (code) => {
       clearTimeout(timer);
       acc.clear();
       if (code !== 0 && !settled) {
-        emit(systemEvent(base("opencode:err"), `opencode exited (${code}): ${stderrTail.trim().slice(-500)}`, "error"));
+        emit(
+          systemEvent(
+            base("opencode:err"),
+            `opencode exited (${code}): ${stderrTail.trim().slice(-500)}`,
+            "error",
+          ),
+        );
       }
       finish();
     });
     child.on("error", (e) => {
       clearTimeout(timer);
-      emit(systemEvent(base("opencode:err"), `opencode failed to start: ${e?.message || e}`, "error"));
+      emit(
+        systemEvent(base("opencode:err"), `opencode failed to start: ${e?.message || e}`, "error"),
+      );
       finish();
     });
 
-    return { stop: () => { try { child.kill("SIGINT"); } catch {} setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 5000).unref?.(); }, done };
+    return {
+      stop: () => {
+        try {
+          child.kill("SIGINT");
+        } catch {}
+        setTimeout(() => {
+          try {
+            child.kill("SIGKILL");
+          } catch {}
+        }, 5000).unref?.();
+      },
+      done,
+    };
   }
 
   // --- legacy JSON file-store fallback ---------------------------------------
@@ -327,20 +464,33 @@ export class OpencodeAdapter {
     const root = path.join(STORE_DIR, "session");
     const out = [];
     let projects;
-    try { projects = readdirSync(root); } catch { return out; }
+    try {
+      projects = readdirSync(root);
+    } catch {
+      return out;
+    }
     for (const proj of projects) {
       let files;
-      try { files = readdirSync(path.join(root, proj)); } catch { continue; }
+      try {
+        files = readdirSync(path.join(root, proj));
+      } catch {
+        continue;
+      }
       for (const f of files) {
         if (!f.startsWith("ses_") || !f.endsWith(".json")) continue;
         try {
           const s = JSON.parse(readFileSync(path.join(root, proj, f), "utf8"));
           if (s.parentID) continue; // sub-sessions mirror the db's parent_id filter
           out.push({
-            id: s.id || f.slice(0, -5), filePath: path.join(root, proj, f),
-            cwd: s.directory || null, name: s.title || null, preview: s.title || null,
-            createdAt: msIso(s.time?.created), updatedAt: msIso(s.time?.updated),
-            gitBranch: null, sizeBytes: 0,
+            id: s.id || f.slice(0, -5),
+            filePath: path.join(root, proj, f),
+            cwd: s.directory || null,
+            name: s.title || null,
+            preview: s.title || null,
+            createdAt: msIso(s.time?.created),
+            updatedAt: msIso(s.time?.updated),
+            gitBranch: null,
+            sizeBytes: 0,
           });
         } catch {}
       }
@@ -351,7 +501,13 @@ export class OpencodeAdapter {
   _messagesFiles(threadId) {
     const msgDir = path.join(STORE_DIR, "message", threadId);
     let files;
-    try { files = readdirSync(msgDir).filter((f) => f.startsWith("msg_")).sort(); } catch { return []; }
+    try {
+      files = readdirSync(msgDir)
+        .filter((f) => f.startsWith("msg_"))
+        .sort();
+    } catch {
+      return [];
+    }
     const out = [];
     for (const f of files) {
       try {
@@ -360,10 +516,13 @@ export class OpencodeAdapter {
         const partDir = path.join(STORE_DIR, "part", msgId);
         let parts = [];
         try {
-          parts = readdirSync(partDir).filter((p) => p.startsWith("prt_")).sort().map((p) => ({
-            id: p.slice(0, -5),
-            data: JSON.parse(readFileSync(path.join(partDir, p), "utf8")),
-          }));
+          parts = readdirSync(partDir)
+            .filter((p) => p.startsWith("prt_"))
+            .sort()
+            .map((p) => ({
+              id: p.slice(0, -5),
+              data: JSON.parse(readFileSync(path.join(partDir, p), "utf8")),
+            }));
         } catch {}
         out.push({ data, parts });
       } catch {}
@@ -379,8 +538,13 @@ function msIso(ms) {
 function failedTurn(threadId, message, onEvent) {
   try {
     onEvent({
-      id: `${threadId || "opencode"}:spawn-err`, conversationId: threadId || null, seq: 1,
-      ts: new Date().toISOString(), type: "system_event", message, level: "error",
+      id: `${threadId || "opencode"}:spawn-err`,
+      conversationId: threadId || null,
+      seq: 1,
+      ts: new Date().toISOString(),
+      type: "system_event",
+      message,
+      level: "error",
     });
   } catch {}
   return { stop: () => {}, done: Promise.resolve(threadId || null) };

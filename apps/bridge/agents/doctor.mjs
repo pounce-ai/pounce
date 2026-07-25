@@ -27,7 +27,12 @@ function whichBin(name) {
 }
 
 /** The CLI binary each agent needs installed to run turns. */
-const AGENT_BIN = { claude: "claude", codex: "codex", opencode: "opencode", cursor: "cursor-agent" };
+const AGENT_BIN = {
+  claude: "claude",
+  codex: "codex",
+  opencode: "opencode",
+  cursor: "cursor-agent",
+};
 
 function tunnelBinary() {
   const candidates = [
@@ -81,9 +86,15 @@ export async function buildDoctorReport(adapters) {
   let ghAuthed = null;
   if (ghVersion) {
     try {
-      const r = spawnSync(binOverride("gh") || "gh", ["auth", "status"], { env: agentEnv(), encoding: "utf8", timeout: 8000 });
+      const r = spawnSync(binOverride("gh") || "gh", ["auth", "status"], {
+        env: agentEnv(),
+        encoding: "utf8",
+        timeout: 8000,
+      });
       ghAuthed = r.status === 0;
-    } catch { ghAuthed = null; }
+    } catch {
+      ghAuthed = null;
+    }
   }
   const tunnelBin = tunnelBinary();
   const sessionsTotal = agents.reduce((s, a) => s + a.sessionCount, 0);
@@ -95,11 +106,14 @@ export async function buildDoctorReport(adapters) {
     // baked into the pairing QR; `ips` are all candidates (a multi-interface Mac
     // — VPN/Docker/Ethernet — can advertise an unreachable one).
     network: { advertised: ips[0] || null, ips, port, reachable: ips.length > 0 },
-    ok:
-      agents.some((a) => a.installed) && sessionsTotal >= 0, // "usable" = at least one agent CLI
+    ok: agents.some((a) => a.installed) && sessionsTotal >= 0, // "usable" = at least one agent CLI
     node: { ok: true, path: process.execPath, version: process.version.replace(/^v/, "") },
     git: { ok: !!gitVersion, version: gitVersion },
-    gh: { ok: !!ghVersion, version: ghVersion ? ghVersion.replace(/^gh version /, "").split(" ")[0] : null, authed: ghAuthed },
+    gh: {
+      ok: !!ghVersion,
+      version: ghVersion ? ghVersion.replace(/^gh version /, "").split(" ")[0] : null,
+      authed: ghAuthed,
+    },
     agents,
     // Off-LAN reachability. No binary → LAN-only (works on the same network).
     tunnel: { ok: !!tunnelBin, path: tunnelBin, mode: tunnelBin ? "internet" : "lan-only" },

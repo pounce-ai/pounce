@@ -2,9 +2,13 @@
   "name": "@pounce/transcript",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "description": "Normalize coding-agent (Claude Code, Codex, opencode, …) session-transcript message bodies: strip agent-specific plumbing tags, surface slash-commands and captured output. Framework-agnostic, zero runtime dependencies.",
   "license": "MIT",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "sideEffects": false,
   "main": "./src/index.js",
   "types": "./src/index.d.ts",
   "exports": {
@@ -13,10 +17,6 @@
       "default": "./src/index.js"
     }
   },
-  "files": [
-    "src"
-  ],
-  "sideEffects": false,
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"

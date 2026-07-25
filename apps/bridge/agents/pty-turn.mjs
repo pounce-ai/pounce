@@ -55,7 +55,10 @@ function cwdFromTranscript(file) {
   try {
     for (const line of readFileSync(file, "utf8").split("\n")) {
       if (!line) continue;
-      try { const o = JSON.parse(line); if (o.cwd) return o.cwd; } catch {}
+      try {
+        const o = JSON.parse(line);
+        if (o.cwd) return o.cwd;
+      } catch {}
     }
   } catch {}
   return null;
@@ -65,8 +68,16 @@ function transcriptRows(threadId) {
   const f = transcriptFile(threadId);
   if (!f) return [];
   try {
-    return readFileSync(f, "utf8").split("\n").filter(Boolean)
-      .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    return readFileSync(f, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => {
+        try {
+          return JSON.parse(l);
+        } catch {
+          return null;
+        }
+      })
       .filter(Boolean);
   } catch {}
   return [];
@@ -76,7 +87,9 @@ function transcriptRows(threadId) {
  *  grows by one each time a turn produces output (an AskUserQuestion tool_use is
  *  itself such a record), so a rise past a baseline means "our turn started". */
 function assistantCount(rows) {
-  return rows.filter((o) => o.type === "assistant" && Array.isArray(o.message?.content) && o.message.content.length).length;
+  return rows.filter(
+    (o) => o.type === "assistant" && Array.isArray(o.message?.content) && o.message.content.length,
+  ).length;
 }
 
 /**
@@ -93,7 +106,10 @@ export function pendingPrompt(threadId) {
   if (!p) return null;
   // Stable-ish id so the app doesn't re-mount the card every poll: thread + the
   // option set (a new prompt with different options gets a new id).
-  const promptId = `${threadId}:${p.options.map((o) => o.label).join("|").slice(0, 80)}`;
+  const promptId = `${threadId}:${p.options
+    .map((o) => o.label)
+    .join("|")
+    .slice(0, 80)}`;
   return { promptId, ...p };
 }
 
@@ -131,7 +147,9 @@ async function submitPrompt(session, threadId, text) {
   // or the turn already produced a new assistant record.
   const done = () => {
     const rows = transcriptRows(threadId);
-    const landed = userRecords(rows).slice(baseUsers).some((o) => o.message.content.includes(key));
+    const landed = userRecords(rows)
+      .slice(baseUsers)
+      .some((o) => o.message.content.includes(key));
     return landed || assistantCount(rows) > baseAsst;
   };
   await sleep(3000); // let the TUI finish its (startup / resume) render
@@ -179,9 +197,12 @@ export function startInteractiveSession({ threadId, text, cwd, model }) {
   const sessionId = valid ? threadId : randomUUID();
   // Resume must run from the thread's own cwd; prefer the caller's, fall back to
   // the one recorded in the transcript, then $HOME (fresh sessions only).
-  const dir = cwd && existsSync(cwd) ? cwd
-    : resumeFile ? (cwdFromTranscript(resumeFile) || os.homedir())
-    : os.homedir();
+  const dir =
+    cwd && existsSync(cwd)
+      ? cwd
+      : resumeFile
+        ? cwdFromTranscript(resumeFile) || os.homedir()
+        : os.homedir();
   const args = resumeFile ? ["--resume", sessionId] : ["--session-id", sessionId];
   if (model) args.push("--model", model);
   const session = ptys.create(sessionId, {
@@ -209,7 +230,9 @@ export async function answerPrompt(threadId, optionIndex) {
   if (!p) return false;
   const target = Math.max(0, Math.min(Number(optionIndex) || 0, p.options.length - 1));
   const keys = answerKeys(p.highlighted, target);
-  console.log(`[answer] thread=${threadId} "${p.options[target]?.label}" (${p.highlighted}→${target})`);
+  console.log(
+    `[answer] thread=${threadId} "${p.options[target]?.label}" (${p.highlighted}→${target})`,
+  );
   await writeKeys((b) => session.write(b), keys);
   return true;
 }

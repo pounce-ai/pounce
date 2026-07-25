@@ -1,13 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Linking,
-  Pressable,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { ActivityIndicator, Alert, Linking, Pressable, Text, TextInput, View } from "react-native";
 import { KeyboardAvoidingView, Platform } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -57,7 +49,10 @@ export default function ChangesScreen() {
   // Stable identities matter: DiffView is memoized because its props cross the
   // WebView bridge, so a fresh [] or closure per keystroke would re-marshal it.
   const seenPaths = useSelector(() => seenFiles$[id!].get()) ?? NO_SEEN;
-  const onToggleSeen = useCallback(async (path: string, seen: boolean) => setSeenFile(id!, path, seen), [id]);
+  const onToggleSeen = useCallback(
+    async (path: string, seen: boolean) => setSeenFile(id!, path, seen),
+    [id],
+  );
 
   const load = useCallback(async () => {
     if (!session?.cwd) return;
@@ -87,10 +82,11 @@ export default function ChangesScreen() {
   }, [changes?.files]);
 
   const pickExtFilter = () =>
-    pickSheet("Filter by file type", [
-      `All files (${fileCount})`,
-      ...extensions.map(([ext, n]) => `${ext} (${n})`),
-    ], (i) => setExtFilter(i === 0 ? null : extensions[i - 1][0]));
+    pickSheet(
+      "Filter by file type",
+      [`All files (${fileCount})`, ...extensions.map(([ext, n]) => `${ext} (${n})`)],
+      (i) => setExtFilter(i === 0 ? null : extensions[i - 1][0]),
+    );
 
   /** Model suggestion, or null after telling the user why it failed. */
   const suggest = async (): Promise<GitSuggestion | null> => {
@@ -174,7 +170,9 @@ export default function ChangesScreen() {
         onMain && branchName ? `Create branch ${branchName} (you're on ${changes?.branch})` : null,
         `Commit: ${msg.split("\n")[0]}`,
         "Push to origin",
-      ].filter(Boolean).join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
       if (!(await approve("Commit & push?", plan, "Commit & push"))) return;
       if (onMain && branchName) {
         const b = await gitBranch(session.hostId, session.cwd, branchName);
@@ -201,7 +199,9 @@ export default function ChangesScreen() {
       const title = s?.prTitle;
       const body = s?.prBody;
       const label = prDraft ? "Create draft PR" : "Create PR";
-      const detail = title ? `${title}\n\n${body ?? ""}`.trim() : "gh will fill the title/body from commits.";
+      const detail = title
+        ? `${title}\n\n${body ?? ""}`.trim()
+        : "gh will fill the title/body from commits.";
       if (!(await approve(prDraft ? "Draft PR" : "PR", detail, label))) return;
       const r = await gitPR(session.hostId, session.cwd, { title, body, draft: prDraft });
       if (r?.ok && r.url) {
@@ -214,7 +214,8 @@ export default function ChangesScreen() {
     }
   };
 
-  const pickPrMode = () => pickSheet("Pull request mode", ["Draft PR", "PR"], (i) => setPrDraft(i === 0));
+  const pickPrMode = () =>
+    pickSheet("Pull request mode", ["Draft PR", "PR"], (i) => setPrDraft(i === 0));
 
   return (
     <KeyboardAvoidingView
@@ -225,7 +226,10 @@ export default function ChangesScreen() {
     >
       {/* Header */}
       <View style={s.header}>
-        <Pressable onPress={() => router.back()} style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}>
+        <Pressable
+          onPress={() => router.back()}
+          style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
+        >
           <PounceIcon name="chevron-down" size={22} color={theme.colors.fg} />
         </Pressable>
         <View style={s.titleWrap}>
@@ -269,7 +273,11 @@ export default function ChangesScreen() {
               pressed && s.pressed70,
             ]}
           >
-            <PounceIcon name="filter" size={13} color={extFilter ? theme.colors.accent : theme.colors.fgMuted} />
+            <PounceIcon
+              name="filter"
+              size={13}
+              color={extFilter ? theme.colors.accent : theme.colors.fgMuted}
+            />
             <Text style={[s.filterText, extFilter ? s.accentText : s.mutedText]}>
               {extFilter ?? "Filter"}
             </Text>
@@ -327,7 +335,13 @@ export default function ChangesScreen() {
                 <Text style={s.commitText}>Commit</Text>
               )}
             </Pressable>
-            <SecondaryButton label="Push" icon="cloud-upload-outline" busy={busy === "push"} onPress={push} disabled={busy != null} />
+            <SecondaryButton
+              label="Push"
+              icon="cloud-upload-outline"
+              busy={busy === "push"}
+              onPress={push}
+              disabled={busy != null}
+            />
             <View style={s.prGroup}>
               <Pressable
                 onPress={openPR}
@@ -341,7 +355,11 @@ export default function ChangesScreen() {
                 {busy === "pr" ? (
                   <ActivityIndicator color={theme.colors.fgMuted} size="small" />
                 ) : (
-                  <PounceIcon name="git-pull-request-outline" size={15} color={theme.colors.fgMuted} />
+                  <PounceIcon
+                    name="git-pull-request-outline"
+                    size={15}
+                    color={theme.colors.fgMuted}
+                  />
                 )}
                 <Text style={s.btnLabel}>{prDraft ? "Draft PR" : "PR"}</Text>
               </Pressable>
@@ -439,7 +457,13 @@ const s = StyleSheet.create((theme) => ({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
   emptyEmoji: { fontSize: 40 },
-  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyTitle: {
+    marginTop: 12,
+    textAlign: "center",
+    fontSize: 15,
+    fontWeight: "600",
+    color: theme.colors.fg,
+  },
   emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   // Transparent, borderless bar to match the floating-composer look elsewhere.
   footer: {

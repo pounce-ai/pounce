@@ -27,7 +27,11 @@ export function isTunnelAvailable(): boolean {
 
 /** Returns the local port to use as `http://127.0.0.1:<port>`. Throws with the
  *  Rust-side error message on failure. Idempotent per (nodeId, relay, token). */
-export async function startTunnel(nodeId: string, relay: string | null, token: string): Promise<number> {
+export async function startTunnel(
+  nodeId: string,
+  relay: string | null,
+  token: string,
+): Promise<number> {
   if (!native) throw new Error("PounceTunnel native module not in this build");
   return native.start(nodeId, relay, token);
 }

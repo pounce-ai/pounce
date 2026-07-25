@@ -222,7 +222,11 @@ function parseBlocks(src: string): Block[] {
       continue;
     }
     const body: string[] = [];
-    while (i < lines.length && lines[i].trim() !== "" && !/^\s*(```|#{1,4}\s|>\s?|([-*+]|\d+\.)\s)/.test(lines[i]))
+    while (
+      i < lines.length &&
+      lines[i].trim() !== "" &&
+      !/^\s*(```|#{1,4}\s|>\s?|([-*+]|\d+\.)\s)/.test(lines[i])
+    )
       body.push(lines[i++]);
     blocks.push({ kind: "para", lines: body });
   }
@@ -312,7 +316,13 @@ const s = StyleSheet.create({
   gap1: { gap: 4 },
   gap2: { gap: 8 },
   cursor: { color: T.accent },
-  codeCard: { overflow: "hidden", borderRadius: 8, borderWidth: 1, borderColor: T.border, backgroundColor: T.bg },
+  codeCard: {
+    overflow: "hidden",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: T.border,
+    backgroundColor: T.bg,
+  },
   codeCardHeader: {
     flexDirection: "row",
     alignItems: "center",
