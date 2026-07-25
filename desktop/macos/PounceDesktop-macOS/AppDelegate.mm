@@ -9,8 +9,12 @@
 // stays in the menu bar; a released NSStatusItem drops out of it.
 // NSWindowDelegate so the red close button hides the window (keeping the app —
 // and the bridge child process — alive) instead of destroying it.
-@interface AppDelegate () <NSWindowDelegate>
+// NSMenuDelegate so the tray's usage line refreshes the moment the menu opens —
+// no background polling for a number nobody is looking at.
+@interface AppDelegate () <NSWindowDelegate, NSMenuDelegate>
 @property (nonatomic, strong) NSStatusItem *statusItem;
+@property (nonatomic, strong) NSMenuItem *usageItem;
+@property (nonatomic, copy) NSString *bridgeToken;
 @end
 
 // The Pounce bridge — a self-contained executable (built from apps/bridge via
@@ -141,6 +145,15 @@ static void PounceStartBridge(void)
   self.statusItem.button.toolTip = @"Pounce";
 
   NSMenu *menu = [[NSMenu alloc] init];
+  menu.delegate = self; // refresh the usage line on open
+
+  // Today's activity, straight from the local bridge. Disabled: it's a readout,
+  // not an action. Starts as a placeholder so the menu never opens empty while
+  // the fetch is in flight.
+  self.usageItem = [[NSMenuItem alloc] initWithTitle:@"Today — …" action:nil keyEquivalent:@""];
+  self.usageItem.enabled = NO;
+  [menu addItem:self.usageItem];
+  [menu addItem:[NSMenuItem separatorItem]];
 
   NSMenuItem *open = [[NSMenuItem alloc] initWithTitle:@"Open Pounce"
                                                 action:@selector(openMainWindow:)
@@ -163,6 +176,92 @@ static void PounceStartBridge(void)
   [menu addItem:quit];
 
   self.statusItem.menu = menu;
+}
+
+#pragma mark - Tray usage readout
+
+// 1_200_000 → "1.2M". Mirrors the app's fmtTokens so both surfaces read the same.
+static NSString *PounceFmtTokens(double n)
+{
+  if (n >= 1e9) return [NSString stringWithFormat:@"%.1fB", n / 1e9];
+  if (n >= 1e6) return [NSString stringWithFormat:@"%.1fM", n / 1e6];
+  if (n >= 1e3) return [NSString stringWithFormat:@"%.0fK", n / 1e3];
+  return [NSString stringWithFormat:@"%.0f", n];
+}
+
+// GET a loopback bridge endpoint as JSON. Short timeout: this runs while a menu
+// is open, so a stalled bridge must not hang the UI — it just leaves the last
+// value in place.
+static void PounceGetJSON(NSString *path, NSString *token, void (^done)(NSDictionary *))
+{
+  NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:8099%@", path]];
+  NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+  req.timeoutInterval = 3.0;
+  if (token.length > 0) {
+    [req setValue:[NSString stringWithFormat:@"Bearer %@", token] forHTTPHeaderField:@"Authorization"];
+  }
+  NSURLSessionDataTask *task = [[NSURLSession sharedSession]
+      dataTaskWithRequest:req
+        completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+          if (err != nil || data == nil) {
+            done(nil);
+            return;
+          }
+          id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+          done([json isKindOfClass:[NSDictionary class]] ? json : nil);
+        }];
+  [task resume];
+}
+
+/**
+ * Refresh the tray's "Today" line from /v1/activity.
+ *
+ * Tokens lead because they always exist; a dollar figure is appended only when
+ * an agent actually reported one (the bridge never prices tokens — see
+ * agents/activity-index.mjs), so this line can't imply a spend nobody measured.
+ */
+- (void)refreshUsage
+{
+  __weak AppDelegate *weakSelf = self;
+  void (^fetch)(NSString *) = ^(NSString *token) {
+    PounceGetJSON(@"/v1/activity?days=1", token, ^(NSDictionary *json) {
+      NSDictionary *totals = json[@"totals"];
+      if (![totals isKindOfClass:[NSDictionary class]]) return;
+      double tokens = [totals[@"tokens"] doubleValue];
+      long long sessions = [totals[@"sessions"] longLongValue];
+      id cost = totals[@"cost"];
+      NSMutableString *line = [NSMutableString stringWithFormat:@"Today — %@ tokens · %lld %@",
+                                                                PounceFmtTokens(tokens), sessions,
+                                                                sessions == 1 ? @"session" : @"sessions"];
+      // `cost` is null unless an agent stated a price; NSNull means "not known",
+      // which is different from zero and must not render as "$0.00".
+      if ([cost isKindOfClass:[NSNumber class]]) {
+        BOOL partial = ![totals[@"costComplete"] boolValue];
+        [line appendFormat:@" · %@$%.2f", partial ? @"~" : @"", [cost doubleValue]];
+      }
+      dispatch_async(dispatch_get_main_queue(), ^{
+        weakSelf.usageItem.title = line;
+      });
+    });
+  };
+
+  if (self.bridgeToken.length > 0) {
+    fetch(self.bridgeToken);
+    return;
+  }
+  // The bridge's /ui is loopback-only and hands out its own pairing token, so
+  // the tray needs no configuration — same trick the RN shell uses to self-pair.
+  PounceGetJSON(@"/ui", nil, ^(NSDictionary *ui) {
+    NSString *token = [ui[@"token"] isKindOfClass:[NSString class]] ? ui[@"token"] : nil;
+    if (token.length == 0) return;
+    weakSelf.bridgeToken = token;
+    fetch(token);
+  });
+}
+
+- (void)menuWillOpen:(NSMenu *)menu
+{
+  [self refreshUsage];
 }
 
 // Reveal the main window and bring the app forward. The window object survives a
