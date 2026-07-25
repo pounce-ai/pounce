@@ -27,18 +27,40 @@ export function shortModel(model: string): string {
     .replace(/-(\d+)$/, " $1");
 }
 
+/** "26% of 5h" — how much of a plan's rate-limit window an agent has consumed. */
+function fmtRateLimit(rl: NonNullable<ThreadUsage["rateLimit"]>): string | null {
+  if (rl.usedPercent == null) return null;
+  const pct = `${Math.round(rl.usedPercent)}%`;
+  if (!rl.windowMinutes) return `${pct} used`;
+  const w =
+    rl.windowMinutes >= 1440
+      ? `${Math.round(rl.windowMinutes / 1440)}d`
+      : rl.windowMinutes >= 60
+        ? `${Math.round(rl.windowMinutes / 60)}h`
+        : `${rl.windowMinutes}m`;
+  return `${pct} of ${w}`;
+}
+
 /**
- * Static usage readout for the thread header: "79.4M · $61.03" (a leading "~"
- * marks an incomplete cost estimate). Renders nothing until usage is available.
+ * Static usage readout for the thread header: "79.4M · $61.03".
+ *
+ * Every figure here is the agent's own — we never price tokens ourselves, so a
+ * thread simply shows no cost when its agent doesn't report one (Codex shows
+ * its plan's rate-limit consumption instead). A leading "~" marks a cost that
+ * covers only the turns Pounce drove, not the whole thread.
  */
 export function ThreadUsageSummary({ usage }: { usage: ThreadUsage | null }) {
   if (!usage?.available || !usage.tokens) return null;
-  const cost =
-    usage.cost != null ? `${usage.costComplete === false ? "~" : ""}${fmtCost(usage.cost)}` : null;
+  const parts = [fmtTokens(usage.tokens.total)];
+  if (usage.cost != null) {
+    parts.push(`${usage.costComplete === false ? "~" : ""}${fmtCost(usage.cost)}`);
+  } else if (usage.rateLimit) {
+    const rl = fmtRateLimit(usage.rateLimit);
+    if (rl) parts.push(rl);
+  }
   return (
     <Text numberOfLines={1} style={s.summary}>
-      {fmtTokens(usage.tokens.total)}
-      {cost ? ` · ${cost}` : ""}
+      {parts.join(" · ")}
     </Text>
   );
 }

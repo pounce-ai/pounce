@@ -26,13 +26,13 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { createInterface } from "node:readline";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import { createHost } from "./agents/host.mjs";
+import { toAtif } from "./agents/atif.mjs";
 import { resolvePermission } from "./agents/acp.mjs";
 import {
   startInteractiveSession,
@@ -41,7 +41,7 @@ import {
   isInteractive,
   sendInput,
 } from "./agents/pty-turn.mjs";
-import { agentEnv, binPath, primaryLanIp } from "./agents/env.mjs";
+import { agentEnv, binPath, binVersion, primaryLanIp } from "./agents/env.mjs";
 import { readConfig, writeConfig } from "./agents/config.mjs";
 import { createHistorySearch } from "./agents/search.mjs";
 
@@ -648,119 +648,16 @@ async function getMessages(agent, threadId, fresh = false, limit) {
   ];
 }
 
-// --- Per-thread token usage + cost -----------------------------------------
-// The daemon exposes no usage, but Claude Code records `message.usage` +
-// `message.model` on each assistant line of its own transcript
-// (~/.claude/projects/<escaped-cwd>/<sessionId>.jsonl). We read that directly.
-// Prices are USD per 1M tokens; cache-read ≈ 0.1× input, cache-write(5m) ≈ 1.25× input.
-const MODEL_PRICES = {
-  "claude-opus-4-8": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-  "claude-opus-4-7": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-  "claude-opus-4-6": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-  "claude-opus-4-5": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-  "claude-opus-4-1": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-  "claude-fable-5": { in: 10, out: 50, cacheRead: 1.0, cacheWrite: 12.5 },
-  "claude-mythos-5": { in: 10, out: 50, cacheRead: 1.0, cacheWrite: 12.5 },
-  "claude-sonnet-5": { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-  "claude-sonnet-4-6": { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-  "claude-sonnet-4-5": { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-  "claude-haiku-4-5": { in: 1, out: 5, cacheRead: 0.1, cacheWrite: 1.25 },
-};
-
-/** Price row for a model id, tolerating date-suffixed ids (…-20251001). */
-function priceFor(model) {
-  if (!model) return null;
-  return (
-    MODEL_PRICES[model] ||
-    MODEL_PRICES[Object.keys(MODEL_PRICES).find((k) => model.startsWith(k))] ||
-    null
+// --- Per-thread token usage ------------------------------------------------
+// Owned by the adapters now (agents/usage.mjs): each one reads its own agent's
+// records, and a dollar figure is reported ONLY when that agent itself states
+// one. The price table that used to live here — which multiplied tokens by
+// hardcoded per-model rates — was deliberately deleted: it silently drifted
+// from real billing and presented an estimate as fact.
+function getUsage(agent, thread) {
+  return cached(`usage:${agent}:${thread}`, CACHE_MS, () =>
+    host.getUsage(agent, thread).catch(() => ({ available: false, reason: "unavailable" })),
   );
-}
-
-/** USD for one assistant message's usage, weighting cache tokens per the model. */
-function msgCost(model, u) {
-  const p = priceFor(model);
-  if (!p) return null;
-  return (
-    ((u.input_tokens || 0) * p.in +
-      (u.output_tokens || 0) * p.out +
-      (u.cache_read_input_tokens || 0) * p.cacheRead +
-      (u.cache_creation_input_tokens || 0) * p.cacheWrite) /
-    1_000_000
-  );
-}
-
-/** Claude Code escapes a cwd into its projects-dir name by replacing / and . with -. */
-function escapeCwd(cwd) {
-  return cwd.replace(/[/.]/g, "-");
-}
-
-/** Locate a thread's transcript file. The daemon threadId equals the Claude
- *  Code session id (== the .jsonl filename), so this is a direct lookup — we
- *  deliberately don't guess a sibling file when it's missing, since showing a
- *  different thread's cost is worse than showing none. */
-function transcriptPath(thread, cwd) {
-  if (!cwd || !/^[0-9a-f-]{8,}$/i.test(thread)) return null;
-  const file = path.join(os.homedir(), ".claude", "projects", escapeCwd(cwd), `${thread}.jsonl`);
-  return existsSync(file) ? file : null;
-}
-
-/** Sum token usage + cost across a thread's Claude Code transcript. Claude-only;
- *  other agents keep their transcripts elsewhere in other formats. */
-function getUsage(agent, thread, cwd) {
-  return cached(`usage:${agent}:${thread}`, CACHE_MS, async () => {
-    if (agent !== "claude") return { available: false, reason: "unsupported-agent" };
-    const file = transcriptPath(thread, cwd);
-    if (!file) return { available: false, reason: "no-transcript" };
-    const tokens = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
-    const outByModel = new Map();
-    let cost = 0,
-      costComplete = true,
-      messages = 0;
-    // Stream the transcript line-by-line — reading a multi-million-token thread's
-    // JSONL fully into memory (readFileSync + split) is a large, avoidable spike.
-    let rl;
-    try {
-      rl = createInterface({ input: createReadStream(file, "utf8"), crlfDelay: Infinity });
-    } catch {
-      return { available: false, reason: "no-transcript" };
-    }
-    for await (const line of rl) {
-      if (!line) continue;
-      let o;
-      try {
-        o = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (o.type !== "assistant") continue;
-      const m = o.message;
-      const u = m && m.usage;
-      if (!u) continue;
-      messages++;
-      tokens.input += u.input_tokens || 0;
-      tokens.output += u.output_tokens || 0;
-      tokens.cacheRead += u.cache_read_input_tokens || 0;
-      tokens.cacheCreation += u.cache_creation_input_tokens || 0;
-      const c = msgCost(m.model, u);
-      if (c == null) costComplete = false;
-      else cost += c;
-      if (m.model) outByModel.set(m.model, (outByModel.get(m.model) || 0) + (u.output_tokens || 0));
-    }
-    if (!messages) return { available: false, reason: "no-usage" };
-    const models = [...outByModel.keys()];
-    const model = models.slice().sort((a, b) => outByModel.get(b) - outByModel.get(a))[0] || null;
-    const total = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreation;
-    return {
-      available: true,
-      model,
-      models,
-      tokens: { ...tokens, total },
-      cost: Math.round(cost * 100) / 100,
-      costComplete,
-      messages,
-    };
-  });
 }
 
 // --- Available models per agent (from the daemon's model/list — the same source
@@ -1215,6 +1112,32 @@ const server = http.createServer(async (req, res) => {
       res.end(img.buffer);
       return;
     }
+    if (url.pathname === "/v1/trajectory") {
+      // Export a thread as ATIF (Harbor RFC 0001) so it can leave Pounce for a
+      // bug report, an eval harness, or someone else's tooling. Read-only, and
+      // built from the same events + official usage the app already sees.
+      const agent = url.searchParams.get("agent");
+      const thread = url.searchParams.get("thread");
+      if (!agent || !thread) return send(res, 400, { error: "agent and thread required" });
+      const [events, usage] = await Promise.all([
+        getMessages(agent, thread, url.searchParams.get("fresh") === "1"),
+        getUsage(agent, thread).catch(() => null),
+      ]);
+      if (!events.length) return send(res, 404, { error: "thread not found" });
+      const doc = toAtif({
+        agent,
+        threadId: thread,
+        events,
+        usage: usage?.available ? usage : null,
+        // ATIF's agent.version means the CLI that produced the trajectory.
+        agentVersion: await binVersion(agent).catch(() => null),
+        cwd: url.searchParams.get("cwd") || null,
+      });
+      if (url.searchParams.get("download") === "1") {
+        res.setHeader("content-disposition", `attachment; filename="${agent}-${thread}.atif.json"`);
+      }
+      return send(res, 200, doc);
+    }
     if (url.pathname === "/v1/file") {
       // Serve a local IMAGE file by absolute path — used to preview a Read of an
       // image (screenshot) in its tool card. Token-authed like every route, and
@@ -1270,10 +1193,11 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/v1/usage") {
       const agent = url.searchParams.get("agent");
       const thread = url.searchParams.get("thread");
-      const cwd = url.searchParams.get("cwd");
       if (!agent || !thread) return send(res, 400, { error: "agent and thread required" });
       if (url.searchParams.get("fresh") === "1") cache.delete(`usage:${agent}:${thread}`);
-      return send(res, 200, { usage: await getUsage(agent, thread, cwd) });
+      // `cwd` is still accepted from older clients but no longer needed — the
+      // adapters resolve a thread's own records without being told where it ran.
+      return send(res, 200, { usage: await getUsage(agent, thread) });
     }
     if (url.pathname === "/v1/warm" && req.method === "POST") {
       // The app's ranking of which threads to keep hot (usage-predicted). We

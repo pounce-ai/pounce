@@ -25,6 +25,7 @@ import {
   readTailLines,
 } from "./events.mjs";
 import { agentEnv, binVersion, binPath, liveAgentCwds } from "./env.mjs";
+import { noUsage, usageResult } from "./usage.mjs";
 
 const ROOT = path.join(os.homedir(), ".codex", "sessions");
 const INDEX_FILE = path.join(os.homedir(), ".codex", "session_index.jsonl");
@@ -141,6 +142,85 @@ export class CodexAdapter {
       });
       rl.on("close", settle);
       stream.on("error", settle);
+    });
+  }
+
+  /**
+   * Token totals and plan consumption — never dollars.
+   *
+   * Codex bills against a ChatGPT plan, not per-request USD, and reports no
+   * cost field anywhere in its rollouts. What it does give is official and
+   * useful in its own right: `token_count.info.total_token_usage` (CUMULATIVE,
+   * so the last such event is the thread total, not a sum), the rate-limit
+   * windows it's consuming, and the model's context window. We surface those
+   * rather than pricing its tokens ourselves.
+   */
+  async getUsage(threadId) {
+    const file = await this.findFile(threadId);
+    if (!file) return noUsage("no-transcript");
+    let rl;
+    try {
+      rl = createInterface({ input: createReadStream(file, "utf8"), crlfDelay: Infinity });
+    } catch {
+      return noUsage("no-transcript");
+    }
+    let usage = null,
+      lastUsage = null,
+      rateLimits = null,
+      contextWindow = null,
+      turns = 0;
+    const models = new Set();
+    for await (const line of rl) {
+      if (!line) continue;
+      let o;
+      try {
+        o = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const p = o.payload;
+      if (!p) continue;
+      if (o.type === "turn_context") {
+        if (p.model) models.add(p.model);
+        continue;
+      }
+      if (o.type !== "event_msg") continue;
+      if (p.type === "task_complete") turns++;
+      if (p.type !== "token_count") continue;
+      // Later events supersede earlier ones — totals are cumulative, and the
+      // rate-limit snapshot is only meaningful as of the most recent report.
+      if (p.info?.total_token_usage) usage = p.info.total_token_usage;
+      // `last_token_usage` is that one request rather than the running total —
+      // its input_tokens (cached included) is what currently fills the window.
+      if (p.info?.last_token_usage) lastUsage = p.info.last_token_usage;
+      if (p.info?.model_context_window) contextWindow = p.info.model_context_window;
+      if (p.rate_limits) rateLimits = p.rate_limits;
+    }
+    if (!usage) return noUsage("no-usage");
+    const primary = rateLimits?.primary || null;
+    return usageResult({
+      tokens: {
+        // Codex counts cached input separately from `input_tokens`; keep them
+        // in the cacheRead slot so the total doesn't double-count.
+        input: Math.max(0, (usage.input_tokens || 0) - (usage.cached_input_tokens || 0)),
+        output: usage.output_tokens || 0,
+        cacheRead: usage.cached_input_tokens || 0,
+        reasoning: usage.reasoning_output_tokens || 0,
+      },
+      cost: null, // plan-based: no USD exists to report
+      model: [...models].pop() || null,
+      models: [...models],
+      messages: turns,
+      contextWindow,
+      contextUsed: lastUsage?.input_tokens ?? null,
+      rateLimit: primary
+        ? {
+            usedPercent: primary.used_percent ?? null,
+            windowMinutes: primary.window_minutes ?? null,
+            resetsAt: primary.resets_at ?? null,
+            planType: rateLimits?.plan_type ?? null,
+          }
+        : null,
     });
   }
 

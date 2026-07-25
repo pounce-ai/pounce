@@ -1223,6 +1223,7 @@ export default function SessionScreen() {
                   ? { count: markers.length, onPress: () => setMarkerSheet(true) }
                   : null
               }
+              usage={usage}
             />
           </View>
         </View>

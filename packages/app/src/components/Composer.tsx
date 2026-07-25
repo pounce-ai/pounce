@@ -30,7 +30,8 @@ import { PounceIcon } from "../ui/native/Icon";
 import type { IoniconName } from "../ui/native/icon-map";
 import type { AgentCapabilities, RunImage } from "@pounce/shared";
 import { SLASH_COMMANDS } from "../ui/agent-meta";
-import { fetchFiles, type RepoEntry } from "../services/bridge";
+import { fetchFiles, type RepoEntry, type ThreadUsage } from "../services/bridge";
+import { ContextRing } from "./ContextRing";
 import { isVoiceAvailable, startDictation, type Dictation } from "../services/voice";
 import { AgentLogo, COLOR } from "../ui";
 import { hexFor } from "../ui/theme-hex";
@@ -144,6 +145,7 @@ export function Composer({
   model,
   mode,
   markers,
+  usage,
   ref,
 }: {
   agent: string;
@@ -169,6 +171,9 @@ export function Composer({
   mode?: { label: string; active: boolean; onPress: () => void } | null;
   /** Marker jump-list pill — bookmark glyph + count (null to hide). */
   markers?: { count: number; onPress: () => void } | null;
+  /** Thread usage — drives the context-fill ring (hidden unless the agent
+   *  reports both a window and a recent request size). */
+  usage?: ThreadUsage | null;
   ref?: Ref<ComposerHandle>;
 }) {
   const { theme } = useUnistyles();
@@ -631,6 +636,7 @@ export function Composer({
 
           <View style={s.flex1} />
 
+          <ContextRing usage={usage ?? null} />
           {!disabled && voiceAvailable ? (
             <MicButton listening={listening} onPress={toggleVoice} />
           ) : null}

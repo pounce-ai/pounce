@@ -725,7 +725,16 @@ export async function fetchMessages(
   });
 }
 
-/** Per-thread token usage + cost, read from the host's agent transcript. */
+/**
+ * Per-thread usage, read from the host's own agent records.
+ *
+ * Tokens are always the agent's own counts. `cost` is present ONLY when the
+ * agent itself reported dollars — the bridge no longer prices tokens, so a
+ * missing cost means "not knowable", never "zero". In practice OpenCode reports
+ * cost for all history, Claude only for turns Pounce drove (`costComplete`
+ * false when it covers part of a thread), and Codex never — it bills against a
+ * plan and reports `rateLimit` consumption instead.
+ */
 export interface ThreadUsage {
   available: boolean;
   model?: string | null;
@@ -735,11 +744,29 @@ export interface ThreadUsage {
     output: number;
     cacheRead: number;
     cacheCreation: number;
+    reasoning?: number;
     total: number;
   };
-  cost?: number;
+  cost?: number | null;
   costComplete?: boolean;
+  /** "agent" when a real dollar figure came from the CLI; null when absent. */
+  costSource?: "agent" | null;
   messages?: number;
+  /** Context window of the model that ran, when the agent states it. */
+  contextWindow?: number | null;
+  /**
+   * Size of the most recent request — how full the window is right now. This is
+   * NOT `tokens.total`, which sums every turn ever taken; a long thread can run
+   * to tens of millions cumulatively while each request still fits the window.
+   */
+  contextUsed?: number | null;
+  /** Plan-based consumption (Codex): how much of a rate-limit window is used. */
+  rateLimit?: {
+    usedPercent: number | null;
+    windowMinutes: number | null;
+    resetsAt: number | null;
+    planType: string | null;
+  } | null;
   reason?: string;
 }
 
