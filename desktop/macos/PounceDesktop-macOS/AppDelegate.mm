@@ -14,6 +14,7 @@
 @interface AppDelegate () <NSWindowDelegate, NSMenuDelegate>
 @property (nonatomic, strong) NSStatusItem *statusItem;
 @property (nonatomic, strong) NSMenuItem *usageItem;
+@property (nonatomic, strong) NSMenuItem *quotaItem;
 @property (nonatomic, copy) NSString *bridgeToken;
 @end
 
@@ -153,6 +154,14 @@ static void PounceStartBridge(void)
   self.usageItem = [[NSMenuItem alloc] initWithTitle:@"Today — …" action:nil keyEquivalent:@""];
   self.usageItem.enabled = NO;
   [menu addItem:self.usageItem];
+
+  // Plan quota. Hidden until an agent reports one — on a subscription this is
+  // the number that matters, but not every agent meters a window.
+  self.quotaItem = [[NSMenuItem alloc] initWithTitle:@"" action:nil keyEquivalent:@""];
+  self.quotaItem.enabled = NO;
+  self.quotaItem.hidden = YES;
+  [menu addItem:self.quotaItem];
+
   [menu addItem:[NSMenuItem separatorItem]];
 
   NSMenuItem *open = [[NSMenuItem alloc] initWithTitle:@"Open Pounce"
@@ -241,6 +250,33 @@ static void PounceGetJSON(NSString *path, NSString *token, void (^done)(NSDictio
       }
       dispatch_async(dispatch_get_main_queue(), ^{
         weakSelf.usageItem.title = line;
+      });
+    });
+
+    // Quota rides the same refresh: one more loopback call, same token.
+    PounceGetJSON(@"/v1/quota", token, ^(NSDictionary *json) {
+      NSDictionary *quota = json[@"quota"];
+      if (![quota isKindOfClass:[NSDictionary class]]) return;
+      NSMutableArray<NSString *> *parts = [NSMutableArray array];
+      for (NSString *agent in quota) {
+        NSDictionary *q = quota[agent];
+        if (![q isKindOfClass:[NSDictionary class]]) continue;
+        for (NSDictionary *w in q[@"windows"]) {
+          if (![w isKindOfClass:[NSDictionary class]]) continue;
+          id pct = w[@"usedPercent"];
+          if (![pct isKindOfClass:[NSNumber class]]) continue;
+          [parts addObject:[NSString stringWithFormat:@"%@ %.0f%%", w[@"label"],
+                                                      [pct doubleValue]]];
+        }
+      }
+      dispatch_async(dispatch_get_main_queue(), ^{
+        if (parts.count == 0) {
+          weakSelf.quotaItem.hidden = YES;
+          return;
+        }
+        weakSelf.quotaItem.title =
+            [NSString stringWithFormat:@"Plan — %@", [parts componentsJoinedByString:@" · "]];
+        weakSelf.quotaItem.hidden = NO;
       });
     });
   };

@@ -41,7 +41,12 @@ function normalize(raw) {
   const extraPath = Array.isArray(r.extraPath)
     ? r.extraPath.filter((p) => typeof p === "string" && p.trim()).map((p) => p.trim())
     : [];
-  return { bins, extraPath, env };
+  // Opt-in Admin API key for official org spend (agents/admin-cost.mjs). Kept
+  // here rather than in an env var so it survives restarts and can be set from
+  // the app; the HTTP layer never reads it back out (see publicConfig).
+  const adminApiKey =
+    typeof r.adminApiKey === "string" && r.adminApiKey.trim() ? r.adminApiKey.trim() : "";
+  return { bins, extraPath, env, adminApiKey };
 }
 
 /** Current config (cached until the file's mtime changes). Never throws. */
@@ -81,7 +86,9 @@ export function writeConfig(patch = {}) {
     }
   }
   const extraPath = patch.extraPath !== undefined ? patch.extraPath : cur.extraPath;
-  const next = normalize({ bins, env, extraPath });
+  // "" clears the stored key, mirroring how bins/env overrides are cleared.
+  const adminApiKey = patch.adminApiKey !== undefined ? patch.adminApiKey : cur.adminApiKey;
+  const next = normalize({ bins, env, extraPath, adminApiKey });
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(next, null, 2) + "\n");
   cache = next;

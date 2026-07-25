@@ -43,6 +43,7 @@ import {
 import { savePairing } from "../services/runtime";
 import { type ParsedPairing, pairingHostName, parsePairing } from "../services/pairing";
 import { DeviceSetupCard } from "../components/DeviceSetupCard";
+import { AdminKeySection } from "../components/AdminKeySection";
 import { DeviceIcon, fmtDuration, IS_DESKTOP } from "../ui";
 import { appearance$, setAppearance } from "../state/appearance";
 
@@ -303,6 +304,8 @@ export default function SettingsScreen() {
           </View>
         </View>
       ) : null}
+
+      <AdminKeySection devices={devices} />
 
       {/* Diagnostics (Pounce Doctor) */}
       <Pressable
