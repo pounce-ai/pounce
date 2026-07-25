@@ -38,8 +38,18 @@ export type WirePayload =
   | { readonly type: "UserEnvelope"; readonly message: unknown }
   | { readonly type: "AssistantEnvelope"; readonly message: unknown; readonly ttftMs?: number }
   | { readonly type: "ContentBlockDelta"; readonly index: number; readonly delta: unknown }
-  | { readonly type: "ToolCall"; readonly toolCallId: string; readonly toolName: string; readonly arguments: unknown }
-  | { readonly type: "ToolResult"; readonly toolUseId: string; readonly content: unknown; readonly isError?: boolean }
+  | {
+      readonly type: "ToolCall";
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly arguments: unknown;
+    }
+  | {
+      readonly type: "ToolResult";
+      readonly toolUseId: string;
+      readonly content: unknown;
+      readonly isError?: boolean;
+    }
   | { readonly type: "ThinkingDelta"; readonly text: string }
   | { readonly type: "SystemStatus"; readonly status: string; readonly subtype?: string }
   | { readonly type: "RateLimitEnvelope"; readonly rateLimitInfo: unknown }
@@ -63,11 +73,7 @@ export interface CreateRunRequest {
   readonly reasoningEffort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 }
 
-export type PermissionMode =
-  | "default"
-  | "acceptEdits"
-  | "bypassPermissions"
-  | "plan";
+export type PermissionMode = "default" | "acceptEdits" | "bypassPermissions" | "plan";
 
 export interface RunInput {
   readonly text: string;

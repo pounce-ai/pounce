@@ -22,7 +22,11 @@ export function streamTurn(
         seen = text.length;
         if (stop) {
           resolve();
-          try { xhr.abort(); } catch { /* already settled */ }
+          try {
+            xhr.abort();
+          } catch {
+            /* already settled */
+          }
         }
       }
     };

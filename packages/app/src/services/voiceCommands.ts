@@ -24,13 +24,24 @@ export interface VoiceResult {
 }
 
 const AGENT_LABEL: Record<string, string> = {
-  claude: "Claude", codex: "Codex", cursor: "Cursor", opencode: "opencode", grok: "Grok",
-  pi: "Pi", amp: "Amp", droid: "Droid", devin: "Devin", hermes: "Hermes",
+  claude: "Claude",
+  codex: "Codex",
+  cursor: "Cursor",
+  opencode: "opencode",
+  grok: "Grok",
+  pi: "Pi",
+  amp: "Amp",
+  droid: "Droid",
+  devin: "Devin",
+  hermes: "Hermes",
 };
 
 /** Interpret `transcript` against `ctx` and perform the action. */
 export function runVoiceCommand(transcript: string, ctx: VoiceContext): VoiceResult {
-  const t = transcript.toLowerCase().trim().replace(/[.?!]+$/, "");
+  const t = transcript
+    .toLowerCase()
+    .trim()
+    .replace(/[.?!]+$/, "");
   if (!t) return { ok: false, say: "I didn't catch that." };
 
   // New task
@@ -40,7 +51,9 @@ export function runVoiceCommand(transcript: string, ctx: VoiceContext): VoiceRes
   }
 
   // Open a specific thread: "open the auth thread", "open prod cart"
-  const open = t.match(/^(?:open|show|go to)\s+(?:the\s+)?(.+?)(?:\s+(?:thread|task|card|session))?$/);
+  const open = t.match(
+    /^(?:open|show|go to)\s+(?:the\s+)?(.+?)(?:\s+(?:thread|task|card|session))?$/,
+  );
   if (open && /^(open|go to)/.test(t)) {
     const q = open[1].trim();
     // Don't hijack filter phrases like "open codex tasks".

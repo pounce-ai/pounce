@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  cleanAssistantText,
-  isEmptyUserMessage,
-  parseUserMessage,
-  stripNoise,
-} from "./index.js";
+import { cleanAssistantText, isEmptyUserMessage, parseUserMessage, stripNoise } from "./index.js";
 
 describe("parseUserMessage — claude", () => {
   const p = (raw: string) => parseUserMessage(raw, "claude");
@@ -20,7 +15,9 @@ describe("parseUserMessage — claude", () => {
   });
 
   it("keeps non-empty command args", () => {
-    expect(p("<command-name>/model</command-name>\n<command-args>opus</command-args>").command).toEqual({
+    expect(
+      p("<command-name>/model</command-name>\n<command-args>opus</command-args>").command,
+    ).toEqual({
       name: "/model",
       args: "opus",
     });
@@ -40,18 +37,21 @@ describe("parseUserMessage — claude", () => {
   });
 
   it("strips ANSI escapes from captured output", () => {
-    expect(p("<local-command-stdout>\x1b[1mBold\x1b[0m done</local-command-stdout>").output?.text).toBe(
-      "Bold done",
-    );
+    expect(
+      p("<local-command-stdout>\x1b[1mBold\x1b[0m done</local-command-stdout>").output?.text,
+    ).toBe("Bold done");
   });
 
   it("treats a lone caveat/system-reminder envelope as empty", () => {
-    expect(isEmptyUserMessage(p("<local-command-caveat>Caveat: …</local-command-caveat>"))).toBe(true);
+    expect(isEmptyUserMessage(p("<local-command-caveat>Caveat: …</local-command-caveat>"))).toBe(
+      true,
+    );
     expect(isEmptyUserMessage(p("<system-reminder>Do not do X.</system-reminder>"))).toBe(true);
   });
 
   it("strips a task-notification envelope (task-id and all)", () => {
-    const raw = "<task-notification>\n<task-id>aeaf6e6072ce89041</task-id>\nDone.\n</task-notification>";
+    const raw =
+      "<task-notification>\n<task-id>aeaf6e6072ce89041</task-id>\nDone.\n</task-notification>";
     expect(isEmptyUserMessage(p(raw))).toBe(true);
     const r = p(`resume that\n${raw}`);
     expect(r.text).toBe("resume that");
@@ -137,9 +137,9 @@ describe("stripNoise (server-side ingest)", () => {
 
 describe("cleanAssistantText", () => {
   it("strips injected system-reminders for claude but leaves opencode alone", () => {
-    expect(cleanAssistantText("answer\n<system-reminder>x</system-reminder>", "claude").trim()).toBe(
-      "answer",
-    );
+    expect(
+      cleanAssistantText("answer\n<system-reminder>x</system-reminder>", "claude").trim(),
+    ).toBe("answer");
     const withTag = "answer <system-reminder>x</system-reminder>";
     expect(cleanAssistantText(withTag, "opencode")).toBe(withTag);
   });

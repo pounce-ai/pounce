@@ -18,17 +18,27 @@ import path from "node:path";
 import { parseUserMessage, stripNoise } from "@pounce/transcript";
 import { SessionIndex } from "./session-index.mjs";
 import {
-  userMessage, thinking, assistantMessage, toolCall, toolResult, systemEvent,
-  readTailLines, patchFromStructured, contentText,
+  userMessage,
+  thinking,
+  assistantMessage,
+  toolCall,
+  toolResult,
+  systemEvent,
+  readTailLines,
+  patchFromStructured,
+  contentText,
 } from "./events.mjs";
 import { agentEnv, binVersion, binPath, liveAgentCwds } from "./env.mjs";
 
 const ROOT = path.join(os.homedir(), ".claude", "projects");
 // Claude Code's permission-mode names → the app's canonical PermissionMode.
 const CLAUDE_MODE = {
-  normal: "default", default: "default",
-  auto: "acceptEdits", acceptEdits: "acceptEdits",
-  plan: "plan", bypassPermissions: "bypassPermissions",
+  normal: "default",
+  default: "default",
+  auto: "acceptEdits",
+  acceptEdits: "acceptEdits",
+  plan: "plan",
+  bypassPermissions: "bypassPermissions",
 };
 // A turn started outside the bridge shows as "running" while its file is this fresh.
 const RUNNING_WINDOW_MS = 120_000;
@@ -80,7 +90,14 @@ export class ClaudeAdapter {
     this.id = "claude";
     this.displayName = "Claude Code";
     this.description = "Anthropic's Claude Code CLI";
-    this.capabilities = { streaming: true, tools: true, images: true, thinking: true, terminal: true, git: true };
+    this.capabilities = {
+      streaming: true,
+      tools: true,
+      images: true,
+      thinking: true,
+      terminal: true,
+      git: true,
+    };
     this.turns = turns;
     this.index = new SessionIndex({
       root: ROOT,
@@ -89,7 +106,9 @@ export class ClaudeAdapter {
     });
   }
 
-  onDirty(cb) { this.index.onDirty(cb); }
+  onDirty(cb) {
+    this.index.onDirty(cb);
+  }
 
   async isAvailable() {
     return (await binVersion("claude")) != null;
@@ -105,7 +124,11 @@ export class ClaudeAdapter {
     const meta = await this.index.get(threadId);
     if (meta?.filePath && existsSync(meta.filePath)) return meta.filePath;
     let dirs;
-    try { dirs = readdirSync(ROOT); } catch { return null; }
+    try {
+      dirs = readdirSync(ROOT);
+    } catch {
+      return null;
+    }
     for (const d of dirs) {
       const p = path.join(ROOT, d, `${threadId}.jsonl`);
       if (existsSync(p)) return p;
@@ -126,17 +149,26 @@ export class ClaudeAdapter {
     let totalBytes = 0;
     let truncated = false;
     const bucket = (startsTurn) => {
-      if (startsTurn || !cur) { cur = { events: [], bytes: 0 }; turns.push(cur); }
+      if (startsTurn || !cur) {
+        cur = { events: [], bytes: 0 };
+        turns.push(cur);
+      }
       return cur;
     };
     const add = (ev, startsTurn = false) => {
       const b = bucket(startsTurn);
-      const size = (ev.text?.length || 0) * 2 + (ev.result?.content?.text?.length || 0) * 2 +
-        (ev.result?.content?.patch?.length || 0) * 2 + 200;
+      const size =
+        (ev.text?.length || 0) * 2 +
+        (ev.result?.content?.text?.length || 0) * 2 +
+        (ev.result?.content?.patch?.length || 0) * 2 +
+        200;
       b.events.push(ev);
       b.bytes += size;
       totalBytes += size;
-      while ((limit && turns.length > limit) || (totalBytes > MAX_HISTORY_BYTES && turns.length > 1)) {
+      while (
+        (limit && turns.length > limit) ||
+        (totalBytes > MAX_HISTORY_BYTES && turns.length > 1)
+      ) {
         const dropped = turns.shift();
         totalBytes -= dropped.bytes;
         truncated = true;
@@ -146,11 +178,17 @@ export class ClaudeAdapter {
     let rl;
     try {
       rl = createInterface({ input: createReadStream(file, "utf8"), crlfDelay: Infinity });
-    } catch { return []; }
+    } catch {
+      return [];
+    }
     for await (const line of rl) {
       if (!line) continue;
       let o;
-      try { o = JSON.parse(line); } catch { continue; }
+      try {
+        o = JSON.parse(line);
+      } catch {
+        continue;
+      }
       const ts = o.timestamp || new Date().toISOString();
       const base = (id) => ({ id, conversationId: threadId, seq: 0, ts });
 
@@ -169,16 +207,27 @@ export class ClaudeAdapter {
         // lazily from /v1/image, and drop the "[Image #N]" placeholder text.
         const imgs = imageRefs(c, uuid);
         const text = contentText(c);
-        const cleaned = stripNoise(text, "claude").replace(/\[Image #\d+\]/g, "").trim();
+        const cleaned = stripNoise(text, "claude")
+          .replace(/\[Image #\d+\]/g, "")
+          .trim();
         if (cleaned || imgs.length) add(userMessage(base(uuid), cleaned, imgs), true);
         for (const b of c) {
           if (b?.type !== "tool_result") continue;
           const callId = b.tool_use_id || o.uuid;
           const sp = o.toolUseResult?.structuredPatch;
           const content = sp?.length
-            ? { kind: "diff", path: o.toolUseResult.filePath || "", patch: patchFromStructured(sp, o.toolUseResult.filePath) }
-            : { kind: "text", text: contentText(b.content) || (typeof b.content === "string" ? b.content : "") };
-          add(toolResult(base(`${callId}:o`), { toolCallId: callId, content, isError: !!b.is_error }));
+            ? {
+                kind: "diff",
+                path: o.toolUseResult.filePath || "",
+                patch: patchFromStructured(sp, o.toolUseResult.filePath),
+              }
+            : {
+                kind: "text",
+                text: contentText(b.content) || (typeof b.content === "string" ? b.content : ""),
+              };
+          add(
+            toolResult(base(`${callId}:o`), { toolCallId: callId, content, isError: !!b.is_error }),
+          );
         }
         continue;
       }
@@ -187,10 +236,12 @@ export class ClaudeAdapter {
         const blocks = o.message?.content;
         if (!Array.isArray(blocks)) continue;
         blocks.forEach((b, i) => {
-          const id = i === 0 ? (o.uuid || o.message?.id || `a:${ts}`) : `${o.uuid || o.message?.id}:${i}`;
+          const id =
+            i === 0 ? o.uuid || o.message?.id || `a:${ts}` : `${o.uuid || o.message?.id}:${i}`;
           if (b.type === "thinking" && b.thinking?.trim()) add(thinking(base(id), b.thinking));
           else if (b.type === "text" && b.text?.trim()) add(assistantMessage(base(id), b.text));
-          else if (b.type === "tool_use") add(toolCall(base(b.id || id), shellify(b.name, b.input)));
+          else if (b.type === "tool_use")
+            add(toolCall(base(b.id || id), shellify(b.name, b.input)));
         });
       }
       if (o.type === "system") {
@@ -203,9 +254,16 @@ export class ClaudeAdapter {
           if (text.trim()) add(userMessage(base(o.uuid || `c:${ts}`), text), true);
         } else if (o.subtype === "compact_boundary") {
           const m = o.compactMetadata || {};
-          const k = (n) => (typeof n === "number" ? (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n)) : null);
-          const span = k(m.preTokens) && k(m.postTokens) ? ` (${k(m.preTokens)} → ${k(m.postTokens)} tokens)` : "";
-          add(systemEvent(base(o.uuid || `cb:${ts}`), `Conversation compacted${span}`, "info"), true);
+          const k = (n) =>
+            typeof n === "number" ? (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n)) : null;
+          const span =
+            k(m.preTokens) && k(m.postTokens)
+              ? ` (${k(m.preTokens)} → ${k(m.postTokens)} tokens)`
+              : "";
+          add(
+            systemEvent(base(o.uuid || `cb:${ts}`), `Conversation compacted${span}`, "info"),
+            true,
+          );
         }
         continue;
       }
@@ -214,12 +272,22 @@ export class ClaudeAdapter {
     }
 
     const events = turns.flatMap((t) => t.events);
-    events.forEach((ev, i) => { ev.seq = i + 1; });
+    events.forEach((ev, i) => {
+      ev.seq = i + 1;
+    });
     if (truncated && !limit) {
-      events.unshift(systemEvent(
-        { id: `${threadId}:trunc`, conversationId: threadId, seq: 0, ts: events[0]?.ts || new Date().toISOString() },
-        "Older history truncated (thread too large to load fully)", "warning",
-      ));
+      events.unshift(
+        systemEvent(
+          {
+            id: `${threadId}:trunc`,
+            conversationId: threadId,
+            seq: 0,
+            ts: events[0]?.ts || new Date().toISOString(),
+          },
+          "Older history truncated (thread too large to load fully)",
+          "warning",
+        ),
+      );
     }
     return events;
   }
@@ -237,21 +305,34 @@ export class ClaudeAdapter {
     const file = await this.findFile(threadId);
     if (!file || !Number.isInteger(idx)) return null;
     let rl;
-    try { rl = createInterface({ input: createReadStream(file, "utf8"), crlfDelay: Infinity }); }
-    catch { return null; }
+    try {
+      rl = createInterface({ input: createReadStream(file, "utf8"), crlfDelay: Infinity });
+    } catch {
+      return null;
+    }
     try {
       for await (const line of rl) {
         if (!line || !line.includes(uuid)) continue;
-        let o; try { o = JSON.parse(line); } catch { continue; }
+        let o;
+        try {
+          o = JSON.parse(line);
+        } catch {
+          continue;
+        }
         if (o.uuid !== uuid) continue;
         const c = o.message?.content;
         const b = Array.isArray(c) ? c[idx] : null;
         if (b?.type === "image" && b.source?.data) {
-          return { mediaType: b.source.media_type || "image/png", buffer: Buffer.from(b.source.data, "base64") };
+          return {
+            mediaType: b.source.media_type || "image/png",
+            buffer: Buffer.from(b.source.data, "base64"),
+          };
         }
         return null;
       }
-    } finally { rl.close(); }
+    } finally {
+      rl.close();
+    }
     return null;
   }
 
@@ -264,10 +345,7 @@ export class ClaudeAdapter {
       return { activity: "running", lastActivityAt: new Date().toISOString() };
     }
     const cwd = this.index.metas.get(threadId)?.cwd;
-    const [file, live] = await Promise.all([
-      this.findFile(threadId),
-      cwd ? liveAgentCwds() : null,
-    ]);
+    const [file, live] = await Promise.all([this.findFile(threadId), cwd ? liveAgentCwds() : null]);
     // null = liveness unknown → the mtime heuristic decides
     const liveInCwd = cwd && live ? (live.get("claude")?.has(cwd) ?? false) : null;
     return judgeTranscript(file, liveInCwd);
@@ -277,10 +355,34 @@ export class ClaudeAdapter {
     // The claude CLI resolves aliases/full ids itself; a static list keeps the
     // picker useful without a daemon to ask. Default mirrors the CLI default.
     return [
-      { id: "claude-opus-4-8", name: "Opus 4.8", description: "Most capable, default", isDefault: true, deprecated: false },
-      { id: "claude-fable-5", name: "Fable 5", description: "Claude 5 frontier model", isDefault: false, deprecated: false },
-      { id: "claude-sonnet-5", name: "Sonnet 5", description: "Fast and capable", isDefault: false, deprecated: false },
-      { id: "claude-haiku-4-5", name: "Haiku 4.5", description: "Fastest", isDefault: false, deprecated: false },
+      {
+        id: "claude-opus-4-8",
+        name: "Opus 4.8",
+        description: "Most capable, default",
+        isDefault: true,
+        deprecated: false,
+      },
+      {
+        id: "claude-fable-5",
+        name: "Fable 5",
+        description: "Claude 5 frontier model",
+        isDefault: false,
+        deprecated: false,
+      },
+      {
+        id: "claude-sonnet-5",
+        name: "Sonnet 5",
+        description: "Fast and capable",
+        isDefault: false,
+        deprecated: false,
+      },
+      {
+        id: "claude-haiku-4-5",
+        name: "Haiku 4.5",
+        description: "Fastest",
+        isDefault: false,
+        deprecated: false,
+      },
     ];
   }
 
@@ -290,14 +392,21 @@ export class ClaudeAdapter {
    * Input goes over stdin as one stream-json user message (works for plain
    * text and base64 images alike, and dodges argv size/quoting limits).
    */
-  async startTurn({ threadId, text, cwd, images, permissionMode, reasoningEffort, model }, onEvent) {
+  async startTurn(
+    { threadId, text, cwd, images, permissionMode, reasoningEffort, model },
+    onEvent,
+  ) {
     this.turns.assertCapacity();
     const fresh = !threadId || !/^[0-9a-f]{8}-/i.test(threadId);
     const sessionId = fresh ? randomUUID() : threadId;
 
     if (!fresh) {
       if (this.turns.isRunning("claude", threadId)) {
-        return failedTurn(sessionId, "A turn is already running for this thread — interrupt it first.", onEvent);
+        return failedTurn(
+          sessionId,
+          "A turn is already running for this thread — interrupt it first.",
+          onEvent,
+        );
       }
       // Resuming a session that's mid-turn in ANOTHER process (a terminal /
       // FleetView session) forks a live agent that keeps working the original
@@ -306,22 +415,34 @@ export class ClaudeAdapter {
       // in-flight turn; the user can retry once it settles.
       const act = await this.getActivity(threadId).catch(() => null);
       if (act?.activity === "running") {
-        return failedTurn(sessionId,
+        return failedTurn(
+          sessionId,
           "This thread is currently active in another Claude Code session on the host — wait for it to finish, then retry.",
-          onEvent);
+          onEvent,
+        );
       }
     }
 
-    const args = ["-p", "--verbose", "--output-format", "stream-json",
-      "--include-partial-messages", "--input-format", "stream-json"];
+    const args = [
+      "-p",
+      "--verbose",
+      "--output-format",
+      "stream-json",
+      "--include-partial-messages",
+      "--input-format",
+      "stream-json",
+    ];
     args.push(fresh ? "--session-id" : "--resume", sessionId);
     // The daemon ran with bypass_permissions=true (host.toml) — headless turns
     // can't answer permission prompts, so "default" maps to bypass to keep the
     // phone UX working. Explicit non-default modes pass through verbatim.
-    const mode = permissionMode && permissionMode !== "default" ? permissionMode : "bypassPermissions";
+    const mode =
+      permissionMode && permissionMode !== "default" ? permissionMode : "bypassPermissions";
     args.push("--permission-mode", mode);
     if (model) args.push("--model", model);
-    const effort = { minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "high" }[reasoningEffort];
+    const effort = { minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "high" }[
+      reasoningEffort
+    ];
     if (effort) args.push("--effort", effort);
 
     // Transcripts are keyed by project dir, so a resume MUST run from the
@@ -334,15 +455,22 @@ export class ClaudeAdapter {
       const meta = this.index.metas.get(threadId);
       if (meta?.cwd && existsSync(meta.cwd)) dir = meta.cwd;
       if (!dir) {
-        return failedTurn(sessionId,
+        return failedTurn(
+          sessionId,
           `This thread's folder no longer exists (${cwd || meta?.cwd || "unknown"}) — it can't be resumed. Start a new conversation instead.`,
-          onEvent);
+          onEvent,
+        );
       }
     }
     if (!dir) dir = os.homedir();
     let child;
     try {
-      child = spawn(binPath("claude"), args, { cwd: dir, env: agentEnv(), stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+      child = spawn(binPath("claude"), args, {
+        cwd: dir,
+        env: agentEnv(),
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      });
     } catch (e) {
       return failedTurn(sessionId, String(e?.message || e), onEvent);
     }
@@ -350,10 +478,16 @@ export class ClaudeAdapter {
 
     const content = [{ type: "text", text }];
     for (const img of images || []) {
-      if (img?.data) content.push({ type: "image", source: { type: "base64", media_type: img.mediaType || "image/png", data: img.data } });
+      if (img?.data)
+        content.push({
+          type: "image",
+          source: { type: "base64", media_type: img.mediaType || "image/png", data: img.data },
+        });
     }
     try {
-      child.stdin.write(JSON.stringify({ type: "user", message: { role: "user", content } }) + "\n");
+      child.stdin.write(
+        JSON.stringify({ type: "user", message: { role: "user", content } }) + "\n",
+      );
       child.stdin.end();
     } catch {}
 
@@ -363,7 +497,9 @@ export class ClaudeAdapter {
     const base = (id) => ({ id, conversationId: sessionId, seq: ++seq, ts: now() });
     const emit = (ev) => {
       if (ev.type !== "user_message" && ev.type !== "system_event") sawReply = true;
-      try { onEvent(ev); } catch {}
+      try {
+        onEvent(ev);
+      } catch {}
     };
 
     // The daemon echoed the user's message as a stream item; mirror that.
@@ -383,7 +519,10 @@ export class ClaudeAdapter {
     const open = { text: [], thinking: [] };
     let sawResult = false;
     let resolveDone, rejectDone;
-    const done = new Promise((res, rej) => { resolveDone = res; rejectDone = rej; });
+    const done = new Promise((res, rej) => {
+      resolveDone = res;
+      rejectDone = rej;
+    });
     let settled = false;
     const finish = (err) => {
       if (settled) return;
@@ -395,18 +534,27 @@ export class ClaudeAdapter {
       // running session and returns without a reply, and the child can linger.
       // Tell the phone what happened instead of ending in silence…
       if (!err && !sawReply) {
-        emit(systemEvent(base(`${sessionId}:live`),
-          "No reply here — this thread appears active in another window; your message was delivered to that session.",
-          "warning"));
+        emit(
+          systemEvent(
+            base(`${sessionId}:live`),
+            "No reply here — this thread appears active in another window; your message was delivered to that session.",
+            "warning",
+          ),
+        );
       }
       // …and never leak the child: if it survives the result, reap it.
       setTimeout(() => {
         if (child.exitCode === null) {
-          console.log(`[turn] claude lingering child pid=${child.pid} thread=${sessionId} — reaping`);
-          try { child.kill("SIGKILL"); } catch {}
+          console.log(
+            `[turn] claude lingering child pid=${child.pid} thread=${sessionId} — reaping`,
+          );
+          try {
+            child.kill("SIGKILL");
+          } catch {}
         }
       }, 5000).unref?.();
-      if (err) rejectDone(err); else resolveDone(sessionId);
+      if (err) rejectDone(err);
+      else resolveDone(sessionId);
     };
 
     const handle = (o) => {
@@ -416,11 +564,15 @@ export class ClaudeAdapter {
       }
       if (o.type === "stream_event") {
         const ev = o.event || {};
-        if (ev.type === "message_start") { msgN++; return; }
+        if (ev.type === "message_start") {
+          msgN++;
+          return;
+        }
         if (ev.type === "content_block_delta") {
           const key = `${sessionId}:${msgN}:${ev.index}`;
           const d = ev.delta || {};
-          const piece = d.type === "text_delta" ? d.text : d.type === "thinking_delta" ? d.thinking : null;
+          const piece =
+            d.type === "text_delta" ? d.text : d.type === "thinking_delta" ? d.thinking : null;
           if (typeof piece !== "string") return;
           if (!acc.has(key)) (d.type === "thinking_delta" ? open.thinking : open.text).push(key);
           const text = ((acc.get(key) || "") + piece).slice(0, MAX_STREAM_ITEM_BYTES);
@@ -451,11 +603,16 @@ export class ClaudeAdapter {
         for (const b of o.message?.content || []) {
           if (b?.type !== "tool_result") continue;
           const callId = b.tool_use_id;
-          emit(toolResult(base(`${callId}:o`), {
-            toolCallId: callId,
-            content: { kind: "text", text: contentText(b.content) || (typeof b.content === "string" ? b.content : "") },
-            isError: !!b.is_error,
-          }));
+          emit(
+            toolResult(base(`${callId}:o`), {
+              toolCallId: callId,
+              content: {
+                kind: "text",
+                text: contentText(b.content) || (typeof b.content === "string" ? b.content : ""),
+              },
+              isError: !!b.is_error,
+            }),
+          );
         }
         return;
       }
@@ -470,7 +627,13 @@ export class ClaudeAdapter {
         // Surface any non-success outcome — "no conversation found", API
         // errors, execution errors — or the app just sees a silent no-op.
         if (o.is_error || (o.subtype && o.subtype !== "success")) {
-          emit(systemEvent(base(`${sessionId}:err`), String(o.result || o.subtype || "turn failed"), "error"));
+          emit(
+            systemEvent(
+              base(`${sessionId}:err`),
+              String(o.result || o.subtype || "turn failed"),
+              "error",
+            ),
+          );
         }
         finish();
       }
@@ -487,7 +650,9 @@ export class ClaudeAdapter {
       clearTimeout(timer);
       timer = setTimeout(() => {
         console.log(`[turn] claude idle>${TURN_TIMEOUT_MS / 1000}s thread=${sessionId} — killing`);
-        try { child.kill("SIGKILL"); } catch {}
+        try {
+          child.kill("SIGKILL");
+        } catch {}
       }, TURN_TIMEOUT_MS);
     };
     arm();
@@ -495,20 +660,38 @@ export class ClaudeAdapter {
     const rl = createInterface({ input: child.stdout });
     rl.on("line", (line) => {
       arm();
-      if (line) { try { handle(JSON.parse(line)); } catch {} }
+      if (line) {
+        try {
+          handle(JSON.parse(line));
+        } catch {}
+      }
     });
 
     child.on("close", (code) => {
       clearTimeout(timer);
-      console.log(`[turn] claude exit code=${code} thread=${sessionId} in ${Math.round((Date.now() - t0) / 1000)}s ${sawResult ? "(result)" : "(no result)"}${code !== 0 ? ` stderr: ${stderrTail.trim().slice(-300)}` : ""}`);
+      console.log(
+        `[turn] claude exit code=${code} thread=${sessionId} in ${Math.round((Date.now() - t0) / 1000)}s ${sawResult ? "(result)" : "(no result)"}${code !== 0 ? ` stderr: ${stderrTail.trim().slice(-300)}` : ""}`,
+      );
       if (!sawResult && code !== 0 && !settled) {
-        emit(systemEvent(base(`${sessionId}:err`), `claude exited (${code}): ${stderrTail.trim().slice(-500)}`, "error"));
+        emit(
+          systemEvent(
+            base(`${sessionId}:err`),
+            `claude exited (${code}): ${stderrTail.trim().slice(-500)}`,
+            "error",
+          ),
+        );
       }
       finish();
     });
     child.on("error", (e) => {
       clearTimeout(timer);
-      emit(systemEvent(base(`${sessionId}:err`), `claude failed to start: ${e?.message || e}`, "error"));
+      emit(
+        systemEvent(
+          base(`${sessionId}:err`),
+          `claude failed to start: ${e?.message || e}`,
+          "error",
+        ),
+      );
       finish();
     });
 
@@ -530,7 +713,11 @@ export class ClaudeAdapter {
 function judgeTranscript(file, liveInCwd = null) {
   if (!file) return { activity: "idle", lastActivityAt: null };
   let mtimeMs;
-  try { mtimeMs = statSync(file).mtimeMs; } catch { return { activity: "idle", lastActivityAt: null }; }
+  try {
+    mtimeMs = statSync(file).mtimeMs;
+  } catch {
+    return { activity: "idle", lastActivityAt: null };
+  }
   const lastActivityAt = new Date(mtimeMs).toISOString();
   const sinceWrite = Date.now() - mtimeMs;
   const windowMs = liveInCwd ? LIVE_EXTENDED_WINDOW_MS : RUNNING_WINDOW_MS;
@@ -540,12 +727,17 @@ function judgeTranscript(file, liveInCwd = null) {
   const lines = readTailLines(file);
   for (let i = lines.length - 1; i >= 0; i--) {
     let o;
-    try { o = JSON.parse(lines[i]); } catch { continue; }
+    try {
+      o = JSON.parse(lines[i]);
+    } catch {
+      continue;
+    }
     if (o.type === "assistant") {
       const blocks = o.message?.content || [];
       const lastBlock = Array.isArray(blocks) ? blocks[blocks.length - 1] : null;
       // Ends on tool_use → a tool is (was) executing; text → the agent finished.
-      if (lastBlock?.type === "tool_use") return { activity: recent ? "running" : "completed", lastActivityAt };
+      if (lastBlock?.type === "tool_use")
+        return { activity: recent ? "running" : "completed", lastActivityAt };
       return { activity: "completed", lastActivityAt };
     }
     if (o.type === "user") {
@@ -570,8 +762,13 @@ function shellify(name, input) {
 function failedTurn(threadId, message, onEvent, level = "error") {
   try {
     onEvent({
-      id: `${threadId}:spawn-err`, conversationId: threadId, seq: 1,
-      ts: new Date().toISOString(), type: "system_event", message, level,
+      id: `${threadId}:spawn-err`,
+      conversationId: threadId,
+      seq: 1,
+      ts: new Date().toISOString(),
+      type: "system_event",
+      message,
+      level,
     });
   } catch {}
   return { stop: () => {}, done: Promise.resolve(threadId) };
@@ -585,11 +782,15 @@ function failedTurn(threadId, message, onEvent, level = "error") {
 function scanTranscript(file, st) {
   return new Promise((resolve) => {
     const id = path.basename(file, ".jsonl");
-    let cwd = null, createdAt = null, gitBranch = null, name = null;
-    let preview = null;         // first real prose message — what a human titles it
+    let cwd = null,
+      createdAt = null,
+      gitBranch = null,
+      name = null;
+    let preview = null; // first real prose message — what a human titles it
     let previewFallback = null; // first slash-command chip, if that's all there is
     let sawUserLine = false;
-    let lines = 0, bytes = 0;
+    let lines = 0,
+      bytes = 0;
     const stream = createReadStream(file, "utf8");
     const rl = createInterface({ input: stream, crlfDelay: Infinity });
     const settle = () => {
@@ -612,19 +813,28 @@ function scanTranscript(file, st) {
         if (!permissionMode && line.includes("permissionMode")) {
           try {
             const o = JSON.parse(line);
-            if (typeof o.permissionMode === "string") permissionMode = CLAUDE_MODE[o.permissionMode] || null;
+            if (typeof o.permissionMode === "string")
+              permissionMode = CLAUDE_MODE[o.permissionMode] || null;
           } catch {}
         }
         if (name && permissionMode) break;
       }
       resolve({
-        id, filePath: file, cwd, name, preview: preview || previewFallback,
-        createdAt, updatedAt: new Date(st.mtimeMs).toISOString(),
-        gitBranch, sizeBytes: st.size, permissionMode,
+        id,
+        filePath: file,
+        cwd,
+        name,
+        preview: preview || previewFallback,
+        createdAt,
+        updatedAt: new Date(st.mtimeMs).toISOString(),
+        gitBranch,
+        sizeBytes: st.size,
+        permissionMode,
       });
     };
     rl.on("line", (line) => {
-      lines++; bytes += line.length;
+      lines++;
+      bytes += line.length;
       if (line) {
         try {
           const o = JSON.parse(line);
@@ -635,7 +845,10 @@ function scanTranscript(file, st) {
           if (!name && o.type === "ai-title" && o.aiTitle) name = String(o.aiTitle).slice(0, 200);
           if (!preview && isRealUserLine(o)) {
             sawUserLine = true;
-            const raw = typeof o.message.content === "string" ? o.message.content : contentText(o.message.content);
+            const raw =
+              typeof o.message.content === "string"
+                ? o.message.content
+                : contentText(o.message.content);
             const p = parseUserMessage(raw, "claude");
             // A session often opens with slash commands (/clear, /model) before
             // the real ask — keep scanning for prose and only fall back to the

@@ -112,11 +112,7 @@ export class PounceAdapter {
     return out;
   }
 
-  #finalizeOpen(
-    conversationId: string,
-    ts: string,
-    out: TimelineEvent[],
-  ): void {
+  #finalizeOpen(conversationId: string, ts: string, out: TimelineEvent[]): void {
     const open = this.#openAssistant.get(conversationId);
     if (!open) return;
     out.push({

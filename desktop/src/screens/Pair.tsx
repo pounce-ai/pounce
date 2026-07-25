@@ -66,7 +66,8 @@ export default function PairScreen() {
           <>
             <Ionicons name="cloud-offline-outline" size={40} color={COLOR.fgFaint} />
             <Text style={s.hintText}>
-              The local bridge isn't reachable yet. Give it a few seconds after launch, then reopen this window.
+              The local bridge isn't reachable yet. Give it a few seconds after launch, then reopen
+              this window.
             </Text>
           </>
         ) : !info ? (

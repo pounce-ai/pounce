@@ -81,7 +81,13 @@ const s = StyleSheet.create((theme) => ({
     paddingTop: 16,
   },
   header: { marginBottom: 16, alignItems: "center" },
-  grabber: { marginBottom: 12, height: 4, width: 36, borderRadius: 999, backgroundColor: theme.colors.border },
+  grabber: {
+    marginBottom: 12,
+    height: 4,
+    width: 36,
+    borderRadius: 999,
+    backgroundColor: theme.colors.border,
+  },
   title: { fontSize: 12, color: theme.colors.fgMuted },
   resolvedRow: {
     flexDirection: "row",

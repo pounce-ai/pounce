@@ -34,18 +34,25 @@ export class SessionIndex {
   }
 
   /** Register a callback fired with a thread id whose file changed/vanished. */
-  onDirty(cb) { this._dirty.add(cb); }
+  onDirty(cb) {
+    this._dirty.add(cb);
+  }
 
   /** First call walks + watches; later calls are free. Never rejects. */
   ensure() {
-    if (!this._ready) this._ready = this._scanAll().then(() => this._watch()).catch(() => {});
+    if (!this._ready)
+      this._ready = this._scanAll()
+        .then(() => this._watch())
+        .catch(() => {});
     return this._ready;
   }
 
   /** All metas, newest activity first. */
   async list() {
     await this.ensure();
-    return [...this.metas.values()].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+    return [...this.metas.values()].sort((a, b) =>
+      (b.updatedAt || "").localeCompare(a.updatedAt || ""),
+    );
   }
 
   async get(id) {
@@ -61,10 +68,16 @@ export class SessionIndex {
 
   async _scanOne(filePath) {
     let st;
-    try { st = statSync(filePath); } catch { return this._drop(filePath); }
+    try {
+      st = statSync(filePath);
+    } catch {
+      return this._drop(filePath);
+    }
     if (!st.isFile()) return;
     let meta = null;
-    try { meta = await this.scanFile(filePath, st); } catch {}
+    try {
+      meta = await this.scanFile(filePath, st);
+    } catch {}
     if (!meta || !meta.id) return;
     // The same file may have produced a meta before — keep the id↔path maps consistent.
     const prevId = this.byPath.get(filePath);
@@ -81,7 +94,13 @@ export class SessionIndex {
     this._emit(id);
   }
 
-  _emit(id) { for (const cb of this._dirty) { try { cb(id); } catch {} } }
+  _emit(id) {
+    for (const cb of this._dirty) {
+      try {
+        cb(id);
+      } catch {}
+    }
+  }
 
   _onFsEvent(relName) {
     if (!relName) return; // platform gave no filename — ignore rather than rescan
@@ -89,13 +108,16 @@ export class SessionIndex {
     if (!this.match(path.basename(full))) return;
     // Debounce per file: agents append transcripts in bursts.
     clearTimeout(this._timers.get(full));
-    this._timers.set(full, setTimeout(() => {
-      this._timers.delete(full);
-      void this._scanOne(full).then(() => {
-        const id = this.byPath.get(full);
-        if (id) this._emit(id);
-      });
-    }, this.debounceMs));
+    this._timers.set(
+      full,
+      setTimeout(() => {
+        this._timers.delete(full);
+        void this._scanOne(full).then(() => {
+          const id = this.byPath.get(full);
+          if (id) this._emit(id);
+        });
+      }, this.debounceMs),
+    );
   }
 
   _watch() {
@@ -118,16 +140,24 @@ export class SessionIndex {
         if (d.isDirectory()) watchDir(path.join(this.root, d.name), d.name);
       }
       // New first-level dirs after boot: re-attach when the root reports them.
-      this._watchers.push(watch(this.root, (_e, f) => {
-        if (!f) return;
-        const full = path.join(this.root, f);
-        try { if (statSync(full).isDirectory()) watchDir(full, f); } catch {}
-      }));
+      this._watchers.push(
+        watch(this.root, (_e, f) => {
+          if (!f) return;
+          const full = path.join(this.root, f);
+          try {
+            if (statSync(full).isDirectory()) watchDir(full, f);
+          } catch {}
+        }),
+      );
     } catch {}
   }
 
   close() {
-    for (const w of this._watchers) { try { w.close(); } catch {} }
+    for (const w of this._watchers) {
+      try {
+        w.close();
+      } catch {}
+    }
     for (const t of this._timers.values()) clearTimeout(t);
     this._watchers = [];
     this._timers.clear();
@@ -138,7 +168,11 @@ export class SessionIndex {
 function* walkFiles(root, match, depth = 0) {
   if (depth > 6) return; // safety bound; session trees are ≤4 deep
   let entries;
-  try { entries = readdirSync(root, { withFileTypes: true }); } catch { return; }
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return;
+  }
   for (const e of entries) {
     const full = path.join(root, e.name);
     if (e.isDirectory()) yield* walkFiles(full, match, depth + 1);

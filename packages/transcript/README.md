@@ -14,7 +14,12 @@ Framework-agnostic, **zero runtime dependencies**, plain ESM — runs in a bundl
 ## API
 
 ```js
-import { stripNoise, parseUserMessage, isEmptyUserMessage, cleanAssistantText } from "@pounce/transcript";
+import {
+  stripNoise,
+  parseUserMessage,
+  isEmptyUserMessage,
+  cleanAssistantText,
+} from "@pounce/transcript";
 
 // Server-side / ingest: remove only zero-value junk, keep presentation tags.
 stripNoise(rawText, "codex"); // → readable text for any client
@@ -45,14 +50,14 @@ per agent**, never a blanket XML strip. Unknown agents pass through untouched.
 Verified against real `~/.claude`, `~/.codex`, and `~/.local/share/opencode`
 transcripts.
 
-| Agent | Body plumbing | Treatment |
-|---|---|---|
-| **claude** | `<command-name\|message\|args>` | slash-command chip (message/args folded in) |
-| | `<local-command-stdout\|stderr>`, `<bash-input\|stdout\|stderr>` | collapsed output note |
-| | `<system-reminder>`, `<local-command-caveat>`, `<user-prompt-submit-hook>` | stripped (noise) |
-| **codex** | `<INSTRUCTIONS>` (AGENTS.md), `<environment_context>`, `<user_instructions>`, `# AGENTS.md instructions for <path>` header | stripped (injected context, not turns) |
-| **opencode** | none — plain markdown | passthrough |
-| **others** (amp/pi/grok/hermes/…) | unknown | passthrough (safe) |
+| Agent                             | Body plumbing                                                                                                              | Treatment                                   |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| **claude**                        | `<command-name\|message\|args>`                                                                                            | slash-command chip (message/args folded in) |
+|                                   | `<local-command-stdout\|stderr>`, `<bash-input\|stdout\|stderr>`                                                           | collapsed output note                       |
+|                                   | `<system-reminder>`, `<local-command-caveat>`, `<user-prompt-submit-hook>`                                                 | stripped (noise)                            |
+| **codex**                         | `<INSTRUCTIONS>` (AGENTS.md), `<environment_context>`, `<user_instructions>`, `# AGENTS.md instructions for <path>` header | stripped (injected context, not turns)      |
+| **opencode**                      | none — plain markdown                                                                                                      | passthrough                                 |
+| **others** (amp/pi/grok/hermes/…) | unknown                                                                                                                    | passthrough (safe)                          |
 
 Add an agent by extending `AGENT_RULES` in `src/index.js` — `noise` tags are
 stripped everywhere, `command`/`output` map tags to chips/notes, and `present`

@@ -93,7 +93,13 @@ const s = StyleSheet.create((theme) => ({
     paddingHorizontal: 32,
   },
   emoji: { fontSize: 40 },
-  title: { marginTop: 12, textAlign: "center", fontSize: 16, fontWeight: "600", color: theme.colors.fg },
+  title: {
+    marginTop: 12,
+    textAlign: "center",
+    fontSize: 16,
+    fontWeight: "600",
+    color: theme.colors.fg,
+  },
   body: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   continueBtn: {
     marginTop: 24,

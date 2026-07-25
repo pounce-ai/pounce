@@ -25,7 +25,11 @@ export function tunnelAvailable(): boolean {
 
 /** Start (or reuse) the loopback proxy; resolves the local port. Idempotent
  *  per (nodeId, relay, token) — the native side keeps one proxy per peer. */
-export async function startTunnel(nodeId: string, relay: string | null, token: string): Promise<number> {
+export async function startTunnel(
+  nodeId: string,
+  relay: string | null,
+  token: string,
+): Promise<number> {
   if (!native) throw new Error("tunnel module not in this build");
   return native.start(nodeId, relay, token);
 }

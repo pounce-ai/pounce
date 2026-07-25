@@ -18,7 +18,14 @@
 import http from "node:http";
 import net from "node:net";
 import { execFileSync, spawn } from "node:child_process";
-import { createReadStream, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  createReadStream,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { createInterface } from "node:readline";
 import os from "node:os";
 import path from "node:path";
@@ -27,7 +34,13 @@ import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import { createHost } from "./agents/host.mjs";
 import { resolvePermission } from "./agents/acp.mjs";
-import { startInteractiveSession, answerPrompt, pendingPrompt, isInteractive, sendInput } from "./agents/pty-turn.mjs";
+import {
+  startInteractiveSession,
+  answerPrompt,
+  pendingPrompt,
+  isInteractive,
+  sendInput,
+} from "./agents/pty-turn.mjs";
 import { agentEnv, binPath, primaryLanIp } from "./agents/env.mjs";
 import { readConfig, writeConfig } from "./agents/config.mjs";
 import { createHistorySearch } from "./agents/search.mjs";
@@ -56,7 +69,13 @@ else if (process.env.POUNCE_NO_CTX_INSTALL !== "1") void historySearch.ensureIns
 const BRIDGE_STARTED_AT = new Date().toISOString();
 /** /v1/daemon payload — kept shape-compatible with the old daemon report. */
 function hostInfo() {
-  return { running: true, pid: process.pid, startedAt: BRIDGE_STARTED_AT, uptimeSecs: Math.round(process.uptime()), activeTurns };
+  return {
+    running: true,
+    pid: process.pid,
+    startedAt: BRIDGE_STARTED_AT,
+    uptimeSecs: Math.round(process.uptime()),
+    activeTurns,
+  };
 }
 const CACHE_MS = 20_000;
 const cache = new Map(); // key -> { at, value }
@@ -111,18 +130,30 @@ function gitList(cwd, args) {
 function exec(cmd, args, cwd, timeoutMs = 0, env = undefined, input = undefined) {
   return new Promise((resolve) => {
     const p = spawn(cmd, args, {
-      cwd, env, windowsHide: true,
+      cwd,
+      env,
+      windowsHide: true,
       stdio: [input != null ? "pipe" : "ignore", "pipe", "pipe"],
     });
-    let out = "", err = "", killed = false;
-    const timer = timeoutMs ? setTimeout(() => { killed = true; p.kill("SIGKILL"); }, timeoutMs) : null;
+    let out = "",
+      err = "",
+      killed = false;
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          killed = true;
+          p.kill("SIGKILL");
+        }, timeoutMs)
+      : null;
     p.stdout.on("data", (d) => (out += d));
     p.stderr.on("data", (d) => (err += d));
     p.on("close", (code) => {
       if (timer) clearTimeout(timer);
       resolve({ code, out, err: err + (killed ? "\n[command timed out]" : "") });
     });
-    p.on("error", (e) => { if (timer) clearTimeout(timer); resolve({ code: -1, out: "", err: String(e?.message || e) }); });
+    p.on("error", (e) => {
+      if (timer) clearTimeout(timer);
+      resolve({ code: -1, out: "", err: String(e?.message || e) });
+    });
     if (input != null) {
       p.stdin.write(input);
       p.stdin.end();
@@ -176,9 +207,13 @@ async function gitChanges(cwd) {
   }
   const diffText = truncateDiff(diff.out, 200_000);
   // "behind\tahead" relative to upstream; no upstream → nulls.
-  const [behind, ahead] = upstream.code === 0
-    ? upstream.out.trim().split(/\s+/).map((n) => Number(n) || 0)
-    : [null, null];
+  const [behind, ahead] =
+    upstream.code === 0
+      ? upstream.out
+          .trim()
+          .split(/\s+/)
+          .map((n) => Number(n) || 0)
+      : [null, null];
   return { branch: branch.out.trim(), files, diff: diffText, ahead, behind, conflicts };
 }
 
@@ -213,9 +248,19 @@ async function gitSuggest(cwd) {
   ].join("\n");
   // Run from the OS temp dir, not the repo: claude -p records a session under
   // its cwd's project, which would surface these one-shot calls as threads.
-  const run = await exec(binPath("claude"), ["-p", "--model", "haiku"], os.tmpdir(), 90_000, agentEnv(), prompt);
+  const run = await exec(
+    binPath("claude"),
+    ["-p", "--model", "haiku"],
+    os.tmpdir(),
+    90_000,
+    agentEnv(),
+    prompt,
+  );
   if (run.code !== 0) return { ok: false, error: (run.err || "claude CLI failed").slice(0, 400) };
-  const body = run.out.replace(/^```(?:json)?/m, "").replace(/```\s*$/m, "").trim();
+  const body = run.out
+    .replace(/^```(?:json)?/m, "")
+    .replace(/```\s*$/m, "")
+    .trim();
   const start = body.indexOf("{");
   const end = body.lastIndexOf("}");
   try {
@@ -223,7 +268,9 @@ async function gitSuggest(cwd) {
     const clean = (v) => (typeof v === "string" ? v.trim() : "");
     return {
       ok: true,
-      branchName: clean(s.branchName).replace(/[^a-zA-Z0-9._/-]+/g, "-").replace(/^-+|-+$/g, ""),
+      branchName: clean(s.branchName)
+        .replace(/[^a-zA-Z0-9._/-]+/g, "-")
+        .replace(/^-+|-+$/g, ""),
       commitMessage: clean(s.commitMessage),
       prTitle: clean(s.prTitle),
       prBody: clean(s.prBody),
@@ -245,8 +292,12 @@ async function gitChecks(cwd) {
     const arr = JSON.parse(r.out);
     if (!Array.isArray(arr) || !arr.length) return { checks: null, failed: 0, total: 0 };
     const states = arr.map((c) => String(c.state || "").toUpperCase());
-    const failed = states.filter((s) => ["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"].includes(s)).length;
-    const pending = states.filter((s) => ["PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED", "EXPECTED"].includes(s)).length;
+    const failed = states.filter((s) =>
+      ["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"].includes(s),
+    ).length;
+    const pending = states.filter((s) =>
+      ["PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED", "EXPECTED"].includes(s),
+    ).length;
     const checks = failed ? "failing" : pending ? "pending" : "passing";
     return { checks, failed, total: states.length };
   } catch {
@@ -317,7 +368,11 @@ function listDirs(dir) {
     let isDir = d.isDirectory();
     const full = path.join(dir, d.name);
     if (!isDir && d.isSymbolicLink()) {
-      try { isDir = statSync(full).isDirectory(); } catch { continue; }
+      try {
+        isDir = statSync(full).isDirectory();
+      } catch {
+        continue;
+      }
     }
     if (!isDir) continue;
     out.push({ name: d.name, path: full, isRepo: existsSync(path.join(full, ".git")) });
@@ -343,7 +398,12 @@ function repoInfo(cwd) {
     // the directory exists — hardcoding isLive:false made every scratch thread
     // read-only ("archived") the moment it finished, forcing a NEW session per
     // follow-up instead of reusing the one thread.
-    return { repo: "Scratch", isWorktree: false, isLive: !!norm && existsSync(cwd), worktree: null };
+    return {
+      repo: "Scratch",
+      isWorktree: false,
+      isLive: !!norm && existsSync(cwd),
+      worktree: null,
+    };
   }
   const live = existsSync(cwd);
   const m = norm.match(/\/worktrees\/([^/]+)\/(.+)$/);
@@ -469,7 +529,9 @@ async function getThreads(fresh = false) {
     // is only needed to RUN new turns (gated in startTurn). Empty dirs cost nothing.
     const avail = agents.filter((a) => a.wire === "jsonl" && a.id !== "shell");
     const lists = await Promise.all(avail.map((a) => listThreads(a.id).catch(() => [])));
-    const threads = lists.flat().sort((x, y) => (y.createdAt || "").localeCompare(x.createdAt || ""));
+    const threads = lists
+      .flat()
+      .sort((x, y) => (y.createdAt || "").localeCompare(x.createdAt || ""));
 
     // Fold worktree sessions into their real origin repo before clients see the
     // list (cheap: one git call per unresolved workspace, then cached).
@@ -513,7 +575,9 @@ function enrichThreadActivity(threads) {
       if (a.lastActivityAt) t.lastActivityAt = a.lastActivityAt;
       flagAwaitingPrompt(t); // a pending prompt outranks transcript-derived state
     } catch {}
-  }).finally(() => { enrichInFlight = false; });
+  }).finally(() => {
+    enrichInFlight = false;
+  });
 }
 
 function status() {
@@ -543,7 +607,10 @@ function streamTurn(agent, threadId, text, cwd, onEvent, onDone, opts = {}) {
   // onDone must fire even when the turn errors — otherwise the client stream
   // never gets its terminal frame and the busy marker leaks.
   void t.done.then(
-    (realId) => { historySearch.refresh(); onDone(realId || threadId); },
+    (realId) => {
+      historySearch.refresh();
+      onDone(realId || threadId);
+    },
     () => onDone(threadId),
   );
   return () => t.stop();
@@ -603,7 +670,11 @@ const MODEL_PRICES = {
 /** Price row for a model id, tolerating date-suffixed ids (…-20251001). */
 function priceFor(model) {
   if (!model) return null;
-  return MODEL_PRICES[model] || MODEL_PRICES[Object.keys(MODEL_PRICES).find((k) => model.startsWith(k))] || null;
+  return (
+    MODEL_PRICES[model] ||
+    MODEL_PRICES[Object.keys(MODEL_PRICES).find((k) => model.startsWith(k))] ||
+    null
+  );
 }
 
 /** USD for one assistant message's usage, weighting cache tokens per the model. */
@@ -643,17 +714,25 @@ function getUsage(agent, thread, cwd) {
     if (!file) return { available: false, reason: "no-transcript" };
     const tokens = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
     const outByModel = new Map();
-    let cost = 0, costComplete = true, messages = 0;
+    let cost = 0,
+      costComplete = true,
+      messages = 0;
     // Stream the transcript line-by-line — reading a multi-million-token thread's
     // JSONL fully into memory (readFileSync + split) is a large, avoidable spike.
     let rl;
     try {
       rl = createInterface({ input: createReadStream(file, "utf8"), crlfDelay: Infinity });
-    } catch { return { available: false, reason: "no-transcript" }; }
+    } catch {
+      return { available: false, reason: "no-transcript" };
+    }
     for await (const line of rl) {
       if (!line) continue;
       let o;
-      try { o = JSON.parse(line); } catch { continue; }
+      try {
+        o = JSON.parse(line);
+      } catch {
+        continue;
+      }
       if (o.type !== "assistant") continue;
       const m = o.message;
       const u = m && m.usage;
@@ -664,14 +743,23 @@ function getUsage(agent, thread, cwd) {
       tokens.cacheRead += u.cache_read_input_tokens || 0;
       tokens.cacheCreation += u.cache_creation_input_tokens || 0;
       const c = msgCost(m.model, u);
-      if (c == null) costComplete = false; else cost += c;
+      if (c == null) costComplete = false;
+      else cost += c;
       if (m.model) outByModel.set(m.model, (outByModel.get(m.model) || 0) + (u.output_tokens || 0));
     }
     if (!messages) return { available: false, reason: "no-usage" };
     const models = [...outByModel.keys()];
     const model = models.slice().sort((a, b) => outByModel.get(b) - outByModel.get(a))[0] || null;
     const total = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreation;
-    return { available: true, model, models, tokens: { ...tokens, total }, cost: Math.round(cost * 100) / 100, costComplete, messages };
+    return {
+      available: true,
+      model,
+      models,
+      tokens: { ...tokens, total },
+      cost: Math.round(cost * 100) / 100,
+      costComplete,
+      messages,
+    };
   });
 }
 
@@ -712,17 +800,27 @@ async function warmMessages(threads) {
   const byId = new Map(live.map((t) => [t.id, t]));
   const picked = [];
   const seen = new Set();
-  const add = (t) => { if (t && !seen.has(t.id)) { seen.add(t.id); picked.push(t); } };
+  const add = (t) => {
+    if (t && !seen.has(t.id)) {
+      seen.add(t.id);
+      picked.push(t);
+    }
+  };
   // 1) usage-predicted threads first (while the hint is fresh).
   if (Date.now() - warmHints.at < WARM_HINT_TTL) {
     for (const id of warmHints.ids) add(byId.get(id));
   }
   // 2) fall back to most-recently-active threads to fill the budget.
-  for (const t of live) { if (picked.length >= WARM_THREADS) break; add(t); }
+  for (const t of live) {
+    if (picked.length >= WARM_THREADS) break;
+    add(t);
+  }
   // Low concurrency: each cold probe holds an Iroh dial for ~4s; don't stampede
   // the daemon. Warm threads short-circuit, so this rarely does real work.
   await mapLimit(picked.slice(0, WARM_THREADS), 2, async (t) => {
-    try { await getMessages(t.agent, t.id); } catch {}
+    try {
+      await getMessages(t.agent, t.id);
+    } catch {}
   });
 }
 
@@ -795,13 +893,17 @@ async function watchTick() {
         if (!prev || prev === cur) continue;
         const label = t.name || t.preview || t.repo || "Task";
         let note = null;
-        if (cur === "completed" && prev === "running") note = { title: "✅ Task done", body: label };
+        if (cur === "completed" && prev === "running")
+          note = { title: "✅ Task done", body: label };
         else if (cur === "failed") note = { title: "❌ Task failed", body: label };
         else if (cur === "awaiting_input") note = { title: "🔔 Waiting on you", body: label };
         if (!note) continue;
         for (const to of pushTokens) {
           messages.push({
-            to, sound: "default", title: note.title, body: note.body,
+            to,
+            sound: "default",
+            title: note.title,
+            body: note.body,
             data: { threadId: t.id, agent: t.agent },
           });
         }
@@ -821,7 +923,13 @@ function readBody(req) {
   return new Promise((resolve) => {
     let b = "";
     req.on("data", (d) => (b += d));
-    req.on("end", () => { try { resolve(JSON.parse(b || "{}")); } catch { resolve({}); } });
+    req.on("end", () => {
+      try {
+        resolve(JSON.parse(b || "{}"));
+      } catch {
+        resolve({});
+      }
+    });
   });
 }
 
@@ -835,7 +943,7 @@ function send(res, code, body) {
 }
 
 let lastClientSeen = 0; // updated on every authed app request — a liveness signal
-let PAIR = null;        // { ip, port, pairUrl, deepLink } — set once we're listening
+let PAIR = null; // { ip, port, pairUrl, deepLink } — set once we're listening
 
 /** Whether the machine-wide tunnel identity belongs to THIS bridge. It always
  *  targets the default-port bridge (see ensureTunnel's singleton guard), so a
@@ -851,7 +959,9 @@ function tunnelEligible() {
  *  previous run still names the right endpoint. Null until a tunnel has run. */
 function tunnelInfo() {
   try {
-    const info = JSON.parse(readFileSync(path.join(os.homedir(), ".pounce", "tunnel.json"), "utf8"));
+    const info = JSON.parse(
+      readFileSync(path.join(os.homedir(), ".pounce", "tunnel.json"), "utf8"),
+    );
     return info?.nodeId ? { nodeId: info.nodeId, relay: info.relay || null } : null;
   } catch {
     return null;
@@ -974,7 +1084,10 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/" || url.pathname === "/ui" || url.pathname === "/qr.svg") {
     if (!isLoopback(req)) return send(res, 403, { error: "local only" });
     if (url.pathname === "/") {
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+      });
       return res.end(UI_HTML);
     }
     if (url.pathname === "/qr.svg") {
@@ -1003,14 +1116,17 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  const auth = req.headers.authorization?.replace(/^Bearer\s+/i, "") || url.searchParams.get("token");
+  const auth =
+    req.headers.authorization?.replace(/^Bearer\s+/i, "") || url.searchParams.get("token");
   if (auth !== TOKEN) return send(res, 401, { error: "unauthorized" });
   lastClientSeen = Date.now();
   if (process.env.BRIDGE_DEBUG) console.log(`[req] ${req.method} ${url.pathname}${url.search}`);
 
   try {
-    if (url.pathname === "/v1/agents") return send(res, 200, { agents: await getAgents(url.searchParams.get("fresh") === "1") });
-    if (url.pathname === "/v1/threads") return send(res, 200, { threads: await getThreads(url.searchParams.get("fresh") === "1") });
+    if (url.pathname === "/v1/agents")
+      return send(res, 200, { agents: await getAgents(url.searchParams.get("fresh") === "1") });
+    if (url.pathname === "/v1/threads")
+      return send(res, 200, { threads: await getThreads(url.searchParams.get("fresh") === "1") });
     // SSE variant: emit each page of threads as it arrives so the app's initial
     // connect renders progressively instead of blocking ~a minute on all the
     // cold-dial pages. `data: {threads:[...]}` per page, then `data: {done:true}`.
@@ -1023,9 +1139,13 @@ const server = http.createServer(async (req, res) => {
       });
       const write = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
       let closed = false;
-      req.on("close", () => { closed = true; });
+      req.on("close", () => {
+        closed = true;
+      });
       try {
-        await streamThreads((page) => { if (!closed) write({ threads: page }); });
+        await streamThreads((page) => {
+          if (!closed) write({ threads: page });
+        });
         if (!closed) write({ done: true });
       } catch (e) {
         if (!closed) write({ error: String(e?.message || e) });
@@ -1054,7 +1174,10 @@ const server = http.createServer(async (req, res) => {
       const q = url.searchParams.get("q");
       if (!q) return send(res, 400, { error: "q required" });
       if (!historySearch.available()) {
-        return send(res, 501, { error: "search unavailable", hint: "install ctx on this machine: https://ctx.rs" });
+        return send(res, 501, {
+          error: "search unavailable",
+          hint: "install ctx on this machine: https://ctx.rs",
+        });
       }
       const agent = url.searchParams.get("agent") || undefined;
       const workspace = url.searchParams.get("workspace") || undefined;
@@ -1064,7 +1187,8 @@ const server = http.createServer(async (req, res) => {
       const providers = (await getAgents()).map((a) => a.id);
       const key = `search:${agent || "*"}:${workspace || "*"}:${since || "*"}:${thread || "*"}:${limit}:${q}`;
       const results = await cached(key, 15_000, () =>
-        historySearch.search({ q, agent, workspace, since, thread, limit, providers }));
+        historySearch.search({ q, agent, workspace, since, thread, limit, providers }),
+      );
       return send(res, 200, { results });
     }
     if (url.pathname === "/v1/messages") {
@@ -1079,7 +1203,8 @@ const server = http.createServer(async (req, res) => {
       const agent = url.searchParams.get("agent");
       const thread = url.searchParams.get("thread");
       const ref = url.searchParams.get("ref");
-      if (!agent || !thread || !ref) return send(res, 400, { error: "agent, thread, ref required" });
+      if (!agent || !thread || !ref)
+        return send(res, 400, { error: "agent, thread, ref required" });
       const img = await host.getImage(agent, thread, ref).catch(() => null);
       if (!img) return send(res, 404, { error: "image not found" });
       res.writeHead(200, {
@@ -1096,15 +1221,25 @@ const server = http.createServer(async (req, res) => {
       // deliberately IMAGE-ONLY (never arbitrary files) so this can't exfiltrate
       // source/secrets. Streamed + size-capped.
       const IMG_MIME = {
-        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
-        ".webp": "image/webp", ".bmp": "image/bmp", ".heic": "image/heic", ".svg": "image/svg+xml",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+        ".heic": "image/heic",
+        ".svg": "image/svg+xml",
       };
       const p = url.searchParams.get("path");
       if (!p) return send(res, 400, { error: "path required" });
       const mime = IMG_MIME[path.extname(p).toLowerCase()];
       if (!mime) return send(res, 415, { error: "not an image" });
       let st;
-      try { st = statSync(p); } catch { return send(res, 404, { error: "not found" }); }
+      try {
+        st = statSync(p);
+      } catch {
+        return send(res, 404, { error: "not found" });
+      }
       if (!st.isFile() || st.size > 25 * 1024 * 1024) return send(res, 404, { error: "not found" });
       res.writeHead(200, {
         "content-type": mime,
@@ -1147,13 +1282,16 @@ const server = http.createServer(async (req, res) => {
       setWarmHints(body?.threads);
       // Warm immediately off the cached thread list so a just-updated ranking
       // doesn't wait for the next 15s tick.
-      void getThreads().then(warmMessages).catch(() => {});
+      void getThreads()
+        .then(warmMessages)
+        .catch(() => {});
       return send(res, 200, { ok: true });
     }
     if (url.pathname === "/v1/turn" && req.method === "POST") {
       const body = await readBody(req);
       const { agent, threadId, text } = body;
-      if (!agent || !threadId || !text) return send(res, 400, { error: "agent, threadId, text required" });
+      if (!agent || !threadId || !text)
+        return send(res, 400, { error: "agent, threadId, text required" });
       return send(res, 200, { events: await runTurn(agent, threadId, text) });
     }
     if (url.pathname === "/v1/files") {
@@ -1170,7 +1308,11 @@ const server = http.createServer(async (req, res) => {
       let dir = url.searchParams.get("path") || home;
       if (!existsSync(dir)) dir = home;
       let entries = [];
-      try { entries = listDirs(dir); } catch { entries = []; }
+      try {
+        entries = listDirs(dir);
+      } catch {
+        entries = [];
+      }
       // At home or a filesystem root there is no "up" — path.dirname of a root
       // (/, C:\) returns itself, which would loop the folder browser forever.
       const up = path.dirname(dir);
@@ -1193,9 +1335,20 @@ const server = http.createServer(async (req, res) => {
       // to ~/.pounce/tunnel.json at its startup) + this bridge's token. The
       // phone dials the tunnel by node id and speaks this same HTTP API.
       const info = tunnelEligible() ? tunnelInfo() : null;
-      return send(res, 200, info
-        ? { pairing: { nodeId: info.nodeId, token: TOKEN, hostName: os.hostname().replace(/\.local$/, ""), relay: info.relay } }
-        : { pairing: null, error: "tunnel not running" });
+      return send(
+        res,
+        200,
+        info
+          ? {
+              pairing: {
+                nodeId: info.nodeId,
+                token: TOKEN,
+                hostName: os.hostname().replace(/\.local$/, ""),
+                relay: info.relay,
+              },
+            }
+          : { pairing: null, error: "tunnel not running" },
+      );
     }
     if (url.pathname === "/v1/tunnel/ensure") {
       // (Re)spawn pounce-tunnel if a binary is available and it isn't running —
@@ -1208,7 +1361,12 @@ const server = http.createServer(async (req, res) => {
       // the wrong bridge).
       ensureTunnel();
       const eligible = tunnelEligible();
-      return send(res, 200, { eligible, running: !!tunnelChild, binary: tunnelBinary(), tunnel: eligible ? tunnelInfo() : null });
+      return send(res, 200, {
+        eligible,
+        running: !!tunnelChild,
+        binary: tunnelBinary(),
+        tunnel: eligible ? tunnelInfo() : null,
+      });
     }
     if (url.pathname === "/v1/git/changes") {
       const cwd = url.searchParams.get("cwd");
@@ -1228,7 +1386,10 @@ const server = http.createServer(async (req, res) => {
       if (add.code !== 0) return send(res, 200, { ok: false, error: add.err || "git add failed" });
       const commit = await git(cwd, ["commit", "-m", message]);
       if (commit.code !== 0)
-        return send(res, 200, { ok: false, error: commit.err || commit.out || "nothing to commit" });
+        return send(res, 200, {
+          ok: false,
+          error: commit.err || commit.out || "nothing to commit",
+        });
       const sha = (await git(cwd, ["rev-parse", "--short", "HEAD"])).out.trim();
       cache.delete("threads");
       return send(res, 200, { ok: true, sha });
@@ -1251,16 +1412,34 @@ const server = http.createServer(async (req, res) => {
       const { cwd, name } = await readBody(req);
       if (!cwd || !name) return send(res, 400, { error: "cwd, name required" });
       const r = await git(cwd, ["checkout", "-b", name]);
-      return send(res, 200, { ok: r.code === 0, error: r.code === 0 ? undefined : (r.err || r.out).trim() });
+      return send(res, 200, {
+        ok: r.code === 0,
+        error: r.code === 0 ? undefined : (r.err || r.out).trim(),
+      });
     }
     if (url.pathname === "/v1/git/pr" && req.method === "POST") {
       const { cwd, title, body, draft } = await readBody(req);
       if (!cwd) return send(res, 400, { error: "cwd required" });
       // Ensure the branch is pushed first, then open a PR via gh (if installed).
       let push = await git(cwd, ["push", "-u", "origin", "HEAD"]);
-      const r = await exec("gh", ["pr", "create", "--fill", ...(draft ? ["--draft"] : []), ...(title ? ["--title", title] : []), ...(body ? ["--body", body] : [])], cwd);
+      const r = await exec(
+        "gh",
+        [
+          "pr",
+          "create",
+          "--fill",
+          ...(draft ? ["--draft"] : []),
+          ...(title ? ["--title", title] : []),
+          ...(body ? ["--body", body] : []),
+        ],
+        cwd,
+      );
       if (r.code !== 0)
-        return send(res, 200, { ok: false, error: r.err || "gh not available or PR failed", pushed: push.code === 0 });
+        return send(res, 200, {
+          ok: false,
+          error: r.err || "gh not available or PR failed",
+          pushed: push.code === 0,
+        });
       const urlMatch = (r.out.match(/https?:\/\/\S+/) || [])[0] || null;
       return send(res, 200, { ok: true, url: urlMatch });
     }
@@ -1289,7 +1468,8 @@ const server = http.createServer(async (req, res) => {
       // Answer a pending interactive prompt on a PTY-hosted session by selecting
       // an option (trust / permission / plan / AskUserQuestion / any menu).
       const { threadId, optionIndex } = await readBody(req);
-      if (!threadId || !Number.isInteger(optionIndex)) return send(res, 400, { error: "threadId, optionIndex required" });
+      if (!threadId || !Number.isInteger(optionIndex))
+        return send(res, 400, { error: "threadId, optionIndex required" });
       const ok = await answerPrompt(threadId, optionIndex);
       if (ok) cache.delete("threads"); // activity changes as the turn resumes
       return send(res, 200, { ok });
@@ -1298,7 +1478,8 @@ const server = http.createServer(async (req, res) => {
       // Raw keystrokes / text into a PTY-hosted session — the escape hatch for
       // free-form prompts, ↑/↓ steering, Esc, Ctrl-C. `data` is written verbatim.
       const { threadId, data } = await readBody(req);
-      if (!threadId || typeof data !== "string") return send(res, 400, { error: "threadId, data required" });
+      if (!threadId || typeof data !== "string")
+        return send(res, 400, { error: "threadId, data required" });
       const ok = sendInput(threadId, data);
       if (ok) cache.delete("threads");
       return send(res, 200, { ok });
@@ -1319,7 +1500,8 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok });
     }
     if (url.pathname === "/v1/turn/stream" && req.method === "POST") {
-      const { agent, threadId, text, cwd, images, permissionMode, reasoningEffort, model } = await readBody(req);
+      const { agent, threadId, text, cwd, images, permissionMode, reasoningEffort, model } =
+        await readBody(req);
       if (!agent || !text) return send(res, 400, { error: "agent, text required" });
       res.writeHead(200, {
         "content-type": "text/event-stream",
@@ -1328,14 +1510,28 @@ const server = http.createServer(async (req, res) => {
         "access-control-allow-origin": "*",
       });
       let closed = false;
-      const write = (obj) => { if (!closed) { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch {} } };
+      const write = (obj) => {
+        if (!closed) {
+          try {
+            res.write(`data: ${JSON.stringify(obj)}\n\n`);
+          } catch {}
+        }
+      };
       // Mark the bridge busy until the TURN completes — not until the stream
       // closes — so a daemon restart won't cut the turn off mid-flight.
       activeTurns++;
       let settled = false;
-      const settle = () => { if (!settled) { settled = true; activeTurns = Math.max(0, activeTurns - 1); } };
+      const settle = () => {
+        if (!settled) {
+          settled = true;
+          activeTurns = Math.max(0, activeTurns - 1);
+        }
+      };
       streamTurn(
-        agent, threadId, text, cwd,
+        agent,
+        threadId,
+        text,
+        cwd,
         (ev) => write({ event: ev }),
         (realThreadId) => {
           // The streamed turn changed this thread's history — drop the cache so
@@ -1346,7 +1542,11 @@ const server = http.createServer(async (req, res) => {
           cache.delete("threads");
           settle();
           write({ done: true, threadId: realThreadId });
-          if (!closed) { try { res.end(); } catch {} }
+          if (!closed) {
+            try {
+              res.end();
+            } catch {}
+          }
         },
         { images, permissionMode, reasoningEffort, model },
       );
@@ -1354,7 +1554,9 @@ const server = http.createServer(async (req, res) => {
       // NOT kill the running turn — the agent keeps working, the transcript
       // persists, and the phone catches up via sync. Interrupting is explicit:
       // POST /v1/turn/interrupt (the app's stop button).
-      req.on("close", () => { closed = true; });
+      req.on("close", () => {
+        closed = true;
+      });
       return;
     }
     return send(res, 404, { error: "not found" });
@@ -1372,8 +1574,14 @@ function portInUse(port) {
   return new Promise((resolve) => {
     const sock = net.connect({ port, host: "127.0.0.1" });
     sock.setTimeout(1500);
-    sock.once("connect", () => { sock.destroy(); resolve(true); });
-    sock.once("timeout", () => { sock.destroy(); resolve(false); });
+    sock.once("connect", () => {
+      sock.destroy();
+      resolve(true);
+    });
+    sock.once("timeout", () => {
+      sock.destroy();
+      resolve(false);
+    });
     sock.once("error", () => resolve(false));
   });
 }
@@ -1426,10 +1634,14 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
       // phone is actively connected. Idle = no probing.
       const warm = () => {
         void getAgents().catch(() => {});
-        void getThreads().then(warmMessages).catch(() => {});
+        void getThreads()
+          .then(warmMessages)
+          .catch(() => {});
       };
       warm();
-      setInterval(() => { if (Date.now() - lastClientSeen < 90_000) warm(); }, 15_000);
+      setInterval(() => {
+        if (Date.now() - lastClientSeen < 90_000) warm();
+      }, 15_000);
       setTimeout(watchTick, WATCH_MS);
       ensureTunnel();
       resolve({ server, token: TOKEN, ...PAIR });
@@ -1468,28 +1680,40 @@ function ensureTunnel() {
   // bridges orphan their tunnels (SIGKILL skips the exit handler), and dozens
   // of zombies fighting over one node id made off-LAN a lottery.
   if (!IS_WIN) {
-    try { execFileSync("pkill", ["-f", "pounce-tunnel serve"], { stdio: "ignore" }); } catch {} // exit 1 = no matches
+    try {
+      execFileSync("pkill", ["-f", "pounce-tunnel serve"], { stdio: "ignore" });
+    } catch {} // exit 1 = no matches
   }
   try {
-    tunnelChild = spawn(bin, ["serve", "--token", TOKEN, "--target", `127.0.0.1:${PORT}`],
-      { stdio: ["ignore", "ignore", "ignore"], windowsHide: true });
+    tunnelChild = spawn(bin, ["serve", "--token", TOKEN, "--target", `127.0.0.1:${PORT}`], {
+      stdio: ["ignore", "ignore", "ignore"],
+      windowsHide: true,
+    });
     tunnelChild.on("close", () => {
       tunnelChild = null;
       // Respawn with backoff — a crashing tunnel must not loop hot.
-      setTimeout(ensureTunnel, Math.min(tunnelBackoffMs *= 2, 60_000)).unref();
+      setTimeout(ensureTunnel, Math.min((tunnelBackoffMs *= 2), 60_000)).unref();
     });
-    tunnelChild.on("spawn", () => { tunnelBackoffMs = 1000; });
+    tunnelChild.on("spawn", () => {
+      tunnelBackoffMs = 1000;
+    });
     console.log(`[tunnel] started ${bin}`);
   } catch {
     tunnelChild = null;
   }
 }
-process.on("exit", () => { try { tunnelChild?.kill("SIGTERM"); } catch {} });
+process.on("exit", () => {
+  try {
+    tunnelChild?.kill("SIGTERM");
+  } catch {}
+});
 // Default signal deaths bypass the exit handler — reap the tunnel explicitly
 // so Ctrl-C'd bridges stop leaving identity-squatting orphans behind.
 for (const sig of ["SIGINT", "SIGTERM"]) {
   process.on(sig, () => {
-    try { tunnelChild?.kill("SIGTERM"); } catch {}
+    try {
+      tunnelChild?.kill("SIGTERM");
+    } catch {}
     process.exit(0);
   });
 }
@@ -1498,7 +1722,10 @@ for (const sig of ["SIGINT", "SIGTERM"]) {
 // with the console QR. When imported (desktop app), the caller starts it.
 // pathToFileURL (not string concat) so Windows paths (C:\…) compare correctly.
 const isMain = (() => {
-  try { return !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href; }
-  catch { return false; }
+  try {
+    return !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+  } catch {
+    return false;
+  }
 })();
 if (isMain) void startBridge();

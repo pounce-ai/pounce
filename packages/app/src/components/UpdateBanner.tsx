@@ -59,7 +59,9 @@ export function UpdateBanner() {
         bottom: insets.bottom + 60, // clear the system tab bar
         alignItems: "center",
         opacity: slide,
-        transform: [{ translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
+        transform: [
+          { translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) },
+        ],
       }}
     >
       <View style={s.pill}>

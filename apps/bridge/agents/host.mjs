@@ -38,14 +38,16 @@ export function createHost({ version = () => null } = {}) {
   return {
     /** AgentInfo list, same shape the app already consumes via /v1/agents. */
     async getAgents() {
-      return Promise.all([...adapters.values()].map(async (a) => ({
-        id: a.id,
-        displayName: a.displayName,
-        available: await a.isAvailable().catch(() => false),
-        wire: "jsonl",
-        description: a.description || "",
-        capabilities: a.capabilities,
-      })));
+      return Promise.all(
+        [...adapters.values()].map(async (a) => ({
+          id: a.id,
+          displayName: a.displayName,
+          available: await a.isAvailable().catch(() => false),
+          wire: "jsonl",
+          description: a.description || "",
+          capabilities: a.capabilities,
+        })),
+      );
     },
 
     /** Host status, shape-stable for the app's device card. nodeId/relay are
@@ -104,47 +106,66 @@ export function createHost({ version = () => null } = {}) {
       // Adapters may be async (pre-flight checks) — return a synchronous
       // {stop, done} facade regardless, and honor a stop() that lands before
       // the child has spawned.
-      let inner = null, stopped = false;
+      let inner = null,
+        stopped = false;
       // Opt-in ACP transport (BRIDGE_ACP=1): drive the agent over the Agent
       // Client Protocol instead of its stream-json path — richer tool status,
       // plans, and permission prompts. Falls back to the adapter when the agent
       // has no ACP server available.
       const useAcp = process.env.BRIDGE_ACP === "1" && acpAvailable(agent);
-      const runCli = () => Promise.resolve(adapter(agent).startTurn(opts, onEvent)).then((t) => {
-        inner = t;
-        if (stopped) t.stop();
-        return t.done;
-      });
-      const runAcp = () => Promise.resolve(startAcpTurn(agent, opts, onEvent)).then((t) => {
-        inner = t;
-        if (stopped) t.stop();
-        // ACP rejects `done` ONLY for pre-stream failures (adapter startup
-        // crash, e.g. a bundled runtime dep missing) — retry over the agent's
-        // classic CLI transport so the user's turn still runs. Mid-turn ACP
-        // failures resolve with their own error event and don't retry.
-        return t.done.catch((e) => {
-          if (stopped) throw e;
-          console.log(`[acp] ${agent} pre-stream failure — falling back to CLI transport: ${String(e?.message || e).slice(0, 300)}`);
-          return runCli();
+      const runCli = () =>
+        Promise.resolve(adapter(agent).startTurn(opts, onEvent)).then((t) => {
+          inner = t;
+          if (stopped) t.stop();
+          return t.done;
         });
-      });
+      const runAcp = () =>
+        Promise.resolve(startAcpTurn(agent, opts, onEvent)).then((t) => {
+          inner = t;
+          if (stopped) t.stop();
+          // ACP rejects `done` ONLY for pre-stream failures (adapter startup
+          // crash, e.g. a bundled runtime dep missing) — retry over the agent's
+          // classic CLI transport so the user's turn still runs. Mid-turn ACP
+          // failures resolve with their own error event and don't retry.
+          return t.done.catch((e) => {
+            if (stopped) throw e;
+            console.log(
+              `[acp] ${agent} pre-stream failure — falling back to CLI transport: ${String(e?.message || e).slice(0, 300)}`,
+            );
+            return runCli();
+          });
+        });
       const done = Promise.resolve()
         .then(() => (useAcp ? runAcp() : runCli()))
         .then(
           // A finished turn changed its thread's history — drop stale parses
           // now rather than waiting on the fs watcher's debounce.
-          (realId) => { history.invalidatePrefix(`${agent}:${realId}:`); return realId; },
+          (realId) => {
+            history.invalidatePrefix(`${agent}:${realId}:`);
+            return realId;
+          },
           (e) => {
             try {
               onEvent({
-                id: `${opts.threadId || agent}:err`, conversationId: opts.threadId || null, seq: 1,
-                ts: new Date().toISOString(), type: "system_event", message: String(e?.message || e), level: "error",
+                id: `${opts.threadId || agent}:err`,
+                conversationId: opts.threadId || null,
+                seq: 1,
+                ts: new Date().toISOString(),
+                type: "system_event",
+                message: String(e?.message || e),
+                level: "error",
               });
             } catch {}
             return opts.threadId || null;
           },
         );
-      return { stop: () => { stopped = true; inner?.stop(); }, done };
+      return {
+        stop: () => {
+          stopped = true;
+          inner?.stop();
+        },
+        done,
+      };
     },
 
     interrupt(agent, threadId) {

@@ -37,9 +37,7 @@ export function LiveStrip() {
       >
         <View style={s.headerLeft}>
           {isLive ? <View style={s.liveDot} /> : null}
-          <Text style={s.headerLabel}>
-            {isLive ? `Live · ${live.length}` : "Recent"}
-          </Text>
+          <Text style={s.headerLabel}>{isLive ? `Live · ${live.length}` : "Recent"}</Text>
         </View>
         <Text style={s.seeAll}>See all →</Text>
       </Pressable>
@@ -68,21 +66,26 @@ function LiveCard({ session, repoName }: { session: Session; repoName: string })
       style={({ pressed }) => pressed && s.pressed70}
     >
       <GlassCard radius={14} style={[s.card, session.needsAttention && s.cardNeeds]}>
-      <View style={s.cardIconRow}>
-        {/* Never animates: this strip is a shortcut, not a status board. */}
-        <AgentStatusIcon agent={session.agent} activity={session.activity} size={14} animated={false} />
-      </View>
-      {/* Reserve two lines so one- and two-line titles keep every card the same
+        <View style={s.cardIconRow}>
+          {/* Never animates: this strip is a shortcut, not a status board. */}
+          <AgentStatusIcon
+            agent={session.agent}
+            activity={session.activity}
+            size={14}
+            animated={false}
+          />
+        </View>
+        {/* Reserve two lines so one- and two-line titles keep every card the same
           height and pin the repo name to a consistent baseline across the strip. */}
-      <Text
-        numberOfLines={2}
-        style={[s.cardTitle, { minHeight: TITLE_LINE_HEIGHT * 2, lineHeight: TITLE_LINE_HEIGHT }]}
-      >
-        {session.title}
-      </Text>
-      <Text numberOfLines={1} style={s.cardRepo}>
-        {repoName}
-      </Text>
+        <Text
+          numberOfLines={2}
+          style={[s.cardTitle, { minHeight: TITLE_LINE_HEIGHT * 2, lineHeight: TITLE_LINE_HEIGHT }]}
+        >
+          {session.title}
+        </Text>
+        <Text numberOfLines={1} style={s.cardRepo}>
+          {repoName}
+        </Text>
       </GlassCard>
     </Pressable>
   );
@@ -99,7 +102,12 @@ const s = StyleSheet.create((theme) => ({
   },
   headerLeft: { flexDirection: "row", alignItems: "center", gap: 6 },
   liveDot: { height: 6, width: 6, borderRadius: 999, backgroundColor: theme.colors.success },
-  headerLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
+  headerLabel: {
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: theme.colors.fgFaint,
+  },
   seeAll: { fontSize: 12, color: theme.colors.fgMuted },
   card: {
     width: 150,

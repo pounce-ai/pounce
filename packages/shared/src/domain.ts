@@ -55,13 +55,7 @@ export interface Conversation {
   readonly seq: { readonly currentSeq: number; readonly floorSeq: number } | null;
 }
 
-export type TaskState =
-  | "queued"
-  | "running"
-  | "paused"
-  | "completed"
-  | "failed"
-  | "cancelled";
+export type TaskState = "queued" | "running" | "paused" | "completed" | "failed" | "cancelled";
 
 /** Every AI action is a Task. Tasks are persisted and survive app restarts. */
 export interface Task {
@@ -216,9 +210,17 @@ export interface DoctorReport {
   readonly node: { readonly ok: boolean; readonly path: string; readonly version: string };
   readonly git: { readonly ok: boolean; readonly version: string | null };
   /** GitHub CLI — powers PR creation and CI check status. authed null = unknown. */
-  readonly gh?: { readonly ok: boolean; readonly version: string | null; readonly authed: boolean | null };
+  readonly gh?: {
+    readonly ok: boolean;
+    readonly version: string | null;
+    readonly authed: boolean | null;
+  };
   readonly agents: readonly DoctorAgent[];
-  readonly tunnel: { readonly ok: boolean; readonly path: string | null; readonly mode: "internet" | "lan-only" };
+  readonly tunnel: {
+    readonly ok: boolean;
+    readonly path: string | null;
+    readonly mode: "internet" | "lan-only";
+  };
   readonly sessionsTotal: number;
   readonly host: string;
   readonly home: string;

@@ -20,11 +20,28 @@ const NO_CAPS: AgentCapabilities = {
 export const DEFAULT_CAPS: Record<string, AgentCapabilities> = {
   claude: { streaming: true, tools: true, images: true, thinking: true, terminal: true, git: true },
   codex: { streaming: true, tools: true, images: true, thinking: true, terminal: true, git: true },
-  cursor: { streaming: true, tools: true, images: false, thinking: true, terminal: true, git: true },
-  opencode: { streaming: true, tools: true, images: false, thinking: false, terminal: true, git: true },
+  cursor: {
+    streaming: true,
+    tools: true,
+    images: false,
+    thinking: true,
+    terminal: true,
+    git: true,
+  },
+  opencode: {
+    streaming: true,
+    tools: true,
+    images: false,
+    thinking: false,
+    terminal: true,
+    git: true,
+  },
 };
 
-export function effectiveCaps(agent: string, reported: AgentCapabilities | null): AgentCapabilities {
+export function effectiveCaps(
+  agent: string,
+  reported: AgentCapabilities | null,
+): AgentCapabilities {
   // Merge, don't replace: devices report a transport-shaped capabilities object
   // that omits our UI keys (images, thinking, …), so overlay it on the static
   // defaults — reported values win where present, defaults fill the rest.

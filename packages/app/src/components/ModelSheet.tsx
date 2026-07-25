@@ -76,7 +76,13 @@ export function ModelSheet({
     const have = new Set(base.map((m) => m.id));
     const extras: ModelInfo[] = [...new Set(pinned)]
       .filter((id) => id && id !== "<synthetic>" && !have.has(id))
-      .map((id) => ({ id, name: prettyModel(id), description: "Used in this thread", isDefault: false, deprecated: false }));
+      .map((id) => ({
+        id,
+        name: prettyModel(id),
+        description: "Used in this thread",
+        isDefault: false,
+        deprecated: false,
+      }));
     return [...extras, ...base];
   }, [models, pinned]);
 
@@ -90,91 +96,89 @@ export function ModelSheet({
 
   return (
     <NativeSheet visible={visible} onClose={onClose}>
-        <Text style={s.title}>Model</Text>
+      <Text style={s.title}>Model</Text>
 
-        <View style={s.searchRow}>
-          <PounceIcon name="search" size={15} color={theme.colors.fgFaint} />
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search models…"
-            placeholderTextColor={theme.colors.fgFaint}
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={[s.input, IS_DESKTOP && s.inputDesktop]}
-          />
+      <View style={s.searchRow}>
+        <PounceIcon name="search" size={15} color={theme.colors.fgFaint} />
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search models…"
+          placeholderTextColor={theme.colors.fgFaint}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={[s.input, IS_DESKTOP && s.inputDesktop]}
+        />
+      </View>
+
+      {loading ? (
+        <View style={s.loading}>
+          <ActivityIndicator color={theme.colors.accent} />
         </View>
-
-        {loading ? (
-          <View style={s.loading}>
-            <ActivityIndicator color={theme.colors.accent} />
-          </View>
-        ) : merged.length === 0 ? (
-          <Text style={s.emptyText}>
-            No models reported for this agent.
-          </Text>
-        ) : (
-          <ScrollView style={{ maxHeight: height * 0.55 }} keyboardShouldPersistTaps="handled">
-            {results.map((m) => {
-              const active = m.id === current;
-              return (
-                <Pressable
-                  key={m.id}
-                  onPress={() => onSelect(m.id)}
-                  style={({ pressed }) => [s.row, pressed && s.rowPressed]}
-                >
-                  <View style={s.flex1}>
-                    <View style={s.nameRow}>
-                      <Text style={[s.name, active ? s.nameActive : s.nameIdle]}>
-                        {m.name}
-                      </Text>
-                      {m.isDefault ? (
-                        <Text style={s.defaultBadge}>
-                          default
-                        </Text>
-                      ) : null}
-                      {m.deprecated ? (
-                        <Text style={s.deprecatedBadge}>
-                          deprecated
-                        </Text>
-                      ) : null}
-                    </View>
-                    {m.description ? (
-                      <Text numberOfLines={2} style={s.desc}>
-                        {m.description}
-                      </Text>
-                    ) : null}
+      ) : merged.length === 0 ? (
+        <Text style={s.emptyText}>No models reported for this agent.</Text>
+      ) : (
+        <ScrollView style={{ maxHeight: height * 0.55 }} keyboardShouldPersistTaps="handled">
+          {results.map((m) => {
+            const active = m.id === current;
+            return (
+              <Pressable
+                key={m.id}
+                onPress={() => onSelect(m.id)}
+                style={({ pressed }) => [s.row, pressed && s.rowPressed]}
+              >
+                <View style={s.flex1}>
+                  <View style={s.nameRow}>
+                    <Text style={[s.name, active ? s.nameActive : s.nameIdle]}>{m.name}</Text>
+                    {m.isDefault ? <Text style={s.defaultBadge}>default</Text> : null}
+                    {m.deprecated ? <Text style={s.deprecatedBadge}>deprecated</Text> : null}
                   </View>
-                  {active ? <PounceIcon name="checkmark" size={18} color={theme.colors.accent} /> : null}
-                </Pressable>
-              );
-            })}
-            {results.length === 0 ? (
-              <Text style={s.noMatches}>No matches.</Text>
-            ) : null}
-          </ScrollView>
-        )}
+                  {m.description ? (
+                    <Text numberOfLines={2} style={s.desc}>
+                      {m.description}
+                    </Text>
+                  ) : null}
+                </View>
+                {active ? (
+                  <PounceIcon name="checkmark" size={18} color={theme.colors.accent} />
+                ) : null}
+              </Pressable>
+            );
+          })}
+          {results.length === 0 ? <Text style={s.noMatches}>No matches.</Text> : null}
+        </ScrollView>
+      )}
 
-        {effort ? (
-          <Pressable
-            onPress={effort.onPress}
-            style={({ pressed }) => [s.effortRow, pressed && s.pressed80]}
-          >
-            <Text style={s.effortTitle}>Effort</Text>
-            <Text style={s.effortLabel}>{effort.label}</Text>
-            <PounceIcon name="chevron-forward" size={16} color={theme.colors.fgFaint} style={{ marginLeft: 6 }} />
-          </Pressable>
-        ) : null}
-        {mode ? (
-          <Pressable
-            onPress={mode.onPress}
-            style={({ pressed }) => [s.effortRow, pressed && s.pressed80]}
-          >
-            <Text style={s.effortTitle}>Mode</Text>
-            <Text style={s.effortLabel}>{mode.label}</Text>
-            <PounceIcon name="chevron-forward" size={16} color={theme.colors.fgFaint} style={{ marginLeft: 6 }} />
-          </Pressable>
-        ) : null}
+      {effort ? (
+        <Pressable
+          onPress={effort.onPress}
+          style={({ pressed }) => [s.effortRow, pressed && s.pressed80]}
+        >
+          <Text style={s.effortTitle}>Effort</Text>
+          <Text style={s.effortLabel}>{effort.label}</Text>
+          <PounceIcon
+            name="chevron-forward"
+            size={16}
+            color={theme.colors.fgFaint}
+            style={{ marginLeft: 6 }}
+          />
+        </Pressable>
+      ) : null}
+      {mode ? (
+        <Pressable
+          onPress={mode.onPress}
+          style={({ pressed }) => [s.effortRow, pressed && s.pressed80]}
+        >
+          <Text style={s.effortTitle}>Mode</Text>
+          <Text style={s.effortLabel}>{mode.label}</Text>
+          <PounceIcon
+            name="chevron-forward"
+            size={16}
+            color={theme.colors.fgFaint}
+            style={{ marginLeft: 6 }}
+          />
+        </Pressable>
+      ) : null}
     </NativeSheet>
   );
 }
@@ -215,7 +219,12 @@ const s = StyleSheet.create((theme) => ({
   // see the inputH helper's comment in ui/index.tsx.
   inputDesktop: { height: "auto" as unknown as number, paddingVertical: 0 },
   loading: { alignItems: "center", paddingVertical: 40 },
-  emptyText: { paddingVertical: 32, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
+  emptyText: {
+    paddingVertical: 32,
+    textAlign: "center",
+    fontSize: 13,
+    color: theme.colors.fgMuted,
+  },
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -248,7 +257,12 @@ const s = StyleSheet.create((theme) => ({
     color: theme.colors.warning,
   },
   desc: { marginTop: 2, fontSize: 12, lineHeight: 16, color: theme.colors.fgMuted },
-  noMatches: { paddingVertical: 24, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
+  noMatches: {
+    paddingVertical: 24,
+    textAlign: "center",
+    fontSize: 13,
+    color: theme.colors.fgMuted,
+  },
   effortRow: {
     marginTop: 8,
     flexDirection: "row",

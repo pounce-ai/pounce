@@ -74,9 +74,7 @@ function DiffSkeleton() {
           {[0, 1, 2, 3, 4].map((l) => (
             <View key={l} style={s.skelLineRow}>
               <View style={s.skelLineNo} />
-              <View
-                style={[s.skelLine, { width: `${30 + ((sec * 5 + l * 37) % 55)}%` }]}
-              />
+              <View style={[s.skelLine, { width: `${30 + ((sec * 5 + l * 37) % 55)}%` }]} />
             </View>
           ))}
         </View>

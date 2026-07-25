@@ -16,12 +16,10 @@ export default function QrScanner({
   return (
     <View style={s.root}>
       <Text style={s.emoji}>📷</Text>
-      <Text style={s.title}>
-        No camera scanning on desktop
-      </Text>
+      <Text style={s.title}>No camera scanning on desktop</Text>
       <Text style={s.body}>
-        This Mac's bridge connects automatically. To add another machine, use
-        “Enter code manually” with its address and token.
+        This Mac's bridge connects automatically. To add another machine, use “Enter code manually”
+        with its address and token.
       </Text>
       <Pressable onPress={onCancel} style={({ pressed }) => [s.backBtn, pressed && s.pressed80]}>
         <Text style={s.backText}>Back</Text>

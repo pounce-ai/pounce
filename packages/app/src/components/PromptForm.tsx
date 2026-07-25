@@ -14,13 +14,12 @@ import { PounceIcon } from "../ui/native/Icon";
 import type { IoniconName } from "../ui/native/icon-map";
 
 /** Header copy + icon per prompt kind — cosmetic only. */
-export const PROMPT_KIND: Record<string, { label: string; icon: IoniconName }> =
-  {
-    trust: { label: "Trust folder", icon: "shield-checkmark-outline" },
-    permission: { label: "Permission", icon: "key-outline" },
-    plan: { label: "Plan", icon: "map-outline" },
-    prompt: { label: "Question", icon: "help-circle-outline" },
-  };
+export const PROMPT_KIND: Record<string, { label: string; icon: IoniconName }> = {
+  trust: { label: "Trust folder", icon: "shield-checkmark-outline" },
+  permission: { label: "Permission", icon: "key-outline" },
+  plan: { label: "Plan", icon: "map-outline" },
+  prompt: { label: "Question", icon: "help-circle-outline" },
+};
 
 export interface PromptFormData {
   readonly promptId: string;
@@ -67,14 +66,10 @@ export function PromptForm({
     <View style={s.root}>
       <View style={s.kindRow}>
         <PounceIcon name={meta.icon} size={14} color={theme.colors.accent} />
-        <Text style={s.kindLabel}>
-          {meta.label}
-        </Text>
+        <Text style={s.kindLabel}>{meta.label}</Text>
       </View>
 
-      {prompt.title ? (
-        <Text style={s.title}>{prompt.title}</Text>
-      ) : null}
+      {prompt.title ? <Text style={s.title}>{prompt.title}</Text> : null}
 
       {submitted ? (
         <Text style={s.answered}>Answered: {submitted}</Text>

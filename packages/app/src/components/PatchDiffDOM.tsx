@@ -271,7 +271,10 @@ function PlainPatch({ text }: { text: string }) {
         .split("\n")
         .filter((l) => !/^(diff --git|index )/.test(l))
         .map((l, i) => (
-          <div key={i} style={{ color: l.startsWith("+") ? C.add : l.startsWith("-") ? C.del : undefined }}>
+          <div
+            key={i}
+            style={{ color: l.startsWith("+") ? C.add : l.startsWith("-") ? C.del : undefined }}
+          >
             {l || " "}
           </div>
         ))}
@@ -308,7 +311,9 @@ export default function PatchDiffDOM({
   const [iconsReady, setIconsReady] = useState(false);
   useEffect(() => {
     void onReady?.();
-    loadFileIcons().then(() => setIconsReady(true)).catch(() => {});
+    loadFileIcons()
+      .then(() => setIconsReady(true))
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only signal
   }, []);
 

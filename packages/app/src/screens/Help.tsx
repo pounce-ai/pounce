@@ -98,7 +98,8 @@ export default function HelpScreen() {
       {/* Search */}
       <View style={s.searchRow}>
         <PounceIcon name="search" size={16} color={theme.colors.fgFaint} />
-        <TextInput {...INPUT_TWEAKS}
+        <TextInput
+          {...INPUT_TWEAKS}
           value={query}
           onChangeText={setQuery}
           placeholder="Search help…"
@@ -139,9 +140,7 @@ export default function HelpScreen() {
                     color={theme.colors.fgFaint}
                   />
                 </View>
-                {isOpen ? (
-                  <Text style={s.answer}>{f.a}</Text>
-                ) : null}
+                {isOpen ? <Text style={s.answer}>{f.a}</Text> : null}
               </Pressable>
             );
           })
@@ -149,9 +148,7 @@ export default function HelpScreen() {
           <View style={s.empty}>
             <Text style={s.emptyEmoji}>🔍</Text>
             <Text style={s.emptyTitle}>No matches</Text>
-            <Text style={s.emptyBody}>
-              Try another word, or open the full docs below.
-            </Text>
+            <Text style={s.emptyBody}>Try another word, or open the full docs below.</Text>
           </View>
         )}
 
@@ -210,7 +207,13 @@ const s = StyleSheet.create((theme) => ({
   answer: { marginTop: 8, fontSize: 14, lineHeight: 21, color: theme.colors.fgMuted },
   empty: { alignItems: "center", paddingHorizontal: 32, paddingVertical: 64 },
   emptyEmoji: { fontSize: 40 },
-  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyTitle: {
+    marginTop: 12,
+    textAlign: "center",
+    fontSize: 15,
+    fontWeight: "600",
+    color: theme.colors.fg,
+  },
   emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   docsBtn: {
     marginTop: 8,

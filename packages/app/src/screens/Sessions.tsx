@@ -73,7 +73,13 @@ const s = StyleSheet.create((theme) => ({
   pressed60: { opacity: 0.6 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
   emptyEmoji: { fontSize: 40 },
-  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyTitle: {
+    marginTop: 12,
+    textAlign: "center",
+    fontSize: 15,
+    fontWeight: "600",
+    color: theme.colors.fg,
+  },
   emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   row: { paddingHorizontal: 16, paddingBottom: 10 },
 }));

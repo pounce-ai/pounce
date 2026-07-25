@@ -117,7 +117,12 @@ const s = StyleSheet.create((theme) => ({
   titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   title: { flex: 1, fontSize: 15, fontWeight: "600", color: theme.colors.fg },
   meta: { marginTop: 6, fontSize: 12, color: theme.colors.fgMuted },
-  footerRow: { marginTop: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  footerRow: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   footerLeft: { fontSize: 11, color: theme.colors.fgMuted },
   footerRight: { fontSize: 11, color: theme.colors.fgFaint },
   list: { gap: 10, paddingHorizontal: 16, paddingTop: 6 },

@@ -41,7 +41,8 @@ export function DeviceSetupCard({
     <View style={s.card}>
       <Text style={s.cardTitle}>Pair a device</Text>
       <Text style={s.cardBody}>
-        On your computer, show its pairing code, then scan it here. Once paired, your sessions sync automatically.
+        On your computer, show its pairing code, then scan it here. Once paired, your sessions sync
+        automatically.
       </Text>
       <Pressable
         onPress={onScan}
@@ -51,14 +52,20 @@ export function DeviceSetupCard({
         <PounceIcon name="qr-code-outline" size={18} color={theme.colors.onAccent} />
         <Text style={s.scanText}>Scan pairing code</Text>
       </Pressable>
-      <Pressable onPress={() => setManual((m) => !m)} style={({ pressed }) => [s.manualToggle, pressed && s.pressed60]}>
-        <Text style={s.manualToggleText}>{manual ? "Hide manual entry" : "Enter code manually"}</Text>
+      <Pressable
+        onPress={() => setManual((m) => !m)}
+        style={({ pressed }) => [s.manualToggle, pressed && s.pressed60]}
+      >
+        <Text style={s.manualToggleText}>
+          {manual ? "Hide manual entry" : "Enter code manually"}
+        </Text>
       </Pressable>
 
       {manual ? (
         <View style={s.manualSection}>
           <Text style={s.fieldLabel}>Address</Text>
-          <TextInput {...INPUT_TWEAKS}
+          <TextInput
+            {...INPUT_TWEAKS}
             value={url}
             onChangeText={setUrl}
             autoCapitalize="none"
@@ -69,7 +76,8 @@ export function DeviceSetupCard({
             style={s.input}
           />
           <Text style={s.fieldLabel}>Code</Text>
-          <TextInput {...INPUT_TWEAKS}
+          <TextInput
+            {...INPUT_TWEAKS}
             value={token}
             onChangeText={setToken}
             autoCapitalize="none"
@@ -121,7 +129,12 @@ const s = StyleSheet.create((theme) => ({
   manualToggle: { alignSelf: "center", paddingTop: 4 },
   manualToggleText: { fontSize: 13, color: theme.colors.fgMuted },
   manualSection: { gap: 8, borderTopWidth: 1, borderColor: theme.colors.border, paddingTop: 12 },
-  fieldLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: theme.colors.fgFaint },
+  fieldLabel: {
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: theme.colors.fgFaint,
+  },
   input: {
     borderRadius: 12,
     backgroundColor: theme.colors.surfaceAlt,

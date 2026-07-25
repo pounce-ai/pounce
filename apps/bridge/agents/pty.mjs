@@ -74,15 +74,26 @@ export class PtySession {
       const s = typeof d === "string" ? d : d.toString("utf8");
       this._append(s);
       this._screen.write(s);
-      for (const sink of this._dataSinks) { try { sink(s); } catch {} }
+      for (const sink of this._dataSinks) {
+        try {
+          sink(s);
+        } catch {}
+      }
     });
 
     // active↔idle transitions. `idle` after an output burst = the CLI is
     // blocked waiting for the user (a prompt / question). See IdleDetector.
-    this._detector = new IdleDetector((e) => {
-      this.idle = e.type === "idle";
-      for (const sink of this._idleSinks) { try { sink(e); } catch {} }
-    }, quietMs != null ? { quietMs } : undefined);
+    this._detector = new IdleDetector(
+      (e) => {
+        this.idle = e.type === "idle";
+        for (const sink of this._idleSinks) {
+          try {
+            sink(e);
+          } catch {}
+        }
+      },
+      quietMs != null ? { quietMs } : undefined,
+    );
     this._pty.attach(this._detector);
 
     this.exited = this._pty.exited.then((code) => {
@@ -111,18 +122,24 @@ export class PtySession {
 
   /** Write raw bytes to the child's stdin (keystrokes, answers, ^C, …). */
   write(data) {
-    try { this._pty.write(data); } catch {}
+    try {
+      this._pty.write(data);
+    } catch {}
   }
 
   resize(cols, rows) {
     this.cols = cols;
     this.rows = rows;
     this._screen.resize(cols, rows);
-    try { this._pty.resize(cols, rows); } catch {}
+    try {
+      this._pty.resize(cols, rows);
+    } catch {}
   }
 
   kill(signal) {
-    try { this._pty.kill(signal); } catch {}
+    try {
+      this._pty.kill(signal);
+    } catch {}
   }
 
   /** Subscribe to live output. Returns an unsubscribe fn. */
@@ -157,9 +174,15 @@ export class PtyManager {
     return session;
   }
 
-  get(id) { return this.sessions.get(id); }
-  has(id) { return this.sessions.has(id); }
-  list() { return [...this.sessions.values()]; }
+  get(id) {
+    return this.sessions.get(id);
+  }
+  has(id) {
+    return this.sessions.has(id);
+  }
+  list() {
+    return [...this.sessions.values()];
+  }
 
   kill(id, signal) {
     const s = this.sessions.get(id);

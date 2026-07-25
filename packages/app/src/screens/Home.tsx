@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActionSheetIOS, Animated as RNAnimated, Easing, Modal, Pressable, RefreshControl, Text, View } from "react-native";
+import {
+  ActionSheetIOS,
+  Animated as RNAnimated,
+  Easing,
+  Modal,
+  Pressable,
+  RefreshControl,
+  Text,
+  View,
+} from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
@@ -59,7 +68,6 @@ type Row =
     }
   | { type: "session"; session: Session; fav?: boolean };
 
-
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -72,8 +80,7 @@ export default function HomeScreen() {
   // returns a NEW reference — otherwise `useSelector` below sees the same object
   // and the grouped `useMemo` (dep: collapsedMap) never rebuilds, so the accordion
   // won't collapse. See legend-state object-selector gotcha.
-  const toggleGroup = (repoId: string) =>
-    collapsed$.set((m) => ({ ...m, [repoId]: !m[repoId] }));
+  const toggleGroup = (repoId: string) => collapsed$.set((m) => ({ ...m, [repoId]: !m[repoId] }));
 
   const status = useSelector(() => connection$.status.get());
   const filterCount = useSelector(() => activeFilterCount());
@@ -139,7 +146,8 @@ export default function HomeScreen() {
     if (favSessions.length) {
       const favCollapsed = !!collapsedMap[FAV_KEY];
       rows.push({ type: "favHeader", count: favSessions.length, collapsed: favCollapsed });
-      if (!favCollapsed) for (const s of favSessions) rows.push({ type: "session", session: s, fav: true });
+      if (!favCollapsed)
+        for (const s of favSessions) rows.push({ type: "session", session: s, fav: true });
     }
 
     const groups = new Map<string, Session[]>();
@@ -182,7 +190,11 @@ export default function HomeScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    try { await refreshLive(true); } finally { setRefreshing(false); }
+    try {
+      await refreshLive(true);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   // Long-press a thread to favourite it. New threads carry a temporary id that's
@@ -197,7 +209,9 @@ export default function HomeScreen() {
         options: [fav ? "Remove from favourites" : "Add to favourites", "Cancel"],
         cancelButtonIndex: 1,
       },
-      (i) => { if (i === 0) toggleFavThread(s.id); },
+      (i) => {
+        if (i === 0) toggleFavThread(s.id);
+      },
     );
   };
 
@@ -209,7 +223,9 @@ export default function HomeScreen() {
         options: [fav ? "Unfavourite folder" : "Favourite folder", "Cancel"],
         cancelButtonIndex: 1,
       },
-      (i) => { if (i === 0) toggleFavRepo(repoId); },
+      (i) => {
+        if (i === 0) toggleFavRepo(repoId);
+      },
     );
   };
 
@@ -219,7 +235,9 @@ export default function HomeScreen() {
   // badge (spinner → green tick), so null here = nothing worth a row.
   const subtitle =
     !connected && !loading ? (
-      <Text numberOfLines={1} style={s.subFaint}>Tap to sync a device</Text>
+      <Text numberOfLines={1} style={s.subFaint}>
+        Tap to sync a device
+      </Text>
     ) : attentionCount > 0 ? (
       <>
         <PounceIcon name="alert-circle" size={13} color={theme.colors.warning} />
@@ -241,7 +259,12 @@ export default function HomeScreen() {
             {loading ? (
               <SyncSpinner />
             ) : connected && attentionCount === 0 ? (
-              <PounceIcon name="checkmark-circle" size={12} color={theme.colors.success} style={{ marginTop: 5 }} />
+              <PounceIcon
+                name="checkmark-circle"
+                size={12}
+                color={theme.colors.success}
+                style={{ marginTop: 5 }}
+              />
             ) : null}
           </View>
           {subtitle || filterCount ? (
@@ -259,14 +282,19 @@ export default function HomeScreen() {
             active={showFilters}
             onPress={() => (IS_DESKTOP ? setShowFilters(true) : router.push("/filters"))}
           />
-          <Pressable onPress={() => router.push("/new")} style={({ pressed }) => [s.newBtn, pressed && s.pressed80]}>
+          <Pressable
+            onPress={() => router.push("/new")}
+            style={({ pressed }) => [s.newBtn, pressed && s.pressed80]}
+          >
             <PounceIcon name="add" size={17} color="#fff" />
             <Text style={s.newBtnLabel}>New</Text>
           </Pressable>
         </View>
       </View>
 
-      {IS_DESKTOP ? <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} /> : null}
+      {IS_DESKTOP ? (
+        <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
+      ) : null}
 
       <AnimatedLegendList
         // Let UIKit inset the scroll under the translucent system tab bar —
@@ -320,7 +348,13 @@ export default function HomeScreen() {
         // survive being offline/mid-reconnect — the strip hides itself when
         // empty. Gating on `connected` made it vanish on every blip.
         ListHeaderComponent={<LiveStrip />}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.colors.accent}
+          />
+        }
         ListEmptyComponent={
           loading ? (
             <SessionListSkeleton />
@@ -362,7 +396,12 @@ function SyncSpinner() {
   const turn = useRef(new RNAnimated.Value(0)).current;
   useEffect(() => {
     const loop = RNAnimated.loop(
-      RNAnimated.timing(turn, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true }),
+      RNAnimated.timing(turn, {
+        toValue: 1,
+        duration: 900,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
     );
     loop.start();
     return () => loop.stop();
@@ -386,11 +425,12 @@ function FavHeader({
 }) {
   const { theme } = useUnistyles();
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [s.groupHeader, pressed && s.pressed70]}
-    >
-      <PounceIcon name={collapsed ? "chevron-forward" : "chevron-down"} size={13} color={theme.colors.fgFaint} />
+    <Pressable onPress={onPress} style={({ pressed }) => [s.groupHeader, pressed && s.pressed70]}>
+      <PounceIcon
+        name={collapsed ? "chevron-forward" : "chevron-down"}
+        size={13}
+        color={theme.colors.fgFaint}
+      />
       <PounceIcon name="star" size={13} color={theme.colors.accent} />
       <Text style={s.groupTitle}>Favourites</Text>
       <Text style={s.groupCount}>{count}</Text>
@@ -431,7 +471,11 @@ function DirHeader({
       delayLongPress={350}
       style={({ pressed }) => [s.groupHeader, pressed && s.pressed70]}
     >
-      <PounceIcon name={collapsed ? "chevron-forward" : "chevron-down"} size={13} color={theme.colors.fgFaint} />
+      <PounceIcon
+        name={collapsed ? "chevron-forward" : "chevron-down"}
+        size={13}
+        color={theme.colors.fgFaint}
+      />
       {fav ? (
         <PounceIcon name="star" size={13} color={theme.colors.accent} />
       ) : deviceName ? (
@@ -491,7 +535,13 @@ const s = StyleSheet.create((theme) => ({
   sessionRow: { paddingHorizontal: 16, paddingBottom: 10 },
   empty: { alignItems: "center", paddingHorizontal: 32, paddingVertical: 80 },
   emptyEmoji: { fontSize: 40 },
-  emptyTitle: { marginTop: 12, textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  emptyTitle: {
+    marginTop: 12,
+    textAlign: "center",
+    fontSize: 15,
+    fontWeight: "600",
+    color: theme.colors.fg,
+  },
   emptyBody: { marginTop: 4, textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   emptyCta: {
     marginTop: 20,

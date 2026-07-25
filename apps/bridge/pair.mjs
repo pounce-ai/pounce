@@ -18,7 +18,9 @@ let deepLink = `pounce://connect?url=${encodeURIComponent(url)}&token=${encodeUR
 // machine-wide tunnel identity always targets the default-port bridge.
 if (PORT === 8099 || process.env.POUNCE_TUNNEL === "1") {
   try {
-    const info = JSON.parse(readFileSync(path.join(os.homedir(), ".pounce", "tunnel.json"), "utf8"));
+    const info = JSON.parse(
+      readFileSync(path.join(os.homedir(), ".pounce", "tunnel.json"), "utf8"),
+    );
     if (info?.nodeId) {
       deepLink += `&node=${encodeURIComponent(info.nodeId)}&host=${encodeURIComponent(os.hostname().replace(/\.local$/, ""))}`;
       if (info.relay) deepLink += `&relay=${encodeURIComponent(info.relay)}`;

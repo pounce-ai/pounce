@@ -22,39 +22,39 @@ export function SessionCard({
       style={({ pressed }) => pressed && s.pressed70}
     >
       <GlassCard radius={16} style={[s.card, needs && s.cardNeeds]}>
-      <View style={s.titleRow}>
-        <Text
-          numberOfLines={1}
-          style={[s.title, session.activity === "idle" ? s.titleIdle : s.titleFg]}
-        >
-          {session.title}
-        </Text>
-        <AgentChip agent={session.agent} activity={session.activity} />
-      </View>
-
-      <View style={s.metaRow}>
-        <Text style={s.metaText}>{session.host}</Text>
-        {session.branch ? (
-          <BranchChip branch={session.branch} worktree={session.worktree} style={s.branch} />
-        ) : null}
-        {!session.isLive ? (
-          <Text style={s.archived}>
-            archived
+        <View style={s.titleRow}>
+          <Text
+            numberOfLines={1}
+            style={[s.title, session.activity === "idle" ? s.titleIdle : s.titleFg]}
+          >
+            {session.title}
           </Text>
-        ) : null}
-      </View>
+          <AgentChip agent={session.agent} activity={session.activity} />
+        </View>
 
-      <View style={s.footerRow}>
-        <Text
-          style={[
-            s.status,
-            needs ? s.statusWarning : session.activity === "failed" ? s.statusDanger : s.statusFaint,
-          ]}
-        >
-          {ACTIVITY_LABEL[session.activity]}
-        </Text>
-        <Text style={s.metaText}>{timeAgo(session.updatedAt)}</Text>
-      </View>
+        <View style={s.metaRow}>
+          <Text style={s.metaText}>{session.host}</Text>
+          {session.branch ? (
+            <BranchChip branch={session.branch} worktree={session.worktree} style={s.branch} />
+          ) : null}
+          {!session.isLive ? <Text style={s.archived}>archived</Text> : null}
+        </View>
+
+        <View style={s.footerRow}>
+          <Text
+            style={[
+              s.status,
+              needs
+                ? s.statusWarning
+                : session.activity === "failed"
+                  ? s.statusDanger
+                  : s.statusFaint,
+            ]}
+          >
+            {ACTIVITY_LABEL[session.activity]}
+          </Text>
+          <Text style={s.metaText}>{timeAgo(session.updatedAt)}</Text>
+        </View>
       </GlassCard>
     </Pressable>
   );
@@ -83,7 +83,12 @@ const s = StyleSheet.create((theme) => ({
     textTransform: "uppercase",
     color: theme.colors.fgFaint,
   },
-  footerRow: { marginTop: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  footerRow: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   status: { fontSize: 12 },
   statusWarning: { color: theme.colors.warning },
   statusDanger: { color: theme.colors.danger },

@@ -30,9 +30,7 @@ export { AgentLogo };
  * input chrome. Spread FIRST (`{...INPUT_TWEAKS}`) so per-input props still win.
  */
 export const INPUT_TWEAKS: Record<string, unknown> =
-  Platform.OS === "macos" || Platform.OS === "windows"
-    ? { enableFocusRing: false }
-    : {};
+  Platform.OS === "macos" || Platform.OS === "windows" ? { enableFocusRing: false } : {};
 
 /** True on the desktop platforms (macOS/Windows) — for tiny layout forks. */
 export const IS_DESKTOP = Platform.OS === "macos" || Platform.OS === "windows";
@@ -62,7 +60,6 @@ export const ACTIVITY_LABEL: Record<ActivityStatus, string> = {
   queued: "Queued",
 };
 
-
 /** Platform picker: NSAlert buttons on desktop, an action sheet on mobile. */
 export function pickSheet(title: string, labels: string[], onPick: (i: number) => void): void {
   if (IS_DESKTOP) {
@@ -74,7 +71,9 @@ export function pickSheet(title: string, labels: string[], onPick: (i: number) =
   }
   ActionSheetIOS.showActionSheetWithOptions(
     { title, options: [...labels, "Cancel"], cancelButtonIndex: labels.length },
-    (i) => { if (i >= 0 && i < labels.length) onPick(i); },
+    (i) => {
+      if (i >= 0 && i < labels.length) onPick(i);
+    },
   );
 }
 
@@ -140,7 +139,16 @@ export function AgentChip({
  *  U+FE0E forces text presentation: bare ✳ (and friends) otherwise render as
  *  their emoji variant on iOS — a green square that ignores the text color. */
 const VS = "\uFE0E";
-const THINKING_GLYPHS = [`·${VS}`, `✢${VS}`, `✳${VS}`, `✶${VS}`, `✽${VS}`, `✶${VS}`, `✳${VS}`, `✢${VS}`];
+const THINKING_GLYPHS = [
+  `·${VS}`,
+  `✢${VS}`,
+  `✳${VS}`,
+  `✶${VS}`,
+  `✽${VS}`,
+  `✶${VS}`,
+  `✳${VS}`,
+  `✢${VS}`,
+];
 const THINKING_FRAME_MS = 160;
 
 // One shared ticker for every animating icon: N running threads would
@@ -214,7 +222,10 @@ export function AgentStatusIcon({
       <AgentLogo agent={agent} size={size} />
       {activity === "completed" ? (
         <View
-          style={[s.lockBadge, { right: -badge * 0.35, bottom: -badge * 0.3, width: badge, height: badge }]}
+          style={[
+            s.lockBadge,
+            { right: -badge * 0.35, bottom: -badge * 0.3, width: badge, height: badge },
+          ]}
         >
           <PounceIcon name="lock-closed" size={badge * 0.68} color={theme.colors.fgMuted} />
         </View>
@@ -243,7 +254,11 @@ export function BranchChip({
   const tint = color ?? theme.colors.fgMuted;
   return (
     <View style={[s.branchChip, style]}>
-      <PounceIcon name={worktree ? "git-network-outline" : "git-branch-outline"} size={size} color={tint} />
+      <PounceIcon
+        name={worktree ? "git-network-outline" : "git-branch-outline"}
+        size={size}
+        color={tint}
+      />
       <Text numberOfLines={1} style={[s.branchText, { color: tint, fontSize: size + 1 }]}>
         {branch}
       </Text>
@@ -260,11 +275,7 @@ export function MergeChip({ state }: { state: "ready" | "conflicts" | "uncommitt
     clean: ["No changes", s.mergeClean],
   };
   const [label, style] = map[state];
-  return (
-    <Text style={[s.mergeChip, style]}>
-      {label}
-    </Text>
-  );
+  return <Text style={[s.mergeChip, style]}>{label}</Text>;
 }
 
 const s = StyleSheet.create((theme) => ({
@@ -280,7 +291,13 @@ const s = StyleSheet.create((theme) => ({
   },
   branchChip: { flexDirection: "row", alignItems: "center", gap: 4 },
   branchText: { flexShrink: 1, fontFamily: "JetBrainsMono" },
-  mergeChip: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2, fontSize: 11, fontWeight: "500" },
+  mergeChip: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    fontSize: 11,
+    fontWeight: "500",
+  },
   // status colors at 10% — no /10 tokens in T; literals from the status hexes.
   mergeReady: { color: theme.colors.success, backgroundColor: "rgba(63, 185, 80, 0.1)" },
   mergeConflicts: { color: theme.colors.danger, backgroundColor: "rgba(248, 81, 73, 0.1)" },

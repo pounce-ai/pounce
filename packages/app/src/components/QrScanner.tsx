@@ -28,10 +28,16 @@ export default function QrScanner({
       <View style={[s.permission, { paddingTop: insets.top }]}>
         <Text style={s.permissionTitle}>Camera access needed</Text>
         <Text style={s.permissionBody}>Allow the camera to scan a pairing code.</Text>
-        <Pressable onPress={() => void requestPermission()} style={({ pressed }) => [s.allowBtn, pressed && s.pressed90]}>
+        <Pressable
+          onPress={() => void requestPermission()}
+          style={({ pressed }) => [s.allowBtn, pressed && s.pressed90]}
+        >
           <Text style={s.allowText}>Allow camera</Text>
         </Pressable>
-        <Pressable onPress={onCancel} style={({ pressed }) => [s.cancelLink, pressed && s.pressed60]}>
+        <Pressable
+          onPress={onCancel}
+          style={({ pressed }) => [s.cancelLink, pressed && s.pressed60]}
+        >
           <Text style={s.cancelLinkText}>Cancel</Text>
         </Pressable>
       </View>
@@ -51,7 +57,11 @@ export default function QrScanner({
       </View>
       <Pressable
         onPress={onCancel}
-        style={({ pressed }) => [s.cancelBtn, { bottom: insets.bottom + 28 }, pressed && s.pressed80]}
+        style={({ pressed }) => [
+          s.cancelBtn,
+          { bottom: insets.bottom + 28 },
+          pressed && s.pressed80,
+        ]}
       >
         <Text style={s.cancelBtnText}>Cancel</Text>
       </Pressable>

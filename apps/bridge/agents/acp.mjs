@@ -24,7 +24,14 @@ import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { client, ndJsonStream, PROTOCOL_VERSION } from "@agentclientprotocol/sdk";
-import { assistantMessage, permissionRequest, systemEvent, thinking, toolCall, toolResult } from "./events.mjs";
+import {
+  assistantMessage,
+  permissionRequest,
+  systemEvent,
+  thinking,
+  toolCall,
+  toolResult,
+} from "./events.mjs";
 import { agentEnv, binPath } from "./env.mjs";
 import { binOverride } from "./config.mjs";
 
@@ -73,7 +80,11 @@ function spawnSpec(agent) {
     const bundled = new URL(`./adapters/${a.bundle}.mjs`, import.meta.url).pathname;
     if (existsSync(bundled)) return { command: process.execPath, args: [bundled] };
     let entry;
-    try { entry = require.resolve(a.pkg); } catch { return null; }
+    try {
+      entry = require.resolve(a.pkg);
+    } catch {
+      return null;
+    }
     return { command: process.execPath, args: [entry] };
   }
   // Direct-CLI adapter (opencode) — honor a user-pinned binary path.
@@ -107,12 +118,18 @@ function toolInput(update) {
   const raw = update.rawInput || {};
   if (typeof raw.command === "string") return { command: raw.command };
   if (Array.isArray(raw.command)) return { command: raw.command.join(" ") };
-  for (const k of ["file_path", "path", "filePath"]) if (typeof raw[k] === "string") return { [k]: raw[k] };
+  for (const k of ["file_path", "path", "filePath"])
+    if (typeof raw[k] === "string") return { [k]: raw[k] };
   // Fall back to the human title Claude/Codex already put on the call.
   return { command: update.title || "" };
 }
 
-const ACP_STATUS = { pending: "pending", in_progress: "running", completed: "success", failed: "error" };
+const ACP_STATUS = {
+  pending: "pending",
+  in_progress: "running",
+  completed: "success",
+  failed: "error",
+};
 
 /** Flatten ACP tool-call `content` blocks into the app's tool_result content. */
 function toolResultContent(content) {
@@ -129,7 +146,10 @@ function toolResultContent(content) {
 /** Render an ACP structured plan as the markdown our PlanCard already shows. */
 function planMarkdown(entries) {
   return (entries || [])
-    .map((e, i) => `${i + 1}. ${e.status === "completed" ? "~~" : ""}${e.content}${e.status === "completed" ? "~~" : ""}`)
+    .map(
+      (e, i) =>
+        `${i + 1}. ${e.status === "completed" ? "~~" : ""}${e.content}${e.status === "completed" ? "~~" : ""}`,
+    )
     .join("\n");
 }
 
@@ -142,11 +162,17 @@ function planMarkdown(entries) {
  *  "default" (Manual) so the user gets interactive prompts — the adapter's own
  *  default is "auto" (silent-approve), which would bypass the whole point. */
 const ACP_MODE = {
-  default: "default", acceptEdits: "acceptEdits",
-  bypassPermissions: "bypassPermissions", plan: "plan",
+  default: "default",
+  acceptEdits: "acceptEdits",
+  bypassPermissions: "bypassPermissions",
+  plan: "plan",
 };
 
-export function startAcpTurn(agent, { threadId, text, cwd, images, model, permissionMode }, onEvent) {
+export function startAcpTurn(
+  agent,
+  { threadId, text, cwd, images, model, permissionMode },
+  onEvent,
+) {
   const spec = spawnSpec(agent);
   const fresh = !threadId || !/^[0-9a-f]{8}-/i.test(threadId);
   const dir = cwd && existsSync(cwd) ? cwd : process.env.HOME;
@@ -175,7 +201,10 @@ export function startAcpTurn(agent, { threadId, text, cwd, images, model, permis
   // CLI transport instead of surfacing a dead turn.
   let emitted = false;
   const emitOut = onEvent;
-  onEvent = (ev) => { emitted = true; emitOut(ev); };
+  onEvent = (ev) => {
+    emitted = true;
+    emitOut(ev);
+  };
   const child = spawn(spec.command, spec.args, {
     cwd: dir,
     env,
@@ -183,7 +212,9 @@ export function startAcpTurn(agent, { threadId, text, cwd, images, model, permis
     windowsHide: true,
   });
   let stderrTail = "";
-  child.stderr.on("data", (d) => { stderrTail = (stderrTail + d).slice(-4096); });
+  child.stderr.on("data", (d) => {
+    stderrTail = (stderrTail + d).slice(-4096);
+  });
 
   const stream = ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout));
   const app = client({ name: "pounce-bridge", version: "0.1.0" });
@@ -213,22 +244,33 @@ export function startAcpTurn(agent, { threadId, text, cwd, images, model, permis
         break;
       }
       case "tool_call":
-        onEvent(toolCall(base(u.toolCallId), {
-          name: toolName(u), input: toolInput(u), status: ACP_STATUS[u.status] || "running",
-        }));
+        onEvent(
+          toolCall(base(u.toolCallId), {
+            name: toolName(u),
+            input: toolInput(u),
+            status: ACP_STATUS[u.status] || "running",
+          }),
+        );
         break;
       case "tool_call_update":
         if (u.content?.length) {
-          onEvent(toolResult(base(`${u.toolCallId}:o`), {
-            toolCallId: u.toolCallId, content: toolResultContent(u.content),
-            isError: u.status === "failed",
-          }));
+          onEvent(
+            toolResult(base(`${u.toolCallId}:o`), {
+              toolCallId: u.toolCallId,
+              content: toolResultContent(u.content),
+              isError: u.status === "failed",
+            }),
+          );
         }
         break;
       case "plan":
-        onEvent(toolCall(base(`plan:${seq}`), {
-          name: "ExitPlanMode", input: { plan: planMarkdown(u.entries) }, status: "success",
-        }));
+        onEvent(
+          toolCall(base(`plan:${seq}`), {
+            name: "ExitPlanMode",
+            input: { plan: planMarkdown(u.entries) },
+            status: "success",
+          }),
+        );
         break;
       // available_commands_update / usage_update: not timeline events here.
     }
@@ -236,7 +278,11 @@ export function startAcpTurn(agent, { threadId, text, cwd, images, model, permis
 
   app.onNotification("session/update", (ctx) => {
     const u = ctx.params?.update;
-    if (u?.sessionUpdate) { try { onUpdate(u); } catch {} }
+    if (u?.sessionUpdate) {
+      try {
+        onUpdate(u);
+      } catch {}
+    }
   });
   const myRequests = new Set(); // requestIds parked by this turn (cleanup on stop)
   // Relay the prompt to the app and wait for its choice. A generous timeout
@@ -244,23 +290,29 @@ export function startAcpTurn(agent, { threadId, text, cwd, images, model, permis
   app.onRequest("session/request_permission", async (ctx) => {
     const opts = ctx.params?.options || [];
     if (!opts.length) return { outcome: { outcome: "cancelled" } };
-    const allow = opts.find((o) => /allow/i.test(o.optionId) || /allow/i.test(o.name || "")) || opts[0];
+    const allow =
+      opts.find((o) => /allow/i.test(o.optionId) || /allow/i.test(o.name || "")) || opts[0];
     const requestId = randomUUID();
     myRequests.add(requestId);
     if (forwarding) {
-      onEvent(permissionRequest(base(`perm:${requestId}`), {
-        requestId,
-        toolName: ctx.params?.toolCall?.kind || "tool",
-        toolTitle: ctx.params?.toolCall?.title || "Run this tool?",
-        options: opts.map((o) => ({ optionId: o.optionId, name: o.name, kind: o.kind })),
-      }));
+      onEvent(
+        permissionRequest(base(`perm:${requestId}`), {
+          requestId,
+          toolName: ctx.params?.toolCall?.kind || "tool",
+          toolTitle: ctx.params?.toolCall?.title || "Run this tool?",
+          options: opts.map((o) => ({ optionId: o.optionId, name: o.name, kind: o.kind })),
+        }),
+      );
     }
     const optionId = await new Promise((resolve) => {
       const timer = setTimeout(() => {
         if (pendingPermissions.delete(requestId)) resolve(allow.optionId); // fallback
       }, 180_000).unref?.();
       pendingPermissions.set(requestId, {
-        resolve: (id) => { clearTimeout(timer); resolve(id); },
+        resolve: (id) => {
+          clearTimeout(timer);
+          resolve(id);
+        },
       });
     });
     myRequests.delete(requestId);
@@ -269,7 +321,10 @@ export function startAcpTurn(agent, { threadId, text, cwd, images, model, permis
   });
 
   let resolveDone, rejectDone;
-  const done = new Promise((res, rej) => { resolveDone = res; rejectDone = rej; });
+  const done = new Promise((res, rej) => {
+    resolveDone = res;
+    rejectDone = rej;
+  });
   let realThreadId = threadId || null;
   let stopped = false;
   // Unpark any prompts still waiting (turn ended / interrupted) so their
@@ -303,34 +358,61 @@ export function startAcpTurn(agent, { threadId, text, cwd, images, model, permis
       // Put the session in the requested permission mode (default = Manual, which
       // prompts). Best-effort — older adapters may not support session/set_mode.
       try {
-        await ctx.request("session/set_mode", { sessionId: realThreadId, modeId: ACP_MODE[permissionMode] || "default" });
+        await ctx.request("session/set_mode", {
+          sessionId: realThreadId,
+          modeId: ACP_MODE[permissionMode] || "default",
+        });
       } catch {}
       const content = [{ type: "text", text }];
       for (const img of images || []) {
-        if (img?.data) content.push({ type: "image", mimeType: img.mediaType || "image/png", data: img.data });
+        if (img?.data)
+          content.push({ type: "image", mimeType: img.mediaType || "image/png", data: img.data });
       }
       forwarding = true;
       await ctx.request("session/prompt", { sessionId: realThreadId, prompt: content });
     })
-    .then(() => { cancelPending(); try { child.kill(); } catch {} resolveDone(realThreadId); })
+    .then(() => {
+      cancelPending();
+      try {
+        child.kill();
+      } catch {}
+      resolveDone(realThreadId);
+    })
     .catch((e) => {
       cancelPending();
-      try { child.kill(); } catch {}
+      try {
+        child.kill();
+      } catch {}
       if (!stopped && !emitted) {
         // Nothing reached the app — adapter startup failure. Reject so the
         // host retries the turn over the agent's classic CLI transport.
-        rejectDone(new Error(`ACP failed pre-stream: ${e?.message || e}${stderrTail ? ` — ${stderrTail.trim().slice(-200)}` : ""}`));
+        rejectDone(
+          new Error(
+            `ACP failed pre-stream: ${e?.message || e}${stderrTail ? ` — ${stderrTail.trim().slice(-200)}` : ""}`,
+          ),
+        );
         return;
       }
       if (!stopped) {
-        onEvent(systemEvent(base(`${realThreadId || "acp"}:err`),
-          `ACP turn failed: ${e?.message || e}${stderrTail ? ` — ${stderrTail.trim().slice(-200)}` : ""}`, "error"));
+        onEvent(
+          systemEvent(
+            base(`${realThreadId || "acp"}:err`),
+            `ACP turn failed: ${e?.message || e}${stderrTail ? ` — ${stderrTail.trim().slice(-200)}` : ""}`,
+            "error",
+          ),
+        );
       }
       resolveDone(realThreadId); // resolve (not reject) so the SSE closes cleanly
     });
 
   return {
-    stop: () => { stopped = true; cancelPending(); try { child.kill("SIGTERM"); } catch {} },
+    stop: () => {
+      stopped = true;
+      cancelPending();
+      try {
+        child.kill("SIGTERM");
+      } catch {}
+    },
     done,
   };
 }

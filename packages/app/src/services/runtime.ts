@@ -55,7 +55,11 @@ export async function refreshLive(fresh = false): Promise<void> {
   const bridge = await loadBridgeConfig();
   if (!bridge) return; // not paired — nothing to refresh
   const { syncLiveData } = await import("./bridge");
-  try { await syncLiveData({ fresh }); } catch { /* keep cached */ }
+  try {
+    await syncLiveData({ fresh });
+  } catch {
+    /* keep cached */
+  }
 }
 
 /** How often the foreground heartbeat re-syncs thread activity. */
@@ -73,12 +77,21 @@ export function startForegroundSync(): void {
   if (foregroundSyncStarted || Platform.OS === "macos" || Platform.OS === "windows") return;
   foregroundSyncStarted = true;
   let timer: ReturnType<typeof setInterval> | null = null;
-  const start = () => { timer ??= setInterval(() => void refreshLive(), FOREGROUND_SYNC_MS); };
-  const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+  const start = () => {
+    timer ??= setInterval(() => void refreshLive(), FOREGROUND_SYNC_MS);
+  };
+  const stop = () => {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
   start();
   AppState.addEventListener("change", (s) => {
-    if (s === "active") { void refreshLive(); start(); }
-    else stop();
+    if (s === "active") {
+      void refreshLive();
+      start();
+    } else stop();
   });
 }
 

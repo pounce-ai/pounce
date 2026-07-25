@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type {
-  CreateRunResponse,
-  WireEnvelope,
-} from "@pounce/shared";
+import type { CreateRunResponse, WireEnvelope } from "@pounce/shared";
 import { PounceAdapter } from "./pounceAdapter";
 import type { Transport } from "../transport/types";
 

@@ -76,7 +76,8 @@ export function migrateLegendToDb(): void {
     );
   }
 
-  const legacySyncLog = readJson<{ at: string; repos: { repoId: string; name: string; count: number }[] }[]>("syncLog");
+  const legacySyncLog =
+    readJson<{ at: string; repos: { repoId: string; name: string; count: number }[] }[]>("syncLog");
   if (legacySyncLog) {
     seed(
       syncLog,
@@ -87,36 +88,65 @@ export function migrateLegendToDb(): void {
   const favThreads = readJson<Record<string, true>>("favThreads");
   const favReposMap = readJson<Record<string, true>>("favRepos");
   const favRows = [
-    ...Object.keys(favThreads ?? {}).map((ref) => ({ id: `thread:${ref}`, kind: "thread" as const, ref })),
-    ...Object.keys(favReposMap ?? {}).map((ref) => ({ id: `repo:${ref}`, kind: "repo" as const, ref })),
+    ...Object.keys(favThreads ?? {}).map((ref) => ({
+      id: `thread:${ref}`,
+      kind: "thread" as const,
+      ref,
+    })),
+    ...Object.keys(favReposMap ?? {}).map((ref) => ({
+      id: `repo:${ref}`,
+      kind: "repo" as const,
+      ref,
+    })),
   ];
   seed(favorites, favRows);
 
   const legacyIgnored = readJson<Record<string, true>>("ignoredRepos");
-  if (legacyIgnored) seed(ignoredRepos, Object.keys(legacyIgnored).map((id) => ({ id })));
+  if (legacyIgnored)
+    seed(
+      ignoredRepos,
+      Object.keys(legacyIgnored).map((id) => ({ id })),
+    );
 
   const legacyThreadModels = readJson<Record<string, string>>("threadModels");
   if (legacyThreadModels) {
-    seed(threadModels, Object.entries(legacyThreadModels).map(([id, model]) => ({ id, model })));
+    seed(
+      threadModels,
+      Object.entries(legacyThreadModels).map(([id, model]) => ({ id, model })),
+    );
   }
 
   const legacyAgentModels = readJson<Record<string, ModelInfo[]>>("agentModels");
   if (legacyAgentModels) {
-    seed(agentModels, Object.entries(legacyAgentModels).map(([id, models]) => ({ id, models })));
+    seed(
+      agentModels,
+      Object.entries(legacyAgentModels).map(([id, models]) => ({ id, models })),
+    );
   }
 
   const legacyCaps = readJson<Record<string, AgentCapabilities>>("agentCaps");
-  if (legacyCaps) seed(agentCaps, Object.entries(legacyCaps).map(([id, caps]) => ({ ...caps, id })));
+  if (legacyCaps)
+    seed(
+      agentCaps,
+      Object.entries(legacyCaps).map(([id, caps]) => ({ ...caps, id })),
+    );
 
-  const legacyOverrides = readJson<Record<string, { name?: string; emoji?: string }>>("deviceOverrides");
+  const legacyOverrides =
+    readJson<Record<string, { name?: string; emoji?: string }>>("deviceOverrides");
   if (legacyOverrides) {
-    seed(deviceOverrides, Object.entries(legacyOverrides).map(([id, patch]) => ({ id, ...patch })));
+    seed(
+      deviceOverrides,
+      Object.entries(legacyOverrides).map(([id, patch]) => ({ id, ...patch })),
+    );
   }
 
   const legacyMarkers = readJson<Record<string, Record<string, boolean>>>("markers");
   if (legacyMarkers) {
     const rows = Object.entries(legacyMarkers).flatMap(([sessionId, byMsg]) =>
-      Object.entries(byMsg).map(([messageId, marked]) => ({ id: `${sessionId}|${messageId}`, marked })),
+      Object.entries(byMsg).map(([messageId, marked]) => ({
+        id: `${sessionId}|${messageId}`,
+        marked,
+      })),
     );
     seed(markers, rows);
   }

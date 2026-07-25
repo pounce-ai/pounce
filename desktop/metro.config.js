@@ -16,10 +16,7 @@ const workspaceRoot = path.resolve(projectRoot, "..");
 const config = makeMetroConfig(getDefaultConfig(projectRoot));
 
 // Shared sources live in ../packages — watch them for fast refresh.
-config.watchFolders = [
-  ...(config.watchFolders ?? []),
-  path.resolve(workspaceRoot, "packages"),
-];
+config.watchFolders = [...(config.watchFolders ?? []), path.resolve(workspaceRoot, "packages")];
 
 // @expo/metro-config pins resolver.platforms to ios/android; the desktop
 // platforms must be listed or the bundler rejects ?platform=macos requests.
@@ -75,7 +72,11 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   // platform mapping) does the rest.
   const bare = !moduleName.startsWith(".") && !path.isAbsolute(moduleName);
   const origin = context.originModulePath ?? "";
-  if (bare && origin.startsWith(workspaceRoot + path.sep) && !origin.startsWith(projectRoot + path.sep)) {
+  if (
+    bare &&
+    origin.startsWith(workspaceRoot + path.sep) &&
+    !origin.startsWith(projectRoot + path.sep)
+  ) {
     // Clone via descriptors: a plain spread evaluates/loses getters on the
     // resolution context, which breaks Expo CLI's wrapped resolver. The
     // original originModulePath descriptor may be non-configurable, so it is

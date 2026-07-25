@@ -15,19 +15,24 @@ for hosts where you don't want the full app.
 ## Install
 
 **Linux / macOS**
+
 ```sh
 ./install.sh
 ```
+
 Registers a systemd user service (Linux) or launchd agent (macOS): starts at
 login, restarts on crash.
 
 **Windows** (PowerShell)
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
+
 Registers a `PounceBridge` scheduled task: starts at logon, restarts on crash.
 
 Override the port or pairing token before installing:
+
 ```sh
 BRIDGE_TOKEN=my-secret BRIDGE_PORT=8099 ./install.sh          # Linux/macOS
 $env:BRIDGE_TOKEN="my-secret"; .\install.ps1                  # Windows

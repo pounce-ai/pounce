@@ -214,7 +214,10 @@ export function upsertRows<T extends WithId>(c: RowCollection, rows: T[]): void 
 
 /** Make the collection exactly `rows`: upsert the present, delete the absent.
  *  Returns which ids were removed so callers can cascade. */
-export function replaceAll<T extends WithId>(c: RowCollection, rows: T[]): { removedIds: string[] } {
+export function replaceAll<T extends WithId>(
+  c: RowCollection,
+  rows: T[],
+): { removedIds: string[] } {
   const nextIds = new Set(rows.map((r) => r.id));
   const removedIds = [...c.keys()].filter((id) => !nextIds.has(id));
   if (removedIds.length) c.delete(removedIds);

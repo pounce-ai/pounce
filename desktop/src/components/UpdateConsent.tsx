@@ -42,7 +42,12 @@ export function UpdateConsent() {
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={() => void decide(false)}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={() => void decide(false)}
+    >
       <View style={[StyleSheet.absoluteFill, s.host]}>
         <View style={[StyleSheet.absoluteFill, s.scrim]} />
         <View style={s.card}>
