@@ -18,8 +18,8 @@ import { MessageMarkdown } from "../components/MessageMarkdown";
 import { NativeSheet } from "../components/NativeSheet";
 import {
   buildContextChangeRequest,
+  clampQuote,
   findMatches,
-  QUOTE_MAX,
   sectionForText,
   splitHighlight,
   splitSections,
@@ -35,14 +35,12 @@ import {
 } from "../state/contextComments";
 import { useThreads } from "../state/db/hooks";
 import { INPUT_TWEAKS, IS_DESKTOP } from "../ui";
+import { HIGHLIGHT, HIGHLIGHT_BG } from "../ui/tokens";
 
 /** The file the app offers to create when a project has no context at all.
  *  CLAUDE.md and AGENTS.md are both conventions; this picks the one Claude
  *  Code reads, since Claude is the default agent. */
 const DEFAULT_CONTEXT_FILE = "CLAUDE.md";
-
-const HIGHLIGHT = "#B3E561";
-const HIGHLIGHT_BG = "rgba(179, 229, 97, 0.22)";
 
 const NO_COMMENTS: ContextComment[] = [];
 
@@ -149,11 +147,7 @@ export default function ContextScreen() {
       const trimmed = selected.trim();
       if (!trimmed) return;
       const section = sectionForText(sections, trimmed);
-      setDraft({
-        kind: "selection",
-        quote: trimmed.length > QUOTE_MAX ? trimmed.slice(0, QUOTE_MAX) + "…" : trimmed,
-        heading: section?.heading ?? null,
-      });
+      setDraft({ kind: "selection", quote: clampQuote(trimmed), heading: section?.heading ?? null });
       setNote("");
     },
     [sections],

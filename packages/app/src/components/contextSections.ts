@@ -219,11 +219,17 @@ export function bodyOf(section: ContextSection): string {
   return section.body.split("\n").slice(1).join("\n").trim();
 }
 
+/** Clamp a quote to what travels with a comment. One definition of the cap and
+ *  the ellipsis, shared by section quotes and free text selections. */
+export function clampQuote(text: string): string {
+  const t = text.trim();
+  return t.length > QUOTE_MAX ? t.slice(0, QUOTE_MAX) + "…" : t;
+}
+
 /** A section's body, for a comment's quote. Falls back to the heading for a
  *  section that is nothing but a heading. */
 export function quoteFor(section: ContextSection): string {
-  const text = bodyOf(section).trim() || section.heading || "";
-  return text.length > QUOTE_MAX ? text.slice(0, QUOTE_MAX) + "…" : text;
+  return clampQuote(bodyOf(section).trim() || section.heading || "");
 }
 
 /**

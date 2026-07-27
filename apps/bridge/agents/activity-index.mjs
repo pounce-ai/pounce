@@ -71,7 +71,7 @@ async function forEachLine(file, start, onLine) {
   return consumed;
 }
 
-const emptyAcc = () => ({ byDay: {}, carry: {} });
+const emptyAcc = () => ({ byDay: {} });
 
 function bump(acc, day, tokens, messages = 1) {
   if (!day) return;
@@ -140,7 +140,7 @@ export function createActivityIndex({
   cacheFile = path.join(os.homedir(), ".pounce", "activity-cache.json"),
   ledgerFile = LEDGER_FILE,
 } = {}) {
-  /** key `agent:threadId` → { file, mtimeMs, size, parsedBytes, carry, byDay } */
+  /** key `agent:threadId` → { file, mtimeMs, size, parsedBytes, byDay } */
   const entries = new Map();
   const inflight = new Map();
   let loaded = false;
@@ -224,7 +224,6 @@ export function createActivityIndex({
       for (const [d, v] of Object.entries(resume.byDay || {})) {
         acc.byDay[d] = { tokens: v.tokens || 0, messages: v.messages || 0 };
       }
-      acc.carry = { ...resume.carry };
     }
     const onLine = PARSERS[agent];
     const parsedBytes = await forEachLine(file, resume ? resume.parsedBytes : 0, (line) =>
@@ -235,7 +234,6 @@ export function createActivityIndex({
       mtimeMs: st.mtimeMs,
       size: st.size,
       parsedBytes,
-      carry: acc.carry,
       byDay: trimDays(acc.byDay),
     };
     entries.set(key, entry);
@@ -319,7 +317,13 @@ export function createActivityIndex({
     const totals = { sessions: 0, messages: 0, tokens: 0, cost: null, costComplete: true };
     const coverage = {};
 
-    for (const t of threads) {
+    // Read every thread's day map CONCURRENTLY. Awaiting inside the fold below
+    // would serialize them and defeat withSlot's own PARSE_CONCURRENCY limit —
+    // `active` could never exceed 1 — which is what made the first (cold) call
+    // of the day take tens of seconds.
+    const perDays = await Promise.all(threads.map((t) => threadDays(t.agent, t.id)));
+
+    for (const [i, t] of threads.entries()) {
       coverage[t.agent] ??= TOKEN_AGENTS.has(t.agent) ? "tokens" : "sessions-only";
       const started = dayOf(t.createdAt);
       if (started && (!since || started >= since)) {
@@ -328,8 +332,7 @@ export function createActivityIndex({
         agentOn(d, t.agent).sessions++;
         totals.sessions++;
       }
-      const perDay = await threadDays(t.agent, t.id);
-      for (const [date, v] of Object.entries(perDay)) {
+      for (const [date, v] of Object.entries(perDays[i])) {
         if (since && date < since) continue;
         const d = day(date);
         d.messages += v.messages;
@@ -372,14 +375,16 @@ export function createActivityIndex({
    * populate pass. Returns how many threads it actually had to read.
    */
   async function populate(threads) {
-    let scanned = 0;
-    for (const t of threads) {
-      if (!TOKEN_AGENTS.has(t.agent)) continue;
-      const key = `${t.agent}:${t.id}`;
-      const before = entries.get(key);
-      await threadDays(t.agent, t.id);
-      if (entries.get(key) !== before) scanned++;
-    }
+    // Concurrent for the same reason as series(): withSlot already provides the
+    // backpressure the sequential loop was standing in for, and this runs on a
+    // timer whose whole point is to stay off the critical path.
+    const wanted = threads.filter((t) => TOKEN_AGENTS.has(t.agent));
+    const before = wanted.map((t) => entries.get(`${t.agent}:${t.id}`));
+    await Promise.all(wanted.map((t) => threadDays(t.agent, t.id)));
+    const scanned = wanted.reduce(
+      (n, t, i) => n + (entries.get(`${t.agent}:${t.id}`) !== before[i] ? 1 : 0),
+      0,
+    );
     flush();
     return scanned;
   }

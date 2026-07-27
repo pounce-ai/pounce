@@ -42,7 +42,7 @@ import {
   sendInput,
 } from "./agents/pty-turn.mjs";
 import { agentEnv, binPath, binVersion, primaryLanIp } from "./agents/env.mjs";
-import { readConfig, writeConfig } from "./agents/config.mjs";
+import { publicConfig, readConfig, writeConfig } from "./agents/config.mjs";
 import { readContextFiles } from "./agents/context.mjs";
 import { createHistorySearch } from "./agents/search.mjs";
 import { createActivityIndex } from "./agents/activity-index.mjs";
@@ -677,17 +677,6 @@ const activity = createActivityIndex({
 const ACTIVITY_POPULATE_MS = Number(process.env.ACTIVITY_POPULATE_MS || 10 * 60_000);
 
 /**
- * Config as it may leave this machine. The Admin API key is a bearer credential
- * for the org's BILLING account, so it is write-only: settable over /v1/config,
- * never readable back. A paired phone gets a boolean and nothing else — the
- * same reasoning that keeps /v1/file image-only.
- */
-function publicConfig(config) {
-  const { adminApiKey, ...rest } = config || {};
-  return { ...rest, adminApiKeySet: typeof adminApiKey === "string" && adminApiKey.length > 0 };
-}
-
-/**
  * Overlay the organization's official daily spend onto the activity series,
  * when the user has opted in with an Admin API key (~/.pounce/config.json).
  *
@@ -1275,7 +1264,7 @@ const server = http.createServer(async (req, res) => {
       // agents/context.mjs; edits go through an agent turn, not an endpoint.
       const cwd = url.searchParams.get("cwd");
       if (!cwd) return send(res, 400, { error: "cwd required" });
-      const out = readContextFiles(cwd);
+      const out = await readContextFiles(cwd);
       if (!out) return send(res, 404, { error: "not found" });
       return send(res, 200, out);
     }
@@ -1319,7 +1308,13 @@ const server = http.createServer(async (req, res) => {
       const days = Math.min(400, Math.max(1, Number(url.searchParams.get("days") || 365)));
       const fresh = url.searchParams.get("fresh") === "1";
       const key = `activity:${days}`;
-      if (fresh) cache.delete(key);
+      if (fresh) {
+        cache.delete(key);
+        // The billing report has its own 5-minute memo inside admin-cost.mjs.
+        // Without this, someone who just fixed a rejected Admin key pulls to
+        // refresh and still gets the stale "not authorized" answer.
+        resetCostCache();
+      }
       return send(
         res,
         200,

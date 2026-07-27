@@ -88,19 +88,21 @@ async function lastRateLimits(file) {
   // Starting mid-file can slice a line in half; drop the fragment.
   const lines = buf.split("\n");
   if (start > 0) lines.shift();
-  let found = null;
-  for (const line of lines) {
-    if (!line.includes('"rate_limits"')) continue;
+  // Backwards: Codex writes a rate_limits snapshot on every API call, so a
+  // 512KB tail holds hundreds of them and only the newest matters. Parsing
+  // forwards meant JSON.parse-ing them all and discarding every one but the last.
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes('"rate_limits"')) continue;
     let o;
     try {
-      o = JSON.parse(line);
+      o = JSON.parse(lines[i]);
     } catch {
       continue;
     }
     const rl = o?.payload?.rate_limits;
-    if (rl) found = { at: o.timestamp || null, rl };
+    if (rl) return { at: o.timestamp || null, rl };
   }
-  return found;
+  return null;
 }
 
 /** One rolling window, as the app renders it. */
@@ -143,5 +145,3 @@ export async function readQuota() {
   }
   return out;
 }
-
-export { newestRollout, lastRateLimits };

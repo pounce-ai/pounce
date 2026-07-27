@@ -16,44 +16,44 @@ afterEach(() => {
 });
 
 describe("readContextFiles", () => {
-  it("reads the whitelisted files that exist and ignores everything else", () => {
+  it("reads the whitelisted files that exist and ignores everything else", async () => {
     const dir = repo();
     writeFileSync(path.join(dir, "CLAUDE.md"), "# Project\n\nBe careful.\n");
     writeFileSync(path.join(dir, "AGENTS.md"), "agents\n");
     writeFileSync(path.join(dir, "README.md"), "not context\n");
     writeFileSync(path.join(dir, ".env"), "SECRET=1\n");
 
-    const out = readContextFiles(dir);
+    const out = await readContextFiles(dir);
     expect(out.files.map((f) => f.path)).toEqual(["CLAUDE.md", "AGENTS.md"]);
     expect(out.files[0].content).toContain("Be careful.");
     expect(out.files[0].truncated).toBe(false);
   });
 
-  it("finds the nested .claude/CLAUDE.md and reports a forward-slashed path", () => {
+  it("finds the nested .claude/CLAUDE.md and reports a forward-slashed path", async () => {
     const dir = repo();
     mkdirSync(path.join(dir, ".claude"));
     writeFileSync(path.join(dir, ".claude", "CLAUDE.md"), "nested\n");
 
-    const out = readContextFiles(dir);
+    const out = await readContextFiles(dir);
     // Forward slashes even though the host may use path.sep — the app shows
     // this verbatim as the file's identity.
     expect(out.files.map((f) => f.path)).toEqual([".claude/CLAUDE.md"]);
   });
 
-  it("returns an empty list for a project with no context files", () => {
-    const out = readContextFiles(repo());
+  it("returns an empty list for a project with no context files", async () => {
+    const out = await readContextFiles(repo());
     expect(out.files).toEqual([]);
   });
 
-  it("returns null for a path that isn't a directory", () => {
+  it("returns null for a path that isn't a directory", async () => {
     const dir = repo();
     const file = path.join(dir, "CLAUDE.md");
     writeFileSync(file, "x\n");
-    expect(readContextFiles(file)).toBeNull();
-    expect(readContextFiles(path.join(dir, "nope"))).toBeNull();
+    expect(await readContextFiles(file)).toBeNull();
+    expect(await readContextFiles(path.join(dir, "nope"))).toBeNull();
   });
 
-  it("refuses a whitelisted name that symlinks outside the project", () => {
+  it("refuses a whitelisted name that symlinks outside the project", async () => {
     const outside = repo();
     const secret = path.join(outside, "id_rsa");
     writeFileSync(secret, "PRIVATE KEY\n");
@@ -62,11 +62,11 @@ describe("readContextFiles", () => {
     // approved NAME in the repo but point it somewhere else.
     symlinkSync(secret, path.join(dir, "CLAUDE.md"));
 
-    const out = readContextFiles(dir);
+    const out = await readContextFiles(dir);
     expect(out.files).toEqual([]);
   });
 
-  it("refuses a symlink into a SIBLING directory that shares the project's name prefix", () => {
+  it("refuses a symlink into a SIBLING directory that shares the project's name prefix", async () => {
     // The containment check is a string prefix compare, so "/x/repo-secrets"
     // must not read as inside "/x/repo". Appending the separator before
     // comparing is what makes that hold.
@@ -79,25 +79,25 @@ describe("readContextFiles", () => {
     writeFileSync(secret, "SIBLING SECRET\n");
     symlinkSync(secret, path.join(project, "CLAUDE.md"));
 
-    expect(readContextFiles(project).files).toEqual([]);
+    expect((await readContextFiles(project)).files).toEqual([]);
   });
 
-  it("follows a symlink that stays inside the project", () => {
+  it("follows a symlink that stays inside the project", async () => {
     const dir = repo();
     mkdirSync(path.join(dir, "docs"));
     writeFileSync(path.join(dir, "docs", "instructions.md"), "shared\n");
     symlinkSync(path.join(dir, "docs", "instructions.md"), path.join(dir, "AGENTS.md"));
 
-    const out = readContextFiles(dir);
+    const out = await readContextFiles(dir);
     expect(out.files.map((f) => f.path)).toEqual(["AGENTS.md"]);
     expect(out.files[0].content).toBe("shared\n");
   });
 
-  it("truncates a file past the per-file cap and flags it", () => {
+  it("truncates a file past the per-file cap and flags it", async () => {
     const dir = repo();
     writeFileSync(path.join(dir, "CLAUDE.md"), "x".repeat(300 * 1024));
 
-    const [file] = readContextFiles(dir).files;
+    const [file] = (await readContextFiles(dir)).files;
     expect(file.truncated).toBe(true);
     expect(file.content.length).toBe(256 * 1024);
     // `size` stays the file's real size — the app tells the user what it cut.

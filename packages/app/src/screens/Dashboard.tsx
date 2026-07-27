@@ -62,9 +62,17 @@ export default function DashboardScreen() {
   const [sharing, setSharing] = useState(false);
   const shareRef = useRef<View>(null);
 
+  // Pull-to-refresh means "go look again", not "show me the same answer" — so it
+  // asks the host to bypass its own 20s cache. Ordinary refetches (mount, stale
+  // time) deliberately don't, since re-parsing every transcript is expensive.
+  const forceFresh = useRef(false);
   const q = useQuery({
     queryKey: ["activity", YEAR],
-    queryFn: () => fetchActivity(YEAR),
+    queryFn: () => {
+      const fresh = forceFresh.current;
+      forceFresh.current = false;
+      return fetchActivity(YEAR, { fresh });
+    },
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
@@ -94,7 +102,7 @@ export default function DashboardScreen() {
   // would be 1px wide and unreadable).
   const bars = useMemo(() => {
     if (period !== "year") {
-      return window.map((d) => ({ key: d.date, value: d.messages, label: fmtDayLabel(d.date) }));
+      return window.map((d) => ({ key: d.date, value: d.messages }));
     }
     const byMonth = new Map<string, number>();
     for (const d of year) {
@@ -133,7 +141,10 @@ export default function DashboardScreen() {
         refreshControl={
           <RefreshControl
             refreshing={q.isFetching && !q.isLoading}
-            onRefresh={() => q.refetch()}
+            onRefresh={() => {
+              forceFresh.current = true;
+              return q.refetch();
+            }}
             tintColor={theme.colors.fgMuted}
           />
         }
@@ -241,7 +252,7 @@ export default function DashboardScreen() {
               </View>
               <View style={s.streakDivider} />
               <View style={s.streakItem}>
-                <Text style={s.streakValue}>{year.filter((d) => d.messages > 0).length}</Text>
+                <Text style={s.streakValue}>{run.active}</Text>
                 <Text style={s.streakLabel}>active days</Text>
               </View>
             </View>

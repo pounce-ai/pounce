@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineEvent } from "@pounce/shared";
-import { deriveTaskState, deriveTaskTimeline, parseTaskCall, taskProgress } from "./taskEvents";
+import { deriveTaskTimeline, parseTaskCall, taskProgress } from "./taskEvents";
+
+/** The checklist half of the fold. Callers derive the whole timeline once and
+ *  read `.state`; these tests only care about that half. */
+const deriveTaskState = (events: readonly TimelineEvent[]) => deriveTaskTimeline(events).state;
 
 // Minimal fixtures — the helpers only read .type, .id, .seq, .ts, .call and .result.
 let seq = 0;

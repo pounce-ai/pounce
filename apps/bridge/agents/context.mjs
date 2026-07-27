@@ -15,7 +15,7 @@
  *     resolved under one directory, with symlinks that point outside rejected.
  *     A `?path=` parameter here would be a repo-wide read primitive.
  */
-import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 
 /**
@@ -53,54 +53,61 @@ function isInside(child, parent) {
  * that into a 404. An empty `files` array is a normal answer: plenty of projects
  * have no CLAUDE.md yet, and the app offers to create one from that state.
  */
-export function readContextFiles(cwd) {
+export async function readContextFiles(cwd) {
   let root;
   try {
     // realpath first: the whole containment check below compares resolved
     // paths, so a symlinked worktree root must resolve to its real location or
     // every file inside it would look like an escape.
-    root = fs.realpathSync(cwd);
-    if (!fs.statSync(root).isDirectory()) return null;
+    root = await fsp.realpath(cwd);
+    if (!(await fsp.stat(root)).isDirectory()) return null;
   } catch {
     return null;
   }
 
+  // Read the candidates concurrently — they're independent, and doing this
+  // synchronously stalled the bridge's single event loop for up to MAX_TOTAL
+  // of file I/O, freezing every other paired device's stream mid-request.
+  const found = await Promise.all(
+    CONTEXT_FILES.map(async (rel) => {
+      let real;
+      let st;
+      try {
+        real = await fsp.realpath(path.join(root, rel));
+        st = await fsp.stat(real);
+      } catch {
+        return null; // absent, or a broken symlink — same outcome either way
+      }
+      if (!st.isFile()) return null;
+      // A symlink pointing out of the project (…/CLAUDE.md -> ~/.ssh/config) is
+      // the one way a fixed whitelist could still read something it shouldn't.
+      if (!isInside(real, root)) return null;
+      try {
+        return { rel, st, content: await fsp.readFile(real, "utf8") };
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  // Caps applied in whitelist order so the response is deterministic regardless
+  // of which read finished first.
   const files = [];
   let total = 0;
-  for (const rel of CONTEXT_FILES) {
-    const full = path.join(root, rel);
-    let real;
-    let st;
-    try {
-      real = fs.realpathSync(full);
-      st = fs.statSync(real);
-    } catch {
-      continue; // absent, or a broken symlink — same outcome either way
-    }
-    if (!st.isFile()) continue;
-    // A symlink pointing out of the project (…/CLAUDE.md -> ~/.ssh/config) is
-    // the one way a fixed whitelist could still read something it shouldn't.
-    if (!isInside(real, root)) continue;
-    if (total >= MAX_TOTAL) break;
-
+  for (const hit of found) {
+    if (!hit || total >= MAX_TOTAL) continue;
     const budget = Math.min(MAX_FILE, MAX_TOTAL - total);
-    let content;
-    try {
-      content = fs.readFileSync(real, "utf8");
-    } catch {
-      continue;
-    }
-    const truncated = content.length > budget;
-    if (truncated) content = content.slice(0, budget);
+    const truncated = hit.content.length > budget;
+    const content = truncated ? hit.content.slice(0, budget) : hit.content;
     total += content.length;
 
     files.push({
       // Forward-slashed regardless of host — the app treats this as an id and
       // shows it verbatim, and `.claude\CLAUDE.md` would read as a typo.
-      path: rel.split(path.sep).join("/"),
-      name: path.basename(rel),
-      size: st.size,
-      mtime: new Date(st.mtimeMs).toISOString(),
+      path: hit.rel.split(path.sep).join("/"),
+      name: path.basename(hit.rel),
+      size: hit.st.size,
+      mtime: new Date(hit.st.mtimeMs).toISOString(),
       content,
       truncated,
     });

@@ -22,7 +22,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import type { PermissionMode, TimelineEvent } from "@pounce/shared";
 import { collapseToolResults, Timeline } from "../components/Timeline";
-import { deriveTaskState } from "../components/taskEvents";
+import { deriveTaskTimeline } from "../components/taskEvents";
 import { TaskProgressBar } from "../components/TaskProgress";
 import { WorkingIndicator } from "../components/WorkingIndicator";
 import { TimelineSkeleton } from "../components/Skeleton";
@@ -380,10 +380,13 @@ export default function SessionScreen() {
   // Timeline collapses paired tool results into their call's accordion, so
   // marker indices must be computed over the same collapsed array it renders.
   const events = useMemo(() => collapseToolResults(rawEvents), [rawEvents]);
-  // The agent's checklist, derived from the newest TodoWrite/update_plan in the
-  // thread — pinned above the composer so progress stays visible while the
-  // timeline scrolls.
-  const taskState = useMemo(() => deriveTaskState(rawEvents), [rawEvents]);
+  // The agent's checklist, folded from the newest task call in the thread.
+  // Derived ONCE here and shared: the pinned bar below shows `state`, and
+  // Timeline needs the same fold to render each task card. Folding it in both
+  // places cost two passes over every event per streamed token, and let the two
+  // views disagree about which task is current.
+  const tasks = useMemo(() => deriveTaskTimeline(rawEvents), [rawEvents]);
+  const taskState = tasks.state;
 
   // --- markers: user messages by default, overrides for adds/removals ---
   const listRef = useRef<LegendListRef>(null);
@@ -1049,6 +1052,7 @@ export default function SessionScreen() {
               <Animated.View style={ANIM.flex1} entering={FadeIn.duration(260)}>
                 <Timeline
                   events={rawEvents}
+                  tasks={tasks}
                   agent={session.agent}
                   cwd={session.cwd}
                   sessionId={id!}

@@ -121,13 +121,7 @@ function addAgent(
  */
 export function mergeActivity(pages: readonly (ActivityPage | null | undefined)[]): ActivityPage {
   const byDate = new Map<string, ActivityDay & { byAgent: Record<string, AgentActivity> }>();
-  const totals = { ...EMPTY_TOTALS } as {
-    sessions: number;
-    messages: number;
-    tokens: number;
-    cost: number | null;
-    costComplete: boolean;
-  };
+  const totals = { ...EMPTY_TOTALS };
   const coverage: Record<string, Coverage> = {};
   for (const page of pages) {
     if (!page) continue;
@@ -213,6 +207,9 @@ export function quantize(days: readonly ActivityDay[]): HeatDay[] {
 export interface Streaks {
   readonly current: number;
   readonly longest: number;
+  /** Days with any activity. Counted here because this already walks the array
+   *  — the dashboard would otherwise re-filter 365 days in its render body. */
+  readonly active: number;
 }
 
 /**
@@ -223,8 +220,10 @@ export interface Streaks {
 export function streaks(days: readonly ActivityDay[]): Streaks {
   let longest = 0;
   let run = 0;
+  let active = 0;
   for (const d of days) {
     if (d.messages > 0) {
+      active++;
       run++;
       if (run > longest) longest = run;
     } else run = 0;
@@ -236,7 +235,7 @@ export function streaks(days: readonly ActivityDay[]): Streaks {
       continue; // today still has time
     else break;
   }
-  return { current, longest };
+  return { current, longest, active };
 }
 
 export type Period = "week" | "month" | "year";
