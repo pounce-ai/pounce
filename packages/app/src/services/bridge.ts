@@ -976,6 +976,41 @@ export async function fetchGitChecks(hostId: string, cwd: string): Promise<GitCh
   }
 }
 
+/** One of a project's agent-instruction files, as the host read it. */
+export interface ContextFile {
+  /** Forward-slashed path relative to the project root, e.g. `.claude/CLAUDE.md`. */
+  path: string;
+  name: string;
+  /** The file's real size on disk — larger than `content` when truncated. */
+  size: number;
+  mtime: string;
+  content: string;
+  truncated: boolean;
+}
+
+export interface ContextFiles {
+  cwd: string;
+  files: ContextFile[];
+}
+
+/**
+ * A project's CLAUDE.md/AGENTS.md files.
+ *
+ * `null` means the host couldn't answer — unreachable, or a bridge too old to
+ * have the route. That's different from an answer with no files (a project
+ * that simply has no context yet), which the screen offers to fix, so the two
+ * must not collapse into the same value.
+ */
+export async function fetchContextFiles(hostId: string, cwd: string): Promise<ContextFiles | null> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return null;
+  try {
+    return await get<ContextFiles>(cfg, `/v1/context?cwd=${encodeURIComponent(cwd)}`, 20_000);
+  } catch {
+    return null;
+  }
+}
+
 async function gitPost<T>(hostId: string, path: string, body: object): Promise<T | null> {
   const cfg = await deviceForHost(hostId);
   if (!cfg) return null;

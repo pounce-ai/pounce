@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { KeyboardAvoidingView } from "../components/kav";
 import { Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -15,8 +15,9 @@ import {
   sortAgents,
 } from "../state/stores";
 import { useAgentCaps, useDevices, useProjects, useThreads } from "../state/db/hooks";
-import { Composer, type ComposerSubmit } from "../components/Composer";
+import { Composer, type ComposerHandle, type ComposerSubmit } from "../components/Composer";
 import { FolderBrowser } from "../components/FolderBrowser";
+import { contextDraft$ } from "../state/contextComments";
 import { startInteractive } from "../services/bridge";
 import { AgentLogo, agentLabel, IS_DESKTOP } from "../ui";
 import { effectiveCaps } from "../ui/agent-meta";
@@ -37,7 +38,13 @@ export default function NewTaskScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { theme } = useUnistyles();
-  const { repoId } = useLocalSearchParams<{ repoId?: string }>();
+  // `cwd`/`hostId` seed an exact folder (from the Project context screen);
+  // `repoId` alone seeds the repo and lets pickRepo choose the folder.
+  const {
+    repoId,
+    cwd: cwdParam,
+    hostId: hostParam,
+  } = useLocalSearchParams<{ repoId?: string; cwd?: string; hostId?: string }>();
   const devices = useDevices();
   const rawThreads = useThreads();
   const projectList = useProjects();
@@ -49,9 +56,9 @@ export default function NewTaskScreen() {
   // Default to a REACHABLE device — a stale/dead pairing (e.g. an old IP) can
   // otherwise sit at devices[0] and silently swallow the turn (no response).
   const [hostId, setHostId] = useState<string | undefined>(
-    (devices.find((d) => d.online) ?? devices[0])?.id,
+    hostParam ? String(hostParam) : (devices.find((d) => d.online) ?? devices[0])?.id,
   );
-  const [cwd, setCwd] = useState<string | null>(null);
+  const [cwd, setCwd] = useState<string | null>(cwdParam ? String(cwdParam) : null);
   const [selectedRepoId, setSelectedRepoId] = useState<string | null>(null);
   const [agent, setAgent] = useState<AgentId>("claude");
   const [browsing, setBrowsing] = useState(false);
@@ -104,11 +111,28 @@ export default function NewTaskScreen() {
   }, [hostId, devices]);
 
   // Seeded from a folder's "+" on Home: adopt that repo's cwd + device on mount
-  // so the user lands straight on the composer for that folder.
+  // so the user lands straight on the composer for that folder. An explicit
+  // cwd param (from Project context) already names the exact folder — pickRepo
+  // would second-guess it and could pick a different worktree.
   useEffect(() => {
+    if (cwdParam) {
+      if (repoId) setSelectedRepoId(String(repoId));
+      return;
+    }
     if (repoId) pickRepo(repoId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoId]);
+  }, [repoId, cwdParam]);
+
+  // A queued change request from the Project context screen. One-shot: read it,
+  // clear it, drop it into the composer as an ordinary editable draft — the
+  // user still gets to reword before sending.
+  const composerRef = useRef<ComposerHandle>(null);
+  useEffect(() => {
+    const draft = contextDraft$.peek();
+    if (!draft) return;
+    contextDraft$.set(null);
+    composerRef.current?.insert(draft);
+  }, []);
 
   const launch = async (s: ComposerSubmit) => {
     const nowIso = new Date().toISOString();
@@ -280,6 +304,7 @@ export default function NewTaskScreen() {
           </Pressable>
         ) : null}
         <Composer
+          ref={composerRef}
           agent={agent}
           caps={caps}
           hostId={hostId}

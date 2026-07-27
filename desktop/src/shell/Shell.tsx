@@ -23,6 +23,7 @@ import SettingsScreen from "@pounce/app/screens/Settings";
 import DashboardScreen from "@pounce/app/screens/Dashboard";
 import NewTaskScreen from "@pounce/app/screens/New";
 import ChangesScreen from "@pounce/app/screens/Changes";
+import ContextScreen from "@pounce/app/screens/Context";
 import TerminalScreen from "@pounce/app/screens/Terminal";
 import ConnectScreen from "@pounce/app/screens/Connect";
 import HelpScreen from "@pounce/app/screens/Help";
@@ -57,6 +58,7 @@ const MODALS: Record<string, { component: ComponentType; width: number; height: 
   "/activity": { component: DashboardScreen, width: 760, height: 700 },
   "/new": { component: NewTaskScreen, width: 640, height: 660 },
   "/changes": { component: ChangesScreen, width: 860, height: 660 },
+  "/context": { component: ContextScreen, width: 720, height: 700 },
   "/terminal": { component: TerminalScreen, width: 860, height: 660 },
   "/connect": { component: ConnectScreen, width: 560, height: 460 },
   "/help": { component: HelpScreen, width: 620, height: 640 },
