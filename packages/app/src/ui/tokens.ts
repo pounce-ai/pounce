@@ -48,3 +48,13 @@ export const AGENT_HEX: Record<string, string> = {
 export function agentLabel(agent: string): string {
   return AGENT_LABEL[agent] ?? agent;
 }
+
+/**
+ * Search-match highlight — the lime used wherever the app says "this is the bit
+ * you were looking for": the deep-linked message in a thread, and matched
+ * passages in the project-context reader. Deliberately outside the light/dark
+ * theme: it has to stay legible against both, and it means "found", not "brand".
+ */
+export const HIGHLIGHT = "#B3E561";
+/** The same colour as a wash behind matched text. */
+export const HIGHLIGHT_BG = "rgba(179, 229, 97, 0.22)";

@@ -222,7 +222,13 @@ describe("quantize", () => {
 describe("streaks", () => {
   it("counts the current run of active days", () => {
     const s = streaks([day("d1", 0), day("d2", 3), day("d3", 3), day("d4", 3)]);
-    expect(s).toEqual({ current: 3, longest: 3 });
+    expect(s).toEqual({ current: 3, longest: 3, active: 3 });
+  });
+
+  it("counts active days regardless of whether they are consecutive", () => {
+    const s = streaks([day("d1", 1), day("d2", 0), day("d3", 2), day("d4", 0), day("d5", 5)]);
+    expect(s.active).toBe(3);
+    expect(s.longest).toBe(1);
   });
 
   it("finds the longest historical run even after it breaks", () => {
@@ -243,7 +249,7 @@ describe("streaks", () => {
   });
 
   it("is zero for an empty series", () => {
-    expect(streaks([])).toEqual({ current: 0, longest: 0 });
+    expect(streaks([])).toEqual({ current: 0, longest: 0, active: 0 });
   });
 });
 

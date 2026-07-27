@@ -37,6 +37,12 @@ function closeButton(tint: string) {
   };
 }
 
+/** A titled modal with a close control. Every modal in this stack that shows a
+ *  header wants exactly this, so adding one is a title rather than four keys —
+ *  and the screens that deliberately skip it read as a choice, not an omission. */
+const titled = (title: string, tint: string) =>
+  ({ presentation: "modal", headerShown: true, title, headerLeft: closeButton(tint) }) as const;
+
 const s = StyleSheet.create({
   close: {
     // Symmetric padding keeps the glyph centred: iOS draws its circular glass
@@ -76,53 +82,14 @@ export default function MainLayout() {
     >
       <Stack.Screen name="(app)" />
       <Stack.Screen name="session/[id]" />
-      <Stack.Screen
-        name="sessions"
-        options={{
-          presentation: "modal",
-          headerShown: true,
-          title: "All sessions",
-          headerLeft: closeButton(hex.accent),
-        }}
-      />
-      <Stack.Screen
-        name="new"
-        options={{
-          presentation: "modal",
-          headerShown: true,
-          title: "New task",
-          headerLeft: closeButton(hex.accent),
-        }}
-      />
-      <Stack.Screen
-        name="context"
-        options={{
-          presentation: "modal",
-          headerShown: true,
-          title: "Project context",
-          headerLeft: closeButton(hex.accent),
-        }}
-      />
+      <Stack.Screen name="sessions" options={titled("All sessions", hex.accent)} />
+      <Stack.Screen name="new" options={titled("New task", hex.accent)} />
+      <Stack.Screen name="context" options={titled("Project context", hex.accent)} />
+      {/* No header, so no close button — these two present their own chrome. */}
       <Stack.Screen name="terminal" options={{ presentation: "modal" }} />
       <Stack.Screen name="connect" options={{ presentation: "modal" }} />
-      <Stack.Screen
-        name="help"
-        options={{
-          presentation: "modal",
-          headerShown: true,
-          title: "Help",
-          headerLeft: closeButton(hex.accent),
-        }}
-      />
-      <Stack.Screen
-        name="sync-history"
-        options={{
-          presentation: "modal",
-          headerShown: true,
-          title: "Sync history",
-          headerLeft: closeButton(hex.accent),
-        }}
-      />
+      <Stack.Screen name="help" options={titled("Help", hex.accent)} />
+      <Stack.Screen name="sync-history" options={titled("Sync history", hex.accent)} />
       {/* Native form sheet (not an RN Modal) — sizes to the prompt's options.
           Stays on the router formSheet: its notification auto-present flow is
           battle-tested, so it does NOT move to the TrueSheet navigator. */}

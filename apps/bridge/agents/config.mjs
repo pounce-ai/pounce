@@ -99,6 +99,22 @@ export function writeConfig(patch = {}) {
   return next;
 }
 
+/**
+ * Config as it may leave this machine.
+ *
+ * Lives here, next to the field it redacts, rather than in the HTTP layer: the
+ * Admin API key is a bearer credential for the org's BILLING account, so it is
+ * write-only — settable over /v1/config, never readable back. A paired phone
+ * gets a boolean and nothing else, the same reasoning that keeps /v1/file
+ * image-only. Any future response that embeds config must go through this, and
+ * any future secret added to `normalize()` must be dropped here in the same
+ * edit.
+ */
+export function publicConfig(config = readConfig()) {
+  const { adminApiKey, ...rest } = config || {};
+  return { ...rest, adminApiKeySet: typeof adminApiKey === "string" && adminApiKey.length > 0 };
+}
+
 /** The configured absolute path for a binary, or null if none. */
 export function binOverride(name) {
   return readConfig().bins[name] || null;

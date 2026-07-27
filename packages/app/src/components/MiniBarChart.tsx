@@ -7,7 +7,6 @@ import { hexFor } from "../ui/theme-hex";
 export interface Bar {
   readonly key: string;
   readonly value: number;
-  readonly label?: string;
 }
 
 /**

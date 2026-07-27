@@ -133,6 +133,8 @@ function resultTexts(events: readonly TimelineEvent[]): Map<string, string> {
   return m;
 }
 
+const EMPTY_RESULTS: ReadonlyMap<string, string> = new Map();
+
 export interface TaskTimeline {
   /** The thread's current checklist, or null when it has none. */
   readonly state: TaskListState | null;
@@ -150,7 +152,16 @@ export interface TaskTimeline {
  */
 export function deriveTaskTimeline(events: readonly TimelineEvent[]): TaskTimeline {
   const labels = new Map<string, string>();
-  const results = resultTexts(events);
+  // Only TaskCreate reads this, and only Claude's task tools emit one. Codex's
+  // update_plan and Claude's TodoWrite — the common case — would otherwise pay
+  // a full extra scan of the transcript, per streamed token, to build a map
+  // nothing reads.
+  const results = events.some((e) => {
+    const n = toolName(e);
+    return n !== null && CREATE_TOOLS.has(n);
+  })
+    ? resultTexts(events)
+    : EMPTY_RESULTS;
   // Incremental fold. Insertion-ordered: a Map preserves creation order, which
   // is the order the agent listed the work in.
   const folded = new Map<string, TaskItem>();
@@ -225,11 +236,6 @@ export function deriveTaskTimeline(events: readonly TimelineEvent[]): TaskTimeli
   // The row that owns the checklist renders it in full, so it carries no label.
   if (latest) labels.delete(latest.id);
   return { state, latestEventId: latest?.id ?? null, labels };
-}
-
-/** The thread's current checklist. */
-export function deriveTaskState(events: readonly TimelineEvent[]): TaskListState | null {
-  return deriveTaskTimeline(events).state;
 }
 
 export interface TaskProgress {
