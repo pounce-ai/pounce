@@ -116,6 +116,7 @@ export function EnvironmentSheet({
   onStop,
   onViewChanges,
   onTerminal,
+  onViewContext,
   onAddSource,
   onRemoveSource,
   onFixConflicts,
@@ -130,6 +131,8 @@ export function EnvironmentSheet({
   onStop: () => void;
   onViewChanges: () => void;
   onTerminal: () => void;
+  /** Open the project's CLAUDE.md/AGENTS.md — read, search, comment. */
+  onViewContext?: () => void;
   /** "+" on the Sources header — e.g. focus the composer's @-mention. */
   onAddSource?: () => void;
   onRemoveSource?: (path: string) => void;
@@ -250,6 +253,13 @@ export function EnvironmentSheet({
                 danger
                 onPress={onFixConflicts ? act(onFixConflicts) : undefined}
                 right={onFixConflicts ? <Text style={s.fixLabel}>Fix</Text> : undefined}
+              />
+            ) : null}
+            {onViewContext ? (
+              <Row
+                icon="document-text-outline"
+                label="Project context"
+                onPress={act(onViewContext)}
               />
             ) : null}
             <Row icon="terminal-outline" label="Open terminal" onPress={act(onTerminal)} />

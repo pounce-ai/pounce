@@ -10,6 +10,14 @@ import {
   type MarkdownStyle,
   type Md4cFlags,
 } from "react-native-enriched-markdown";
+
+/** One extra action on the native text-selection menu. Derived from the
+ *  component's own props rather than imported by name: the package exports two
+ *  different `ContextMenuItem`s (text vs. text-input) and the bare name
+ *  resolves to the wrong one. */
+export type MarkdownContextMenuItem = NonNullable<
+  React.ComponentProps<typeof EnrichedMarkdownText>["contextMenuItems"]
+>[number];
 import { Highlight, themes } from "prism-react-renderer";
 import * as WebBrowser from "expo-web-browser";
 import { StreamdownText } from "react-native-streamdown";
@@ -230,23 +238,39 @@ export function MessageMarkdown({
   role,
   streaming,
   onRun,
+  singleBlock,
+  contextMenuItems,
 }: {
   text: string;
   role: "user" | "assistant";
   streaming?: boolean;
   /** Present only for live assistant turns — enables shell "Run" cards. */
   onRun?: (command: string) => void;
+  /** Render the whole text as ONE markdown view instead of lifting code blocks
+   *  into separate cards. Used where the text is a document rather than a chat
+   *  turn (the project-context reader), so a selection can span the whole
+   *  thing — a selection can't cross two sibling views. */
+  singleBlock?: boolean;
+  /** Extra actions on the native text-selection menu, e.g. "Comment". */
+  contextMenuItems?: MarkdownContextMenuItem[];
 }) {
   // User turns and live streaming (incomplete fences) stay on the native
   // markdown path; settled assistant turns get syntax-highlighted code blocks.
   // Memoized so a row re-render (recycling, marker toggle) doesn't re-split.
-  const highlight = role === "assistant" && !streaming;
+  const highlight = role === "assistant" && !streaming && !singleBlock;
   const segments = useMemo(() => (highlight ? splitCodeBlocks(text) : null), [highlight, text]);
   if (!highlight || !segments) {
-    return <MarkdownBody text={text} role={role} streaming={streaming} />;
+    return (
+      <MarkdownBody
+        text={text}
+        role={role}
+        streaming={streaming}
+        contextMenuItems={contextMenuItems}
+      />
+    );
   }
   if (segments.length === 1 && segments[0].type === "md") {
-    return <MarkdownBody text={text} role="assistant" />;
+    return <MarkdownBody text={text} role="assistant" contextMenuItems={contextMenuItems} />;
   }
   return (
     <View style={{ gap: 8 }}>
@@ -271,10 +295,12 @@ function MarkdownBody({
   text,
   role,
   streaming,
+  contextMenuItems,
 }: {
   text: string;
   role: "user" | "assistant";
   streaming?: boolean;
+  contextMenuItems?: MarkdownContextMenuItem[];
 }) {
   const scheme = useColorScheme();
   const markdownStyle = useMemo(
@@ -308,6 +334,7 @@ function MarkdownBody({
         md4cFlags={MD4C_FLAGS}
         flavor="github"
         selectable
+        contextMenuItems={contextMenuItems}
         onLinkPress={({ url }) => openLink(url)}
       />
     </MarkdownErrorBoundary>

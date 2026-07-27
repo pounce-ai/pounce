@@ -43,6 +43,7 @@ import {
 } from "./agents/pty-turn.mjs";
 import { agentEnv, binPath, binVersion, primaryLanIp } from "./agents/env.mjs";
 import { readConfig, writeConfig } from "./agents/config.mjs";
+import { readContextFiles } from "./agents/context.mjs";
 import { createHistorySearch } from "./agents/search.mjs";
 import { createActivityIndex } from "./agents/activity-index.mjs";
 import { readQuota } from "./agents/quota.mjs";
@@ -1267,6 +1268,16 @@ const server = http.createServer(async (req, res) => {
       });
       createReadStream(p).pipe(res);
       return;
+    }
+    if (url.pathname === "/v1/context") {
+      // A project's agent-instruction files (CLAUDE.md/AGENTS.md), for reading
+      // in the app. Read-only and whitelist-scoped by design — see
+      // agents/context.mjs; edits go through an agent turn, not an endpoint.
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return send(res, 400, { error: "cwd required" });
+      const out = readContextFiles(cwd);
+      if (!out) return send(res, 404, { error: "not found" });
+      return send(res, 200, out);
     }
     if (url.pathname === "/v1/doctor") {
       return send(res, 200, { report: await host.doctor() });

@@ -19,23 +19,39 @@ const BASE: Record<"user" | "assistant", TextStyle> = {
   assistant: { fontSize: 15, lineHeight: 21, color: T.fg },
 };
 
+/** Mirrors the native `ContextMenuItem`, declared locally because the native
+ *  markdown package has no desktop build to import the type from. */
+export interface MarkdownContextMenuItem {
+  text: string;
+  onPress: (event: { text: string; selection: { start: number; end: number } }) => void;
+  icon?: string;
+  visible?: boolean;
+}
+
 export function MessageMarkdown({
   text,
   role,
   streaming,
   onRun,
+  singleBlock,
 }: {
   text: string;
   role: "user" | "assistant";
   streaming?: boolean;
   /** Present only for live assistant turns — enables shell "Run" cards. */
   onRun?: (command: string) => void;
+  /** Render as one document rather than lifting code blocks into cards. */
+  singleBlock?: boolean;
+  /** Accepted for API parity and ignored: the desktop renderer is plain RN
+   *  <Text>, which has no selection-menu hook. Callers that offer a
+   *  select-to-comment action must also offer a button-driven path. */
+  contextMenuItems?: MarkdownContextMenuItem[];
 }) {
   const base = BASE[role];
   const onUser = role === "user";
   // Settled assistant turns get code blocks lifted out (Run cards); streaming
   // turns render on the single path (incomplete fences would mis-split).
-  const highlight = role === "assistant" && !streaming;
+  const highlight = role === "assistant" && !streaming && !singleBlock;
   const segments = useMemo(() => (highlight ? splitCodeBlocks(text) : null), [highlight, text]);
 
   if (!highlight || !segments || (segments.length === 1 && segments[0].type === "md")) {

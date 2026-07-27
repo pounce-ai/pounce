@@ -36,6 +36,10 @@ export default function MainLayout() {
         name="new"
         options={{ presentation: "modal", headerShown: true, title: "New task" }}
       />
+      <Stack.Screen
+        name="context"
+        options={{ presentation: "modal", headerShown: true, title: "Project context" }}
+      />
       <Stack.Screen name="terminal" options={{ presentation: "modal" }} />
       <Stack.Screen name="connect" options={{ presentation: "modal" }} />
       <Stack.Screen
