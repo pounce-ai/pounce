@@ -447,7 +447,9 @@ export default function ContextScreen() {
       ) : null}
 
       <NativeSheet visible={!!draft} onClose={() => setDraft(null)}>
-        <ScrollView bounces={false} style={{ maxHeight: height * 0.6 }}>
+        {/* Only the quote scrolls; the action sits below it. A long selection
+            must not push the button out of reach. */}
+        <ScrollView bounces={false} style={{ maxHeight: height * 0.45 }}>
           <Text style={s.sheetTitle}>
             {draft?.kind === "create"
               ? `New ${DEFAULT_CONTEXT_FILE}`
@@ -477,19 +479,19 @@ export default function ContextScreen() {
             style={s.noteInput}
             {...INPUT_TWEAKS}
           />
-          <Pressable
-            onPress={submitComment}
-            disabled={!note.trim()}
-            style={({ pressed }) => [
-              s.cta,
-              s.sheetCta,
-              !note.trim() && s.ctaDisabled,
-              pressed && s.pressed80,
-            ]}
-          >
-            <Text style={s.ctaText}>Add note</Text>
-          </Pressable>
         </ScrollView>
+        <Pressable
+          onPress={submitComment}
+          disabled={!note.trim()}
+          style={({ pressed }) => [
+            s.cta,
+            s.sheetCta,
+            !note.trim() && s.ctaDisabled,
+            pressed && s.pressed80,
+          ]}
+        >
+          <Text style={s.ctaText}>Add note</Text>
+        </Pressable>
       </NativeSheet>
     </View>
   );
