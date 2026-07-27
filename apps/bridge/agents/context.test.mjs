@@ -66,6 +66,22 @@ describe("readContextFiles", () => {
     expect(out.files).toEqual([]);
   });
 
+  it("refuses a symlink into a SIBLING directory that shares the project's name prefix", () => {
+    // The containment check is a string prefix compare, so "/x/repo-secrets"
+    // must not read as inside "/x/repo". Appending the separator before
+    // comparing is what makes that hold.
+    const parent = repo();
+    const project = path.join(parent, "repo");
+    const sibling = path.join(parent, "repo-secrets");
+    mkdirSync(project);
+    mkdirSync(sibling);
+    const secret = path.join(sibling, "CLAUDE.md");
+    writeFileSync(secret, "SIBLING SECRET\n");
+    symlinkSync(secret, path.join(project, "CLAUDE.md"));
+
+    expect(readContextFiles(project).files).toEqual([]);
+  });
+
   it("follows a symlink that stays inside the project", () => {
     const dir = repo();
     mkdirSync(path.join(dir, "docs"));
