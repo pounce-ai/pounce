@@ -1,4 +1,4 @@
-import { Pressable, useColorScheme } from "react-native";
+import { Platform, Pressable, StyleSheet, useColorScheme } from "react-native";
 import { router, Stack } from "expo-router";
 import { PounceIcon } from "@pounce/app/ui/native/Icon";
 import { T } from "@pounce/app/ui/theme";
@@ -30,12 +30,26 @@ function dismissModal() {
 function closeButton(tint: string) {
   return function CloseButton() {
     return (
-      <Pressable onPress={dismissModal} hitSlop={14} accessibilityLabel="Close">
-        <PounceIcon name="close" size={17} color={tint} />
+      <Pressable onPress={dismissModal} hitSlop={14} accessibilityLabel="Close" style={s.close}>
+        <PounceIcon name="close" size={18} color={tint} />
       </Pressable>
     );
   };
 }
+
+const s = StyleSheet.create({
+  close: {
+    // Symmetric padding keeps the glyph centred: iOS draws its circular glass
+    // background around this frame, so uneven padding visibly shifts the ✕
+    // off-centre inside the circle.
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 6,
+    // Android left-aligns the title flush against headerLeft and needs a gap.
+    // It has to be a margin — outside the frame — for the same reason.
+    marginRight: Platform.OS === "android" ? 14 : 0,
+  },
+});
 
 /** The main native stack — the base screen of the root TrueSheet navigator.
  *  `changes` and `filters` live OUTSIDE this group as true native sheets
