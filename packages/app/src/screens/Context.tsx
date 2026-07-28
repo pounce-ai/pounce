@@ -147,7 +147,11 @@ export default function ContextScreen() {
       const trimmed = selected.trim();
       if (!trimmed) return;
       const section = sectionForText(sections, trimmed);
-      setDraft({ kind: "selection", quote: clampQuote(trimmed), heading: section?.heading ?? null });
+      setDraft({
+        kind: "selection",
+        quote: clampQuote(trimmed),
+        heading: section?.heading ?? null,
+      });
       setNote("");
     },
     [sections],
