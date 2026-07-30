@@ -22,6 +22,8 @@ import { useQuery } from "@tanstack/react-query";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import type { PermissionMode, TimelineEvent } from "@pounce/shared";
 import { collapseToolResults, Timeline } from "../components/Timeline";
+import { deriveTaskState } from "../components/taskEvents";
+import { TaskProgressBar } from "../components/TaskProgress";
 import { WorkingIndicator } from "../components/WorkingIndicator";
 import { TimelineSkeleton } from "../components/Skeleton";
 import { Composer, type ComposerHandle, type ComposerSubmit } from "../components/Composer";
@@ -378,6 +380,10 @@ export default function SessionScreen() {
   // Timeline collapses paired tool results into their call's accordion, so
   // marker indices must be computed over the same collapsed array it renders.
   const events = useMemo(() => collapseToolResults(rawEvents), [rawEvents]);
+  // The agent's checklist, derived from the newest TodoWrite/update_plan in the
+  // thread — pinned above the composer so progress stays visible while the
+  // timeline scrolls.
+  const taskState = useMemo(() => deriveTaskState(rawEvents), [rawEvents]);
 
   // --- markers: user messages by default, overrides for adds/removals ---
   const listRef = useRef<LegendListRef>(null);
@@ -1176,6 +1182,12 @@ export default function SessionScreen() {
               <Text style={s.archivedNote}>
                 Archived session — worktree was removed. Read-only.
               </Text>
+            ) : null}
+            {/* Live task progress. Shown for the whole turn, and afterwards only
+              while work remains — a finished checklist stays in the transcript
+              rather than lingering above the composer. */}
+            {taskState && (running || taskState.items.some((i) => i.status !== "completed")) ? (
+              <TaskProgressBar state={taskState} running={running} />
             ) : null}
             {queued.length > 0 ? (
               <View style={s.queuedWrap}>

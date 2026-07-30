@@ -4,10 +4,11 @@ import { COLOR } from "@pounce/app/ui/tokens";
 import { hexFor } from "@pounce/app/ui/theme-hex";
 
 /**
- * Home / Search / Settings on the system tab bar (UITabBarController on iOS,
- * BottomNavigationView on Android). The quick actions the old floating dock's
- * popups offered all live on the screens themselves (Home: New + filters,
- * Search: filters, Settings: refresh/sync), so the triggers are plain tabs.
+ * Home / Search / Activity / Settings on the system tab bar
+ * (UITabBarController on iOS, BottomNavigationView on Android). The quick
+ * actions the old floating dock's popups offered all live on the screens
+ * themselves (Home: New + filters, Search: filters, Settings: refresh/sync), so
+ * the triggers are plain tabs.
  */
 export default function TabsLayout() {
   const hex = hexFor(useColorScheme());
@@ -37,6 +38,13 @@ export default function TabsLayout() {
       <NativeTabs.Trigger name="search" role="search">
         <NativeTabs.Trigger.Icon sf="magnifyingglass" md="search" />
         <NativeTabs.Trigger.Label>Search</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="activity">
+        <NativeTabs.Trigger.Icon
+          sf={{ default: "chart.bar", selected: "chart.bar.fill" }}
+          md="insert_chart"
+        />
+        <NativeTabs.Trigger.Label>Activity</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings">
         <NativeTabs.Trigger.Icon

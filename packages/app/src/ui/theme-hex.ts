@@ -10,6 +10,10 @@ export const HEX = {
     fg: "#1c1c1e",
     fgMuted: "#6e6e73",
     accent: "#7c6ff0",
+    // SVG fills can't blend a translucent token reliably across renderers, so
+    // the chart palette keeps flattened mid-tones instead of alpha.
+    accentSoftSolid: "#c9c1f8",
+    border: "#e5e5ea",
   },
   dark: {
     bg: "#0b0b0f",
@@ -17,6 +21,8 @@ export const HEX = {
     fg: "#ececf1",
     fgMuted: "#9a9aa5",
     accent: "#7c6ff0",
+    accentSoftSolid: "#4a3f9e",
+    border: "#26262e",
   },
 } as const;
 

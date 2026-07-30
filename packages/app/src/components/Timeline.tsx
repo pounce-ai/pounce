@@ -23,6 +23,8 @@ import { cleanAssistantText, isEmptyUserMessage, parseUserMessage } from "@pounc
 // collapseToolResults lives in a pure (RN-free) module so it can be unit-tested;
 // imported for use below and re-exported since Session.tsx imports it from here.
 import { collapseToolResults } from "./timelineEvents";
+import { deriveTaskTimeline, isTaskCall, type TaskItem } from "./taskEvents";
+import { TodoCard } from "./TodoCard";
 
 export { collapseToolResults };
 
@@ -152,6 +154,16 @@ export const Timeline = memo(function Timeline({
   }, [events]);
   const data = useMemo(() => collapseToolResults(events), [events]);
   const headers = useMemo(() => batchHeaders(data), [data]);
+  // Task events accumulate fast (a create/update per tick). Fold them once here:
+  // the newest one renders the full checklist, the superseded ones become a
+  // one-line trace of how the plan evolved.
+  //
+  // Folded over `events`, NOT `data`: TaskCreate's assigned id lives in its
+  // tool RESULT, and `data` has already collapsed those results into their
+  // calls. Folding the collapsed list would silently fall back to positional
+  // numbering and could map updates onto the wrong task in a resumed thread —
+  // and would disagree with the pinned widget, which folds the raw list.
+  const tasks = useMemo(() => deriveTaskTimeline(events), [events]);
   // Subscribe to this thread's marker overrides once; each row gets its resolved
   // marked state as a prop (a per-row live query would be far too heavy).
   const markerMap = useThreadMarkers(sessionId);
@@ -204,6 +216,8 @@ export const Timeline = memo(function Timeline({
               item.type === "tool_call" ? resultByCallId.get(item.call.id || item.id) : undefined
             }
             batchHeader={headers.get(item.id)}
+            taskList={item.id === tasks.latestEventId ? tasks.state?.items : undefined}
+            taskLabel={tasks.labels.get(item.id)}
             onRespondPermission={onRespondPermission}
             onRespondPrompt={onRespondPrompt}
             onSendInput={onSendInput}
@@ -264,6 +278,8 @@ const Row = memo(function Row({
   onRunCommand,
   pairedResult,
   batchHeader,
+  taskList,
+  taskLabel,
   cwd,
   onRespondPermission,
   onRespondPrompt,
@@ -280,6 +296,10 @@ const Row = memo(function Row({
   pairedResult?: ToolResultEvent;
   /** For the first call of a parallel batch: the synthesized summary line. */
   batchHeader?: string;
+  /** Set on the newest task event: the folded checklist to render as a card. */
+  taskList?: readonly TaskItem[];
+  /** Set on superseded task events: their one-line trace label. */
+  taskLabel?: string;
   /** Thread cwd — tool-call file paths render relative to it. */
   cwd?: string | null;
   /** Answer an ACP permission prompt (requestId, chosen optionId or null). */
@@ -334,6 +354,14 @@ const Row = memo(function Row({
           ? (event.call.input as { plan?: unknown } | undefined)?.plan
           : undefined;
       if (typeof plan === "string" && plan.trim()) return <PlanCard plan={plan} />;
+      // The agent's own checklist. The plan IS the content here, so the newest
+      // task event renders it as a card and the superseded ones stay a quiet
+      // one-line trace — a dozen repeated checklists would bury the turn.
+      if (isTaskCall(event)) {
+        if (taskList?.length) return <TodoCard items={taskList} latest />;
+        if (taskLabel) return <Meta text={taskLabel} />;
+        return <Meta text="Task list cleared" />;
+      }
       if (!batchHeader)
         return (
           <SearchHighlight term={highlightTerm}>

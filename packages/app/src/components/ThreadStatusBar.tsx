@@ -1,22 +1,8 @@
 import { Text } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import type { ThreadUsage } from "../services/bridge";
-
-/** 165_000_000 → "165M", 1_200_000 → "1.2M", 845_000 → "845K", 900 → "900". */
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) {
-    const m = n / 1_000_000;
-    return `${m >= 100 ? Math.round(m) : m.toFixed(1).replace(/\.0$/, "")}M`;
-  }
-  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
-  return `${n}`;
-}
-
-/** "$6.20", "$0.05", or "<$0.01" for tiny non-zero costs. */
-function fmtCost(cost: number): string {
-  if (cost > 0 && cost < 0.01) return "<$0.01";
-  return `$${cost.toFixed(2)}`;
-}
+// Shared with the activity dashboard so both read identically.
+import { fmtCost, fmtTokens } from "../ui/format";
 
 /** "claude-opus-4-8" → "opus 4.8"; "claude-haiku-4-5-20251001" → "haiku 4.5". */
 export function shortModel(model: string): string {

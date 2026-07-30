@@ -260,6 +260,11 @@ export function Sidebar() {
                 : "Offline"}
           </Text>
         </View>
+        <FooterIcon
+          name="stats-chart-outline"
+          hint="Activity"
+          onPress={() => router.push("/activity")}
+        />
         <FooterIcon name="qr-code-outline" hint="Pair phone" onPress={() => router.push("/pair")} />
         <FooterIcon
           name="time-outline"
