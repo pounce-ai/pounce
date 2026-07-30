@@ -23,9 +23,12 @@ In testing on Google Play now — public release soon. The
 ### macOS — the desktop app
 
 [Download `Pounce.dmg`](https://github.com/pounce-ai/pounce/releases/latest)
-— signed and notarized, macOS 14+. Open it, drag Pounce to Applications,
-launch. The full Pounce UI runs on your Mac with the Bridge built in, and the
-pairing QR is right in the window.
+— signed and notarized, macOS 14+ on Apple Silicon. Open it, drag Pounce to
+Applications, launch. The full Pounce UI runs on your Mac with the Bridge built
+in, and the pairing QR is right in the window.
+
+Intel Macs are not supported by the desktop app — use `npx use-pounce` below
+instead.
 
 The app keeps itself up to date automatically.
 
