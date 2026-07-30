@@ -67,7 +67,8 @@
       "expo-status-bar",
       "react-native-enriched-markdown",
       "expo-web-browser",
-      "expo-video"
+      "expo-video",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true,

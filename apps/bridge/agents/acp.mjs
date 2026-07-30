@@ -143,14 +143,14 @@ function toolResultContent(content) {
   return { kind: "text", text: parts.join("\n") };
 }
 
-/** Render an ACP structured plan as the markdown our PlanCard already shows. */
-function planMarkdown(entries) {
+/** ACP plan entries → the same `update_plan` shape Codex emits, so the app's
+ *  task checklist + progress widget light up for ACP agents too. ACP's `plan` is
+ *  a live task list (entries carry pending/in_progress/completed), NOT plan
+ *  mode's proposal markdown — so it belongs in the checklist, not a PlanCard. */
+function planSteps(entries) {
   return (entries || [])
-    .map(
-      (e, i) =>
-        `${i + 1}. ${e.status === "completed" ? "~~" : ""}${e.content}${e.status === "completed" ? "~~" : ""}`,
-    )
-    .join("\n");
+    .filter((e) => typeof e?.content === "string" && e.content.trim())
+    .map((e) => ({ step: e.content, status: e.status || "pending" }));
 }
 
 /**
@@ -263,15 +263,19 @@ export function startAcpTurn(
           );
         }
         break;
-      case "plan":
-        onEvent(
-          toolCall(base(`plan:${seq}`), {
-            name: "ExitPlanMode",
-            input: { plan: planMarkdown(u.entries) },
-            status: "success",
-          }),
-        );
+      case "plan": {
+        const plan = planSteps(u.entries);
+        if (plan.length) {
+          onEvent(
+            toolCall(base(`plan:${seq}`), {
+              name: "update_plan",
+              input: { plan },
+              status: "success",
+            }),
+          );
+        }
         break;
+      }
       // available_commands_update / usage_update: not timeline events here.
     }
   };

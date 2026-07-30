@@ -20,6 +20,7 @@ import SessionScreen from "@pounce/app/screens/Session";
 import SessionsScreen from "@pounce/app/screens/Sessions";
 import SearchScreen from "@pounce/app/screens/Search";
 import SettingsScreen from "@pounce/app/screens/Settings";
+import DashboardScreen from "@pounce/app/screens/Dashboard";
 import NewTaskScreen from "@pounce/app/screens/New";
 import ChangesScreen from "@pounce/app/screens/Changes";
 import TerminalScreen from "@pounce/app/screens/Terminal";
@@ -52,6 +53,8 @@ const MODALS: Record<string, { component: ComponentType; width: number; height: 
   "/search": { component: SearchScreen, width: 620, height: 560 },
   "/sessions": { component: SessionsScreen, width: 620, height: 660 },
   "/settings": { component: SettingsScreen, width: 620, height: 660 },
+  // Wider than the list modals: the heatmap is ~700px of grid at its cell size.
+  "/activity": { component: DashboardScreen, width: 760, height: 700 },
   "/new": { component: NewTaskScreen, width: 640, height: 660 },
   "/changes": { component: ChangesScreen, width: 860, height: 660 },
   "/terminal": { component: TerminalScreen, width: 860, height: 660 },

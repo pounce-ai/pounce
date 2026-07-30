@@ -35,6 +35,7 @@ import {
   syncWorkspace,
   upsertHosts,
 } from "../state/stores";
+import { type ActivityPage, mergeActivity } from "./activity";
 import { clearNotify, notifyOnce } from "./notify";
 import { alertAwaitingSessions } from "./promptAlerts";
 import { streamTurn } from "./streamTurn";
@@ -791,6 +792,32 @@ export async function fetchUsage(
   } catch {
     return null;
   }
+}
+
+/**
+ * Daily activity across EVERY paired device, merged into one series — the
+ * dashboard is about the user's work, not one machine's. Same fan-out shape as
+ * searchMessages: a device that's unreachable (or too old to have the endpoint)
+ * contributes nothing rather than failing the whole view.
+ *
+ * Merging (day sums, worst-case coverage) lives in services/activity.ts so it
+ * stays unit-testable.
+ */
+export async function fetchActivity(days = 365, opts?: { fresh?: boolean }): Promise<ActivityPage> {
+  const devices = await listDeviceConfigs();
+  const qs = `days=${days}${opts?.fresh ? "&fresh=1" : ""}`;
+  const pages = await Promise.all(
+    devices.map(async (cfg) => {
+      try {
+        // Generous timeout: the host's first call of the day parses transcripts
+        // it hasn't summarized yet (cold cache), which can take seconds.
+        return await get<ActivityPage>(cfg, `/v1/activity?${qs}`, 120_000);
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return mergeActivity(pages);
 }
 
 /** One selectable model for an agent, from the daemon's model/list. */

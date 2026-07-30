@@ -44,6 +44,7 @@ import {
 import { agentEnv, binPath, binVersion, primaryLanIp } from "./agents/env.mjs";
 import { readConfig, writeConfig } from "./agents/config.mjs";
 import { createHistorySearch } from "./agents/search.mjs";
+import { createActivityIndex } from "./agents/activity-index.mjs";
 
 const IS_WIN = process.platform === "win32";
 
@@ -660,6 +661,41 @@ function getUsage(agent, thread) {
   );
 }
 
+// --- Daily activity series (the dashboard) ---------------------------------
+// Token counts get a DATE attached by scanning the agents' own transcripts;
+// dollars come only from the cost ledger, i.e. figures an agent reported. See
+// agents/activity-index.mjs — nothing here prices a token.
+const activity = createActivityIndex({
+  resolveFile: (agent, thread) => host.transcriptFile(agent, thread),
+});
+
+// How often the background pass re-reads transcripts that changed. The index is
+// mtime-keyed, so a tick over unchanged threads is one stat() each.
+const ACTIVITY_POPULATE_MS = Number(process.env.ACTIVITY_POPULATE_MS || 10 * 60_000);
+
+/**
+ * Keep the activity index warm in the background.
+ *
+ * Without this the FIRST dashboard open pays a full cold scan of every
+ * transcript on the host — tens of seconds on a machine with real history —
+ * and pays it again after each bridge restart. The index persists to
+ * ~/.pounce/activity-cache.json, so populating it once off the critical path
+ * makes the dashboard open instantly and stay current as turns land.
+ *
+ * Deliberately unconditional (not gated on a connected phone, unlike the warm
+ * loop): the point is that the data is READY when someone finally opens the
+ * tab. It is cheap to repeat — unchanged transcripts cost a stat() — and the
+ * first pass is delayed so it never competes with startup.
+ */
+function startActivityPopulate() {
+  const pass = () =>
+    getThreads()
+      .then((threads) => activity.populate(threads))
+      .catch(() => {});
+  setTimeout(pass, 20_000).unref();
+  setInterval(pass, ACTIVITY_POPULATE_MS).unref();
+}
+
 // --- Available models per agent (from the daemon's model/list — the same source
 // as the daemon's own /model command). Cached; models rarely change. ----------
 const MODELS_CACHE_MS = 300_000;
@@ -1199,6 +1235,20 @@ const server = http.createServer(async (req, res) => {
       // adapters resolve a thread's own records without being told where it ran.
       return send(res, 200, { usage: await getUsage(agent, thread) });
     }
+    // Daily activity across every thread on this host — the dashboard series.
+    // Tokens/messages/sessions come from the agents' own records; a dollar
+    // figure appears only where an agent reported one (see activity-index).
+    if (url.pathname === "/v1/activity") {
+      const days = Math.min(400, Math.max(1, Number(url.searchParams.get("days") || 365)));
+      const fresh = url.searchParams.get("fresh") === "1";
+      const key = `activity:${days}`;
+      if (fresh) cache.delete(key);
+      return send(
+        res,
+        200,
+        await cached(key, CACHE_MS, async () => activity.series(await getThreads(fresh), { days })),
+      );
+    }
     if (url.pathname === "/v1/warm" && req.method === "POST") {
       // The app's ranking of which threads to keep hot (usage-predicted). We
       // pre-warm them in the background so opening one is instant.
@@ -1567,6 +1617,7 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
         if (Date.now() - lastClientSeen < 90_000) warm();
       }, 15_000);
       setTimeout(watchTick, WATCH_MS);
+      startActivityPopulate();
       ensureTunnel();
       resolve({ server, token: TOKEN, ...PAIR });
     });

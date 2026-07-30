@@ -92,6 +92,17 @@ export function createHost({ version = () => null } = {}) {
         : Promise.resolve({ available: false, reason: "unsupported-agent" });
     },
 
+    /** On-disk transcript path for a thread, or null when the adapter keeps its
+     *  history elsewhere (Cursor's SQLite store) or the file is gone. The
+     *  activity index reads per-DAY token counts out of these — dates and token
+     *  counts only, never a price (see ./activity-index.mjs).
+     */
+    async transcriptFile(agent, threadId) {
+      const a = adapters.get(agent);
+      if (!a?.findFile) return null;
+      return a.findFile(threadId).catch(() => null);
+    },
+
     /** Diagnostic report: node, agent CLIs, sessions, git, tunnel. */
     doctor() {
       return buildDoctorReport([...adapters.values()]);
