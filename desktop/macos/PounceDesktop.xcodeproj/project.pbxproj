@@ -493,6 +493,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 922BE6241DEE8FE33E9A7BE6 /* Pods-PounceDesktop-macOS.debug.xcconfig */;
 			buildSettings = {
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = "PounceDesktop-macOS/PounceDesktop.entitlements";
@@ -521,6 +522,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = AD5D5B9B23B33B7870AF93FC /* Pods-PounceDesktop-macOS.release.xcconfig */;
 			buildSettings = {
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = "PounceDesktop-macOS/PounceDesktop.entitlements";

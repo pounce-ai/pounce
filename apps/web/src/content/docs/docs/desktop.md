@@ -11,8 +11,11 @@ makes the machine pairable.
 ## Install
 
 [Download `Pounce.dmg`](https://github.com/pounce-ai/pounce/releases/latest) —
-signed and notarized, macOS 14 or later. Open the DMG, drag Pounce to
-Applications, launch.
+signed and notarized, macOS 14 or later on Apple Silicon. Open the DMG, drag
+Pounce to Applications, launch.
+
+Intel Macs are not supported. If you're on an Intel Mac, run `npx use-pounce`
+instead — see [Install](/docs/install/) — and drive it from your phone.
 
 On first launch the app starts hosting the agents on that Mac and shows the
 pairing QR — scan it with your phone and the machine joins your fleet.

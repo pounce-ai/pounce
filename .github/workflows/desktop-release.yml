@@ -49,13 +49,11 @@ jobs:
           path: dist/pounce-bridge.zip
           if-no-files-found: error
 
-  # Self-contained bridge (bun --compile) — both macOS slices built on ONE Apple
-  # Silicon runner. `bun --compile --target=bun-darwin-<arch>` bakes the target's
-  # platform/arch, so the correct zigpty prebuild is embedded even when
-  # cross-compiling x64 from arm64 (verified: the x64 slice boots under Rosetta
-  # with zigpty loaded). This avoids depending on the macos-13 Intel runner,
-  # which GitHub has deprecated (macos-14/15 are Apple Silicon only). The desktop
-  # job lipo-fuses these into the universal bridge bundled in the .app.
+  # Self-contained bridge (bun --compile), Apple Silicon only. The desktop app is
+  # arm64-only (ARCHS = arm64 in the Xcode project) — Intel Macs are not
+  # supported, so there is no x64 slice and nothing to lipo-fuse. `bun --compile
+  # --target=bun-darwin-arm64` bakes the target's platform/arch so the correct
+  # zigpty prebuild is embedded.
   bridge-macos:
     runs-on: macos-15
     steps:
@@ -64,10 +62,9 @@ jobs:
         with:
           bun-version: latest
       - run: bun install
-      - name: Compile bridge (arm64 + x64)
+      - name: Compile bridge (arm64)
         run: |
           bun run scripts/bridge/compile.mjs --target bun-darwin-arm64 --outfile "$RUNNER_TEMP/pounce-bridge-arm64"
-          bun run scripts/bridge/compile.mjs --target bun-darwin-x64  --outfile "$RUNNER_TEMP/pounce-bridge-x64"
       - name: Smoke-test arm64 — boots with no Node
         run: |
           POUNCE_NO_CTX_INSTALL=1 BRIDGE_PORT=8137 "$RUNNER_TEMP/pounce-bridge-arm64" > /tmp/bridge-smoke.log 2>&1 &
@@ -84,7 +81,6 @@ jobs:
           name: bridge-macos
           path: |
             ${{ runner.temp }}/pounce-bridge-arm64
-            ${{ runner.temp }}/pounce-bridge-x64
           if-no-files-found: error
 
   # Signed + notarized macOS app → DMG + Sparkle appcast.
@@ -161,24 +157,25 @@ jobs:
         working-directory: desktop/macos
         run: pod install
 
-      # Fuse the per-arch bridge binaries into one universal Mach-O and hand its
-      # path to the Xcode "Bundle Pounce Bridge" phase via POUNCE_BRIDGE_BIN
-      # (else the phase would compile a runner-arch-only binary). lipo preserves
-      # each slice's embedded Bun payload — verified locally.
+      # Hand the prebuilt arm64 bridge to the Xcode "Bundle Pounce Bridge" phase
+      # via POUNCE_BRIDGE_BIN, so the phase ships the smoke-tested binary from
+      # the bridge-macos job rather than recompiling one here.
       - uses: actions/download-artifact@v4
         with:
           name: bridge-macos
           path: bridge-artifacts
-      - name: Fuse universal bridge
+      - name: Stage arm64 bridge
         run: |
           OUT="$RUNNER_TEMP/bridge/pounce-bridge"
           mkdir -p "$(dirname "$OUT")"
-          lipo -create \
-            bridge-artifacts/pounce-bridge-arm64 \
-            bridge-artifacts/pounce-bridge-x64 \
-            -output "$OUT"
+          cp bridge-artifacts/pounce-bridge-arm64 "$OUT"
           chmod +x "$OUT"
-          echo "universal bridge: $(lipo -archs "$OUT")"
+          ARCHS_FOUND="$(lipo -archs "$OUT")"
+          echo "bridge archs: $ARCHS_FOUND"
+          # Apple Silicon only — fail loudly if an x86_64 slice ever creeps back in.
+          if [ "$ARCHS_FOUND" != "arm64" ]; then
+            echo "::error::expected an arm64-only bridge, got: $ARCHS_FOUND"; exit 1
+          fi
           echo "POUNCE_BRIDGE_BIN=$OUT" >> "$GITHUB_ENV"
 
       - name: Read app version
