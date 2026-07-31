@@ -41,6 +41,9 @@ import {
 import { captureAvailable, shareDashboard } from "../services/share";
 
 const YEAR = 365;
+/** Matches the desktop sidebar's first section header offset (Sidebar's `grp`
+ *  paddingTop), so the two columns' content lines up across the seam. */
+const SIDEBAR_SECTION_TOP = 9;
 const PERIODS: Period[] = ["week", "month", "year"];
 const PERIOD_LABEL: Record<Period, string> = { week: "Week", month: "Month", year: "Year" };
 
@@ -59,6 +62,8 @@ export default function DashboardScreen() {
   const [period, setPeriod] = useState<Period>("month");
   const [selected, setSelected] = useState<string | null>(null);
   const [chartWidth, setChartWidth] = useState(0);
+  const [heatWidth, setHeatWidth] = useState(0);
+  const [chartHeight, setChartHeight] = useState(0);
   const [sharing, setSharing] = useState(false);
   const shareRef = useRef<View>(null);
 
@@ -94,9 +99,21 @@ export default function DashboardScreen() {
   const now = useMemo(() => sumDays(window), [window]);
   const before = useMemo(() => sumDays(previous), [previous]);
   const run = useMemo(() => streaks(year), [year]);
-  const agents = useMemo(() => byAgentTotals(window), [window]);
+  // One agent list for the whole screen: everything with activity in this
+  // window, plus everything that reported a plan. Plan usage listing three
+  // agents while "By agent" listed two was the same data answering two
+  // questions, and it read as broken.
+  const knownAgents = useMemo(
+    () => [...new Set((quotaQ.data ?? []).map((q) => q.agent))],
+    [quotaQ.data],
+  );
+  const agents = useMemo(() => byAgentTotals(window, knownAgents), [window, knownAgents]);
   const partial = useMemo(() => partialAgents(q.data?.coverage ?? {}), [q.data]);
   const costComplete = q.data?.totals.costComplete !== false;
+  // Estimated is a property of the SLICE on screen, not the whole series: a
+  // week whose every dollar was agent-reported shouldn't inherit the "est."
+  // marker from an older month that ccusage had to price.
+  const estimated = now.costEstimated === true;
 
   // Trend bars: a day each for week/month, a month each for year (365 bars
   // would be 1px wide and unreadable).
@@ -131,12 +148,52 @@ export default function DashboardScreen() {
   const canShare = !IS_DESKTOP && captureAvailable();
   const empty = !q.isLoading && now.messages === 0 && run.longest === 0;
 
+  // A period picker is a toolbar control, not a page section. Full-bleed it
+  // became a 960pt bar with a slab of accent in the middle; on desktop it sits
+  // in the header beside the title, sized to its own labels.
+  const segment = (
+    <View style={[s.segment, IS_DESKTOP && s.segmentDesktop]}>
+      {PERIODS.map((p) => (
+        <Pressable
+          key={p}
+          onPress={() => setPeriod(p)}
+          style={[
+            s.segmentItem,
+            IS_DESKTOP && s.segmentItemDesktop,
+            p === period && s.segmentItemOn,
+          ]}
+        >
+          <Text
+            style={[
+              s.segmentLabel,
+              IS_DESKTOP && s.segmentLabelDesktop,
+              p === period && s.segmentLabelOn,
+            ]}
+          >
+            {PERIOD_LABEL[p]}
+          </Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+
   return (
     <View style={s.root}>
       <ScrollView
         contentContainerStyle={[
           s.content,
-          { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 32 },
+          // Desktop gets a capped, centred column: the same stack run edge to
+          // edge across a 1400pt window leaves stat tiles a foot apart and a
+          // heat-map stretched into a smear.
+          IS_DESKTOP && s.contentDesktop,
+          // Desktop starts level with the sidebar's first section header, which
+          // sits 9pt under its own titlebar row — both columns begin at the same
+          // y instead of the content pane hanging 17pt lower. (No notch here, so
+          // the phone's insets.top + 8 doesn't apply.)
+          {
+            paddingTop: IS_DESKTOP ? SIDEBAR_SECTION_TOP : insets.top + 8,
+            paddingBottom: insets.bottom + 32,
+          },
         ]}
         refreshControl={
           <RefreshControl
@@ -156,6 +213,8 @@ export default function DashboardScreen() {
               {q.isLoading ? "Reading your history…" : `${fmtCount(run.longest)}-day best streak`}
             </Text>
           </View>
+          {IS_DESKTOP ? <View style={s.headerSpacer} /> : null}
+          {IS_DESKTOP ? segment : null}
           {canShare ? (
             <Pressable
               onPress={onShare}
@@ -175,19 +234,7 @@ export default function DashboardScreen() {
 
         {/* Period selector — drives the stat tiles and the trend chart only;
           the heatmap always shows the full year. */}
-        <View style={s.segment}>
-          {PERIODS.map((p) => (
-            <Pressable
-              key={p}
-              onPress={() => setPeriod(p)}
-              style={[s.segmentItem, p === period && s.segmentItemOn]}
-            >
-              <Text style={[s.segmentLabel, p === period && s.segmentLabelOn]}>
-                {PERIOD_LABEL[p]}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        {IS_DESKTOP ? null : segment}
 
         {q.isLoading ? (
           <View style={s.loading}>
@@ -206,39 +253,57 @@ export default function DashboardScreen() {
             {/* Tokens lead, not dollars: token counts are the agents' own
               numbers and always exist, whereas a dollar figure only appears
               for turns an agent actually priced (see the caveat below). */}
-            <View style={s.tiles}>
-              <StatTile
-                label="Tokens"
-                value={fmtTokens(now.tokens)}
-                delta={fmtDelta(delta(now.tokens, before.tokens))}
-                icon="sparkles"
-                hero
-              />
-              <StatTile
-                label="Reported spend"
-                value={now.cost == null ? "—" : `${costComplete ? "" : "~"}${fmtCost(now.cost)}`}
-                delta={fmtDelta(delta(now.cost, before.cost))}
-                hint={now.cost == null ? "not reported" : costComplete ? null : "partial"}
-                icon="card-outline"
-                inverse
-              />
-            </View>
-            <View style={s.tiles}>
-              <StatTile
-                label="Sessions"
-                value={fmtCount(now.sessions)}
-                delta={fmtDelta(delta(now.sessions, before.sessions))}
-                icon="chatbubbles-outline"
-              />
-              <StatTile
-                label="Messages"
-                value={fmtCount(now.messages)}
-                delta={fmtDelta(delta(now.messages, before.messages))}
-                icon="git-commit-outline"
-              />
+            <View style={[s.tileWrap, IS_DESKTOP && s.rowDesktop]}>
+              <View style={[s.tiles, IS_DESKTOP && s.flex1]}>
+                <StatTile
+                  label="Tokens"
+                  value={fmtTokens(now.tokens)}
+                  delta={fmtDelta(delta(now.tokens, before.tokens))}
+                  icon="sparkles"
+                  hero
+                />
+                {/* The label itself changes with provenance: "Reported" is what
+                  agents billed, "Estimated" is tokens priced at public list
+                  rates. Calling a list-price figure "reported spend" would be
+                  the exact lie this dashboard is built to avoid. */}
+                <StatTile
+                  label={estimated ? "Estimated spend" : "Reported spend"}
+                  value={
+                    now.cost == null
+                      ? "—"
+                      : `${costComplete && !estimated ? "" : "~"}${fmtCost(now.cost)}`
+                  }
+                  delta={fmtDelta(delta(now.cost, before.cost))}
+                  hint={
+                    now.cost == null
+                      ? "not reported"
+                      : estimated
+                        ? "list price"
+                        : costComplete
+                          ? null
+                          : "partial"
+                  }
+                  icon="card-outline"
+                  inverse
+                />
+              </View>
+              <View style={[s.tiles, IS_DESKTOP && s.flex1]}>
+                <StatTile
+                  label="Sessions"
+                  value={fmtCount(now.sessions)}
+                  delta={fmtDelta(delta(now.sessions, before.sessions))}
+                  icon="chatbubbles-outline"
+                />
+                <StatTile
+                  label="Messages"
+                  value={fmtCount(now.messages)}
+                  delta={fmtDelta(delta(now.messages, before.messages))}
+                  icon="git-commit-outline"
+                />
+              </View>
             </View>
 
-            <QuotaCard quotas={quotaQ.data ?? []} />
+            <QuotaCard quotas={quotaQ.data ?? []} agents={agents.map((a) => a.agent)} />
 
             <View style={s.streakRow}>
               <View style={s.streakItem}>
@@ -257,63 +322,104 @@ export default function DashboardScreen() {
               </View>
             </View>
 
-            <View style={s.card}>
+            <View
+              style={s.card}
+              onLayout={(e: LayoutChangeEvent) => setHeatWidth(e.nativeEvent.layout.width - 28)}
+            >
               <Text style={s.cardTitle}>Last 12 months</Text>
-              <ContributionGraph days={heat} selected={selected} onSelectDay={setSelected} />
+              <ContributionGraph
+                days={heat}
+                selected={selected}
+                onSelectDay={setSelected}
+                // Desktop only: on a phone the fixed cell size plus horizontal
+                // scroll is right, and stretching 53 weeks across 390pt would
+                // make each day a sliver.
+                fillWidth={IS_DESKTOP && heatWidth > 0 ? heatWidth : undefined}
+              />
               <Text numberOfLines={1} style={s.detailLine}>
                 {detail
                   ? `${fmtDayLabel(detail.date)} — ${fmtCount(detail.messages)} messages · ${fmtTokens(
                       detail.tokens,
-                    )}${detail.cost == null ? "" : ` · ${fmtCost(detail.cost)}`}`
-                  : "Tap a day for its detail"}
+                    )}${
+                      detail.cost == null
+                        ? ""
+                        : ` · ${detail.costEstimated ? "~" : ""}${fmtCost(detail.cost)}${
+                            detail.costEstimated ? " est." : ""
+                          }`
+                    }`
+                  : IS_DESKTOP
+                    ? "Click a day for its detail"
+                    : "Tap a day for its detail"}
               </Text>
             </View>
 
-            <View
-              style={s.card}
-              onLayout={(e: LayoutChangeEvent) => setChartWidth(e.nativeEvent.layout.width - 28)}
-            >
-              <Text style={s.cardTitle}>
-                {period === "year"
-                  ? "Messages by month"
-                  : `Messages · last ${PERIOD_DAYS[period]} days`}
-              </Text>
-              {chartWidth > 0 ? (
-                <MiniBarChart
-                  bars={bars}
-                  width={chartWidth}
-                  selected={period === "year" ? null : selected}
-                  onSelect={period === "year" ? undefined : setSelected}
-                />
-              ) : null}
-            </View>
+            {/* Chart and agent totals are both half-width content; side by side
+                they fill the row instead of each getting a lonely band. */}
+            <View style={[s.tileWrap, IS_DESKTOP && s.rowDesktop]}>
+              <View
+                style={[s.card, IS_DESKTOP && s.flex1]}
+                onLayout={(e: LayoutChangeEvent) => setChartWidth(e.nativeEvent.layout.width - 28)}
+              >
+                <Text style={s.cardTitle}>
+                  {period === "year"
+                    ? "Messages by month"
+                    : `Messages · last ${PERIOD_DAYS[period]} days`}
+                </Text>
+                {/* This card shares a row with "By agent", so its height is set
+                    by whichever is taller. Measure the space left under the
+                    title and draw into all of it, instead of a fixed 96pt bar
+                    area with a gap beneath. */}
+                <View
+                  style={IS_DESKTOP ? s.chartFill : undefined}
+                  onLayout={
+                    IS_DESKTOP
+                      ? (e: LayoutChangeEvent) => setChartHeight(e.nativeEvent.layout.height)
+                      : undefined
+                  }
+                >
+                  {chartWidth > 0 ? (
+                    <MiniBarChart
+                      bars={bars}
+                      width={chartWidth}
+                      height={IS_DESKTOP && chartHeight > 0 ? chartHeight : undefined}
+                      selected={period === "year" ? null : selected}
+                      onSelect={period === "year" ? undefined : setSelected}
+                    />
+                  ) : null}
+                </View>
+              </View>
 
-            {agents.length ? (
-              <View style={s.card}>
-                <Text style={s.cardTitle}>By agent</Text>
-                {agents.map((a) => (
-                  <View key={a.agent} style={s.agentRow}>
-                    <AgentLogo agent={a.agent} size={15} />
-                    <Text style={s.agentName}>{agentLabel(a.agent)}</Text>
-                    {/* An agent that reports no usage still did work — show its
+              {agents.length ? (
+                <View style={[s.card, IS_DESKTOP && s.flex1]}>
+                  <Text style={s.cardTitle}>By agent</Text>
+                  {agents.map((a) => (
+                    <View key={a.agent} style={s.agentRow}>
+                      <AgentLogo agent={a.agent} size={15} />
+                      <Text style={s.agentName}>{agentLabel(a.agent)}</Text>
+                      {/* An agent that reports no usage still did work — show its
                       session count rather than a bare "0 · $0.00", which reads
                       as "you never used it". */}
-                    {a.tokens > 0 ? (
-                      <>
-                        <Text style={s.agentStat}>{fmtTokens(a.tokens)}</Text>
-                        <Text style={a.cost == null ? s.agentSessions : s.agentCost}>
-                          {a.cost == null ? "no price reported" : fmtCost(a.cost)}
+                      {a.tokens > 0 ? (
+                        <>
+                          <Text style={s.agentStat}>{fmtTokens(a.tokens)}</Text>
+                          <Text style={a.cost == null ? s.agentSessions : s.agentCost}>
+                            {a.cost == null
+                              ? "no price reported"
+                              : a.costEstimated
+                                ? `~${fmtCost(a.cost)} est.`
+                                : fmtCost(a.cost)}
+                          </Text>
+                        </>
+                      ) : (
+                        <Text style={s.agentSessions}>
+                          {fmtCount(a.sessions)} {a.sessions === 1 ? "session" : "sessions"}
                         </Text>
-                      </>
-                    ) : (
-                      <Text style={s.agentSessions}>
-                        {fmtCount(a.sessions)} {a.sessions === 1 ? "session" : "sessions"}
-                      </Text>
-                    )}
-                  </View>
-                ))}
-              </View>
-            ) : null}
+                      )}
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
 
             {partial.length ? (
               <Text style={s.caveat}>
@@ -374,6 +480,19 @@ const s = StyleSheet.create((theme) => ({
   },
   segmentItem: { flex: 1, alignItems: "center", borderRadius: 8, paddingVertical: 7 },
   segmentItemOn: { backgroundColor: theme.colors.accent },
+  // Toolbar proportions: content-width, 26pt tall, with a border so the track
+  // is visible on a light window (surfaceAlt is white there).
+  segmentDesktop: {
+    alignSelf: "flex-end",
+    gap: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    padding: 2,
+  },
+  segmentItemDesktop: { flex: 0, minWidth: 62, borderRadius: 6, paddingVertical: 4 },
+  segmentLabelDesktop: { fontSize: 12 },
+  headerSpacer: { flex: 1 },
   segmentLabel: { fontSize: 13, fontWeight: "600", color: theme.colors.fgMuted },
   segmentLabelOn: { color: theme.colors.onAccent },
   loading: { paddingVertical: 48, alignItems: "center" },
@@ -382,6 +501,23 @@ const s = StyleSheet.create((theme) => ({
   emptyTitle: { fontSize: 17, fontWeight: "600", color: theme.colors.fg },
   emptyBody: { textAlign: "center", fontSize: 13, color: theme.colors.fgMuted },
   tiles: { flexDirection: "row", gap: 12 },
+  // Desktop layout helpers. `tileWrap` keeps the parent's 12pt rhythm when it
+  // wraps a pair of rows on mobile; on desktop it turns that pair into a row.
+  tileWrap: { gap: 12 },
+  // `stretch`, not `flex-start`: the two halves hold different content (the
+  // hero Tokens tile is taller than a plain one), so sizing each to its own
+  // content left the four tiles bottoming out on three different lines.
+  rowDesktop: { flexDirection: "row", alignItems: "stretch" },
+  flex1: { flex: 1 },
+  // Claims the leftover height in the chart card so it can be measured; the
+  // floor keeps it usable when the neighbouring card is short.
+  chartFill: { flex: 1, minHeight: 96, justifyContent: "flex-end" },
+  contentDesktop: {
+    maxWidth: 1120,
+    width: "100%",
+    alignSelf: "center",
+    paddingHorizontal: 24,
+  },
   streakRow: {
     flexDirection: "row",
     alignItems: "center",

@@ -3,10 +3,10 @@
  * rebuild needed). Sources: Claude/OpenAI/OpenCode from Simple Icons (CC0),
  * Grok from svgl. Agents without a public mark fall back to a letter badge.
  */
-import { Text, View } from "react-native";
+import { Text, useColorScheme, View } from "react-native";
 import { useUnistyles } from "react-native-unistyles";
 import Svg, { Path } from "react-native-svg";
-import { AGENT_HEX, agentLabel } from "./tokens";
+import { agentHex, agentLabel } from "./tokens";
 
 type MarkProps = { size: number; color: string };
 
@@ -89,7 +89,11 @@ export function AgentLogo({
   color?: string;
 }) {
   const { theme } = useUnistyles();
-  const c = color ?? AGENT_HEX[agent] ?? theme.colors.fgMuted;
+  // Brand hues can't adapt on their own (SVG fills need plain strings), so the
+  // ground has to be resolved here — Codex's mark is near-white and vanishes on
+  // a light window otherwise.
+  const scheme = useColorScheme();
+  const c = color ?? agentHex(agent, scheme) ?? (theme.colors.fgMuted as string);
   switch (agent) {
     case "claude":
       return <ClaudeMark size={size} color={c} />;

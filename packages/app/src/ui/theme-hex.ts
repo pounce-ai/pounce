@@ -9,10 +9,12 @@ export const HEX = {
     bgElevated: "#f2f2f7",
     fg: "#1c1c1e",
     fgMuted: "#6e6e73",
-    accent: "#7c6ff0",
+    // Matches T.accent's light value. #7c6ff0 sits at ~3.6:1 on white, under
+    // the floor for the label text and links this tints.
+    accent: "#5b4fd6",
     // SVG fills can't blend a translucent token reliably across renderers, so
     // the chart palette keeps flattened mid-tones instead of alpha.
-    accentSoftSolid: "#c9c1f8",
+    accentSoftSolid: "#b9b0f2",
     border: "#e5e5ea",
   },
   dark: {

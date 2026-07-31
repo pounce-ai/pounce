@@ -133,3 +133,46 @@ RCT_EXPORT_METHOD(setStyle:(NSString *)style) {
 }
 
 @end
+
+#pragma mark - PounceDragRegionView
+
+@implementation PounceDragRegionNSView
+
+// react-native-macos lays children out with top-left-origin Yoga frames.
+- (BOOL)isFlipped {
+  return YES;
+}
+
+// This view is a bare backdrop with no React children — the chrome's controls
+// are later siblings painted above it, so anything that reaches here really is
+// empty titlebar space. (An earlier version wrapped the controls and tried to
+// hitTest its way out; react-native-macos routes touches through a root gesture
+// recognizer rather than per-view mouseDown, so every button press was eaten
+// and became a window drag instead.)
+- (void)mouseDown:(NSEvent *)event {
+  // Matches the system titlebar: double-click runs the user's
+  // "double-click a window's title bar to…" preference (zoom or minimize).
+  if (event.clickCount == 2) {
+    NSString *action = [[NSUserDefaults standardUserDefaults]
+        stringForKey:@"AppleActionOnDoubleClick"];
+    if ([action isEqualToString:@"Minimize"]) {
+      [self.window miniaturize:nil];
+    } else if (![action isEqualToString:@"None"]) {
+      [self.window zoom:nil];
+    }
+    return;
+  }
+  [self.window performWindowDragWithEvent:event];
+}
+
+@end
+
+@implementation PounceDragRegionViewManager
+
+RCT_EXPORT_MODULE(PounceDragRegionView)
+
+- (NSView *)view {
+  return [[PounceDragRegionNSView alloc] initWithFrame:NSZeroRect];
+}
+
+@end

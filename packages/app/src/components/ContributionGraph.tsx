@@ -54,6 +54,7 @@ export function ContributionGraph({
   selected,
   onSelectDay,
   compact,
+  fillWidth,
 }: {
   /** Chronological, gap-free, quantized (see services/activity). */
   days: readonly HeatDay[];
@@ -61,6 +62,11 @@ export function ContributionGraph({
   onSelectDay?: (date: string) => void;
   /** Share-card mode: no scroll, no labels — the caller sizes the window. */
   compact?: boolean;
+  /** Grow the cells to fill this width instead of using the fixed phone size.
+   *  A 53-week grid at 11pt cells is ~690pt wide; in a desktop card twice that,
+   *  it sits in the left half with dead space beside it. Never shrinks below
+   *  the phone size — on a narrow card the horizontal scroll still applies. */
+  fillWidth?: number;
 }) {
   const scheme = useColorScheme();
   const ramp = RAMP[scheme === "light" ? "light" : "dark"];
@@ -74,8 +80,10 @@ export function ContributionGraph({
   }, [days]);
 
   const cols = Math.ceil((days.length + leadingBlanks) / ROWS);
-  const width = Math.max(1, cols * STEP - GAP);
-  const height = ROWS * STEP - GAP;
+  const step = fillWidth && cols ? Math.max(STEP, Math.floor((fillWidth + GAP) / cols)) : STEP;
+  const cell = step - GAP;
+  const width = Math.max(1, cols * step - GAP);
+  const height = ROWS * step - GAP;
   const labels = useMemo(
     () => (compact ? [] : monthLabels(days, leadingBlanks)),
     [compact, days, leadingBlanks],
@@ -93,24 +101,28 @@ export function ContributionGraph({
       disabled={!onSelectDay}
       onPress={(e) => {
         const { locationX, locationY } = e.nativeEvent;
-        const col = Math.floor(locationX / STEP);
-        const row = Math.floor(locationY / STEP);
+        const col = Math.floor(locationX / step);
+        const row = Math.floor(locationY / step);
         if (row < 0 || row >= ROWS || col < 0) return;
         const idx = col * ROWS + row - leadingBlanks;
         const hit = days[idx];
         if (hit) onSelectDay?.(hit.date);
       }}
     >
-      <Svg width={width} height={height}>
+      {/* pointerEvents="none": RNSVG's view swallows the click on macOS, so the
+          Pressable above never sees it and selecting a day did nothing. The
+          grid is decorative — hit-testing is arithmetic on locationX/Y, not on
+          the rects — so it has no reason to take events. */}
+      <Svg width={width} height={height} pointerEvents="none">
         {days.map((d, i) => {
           const slot = i + leadingBlanks;
           return (
             <Rect
               key={d.date}
-              x={Math.floor(slot / ROWS) * STEP}
-              y={(slot % ROWS) * STEP}
-              width={CELL}
-              height={CELL}
+              x={Math.floor(slot / ROWS) * step}
+              y={(slot % ROWS) * step}
+              width={cell}
+              height={cell}
               rx={2}
               fill={ramp[d.level]}
               // Selection reads as a ring, so it survives on any ramp step.
@@ -136,7 +148,7 @@ export function ContributionGraph({
         <View>
           <View style={[s.labelRow, { width }]}>
             {labels.map((l) => (
-              <Text key={`${l.col}:${l.label}`} style={[s.monthLabel, { left: l.col * STEP }]}>
+              <Text key={`${l.col}:${l.label}`} style={[s.monthLabel, { left: l.col * step }]}>
                 {l.label}
               </Text>
             ))}

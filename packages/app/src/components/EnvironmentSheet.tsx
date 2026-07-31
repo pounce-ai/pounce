@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { PounceIcon } from "../ui/native/Icon";
+import { IS_DESKTOP } from "../ui";
 import type { IoniconName } from "../ui/native/icon-map";
 import type { Session } from "@pounce/shared";
 import {
@@ -198,50 +199,61 @@ export function EnvironmentSheet({
     <NativeSheet visible={visible} onClose={onClose}>
       <ScrollView bounces={false} style={{ maxHeight: height * 0.7 }}>
         {/* Markers moved to the composer's pill row (next to the model pill). */}
-        {onToggleFavourite ? (
+        {/* Favouriting is a one-tap toggle, so on desktop it's a star in the
+            tab strip rather than a row you open a menu to reach. */}
+        {onToggleFavourite && !IS_DESKTOP ? (
           <>
             <SectionHeader title="Thread" />
-            {onToggleFavourite ? (
-              <Row
-                icon={fav ? "star" : "star-outline"}
-                iconColor={fav ? theme.colors.accent : undefined}
-                label={fav ? "Remove from favourites" : "Add to favourites"}
-                onPress={act(onToggleFavourite)}
-              />
-            ) : null}
+            <Row
+              icon={fav ? "star" : "star-outline"}
+              iconColor={fav ? theme.colors.accent : undefined}
+              label={fav ? "Remove from favourites" : "Add to favourites"}
+              onPress={act(onToggleFavourite)}
+            />
             <View style={s.divider} />
           </>
         ) : null}
         <SectionHeader title="Environment" />
 
-        {running ? (
+        {/* Desktop's composer shows a stop button while a turn runs, right where
+            you're already looking — reaching a menu to halt something is the
+            wrong shape for the most time-sensitive action in the app. */}
+        {running && !IS_DESKTOP ? (
           <Row icon="stop-circle-outline" label="Stop agent" danger onPress={act(onStop)} />
         ) : null}
 
         {session.cwd ? (
           <>
-            <Row
-              icon="git-compare-outline"
-              label="Changes"
-              onPress={act(onViewChanges)}
-              right={
-                add || del ? (
-                  <Text style={s.diffCounts}>
-                    <Text style={s.diffAdd}>+{add}</Text> <Text style={s.diffDel}>-{del}</Text>
-                  </Text>
-                ) : (
-                  <Text style={s.noChanges}>No changes</Text>
-                )
-              }
-            />
-            <Row icon="laptop-outline" label={session.host || "Local"} />
-            {branch ? <Row icon="git-branch-outline" label={branch} /> : null}
-            {needsCommit || needsPush ? (
-              <Row
-                icon="git-commit-outline"
-                label={needsCommit ? "Commit or push" : "Push"}
-                onPress={act(onViewChanges)}
-              />
+            {/* Changes, host, branch and commit/push are all standing UI on
+                desktop — the docked diff pane owns the diff and its commit /
+                push / PR buttons, and the status bar shows checkout + branch.
+                Repeating them here would be a menu of things already on screen. */}
+            {!IS_DESKTOP ? (
+              <>
+                <Row
+                  icon="git-compare-outline"
+                  label="Changes"
+                  onPress={act(onViewChanges)}
+                  right={
+                    add || del ? (
+                      <Text style={s.diffCounts}>
+                        <Text style={s.diffAdd}>+{add}</Text> <Text style={s.diffDel}>-{del}</Text>
+                      </Text>
+                    ) : (
+                      <Text style={s.noChanges}>No changes</Text>
+                    )
+                  }
+                />
+                <Row icon="laptop-outline" label={session.host || "Local"} />
+                {branch ? <Row icon="git-branch-outline" label={branch} /> : null}
+                {needsCommit || needsPush ? (
+                  <Row
+                    icon="git-commit-outline"
+                    label={needsCommit ? "Commit or push" : "Push"}
+                    onPress={act(onViewChanges)}
+                  />
+                ) : null}
+              </>
             ) : null}
             {checkRow ? (
               <Row icon={checkRow.icon} iconColor={checkRow.color} label={checkRow.label} />

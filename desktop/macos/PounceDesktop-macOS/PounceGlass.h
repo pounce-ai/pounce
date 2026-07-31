@@ -10,6 +10,9 @@
 //     setting themes AppKit chrome (titlebar, menus, vibrancy materials) and
 //     re-resolves every PlatformColor; mirrors the mobile expo module of the
 //     same name (apps/mobile/modules/pounce-appearance).
+//   • PounceDragRegionView — a <PounceDragRegionView> whose empty areas drag
+//     the window (and double-click to zoom), which the unified titlebar took
+//     away when the app started drawing its own top chrome.
 //
 #import <AppKit/AppKit.h>
 #import <React/RCTBridgeModule.h>
@@ -24,4 +27,13 @@
 @end
 
 @interface PounceAppearance : NSObject <RCTBridgeModule>
+@end
+
+/// NSView that forwards drags on its own background to the window. React
+/// children still receive their own clicks — only pixels no subview claimed
+/// start a window drag.
+@interface PounceDragRegionNSView : NSView
+@end
+
+@interface PounceDragRegionViewManager : RCTViewManager
 @end

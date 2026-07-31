@@ -1,4 +1,4 @@
-import { Component, memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Component, memo, type ReactNode, useMemo, useRef, useState } from "react";
 // eslint-disable-next-line @react-native/no-deprecated-api -- core Clipboard is
 // the only clipboard already inside shipped binaries (OTA-safe); expo-clipboard
 // would need a new native module and a store build.
@@ -23,53 +23,11 @@ import * as WebBrowser from "expo-web-browser";
 import { StreamdownText } from "react-native-streamdown";
 import type { RemendOptions } from "remend";
 import { splitCodeBlocks } from "../components/runnableBlocks";
+import { usePacedText } from "./pacedText";
 import { COLOR } from "../ui";
 import { hexFor } from "../ui/theme-hex";
 
 const MONO = "JetBrainsMono";
-
-/** Grok-style reveal pacing: the bridge streams text in sentence-sized chunks,
- *  and splashing a whole chunk at once defeats the native tail fade-in. This
- *  parcels growth out a few words per tick instead — the engine animates each
- *  increment — with an adaptive step so a big chunk drains in under a second
- *  and the shown text never trails the real stream far. Non-append updates
- *  (recycled row, rewritten buffer) and the settled state pass through
- *  verbatim; the first mount does too, so reopening a mid-stream thread
- *  doesn't replay the whole message. */
-function usePacedText(target: string, enabled: boolean): string {
-  const [shown, setShown] = useState(target);
-  const shownRef = useRef(target);
-  useEffect(() => {
-    if (!enabled || !target.startsWith(shownRef.current)) {
-      shownRef.current = target;
-      setShown(target);
-      return;
-    }
-    if (target.length === shownRef.current.length) return;
-    const timer = setInterval(() => {
-      const cur = shownRef.current;
-      if (cur.length >= target.length) {
-        clearInterval(timer);
-        return;
-      }
-      // A steady 1–2 words per tick is what makes the reveal read as calm —
-      // the native tail fade softens each small step into a shimmer, and the
-      // list's pin-to-end moves in matching small nudges. Only a deep backlog
-      // (a burst chunk) drains faster, and even then gently.
-      const backlog = target.length - cur.length;
-      const steps = backlog > 600 ? 4 : backlog > 250 ? 2 : 1;
-      let next = cur.length;
-      for (let i = 0; i < steps && next < target.length; i++) {
-        const ws = target.slice(next + 1).search(/\s/);
-        next = ws === -1 ? target.length : next + 1 + ws;
-      }
-      shownRef.current = target.slice(0, next);
-      setShown(shownRef.current);
-    }, 40);
-    return () => clearInterval(timer);
-  }, [target, enabled]);
-  return enabled ? shown : target;
-}
 
 /** Open tapped links in an in-app browser (SFSafariViewController / Custom Tabs)
  *  so the user stays inside Pounce instead of being kicked out to Safari. Only

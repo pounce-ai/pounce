@@ -21,7 +21,6 @@
 import { existsSync, readdirSync, statSync, watch } from "node:fs";
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -33,11 +32,7 @@ import {
   systemEvent,
 } from "./events.mjs";
 import { agentEnv, binVersion, binPath, liveAgentCwds } from "./env.mjs";
-
-// node:sqlite loaded via createRequire (native Node resolution): a plain
-// `import("node:sqlite")` is rewritten by vite-node under tests and fails on
-// this newer builtin. Works identically in production.
-const nodeRequire = createRequire(import.meta.url);
+import { openSqliteReadOnly } from "./sqlite.mjs";
 
 const BIN = "cursor-agent";
 const CHATS_DIR = path.join(os.homedir(), ".cursor", "chats");
@@ -139,11 +134,10 @@ export class CursorAdapter {
    *  turns still work). */
   async _sqliteMod() {
     if (this._sqlite !== undefined) return this._sqlite;
-    try {
-      this._sqlite = nodeRequire("node:sqlite").DatabaseSync;
-    } catch {
-      this._sqlite = null;
-    }
+    // Returns an OPENER, not a constructor: the two runtimes' classes differ in
+    // their read-only option, so sqlite.mjs owns that detail. Bun (the shipped
+    // app) has no node:sqlite, which switched Cursor history off entirely.
+    this._sqlite = openSqliteReadOnly;
     return this._sqlite;
   }
 
@@ -213,10 +207,10 @@ export class CursorAdapter {
   }
 
   async _open(dbPath) {
-    const DatabaseSync = await this._sqliteMod();
-    if (!DatabaseSync || !dbPath || !existsSync(dbPath)) return null;
+    const open = await this._sqliteMod();
+    if (!open || !dbPath || !existsSync(dbPath)) return null;
     try {
-      return new DatabaseSync(dbPath, { readOnly: true });
+      return await open(dbPath);
     } catch {
       return null;
     }

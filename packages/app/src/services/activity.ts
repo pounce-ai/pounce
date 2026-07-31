@@ -10,10 +10,15 @@
 /**
  * One day of activity, as the bridge reports it.
  *
- * `cost: null` means "no agent reported a dollar figure for this day" and is
- * NOT the same as `0` — the bridge never prices tokens itself, so most history
- * has real tokens and no cost. Every helper here preserves that distinction
- * rather than coercing null to zero.
+ * `cost: null` means "nothing could put a dollar figure on this day" and is NOT
+ * the same as `0`. Every helper here preserves that distinction rather than
+ * coercing null to zero.
+ *
+ * `costEstimated` marks a figure the bridge PRICED rather than one somebody
+ * BILLED: tokens × public list rates, via ccusage. It's a different kind of
+ * number and the UI must show it as one — on a subscription plan the true
+ * marginal cost of those tokens is zero. The flag is sticky through every sum
+ * below: mixing one estimate into a total makes the total an estimate.
  */
 export interface ActivityDay {
   readonly date: string; // YYYY-MM-DD
@@ -21,6 +26,7 @@ export interface ActivityDay {
   readonly messages: number;
   readonly tokens: number;
   readonly cost: number | null;
+  readonly costEstimated?: boolean;
   readonly byAgent?: Readonly<Record<string, AgentActivity>>;
 }
 
@@ -29,6 +35,7 @@ export interface AgentActivity {
   readonly messages?: number;
   readonly tokens?: number;
   readonly cost?: number | null;
+  readonly costEstimated?: boolean;
 }
 
 export interface ActivityTotals {
@@ -37,6 +44,7 @@ export interface ActivityTotals {
   readonly tokens: number;
   readonly cost: number | null;
   readonly costComplete: boolean;
+  readonly costEstimated?: boolean;
 }
 
 /**
@@ -108,6 +116,7 @@ function addAgent(
       messages: (prev?.messages ?? 0) + (v.messages ?? 0),
       tokens: (prev?.tokens ?? 0) + (v.tokens ?? 0),
       cost: addCost(prev?.cost, v.cost),
+      costEstimated: prev?.costEstimated || v.costEstimated,
     };
   }
 }
@@ -134,6 +143,7 @@ export function mergeActivity(pages: readonly (ActivityPage | null | undefined)[
         messages: (prev?.messages ?? 0) + (day.messages || 0),
         tokens: (prev?.tokens ?? 0) + (day.tokens || 0),
         cost: addCost(prev?.cost, day.cost),
+        costEstimated: prev?.costEstimated || day.costEstimated,
         byAgent: prev?.byAgent ?? {},
       };
       addAgent(merged.byAgent, day.byAgent);
@@ -146,6 +156,7 @@ export function mergeActivity(pages: readonly (ActivityPage | null | undefined)[
       totals.tokens += t.tokens || 0;
       totals.cost = addCost(totals.cost, t.cost);
       if (t.costComplete === false) totals.costComplete = false;
+      if (t.costEstimated) totals.costEstimated = true;
     }
     for (const [agent, c] of Object.entries(page.coverage ?? {})) {
       // Worst report wins — one host that can't price an agent means the
@@ -253,19 +264,22 @@ export function periodSlice(
   return { window, previous };
 }
 
-/** Sum a slice. `costComplete` is the caller's concern — it's a whole-series fact. */
+/** Sum a slice. `costComplete` is the caller's concern — it's a whole-series fact.
+ *  `costEstimated` is not: it belongs to whichever days landed in THIS slice. */
 export function sumDays(days: readonly ActivityDay[]): Omit<ActivityTotals, "costComplete"> {
   let sessions = 0;
   let messages = 0;
   let tokens = 0;
   let cost: number | null = null;
+  let costEstimated = false;
   for (const d of days) {
     sessions += d.sessions || 0;
     messages += d.messages || 0;
     tokens += d.tokens || 0;
     cost = addCost(cost, d.cost);
+    if (d.costEstimated && d.cost != null) costEstimated = true;
   }
-  return { sessions, messages, tokens, cost };
+  return { sessions, messages, tokens, cost, costEstimated };
 }
 
 /**
@@ -280,11 +294,32 @@ export function delta(now: number | null, before: number | null): number | null 
 /** Per-agent totals across a slice, biggest contributor first. */
 export function byAgentTotals(
   days: readonly ActivityDay[],
-): { agent: string; sessions: number; messages: number; tokens: number; cost: number | null }[] {
+  /** Agents to list even with no activity in this window, zero-filled. The
+   *  dashboard passes every agent it knows about so this table and the plan
+   *  card describe the same set — two lists of different agents on one screen
+   *  reads as a bug, not as two questions. */
+  include: readonly string[] = [],
+): {
+  agent: string;
+  sessions: number;
+  messages: number;
+  tokens: number;
+  cost: number | null;
+  costEstimated: boolean;
+}[] {
   const acc = new Map<
     string,
-    { sessions: number; messages: number; tokens: number; cost: number | null }
+    {
+      sessions: number;
+      messages: number;
+      tokens: number;
+      cost: number | null;
+      costEstimated: boolean;
+    }
   >();
+  for (const agent of include) {
+    acc.set(agent, { sessions: 0, messages: 0, tokens: 0, cost: null, costEstimated: false });
+  }
   for (const d of days) {
     for (const [agent, v] of Object.entries(d.byAgent ?? {})) {
       const prev = acc.get(agent) ?? {
@@ -292,12 +327,14 @@ export function byAgentTotals(
         messages: 0,
         tokens: 0,
         cost: null as number | null,
+        costEstimated: false,
       };
       acc.set(agent, {
         sessions: prev.sessions + (v.sessions ?? 0),
         messages: prev.messages + (v.messages ?? 0),
         tokens: prev.tokens + (v.tokens ?? 0),
         cost: addCost(prev.cost, v.cost),
+        costEstimated: prev.costEstimated || !!v.costEstimated,
       });
     }
   }

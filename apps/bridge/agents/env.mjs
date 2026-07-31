@@ -9,10 +9,43 @@
 import os from "node:os";
 import path from "node:path";
 import { existsSync, readlinkSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readConfig, binOverride } from "./config.mjs";
 
 const IS_WIN = process.platform === "win32";
+
+/**
+ * The PATH the user actually has in a terminal, read once from their login
+ * shell.
+ *
+ * The hardcoded list below covers the common installers, but not a tool kept
+ * somewhere personal — and that's exactly the case a GUI launch breaks, because
+ * Finder/Dock give a process `/usr/bin:/bin:/usr/sbin:/sbin` and nothing else.
+ * (Found via `cursor-agent`, which lives in ~/.superset/bin here: it resolved
+ * when the bridge was started from a terminal and vanished when the app spawned
+ * it.) A login shell is the only thing that knows the user's real PATH, so ask
+ * it once and cache — it costs a few hundred ms on first use and nothing after.
+ */
+let loginPathCache;
+function loginShellPath() {
+  if (loginPathCache !== undefined) return loginPathCache;
+  loginPathCache = null;
+  if (IS_WIN) return loginPathCache;
+  try {
+    const shell = process.env.SHELL || "/bin/zsh";
+    const r = spawnSync(shell, ["-lc", 'printf %s "$PATH"'], {
+      encoding: "utf8",
+      timeout: 4000,
+      // A login shell that prompts or writes noise must not hang the bridge.
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const out = r.stdout?.trim();
+    if (out && out.includes(path.delimiter)) loginPathCache = out;
+  } catch {
+    // Keep null: the hardcoded dirs below still apply.
+  }
+  return loginPathCache;
+}
 
 export function agentEnv() {
   const home = os.homedir();
@@ -38,7 +71,15 @@ export function agentEnv() {
   // and any `#!/usr/bin/env node` shebang inside a wrapper resolve to the pinned
   // toolchain. Then the caller's PATH, then their extra dirs, then our defaults.
   const overrideDirs = Object.values(cfg.bins).map((p) => path.dirname(p));
-  const PATH = [...overrideDirs, process.env.PATH || "", ...cfg.extraPath, ...extra.filter(Boolean)]
+  // Login-shell PATH sits after the caller's own but before our guesses: it's
+  // the user's real setup, and more trustworthy than a hardcoded list.
+  const PATH = [
+    ...overrideDirs,
+    process.env.PATH || "",
+    loginShellPath() || "",
+    ...cfg.extraPath,
+    ...extra.filter(Boolean),
+  ]
     .filter(Boolean)
     .join(path.delimiter);
   // cfg.env comes before PATH so our computed PATH always wins.

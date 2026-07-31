@@ -1,28 +1,47 @@
 /**
- * Desktop shell — master-detail layout over the mobile screens.
+ * Desktop shell.
  *
- * Left: dense thread sidebar (search, project groups, status footer).
- * Right: the selected session, or an empty state.
- * Overlay: every mobile modal route rendered as a centered card; git-heavy
- * surfaces (changes, terminal) get a wider card. Navigation state lives in the
- * router shim, so the reused screens drive this shell with their original
- * router calls.
+ *   ┌──────────┬───────────────────────────────────────┐
+ *   │ Sidebar  │ TabStrip                              │
+ *   │ spaces   ├───────────────────────────────────────┤
+ *   │ sessions │ StatusBar (checkout · usage · branch) │
+ *   │ account  ├────────────────────────┬──────────────┤
+ *   │          │ session transcript     │ changes dock │
+ *   └──────────┴────────────────────────┴──────────────┘
+ *
+ * The window has no system title bar (AppDelegate makes it transparent and
+ * full-size), so the sidebar's top row and the tab strip are the chrome — both
+ * are drag regions. Everything else is a centered modal card, as before; the
+ * screens still navigate with their original router hrefs and the shim maps
+ * them onto this layout.
  */
-import type { ComponentType } from "react";
+import { useRef, useState, type ComponentType } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
-import { nav$, router, RouteParamsProvider } from "../shims/router";
+import { nav$, RouteParamsProvider } from "../shims/router";
 import { COLOR } from "@pounce/app/ui";
 import { T } from "@pounce/app/ui/theme";
+import { useThread } from "@pounce/app/state/db/hooks";
+import { sessionChrome$ } from "@pounce/app/state/sessionChrome";
+import { ThreadUsageSummary } from "@pounce/app/components/ThreadStatusBar";
 import { Sidebar } from "./Sidebar";
+import { TabStrip } from "./TabStrip";
+import { DiffDock, DOCK_HIDE_BELOW } from "./DiffDock";
+import { Splitter, SPLITTER_WIDTH } from "./Splitter";
+import { CrossFade } from "./motion";
+import {
+  MIN_TRANSCRIPT_WIDTH,
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+} from "./metrics";
 import SessionScreen from "@pounce/app/screens/Session";
 import SessionsScreen from "@pounce/app/screens/Sessions";
 import SearchScreen from "@pounce/app/screens/Search";
 import SettingsScreen from "@pounce/app/screens/Settings";
 import DashboardScreen from "@pounce/app/screens/Dashboard";
 import NewTaskScreen from "@pounce/app/screens/New";
-import ChangesScreen from "@pounce/app/screens/Changes";
 import ContextScreen from "@pounce/app/screens/Context";
 import TerminalScreen from "@pounce/app/screens/Terminal";
 import ConnectScreen from "@pounce/app/screens/Connect";
@@ -49,7 +68,9 @@ function FiltersModal() {
 /** Modal cards need an explicit height: the screens inside are flex-1, so a
  *  content-sized card collapses to its minimum while centered children
  *  overflow past the header (the floating-QR bug). maxHeight in the host
- *  still clamps these on small windows. */
+ *  still clamps these on small windows.
+ *
+ *  /changes is absent by design — it's the docked pane now (see the shim). */
 const MODALS: Record<string, { component: ComponentType; width: number; height: number }> = {
   "/search": { component: SearchScreen, width: 620, height: 560 },
   "/sessions": { component: SessionsScreen, width: 620, height: 660 },
@@ -57,7 +78,6 @@ const MODALS: Record<string, { component: ComponentType; width: number; height: 
   // Wider than the list modals: the heatmap is ~700px of grid at its cell size.
   "/activity": { component: DashboardScreen, width: 760, height: 700 },
   "/new": { component: NewTaskScreen, width: 640, height: 660 },
-  "/changes": { component: ChangesScreen, width: 860, height: 660 },
   "/context": { component: ContextScreen, width: 720, height: 700 },
   "/terminal": { component: TerminalScreen, width: 860, height: 660 },
   "/connect": { component: ConnectScreen, width: 560, height: 460 },
@@ -68,24 +88,56 @@ const MODALS: Record<string, { component: ComponentType; width: number; height: 
   "/filters": { component: FiltersModal, width: 560, height: 660 },
 };
 
-function EmptyState() {
+/** Where the open thread actually lives — the desktop equivalent of a title
+ *  bar's proxy icon. Quiet by default; it's reference, not navigation. */
+function StatusBar({ threadId }: { threadId: string }) {
+  const session = useThread(threadId);
+  // Published by the open session (it does the fetching); shown here because
+  // the pane has no header of its own to put it in.
+  const usage = useSelector(() => sessionChrome$.usage.get());
+  const tasks = useSelector(() => sessionChrome$.tasks.get());
+  const tasksOpen = useSelector(() => sessionChrome$.tasksOpen.get());
+  const tasksDone = tasks?.items.filter((i) => i.status === "completed").length ?? 0;
+  if (!session) return null;
   return (
-    <View style={s.empty}>
-      <Ionicons name="paw-outline" size={44} color={COLOR.fgFaint} />
-      <Text style={s.emptyText}>Select a thread to follow along</Text>
-      <Pressable
-        onPress={() => router.push("/new")}
-        style={({ pressed }) => [s.newTaskBtn, pressed && s.pressed80]}
-      >
-        <Ionicons name="add" size={16} color={T.onAccent} />
-        <Text style={s.newTaskLabel}>New task</Text>
-      </Pressable>
-      <Pressable
-        onPress={() => router.push("/pair")}
-        style={({ pressed }) => [s.pairLink, pressed && s.pressed70]}
-      >
-        <Text style={s.pairLinkText}>Pair your phone →</Text>
-      </Pressable>
+    <View style={s.statusBar}>
+      <Ionicons
+        name={session.worktree ? "git-network-outline" : "folder-open-outline"}
+        size={11}
+        color={COLOR.fgFaint}
+      />
+      <Text numberOfLines={1} style={s.statusPath}>
+        {session.worktree ? "Worktree" : "Local checkout"}
+        {session.cwd ? ` · ${session.cwd.replace(/^\/Users\/[^/]+/, "~")}` : ""}
+      </Text>
+      <View style={s.flex1} />
+      {/* The turn's checklist, as a count you can open — the panel used to
+          appear over the composer by itself on every message. */}
+      {tasks && tasks.items.length ? (
+        <Pressable
+          onPress={() => sessionChrome$.tasksOpen.set(!tasksOpen)}
+          accessibilityLabel={tasksOpen ? "Hide tasks" : "Show tasks"}
+          style={({ pressed }) => [s.statusChip, (tasksOpen || pressed) && s.statusChipOn]}
+        >
+          <Ionicons
+            name={tasksDone === tasks.items.length ? "checkmark-circle" : "ellipse-outline"}
+            size={11}
+            color={tasksOpen ? COLOR.accent : COLOR.fgFaint}
+          />
+          <Text style={[s.statusChipText, tasksOpen && s.statusChipTextOn]}>
+            {tasksDone}/{tasks.items.length}
+          </Text>
+        </Pressable>
+      ) : null}
+      <ThreadUsageSummary usage={usage} />
+      {session.branch ? (
+        <>
+          <Ionicons name="git-branch-outline" size={11} color={COLOR.fgFaint} />
+          <Text numberOfLines={1} style={s.statusBranch}>
+            {session.branch}
+          </Text>
+        </>
+      ) : null}
     </View>
   );
 }
@@ -93,22 +145,79 @@ function EmptyState() {
 export function Shell() {
   const detail = useSelector(nav$.detail);
   const modal = useSelector(nav$.modal);
+  const dock = useSelector(nav$.dock);
+  const sidebar = useSelector(nav$.sidebar);
   const entry = modal ? MODALS[modal.path] : null;
+  const threadId = detail?.params.id ?? null;
+  const [shellWidth, setShellWidth] = useState(0);
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
+  const sidebarStart = useRef(SIDEBAR_DEFAULT_WIDTH);
+
+  // What the dock may take: everything left over once the sidebar and a
+  // readable transcript have theirs. Want a wider diff than that allows? Drag
+  // the sidebar in — it's never taken away automatically.
+  const dockMax = Math.max(
+    DOCK_HIDE_BELOW,
+    shellWidth - (sidebar ? sidebarWidth : 0) - MIN_TRANSCRIPT_WIDTH,
+  );
 
   return (
-    <View style={s.root}>
-      <View style={s.sidebar}>
-        <Sidebar />
-      </View>
+    // The dock sizes itself against the shell's real width — Dimensions reports
+    // the screen, not this window, so anything derived from it is wrong the
+    // moment the window isn't full-screen.
+    <View style={s.root} onLayout={(e) => setShellWidth(e.nativeEvent.layout.width)}>
+      {sidebar ? (
+        <>
+          <View style={[s.sidebar, { width: sidebarWidth }]}>
+            <Sidebar />
+          </View>
+          {/* Straddles the seam instead of occupying a column: as a sibling it
+              was a 14pt band of flat window background between the sidebar's
+              vibrancy and the content pane, which read as a black stripe. With
+              no layout width the two panes meet, and the grab strip floats over
+              the join. */}
+          <Splitter
+            style={[s.sidebarSplitter, { left: sidebarWidth - SPLITTER_WIDTH / 2 }]}
+            onStart={() => {
+              sidebarStart.current = sidebarWidth;
+            }}
+            onMove={(dx) =>
+              setSidebarWidth(
+                Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, sidebarStart.current + dx)),
+              )
+            }
+          />
+        </>
+      ) : null}
 
-      <View style={s.detail}>
-        {detail ? (
-          <RouteParamsProvider key={detail.params.id ?? "detail"} params={detail.params}>
-            <SessionScreen />
-          </RouteParamsProvider>
-        ) : (
-          <EmptyState />
-        )}
+      <View style={s.main}>
+        <TabStrip />
+        {/* Directly under the tab strip, so the checkout reads as belonging to
+            the tab above it rather than to the window. Tab strip and status bar
+            share one hairline underneath — two stacked rules would make this a
+            wall of chrome. */}
+        {threadId ? <StatusBar threadId={threadId} /> : null}
+        <View style={s.panes}>
+          {/* Switching tabs replaces the transcript in place; a short fade
+              makes that read as a change of view rather than a flicker. */}
+          <CrossFade key={threadId ?? "empty"} style={s.detail}>
+            {detail ? (
+              <RouteParamsProvider key={threadId ?? "detail"} params={detail.params}>
+                <SessionScreen />
+              </RouteParamsProvider>
+            ) : (
+              // No thread open? Show Activity rather than a placeholder. The
+              // pane is the size of a window here, and "what have my agents
+              // been doing" is the useful thing to land on — a paw and a
+              // sentence is what you show on a phone, where there's no room
+              // for anything better.
+              <DashboardScreen />
+            )}
+          </CrossFade>
+          {dock && threadId && shellWidth > 0 ? (
+            <DiffDock threadId={threadId} maxWidth={dockMax} />
+          ) : null}
+        </View>
       </View>
 
       {modal && entry ? (
@@ -123,6 +232,17 @@ export function Shell() {
             >
               <entry.component />
             </RouteParamsProvider>
+            {/* One close affordance for every modal, floated over the screen's
+                own header — the reused mobile screens each draw their titles
+                differently, and several have no dismiss control at all because
+                on a phone you swipe the sheet away. */}
+            <Pressable
+              onPress={() => nav$.modal.set(null)}
+              accessibilityLabel="Close"
+              style={({ pressed }) => [s.modalClose, pressed && s.modalClosePressed]}
+            >
+              <Ionicons name="close" size={14} color={COLOR.fgMuted} />
+            </Pressable>
           </View>
         </View>
       ) : null}
@@ -132,31 +252,37 @@ export function Shell() {
 
 const s = StyleSheet.create({
   root: { flex: 1, flexDirection: "row", backgroundColor: T.bg },
-  sidebar: { width: 300, borderRightWidth: 1, borderColor: T.border },
+  // No right border: the splitter floating over the seam draws it.
+  sidebar: {},
+  sidebarSplitter: { position: "absolute", top: 0, bottom: 0, zIndex: 5 },
+  main: { flex: 1 },
+  panes: { flex: 1, flexDirection: "row" },
   detail: { flex: 1 },
-  empty: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
-    backgroundColor: T.bg,
-  },
-  emptyText: { fontSize: 15, color: T.fgMuted },
-  newTaskBtn: {
-    marginTop: 4,
-    height: 36,
+  flex1: { flex: 1 },
+  statusBar: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    borderRadius: 999,
-    backgroundColor: T.accent,
-    paddingHorizontal: 16,
+    gap: 5,
+    // Rule below, not above: it separates the chrome block (tabs + status) from
+    // the transcript, and the tab strip needs no second line under it.
+    borderBottomWidth: 1,
+    borderColor: T.border,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
   },
-  newTaskLabel: { fontSize: 13, fontWeight: "600", color: T.onAccent },
-  pairLink: { marginTop: 4 },
-  pairLinkText: { fontSize: 12, color: T.fgFaint },
-  pressed70: { opacity: 0.7 },
-  pressed80: { opacity: 0.8 },
+  statusChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    height: 17,
+    borderRadius: 5,
+    paddingHorizontal: 5,
+  },
+  statusChipOn: { backgroundColor: T.accentSoft },
+  statusChipText: { fontSize: 10, color: T.fgFaint, fontVariant: ["tabular-nums"] },
+  statusChipTextOn: { color: T.accent },
+  statusPath: { flexShrink: 1, fontSize: 10.5, color: T.fgFaint },
+  statusBranch: { flexShrink: 1, fontFamily: "JetBrainsMono", fontSize: 10.5, color: T.fgFaint },
   modalHost: {
     position: "absolute",
     top: 0,
@@ -178,8 +304,27 @@ const s = StyleSheet.create({
     overflow: "hidden",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: T.borderStrong,
-    backgroundColor: T.bg,
+    borderColor: T.border,
+    // Raised off the scrim, like a real sheet — bg would match the window
+    // behind it and the card would read as a hole rather than a panel.
+    backgroundColor: T.bgElevated,
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 30,
+    shadowOffset: { width: 0, height: 12 },
   },
-  filtersBody: { flex: 1, backgroundColor: T.bgElevated, paddingHorizontal: 16, paddingTop: 12 },
+  modalClose: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    height: 24,
+    width: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+  },
+  modalClosePressed: { backgroundColor: T.surfaceHover },
+  // Inherits the card's surface: a second fill here made the body a grey slab
+  // sitting inside a white card.
+  filtersBody: { flex: 1, paddingHorizontal: 16, paddingTop: 12 },
 });

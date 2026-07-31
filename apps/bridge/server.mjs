@@ -47,7 +47,9 @@ import { readContextFiles } from "./agents/context.mjs";
 import { createHistorySearch } from "./agents/search.mjs";
 import { createActivityIndex } from "./agents/activity-index.mjs";
 import { readQuota } from "./agents/quota.mjs";
+import { readBlocks } from "./agents/blocks.mjs";
 import { dailyCost, resetCostCache } from "./agents/admin-cost.mjs";
+import { dailyCost as estimatedDailyCost, resetCcusageCache } from "./agents/ccusage.mjs";
 
 const IS_WIN = process.platform === "win32";
 
@@ -675,6 +677,86 @@ const activity = createActivityIndex({
 // How often the background pass re-reads transcripts that changed. The index is
 // mtime-keyed, so a tick over unchanged threads is one stat() each.
 const ACTIVITY_POPULATE_MS = Number(process.env.ACTIVITY_POPULATE_MS || 10 * 60_000);
+
+/**
+ * Fill days the official sources left blank with ccusage's list-price estimate.
+ *
+ * Runs BEFORE withAdminCost so the billing report still overwrites anything it
+ * covers: the precedence is reported > billed > estimated, and this is the
+ * bottom of it. A day that already has a dollar figure is never touched, so no
+ * real number is ever replaced by a guess — the fill only reaches `cost: null`,
+ * which is the state that used to render as "not knowable".
+ *
+ * Every estimated figure is flagged `costEstimated: true` at whatever level it
+ * landed (day, agent, totals) so the app can mark it rather than passing list
+ * prices off as billing. See agents/ccusage.mjs for why a zero never arrives
+ * here as a zero.
+ */
+async function withEstimatedCost(series, days) {
+  const est = await estimatedDailyCost({ days }).catch(() => ({ available: false }));
+  if (!est.available) return series;
+  const byDay = est.byDay || {};
+  let estimated = false;
+  const daysOut = series.days.map((d) => {
+    const e = byDay[d.date];
+    if (!e) return d;
+    const out = { ...d, byAgent: { ...d.byAgent } };
+    if (out.cost == null) {
+      out.cost = e.total;
+      out.costEstimated = true;
+      estimated = true;
+    }
+    for (const [agent, cost] of Object.entries(e.byAgent)) {
+      const cur = out.byAgent[agent];
+      // An agent with no row at all still gets one: it did work that day, we
+      // just had no dated token counts for it (opencode and cursor keep none).
+      if (!cur) {
+        out.byAgent[agent] = { sessions: 0, messages: 0, tokens: 0, cost, costEstimated: true };
+        estimated = true;
+      } else if (cur.cost == null) {
+        out.byAgent[agent] = { ...cur, cost, costEstimated: true };
+        estimated = true;
+      }
+    }
+    return out;
+  });
+  // Days ccusage saw that the series never did — same reasoning as the billing
+  // overlay: a day with spend and no readable transcript still happened.
+  const known = new Set(daysOut.map((d) => d.date));
+  for (const [date, e] of Object.entries(byDay)) {
+    if (known.has(date)) continue;
+    const byAgent = {};
+    for (const [agent, cost] of Object.entries(e.byAgent)) {
+      byAgent[agent] = { sessions: 0, messages: 0, tokens: 0, cost, costEstimated: true };
+    }
+    daysOut.push({
+      date,
+      sessions: 0,
+      messages: 0,
+      tokens: 0,
+      cost: e.total,
+      costEstimated: true,
+      byAgent,
+    });
+    estimated = true;
+  }
+  if (!estimated) return series;
+  let total = null;
+  for (const d of daysOut) if (d.cost != null) total = (total ?? 0) + d.cost;
+  daysOut.sort((a, b) => a.date.localeCompare(b.date));
+  return {
+    ...series,
+    days: daysOut,
+    totals: {
+      ...series.totals,
+      cost: total == null ? null : Math.round(total * 100) / 100,
+      // `costComplete` keeps its meaning — whether every agent reported its own
+      // dollars — and stays false here. `costEstimated` is the separate fact
+      // that some of this total was priced rather than billed.
+      costEstimated: true,
+    },
+  };
+}
 
 /**
  * Overlay the organization's official daily spend onto the activity series,
@@ -1314,13 +1396,17 @@ const server = http.createServer(async (req, res) => {
         // Without this, someone who just fixed a rejected Admin key pulls to
         // refresh and still gets the stale "not authorized" answer.
         resetCostCache();
+        // Same for the estimate, which also memos its (slower) transcript scan.
+        resetCcusageCache();
       }
       return send(
         res,
         200,
         await cached(key, CACHE_MS, async () => {
           const series = await activity.series(await getThreads(fresh), { days });
-          return withAdminCost(series, days);
+          // Precedence, cheapest-truth-last: estimate fills the holes, then the
+          // billing report overwrites whatever it can speak for.
+          return withAdminCost(await withEstimatedCost(series, days), days);
         }),
       );
     }
@@ -1330,7 +1416,16 @@ const server = http.createServer(async (req, res) => {
       return send(
         res,
         200,
-        await cached("quota", 60_000, async () => ({ quota: await readQuota() })),
+        await cached("quota", 60_000, async () => {
+          const quota = await readQuota();
+          // Claude publishes no meter, but its transcripts date every turn — so
+          // the current rolling window and its burn rate ARE derivable. Attached
+          // under `blocks` (never merged into `windows`) so the client can't
+          // mistake a measurement of our own for a figure the agent reported.
+          const blocks = await readBlocks().catch(() => null);
+          if (blocks && quota[blocks.agent]) quota[blocks.agent].blocks = blocks;
+          return { quota };
+        }),
       );
     }
     if (url.pathname === "/v1/warm" && req.method === "POST") {

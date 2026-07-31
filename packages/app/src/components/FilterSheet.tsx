@@ -131,6 +131,24 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
 /** The sheet's body — shared by the RN-Modal variant above (desktop) and the
  *  native formSheet route on mobile (apps/mobile app/filters.tsx). The parent
  *  supplies the container (backdrop/sheet chrome) and vertical gap. */
+/**
+ * The branch / project pickers.
+ *
+ * On a phone these are bounded scrollers inside the sheet — the sheet itself
+ * can't grow past the screen. On desktop the sheet is a modal card that already
+ * scrolls, and a scroller inside a scroller swallows the trackpad and clips
+ * rows mid-height; there the list just flows and the card scrolls it. Both
+ * lists are search-narrowed, so length is the user's to control either way.
+ */
+function OptionList({ maxHeight, children }: { maxHeight: number; children: React.ReactNode }) {
+  if (IS_DESKTOP) return <View>{children}</View>;
+  return (
+    <ScrollView style={{ maxHeight }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+      {children}
+    </ScrollView>
+  );
+}
+
 export function FilterSheetContent({ onClose }: { onClose: () => void }) {
   const { theme } = useUnistyles();
   const { height } = useWindowDimensions();
@@ -313,11 +331,7 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
               </Pressable>
             ) : null}
           </View>
-          <ScrollView
-            style={{ maxHeight: 180 }}
-            keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled
-          >
+          <OptionList maxHeight={180}>
             {shownBranches.map((b) => {
               const active = f.branchQuery === b;
               return (
@@ -340,7 +354,7 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
             {shownBranches.length === 0 ? (
               <Text style={s.emptyText}>No branches match.</Text>
             ) : null}
-          </ScrollView>
+          </OptionList>
         </View>
       ) : null}
 
@@ -373,11 +387,7 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
               style={[s.input, IS_DESKTOP && s.inputDesktop]}
             />
           </View>
-          <ScrollView
-            style={{ maxHeight: folderMax }}
-            keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled
-          >
+          <OptionList maxHeight={folderMax}>
             {shownRepos.map((r) => {
               const ignored = isRepoIgnored(r.id);
               const selected = f.repos.includes(r.id);
@@ -433,7 +443,7 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
               );
             })}
             {shownRepos.length === 0 ? <Text style={s.emptyText}>No folders match.</Text> : null}
-          </ScrollView>
+          </OptionList>
         </View>
       ) : null}
 

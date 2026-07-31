@@ -13,6 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { COLOR } from "../ui";
 import { T } from "../ui/theme";
 import { splitCodeBlocks } from "./runnableBlocks";
+import { usePacedText } from "./pacedText";
 
 const BASE: Record<"user" | "assistant", TextStyle> = {
   user: { fontSize: 15, lineHeight: 21, color: T.onAccent },
@@ -53,11 +54,15 @@ export function MessageMarkdown({
   // turns render on the single path (incomplete fences would mis-split).
   const highlight = role === "assistant" && !streaming && !singleBlock;
   const segments = useMemo(() => (highlight ? splitCodeBlocks(text) : null), [highlight, text]);
+  // Meter the reveal a couple of words at a time rather than letting whole
+  // bridge chunks land at once. Only the streaming path uses it — `paced`
+  // returns `text` verbatim once the turn settles.
+  const paced = usePacedText(text, !!streaming);
 
   if (!highlight || !segments || (segments.length === 1 && segments[0].type === "md")) {
     return (
       <View style={s.gap2}>
-        <Blocks text={text} baseStyle={base} onUser={onUser} />
+        <Blocks text={paced} baseStyle={base} onUser={onUser} />
         {streaming ? <Text style={s.cursor}>▋</Text> : null}
       </View>
     );

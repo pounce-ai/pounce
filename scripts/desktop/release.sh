@@ -64,11 +64,18 @@ if [ -d "$BRIDGE_DIR" ]; then
     [ -f "$BRIDGE_ENTITLEMENTS" ] || { echo "error: bridge entitlements not found: $BRIDGE_ENTITLEMENTS" >&2; exit 1; }
     sign_bridge "$BRIDGE_DIR/pounce-bridge"
   fi
-  # Defensive: any other nested Mach-O (a loose .node/.dylib a future build might
-  # ship). Non-macOS prebuilds (linux/win .node = ELF/PE) aren't Mach-O — skip.
+  # Every other nested Mach-O, whatever it's called — this walks ALL files
+  # rather than *.node/*.dylib because the bundled ccusage (a Rust executable,
+  # no extension) would otherwise slip through, and notarization rejects the
+  # whole app over one unsigned Mach-O. It needs no entitlements: unlike the
+  # bridge it embeds no JS runtime, JITs nothing, and links only libSystem.
+  # Non-macOS prebuilds (linux/win .node = ELF/PE) fail the file(1) test and are
+  # skipped; pounce-bridge is already signed above, with its entitlements.
   while IFS= read -r -d '' bin; do
-    if file "$bin" | grep -q "Mach-O"; then sign "$bin"; fi
-  done < <(find "$BRIDGE_DIR" -type f \( -name "*.node" -o -name "*.dylib" \) -print0)
+    if [ "$bin" != "$BRIDGE_DIR/pounce-bridge" ] && file "$bin" | grep -q "Mach-O"; then
+      sign "$bin"
+    fi
+  done < <(find "$BRIDGE_DIR" -type f -print0)
 fi
 # The app last, with entitlements.
 codesign --force --options runtime --timestamp ${SIGN_KEYCHAIN:+--keychain "$SIGN_KEYCHAIN"} --entitlements "$ENTITLEMENTS" -s "$SIGN_IDENTITY" "$APP"

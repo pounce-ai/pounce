@@ -307,3 +307,54 @@ describe("byAgentTotals + partialAgents", () => {
     expect(partialAgents({ claude: "full" })).toEqual([]);
   });
 });
+
+describe("costEstimated propagation", () => {
+  // A list-price estimate mixed into a total makes the whole total an estimate.
+  // If the flag were dropped anywhere in this chain the UI would print a priced
+  // guess under a "Reported spend" label, which is the one thing it must not do.
+  it("makes a slice estimated when any day in it was priced", () => {
+    const out = sumDays([day("d1", 1), day("d2", 1, { costEstimated: true })]);
+    expect(out.costEstimated).toBe(true);
+    expect(out.cost).toBeCloseTo(0.02);
+  });
+
+  it("leaves a slice unestimated when every day was reported", () => {
+    expect(sumDays([day("d1", 1), day("d2", 1)]).costEstimated).toBe(false);
+  });
+
+  it("ignores the flag on a day that carries no cost at all", () => {
+    // Nothing was priced, so there is nothing to mark as approximate.
+    expect(sumDays([day("d1", 1, { cost: null, costEstimated: true })]).costEstimated).toBe(false);
+  });
+
+  it("carries the flag through a per-agent rollup", () => {
+    const out = byAgentTotals([
+      day("d1", 1, { byAgent: { claude: { tokens: 10, cost: 1 } } }),
+      day("d2", 1, { byAgent: { claude: { tokens: 10, cost: 2, costEstimated: true } } }),
+      day("d3", 1, { byAgent: { opencode: { tokens: 5, cost: 3 } } }),
+    ]);
+    expect(out.find((a) => a.agent === "claude")).toMatchObject({ cost: 3, costEstimated: true });
+    expect(out.find((a) => a.agent === "opencode")).toMatchObject({
+      cost: 3,
+      costEstimated: false,
+    });
+  });
+
+  it("keeps the flag when two hosts' series are merged", () => {
+    const merged = mergeActivity([
+      page([day("2026-07-24", 1)]),
+      page([day("2026-07-24", 1, { costEstimated: true })], {
+        totals: {
+          sessions: 0,
+          messages: 1,
+          tokens: 1000,
+          cost: 0.01,
+          costComplete: true,
+          costEstimated: true,
+        },
+      }),
+    ]);
+    expect(merged.days[0].costEstimated).toBe(true);
+    expect(merged.totals.costEstimated).toBe(true);
+  });
+});

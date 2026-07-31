@@ -49,8 +49,10 @@ export function DashboardShareCard({
       </View>
 
       {/* Tokens are the headline: they're the agent's own number and always
-        exist. A dollar figure is shown only when an agent actually reported
-        one, so the card can't imply a spend nobody measured. */}
+        exist. A dollar figure appears only when something could put one there,
+        and says which kind it is — this card gets screenshotted and shared, so
+        a list-price estimate labelled plain "spend" would travel as a billing
+        claim about someone who may be on a flat-rate plan. */}
       <Text style={s.hero}>{fmtTokens(totals.tokens)}</Text>
       <Text style={s.heroLabel}>tokens driving coding agents</Text>
 
@@ -59,8 +61,10 @@ export function DashboardShareCard({
         <Stat value={fmtCount(totals.messages)} label="messages" />
         {totals.cost == null ? null : (
           <Stat
-            value={`${costComplete ? "" : "~"}${fmtCost(totals.cost)}`}
-            label={costComplete ? "spend" : "spend (partial)"}
+            value={`${costComplete && !totals.costEstimated ? "" : "~"}${fmtCost(totals.cost)}`}
+            label={
+              totals.costEstimated ? "spend (est.)" : costComplete ? "spend" : "spend (partial)"
+            }
           />
         )}
       </View>

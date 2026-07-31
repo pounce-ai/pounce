@@ -729,12 +729,13 @@ export async function fetchMessages(
 /**
  * Per-thread usage, read from the host's own agent records.
  *
- * Tokens are always the agent's own counts. `cost` is present ONLY when the
- * agent itself reported dollars — the bridge no longer prices tokens, so a
- * missing cost means "not knowable", never "zero". In practice OpenCode reports
- * cost for all history, Claude only for turns Pounce drove (`costComplete`
- * false when it covers part of a thread), and Codex never — it bills against a
- * plan and reports `rateLimit` consumption instead.
+ * Tokens are always the agent's own counts. For `cost`, check `costSource`
+ * before showing the number: OpenCode reports real dollars for all history,
+ * Claude only for turns Pounce drove (`costComplete` false when it covers part
+ * of a thread), and Codex never — it bills against a plan and reports
+ * `rateLimit` consumption instead. Where no agent reports one, the bridge falls
+ * back to ccusage's list-price ESTIMATE, which must be labelled as such; a
+ * missing cost still means "not knowable", never "zero".
  */
 export interface ThreadUsage {
   available: boolean;
@@ -750,8 +751,13 @@ export interface ThreadUsage {
   };
   cost?: number | null;
   costComplete?: boolean;
-  /** "agent" when a real dollar figure came from the CLI; null when absent. */
-  costSource?: "agent" | null;
+  /**
+   * Where the dollars came from, and they are not interchangeable:
+   *   "agent"       the CLI reported it — a real, billed figure
+   *   "ccusage-est" tokens priced at public list rates; show it as approximate
+   *   null          no cost at all
+   */
+  costSource?: "agent" | "ccusage-est" | null;
   messages?: number;
   /** Context window of the model that ran, when the agent states it. */
   contextWindow?: number | null;
@@ -828,13 +834,42 @@ export interface QuotaWindow {
   resetsAt: string | null;
 }
 
+/**
+ * Rolling-window usage MEASURED from the agent's own transcripts, for agents
+ * that publish no meter. Deliberately carries no percentage: the window's size
+ * isn't knowable locally, and inferring a ceiling from your busiest past window
+ * turns a guess into a gauge (see agents/blocks.mjs).
+ */
+export interface UsageBlocks {
+  agent: string;
+  windowHours: number;
+  current: {
+    startedAt: string;
+    resetsAt: string;
+    tokens: number;
+    messages: number;
+    tokensPerMin: number;
+  } | null;
+  /** Busiest window within `scannedDays` — context, NOT a limit, and NOT an
+   *  all-time high: the bridge reads only each transcript's tail. */
+  peak: { tokens: number; startedAt: string };
+  weeklyTokens: number;
+  scannedDays: number;
+}
+
 export interface AgentQuota {
   hostId: string;
   agent: string;
   planType: string | null;
+  /** Why there are no `windows`, for agents that name a plan but publish no
+   *  meter locally (Claude, Cursor, opencode). Absent when a meter exists. */
+  note?: string | null;
   /** When the agent last reported this — it can be days stale. */
   observedAt: string | null;
   windows: QuotaWindow[];
+  /** Our own measurement, kept out of `windows` so a derived figure can never
+   *  be mistaken for one the agent reported. */
+  blocks?: UsageBlocks | null;
 }
 
 /**
