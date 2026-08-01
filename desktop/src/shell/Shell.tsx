@@ -19,7 +19,7 @@ import { useRef, useState, type ComponentType } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
-import { nav$, RouteParamsProvider } from "../shims/router";
+import { nav$, RouteParamsProvider, screenKey } from "../shims/router";
 import { COLOR } from "@pounce/app/ui";
 import { T } from "@pounce/app/ui/theme";
 import { useThread } from "@pounce/app/state/db/hooks";
@@ -49,6 +49,7 @@ import HelpScreen from "@pounce/app/screens/Help";
 import SyncHistoryScreen from "@pounce/app/screens/SyncHistory";
 import DiagnosticsScreen from "@pounce/app/screens/Diagnostics";
 import PairScreen from "../screens/Pair";
+import SpaceScreen from "@pounce/app/screens/Space";
 import { FilterSheetContent } from "@pounce/app/components/FilterSheet";
 
 /** Filters as a routed modal card (same href as mobile) — the shared sheet
@@ -71,6 +72,13 @@ function FiltersModal() {
  *  still clamps these on small windows.
  *
  *  /changes is absent by design — it's the docked pane now (see the shim). */
+/** Screens that fill the detail pane under their own tab (see the shim's
+ *  PANES). They're places, not dialogs — a modal card would be the wrong
+ *  container for a page you read, edit, and come back to. */
+const PANE_SCREENS: Record<string, ComponentType> = {
+  "/space": SpaceScreen,
+};
+
 const MODALS: Record<string, { component: ComponentType; width: number; height: number }> = {
   "/search": { component: SearchScreen, width: 620, height: 560 },
   "/sessions": { component: SessionsScreen, width: 620, height: 660 },
@@ -95,9 +103,6 @@ function StatusBar({ threadId }: { threadId: string }) {
   // Published by the open session (it does the fetching); shown here because
   // the pane has no header of its own to put it in.
   const usage = useSelector(() => sessionChrome$.usage.get());
-  const tasks = useSelector(() => sessionChrome$.tasks.get());
-  const tasksOpen = useSelector(() => sessionChrome$.tasksOpen.get());
-  const tasksDone = tasks?.items.filter((i) => i.status === "completed").length ?? 0;
   if (!session) return null;
   return (
     <View style={s.statusBar}>
@@ -111,24 +116,10 @@ function StatusBar({ threadId }: { threadId: string }) {
         {session.cwd ? ` · ${session.cwd.replace(/^\/Users\/[^/]+/, "~")}` : ""}
       </Text>
       <View style={s.flex1} />
-      {/* The turn's checklist, as a count you can open — the panel used to
-          appear over the composer by itself on every message. */}
-      {tasks && tasks.items.length ? (
-        <Pressable
-          onPress={() => sessionChrome$.tasksOpen.set(!tasksOpen)}
-          accessibilityLabel={tasksOpen ? "Hide tasks" : "Show tasks"}
-          style={({ pressed }) => [s.statusChip, (tasksOpen || pressed) && s.statusChipOn]}
-        >
-          <Ionicons
-            name={tasksDone === tasks.items.length ? "checkmark-circle" : "ellipse-outline"}
-            size={11}
-            color={tasksOpen ? COLOR.accent : COLOR.fgFaint}
-          />
-          <Text style={[s.statusChipText, tasksOpen && s.statusChipTextOn]}>
-            {tasksDone}/{tasks.items.length}
-          </Text>
-        </Pressable>
-      ) : null}
+      {/* The checklist toggle used to live here. It moved into the composer's
+          pill row (shared Composer), next to the markers pill — one control in
+          one place on every platform, rather than a chip up here and an
+          identical pill down there. */}
       <ThreadUsageSummary usage={usage} />
       {session.branch ? (
         <>
@@ -148,7 +139,11 @@ export function Shell() {
   const dock = useSelector(nav$.dock);
   const sidebar = useSelector(nav$.sidebar);
   const entry = modal ? MODALS[modal.path] : null;
-  const threadId = detail?.params.id ?? null;
+  const Pane = detail ? PANE_SCREENS[detail.path] : undefined;
+  // Only a SESSION tab has a thread. A pane tab has none, and the chrome that
+  // describes the open thread (status bar, diff dock) must go quiet for it
+  // rather than keep describing whatever was open before.
+  const threadId = detail && !Pane ? (detail.params.id ?? null) : null;
   const [shellWidth, setShellWidth] = useState(0);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const sidebarStart = useRef(SIDEBAR_DEFAULT_WIDTH);
@@ -200,8 +195,15 @@ export function Shell() {
         <View style={s.panes}>
           {/* Switching tabs replaces the transcript in place; a short fade
               makes that read as a change of view rather than a flicker. */}
-          <CrossFade key={threadId ?? "empty"} style={s.detail}>
-            {detail ? (
+          {/* Keyed by SCREEN identity, which is finer than the tab's: the one
+              Space tab changes `key` in place as you move between projects, and
+              keying on the tab alone would leave the previous project mounted. */}
+          <CrossFade key={detail ? screenKey(detail) : "empty"} style={s.detail}>
+            {detail && Pane ? (
+              <RouteParamsProvider key={screenKey(detail)} params={detail.params}>
+                <Pane />
+              </RouteParamsProvider>
+            ) : detail ? (
               <RouteParamsProvider key={threadId ?? "detail"} params={detail.params}>
                 <SessionScreen />
               </RouteParamsProvider>

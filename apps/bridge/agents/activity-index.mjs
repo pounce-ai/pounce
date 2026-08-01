@@ -267,9 +267,17 @@ export function createActivityIndex({
     return p;
   }
 
-  /** Official per-day dollars from the ledger, keyed by agent. Absent agents
-   *  simply contribute nothing — never a synthesized zero. */
-  async function ledgerDays(since) {
+  /**
+   * Official per-day dollars from the ledger, keyed by agent. Absent agents
+   * simply contribute nothing — never a synthesized zero.
+   *
+   * `only` (a Set of `agent:threadId`) narrows the ledger to one slice of the
+   * history — what a repo-scoped series needs, since a dollar belongs to the
+   * thread that spent it. Omitted for the whole-host series, where every row
+   * counts INCLUDING rows whose thread no longer exists on disk: that spend
+   * still happened, and dropping it would quietly shrink the dashboard.
+   */
+  async function ledgerDays(since, only) {
     const out = new Map(); // date -> { total, byAgent: Map }
     let text;
     try {
@@ -286,6 +294,7 @@ export function createActivityIndex({
         continue;
       }
       if (typeof r?.costUsd !== "number") continue;
+      if (only && !only.has(`${r.agent}:${r.threadId}`)) continue;
       const day = dayOf(r.ts);
       if (!day || (since && day < since)) continue;
       if (!out.has(day)) out.set(day, { total: 0, byAgent: new Map() });
@@ -300,8 +309,14 @@ export function createActivityIndex({
    * The dashboard series. Sessions come from thread metadata (so an agent whose
    * tokens we can't read still counts as activity), tokens/messages from the
    * transcript scan, dollars from the ledger.
+   *
+   * `scoped` says `threads` is a SUBSET of the host's history (one repo, say)
+   * rather than all of it, so ledger rows belonging to threads outside the
+   * subset are excluded instead of being attributed to it. Callers that scope
+   * must also skip the host-wide cost overlays (org billing, list-price
+   * estimates) — neither can be attributed to a single repo.
    */
-  async function series(threads, { days = 365 } = {}) {
+  async function series(threads, { days = 365, scoped = false } = {}) {
     const since = days > 0 ? isoDaysAgo(days - 1) : null;
     const byDate = new Map();
     const day = (date) => {
@@ -347,7 +362,10 @@ export function createActivityIndex({
 
     // Dollars last, so a day that only has cost (a turn whose transcript we
     // can't read) still shows up rather than being silently dropped.
-    const ledger = await ledgerDays(since);
+    const ledger = await ledgerDays(
+      since,
+      scoped ? new Set(threads.map((t) => `${t.agent}:${t.id}`)) : null,
+    );
     for (const [date, v] of ledger) {
       const d = day(date);
       d.cost = round((d.cost ?? 0) + v.total);

@@ -1,19 +1,30 @@
 /**
- * A project's agent-context files — CLAUDE.md, AGENTS.md and friends — read for
- * display in the app.
+ * A project's agent-context files — CLAUDE.md, AGENTS.md and friends — read and
+ * written for the app.
  *
- * Deliberately READ-ONLY, and deliberately a fixed whitelist. Two reasons:
+ * Deliberately a FIXED WHITELIST, in both directions. This serves and accepts
+ * file CONTENT over the network, so it is scoped the same way /v1/file is
+ * scoped to images: a closed list of names, resolved under one directory, with
+ * symlinks that point outside rejected. A `?path=` parameter here would be a
+ * repo-wide read/write primitive.
  *
- *   • No write endpoint. Editing a project's instructions is a change to the
- *     repo, and changes to the repo go through an agent turn where they land in
- *     git with a diff the user can review — not through a phone PUT that
- *     silently rewrites a file. The app collects comments and hands them to a
- *     new thread; the agent makes the edit.
+ * On writing: these files were read-only at first, on the reasoning that a
+ * repo change should land through an agent turn where git shows a diff. That
+ * still holds for the phone, and the "leave notes → hand them to an agent"
+ * flow it exists for is unchanged. But a context file is prose the user WRITES
+ * — the desktop app is a local editor sitting on the same machine as the repo,
+ * and making someone dictate a typo fix to an agent is ceremony, not safety.
+ * So `writeContextFile` exists, with the guards that make an unattended edit
+ * survivable:
  *
- *   • No arbitrary paths. This serves file CONTENT over the network, so it is
- *     scoped the same way /v1/file is scoped to images: a closed list of names,
- *     resolved under one directory, with symlinks that point outside rejected.
- *     A `?path=` parameter here would be a repo-wide read primitive.
+ *   • the same whitelist + containment checks as the read path;
+ *   • an mtime precondition, so a user's save can't silently clobber an edit
+ *     an agent made while the editor was open (and vice versa);
+ *   • an atomic tmp+rename, so an agent reading the file mid-save never sees
+ *     a half-written one.
+ *
+ * These files are tracked by git like any other, so an unwanted edit is still
+ * one `git checkout` away — the diff review just happens after the fact.
  */
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -113,6 +124,113 @@ export async function readContextFiles(cwd) {
     });
   }
   return { cwd: root, files };
+}
+
+/**
+ * Resolve a client-supplied file name against the whitelist.
+ *
+ * Returns the canonical relative path (in the host's separator) or null. The
+ * comparison is against the whitelist ENTRIES, not against the string shape, so
+ * `../../.ssh/config`, `CLAUDE.md/../../x` and an absolute path all simply fail
+ * to match rather than needing to be detected.
+ */
+function whitelisted(rel) {
+  if (typeof rel !== "string" || !rel) return null;
+  const want = rel.split(/[\\/]/).join(path.sep);
+  return CONTEXT_FILES.find((c) => c === want) ?? null;
+}
+
+/**
+ * Write one context file under `cwd`, creating it if it doesn't exist.
+ *
+ * `expectedMtime` is an optimistic-concurrency precondition: the ISO mtime the
+ * caller last read. Pass it and the write is rejected (`conflict`) when the
+ * file has changed underneath — the case that matters is an agent turn editing
+ * CLAUDE.md while someone has the editor open on it. Pass `null` to mean "I
+ * expect this file not to exist yet"; omit it (undefined) to force the write.
+ *
+ * The stamp is millisecond-resolution, so two writes inside the same
+ * millisecond are indistinguishable to it. That's fine for what this guards:
+ * the competing writer is an agent turn, which takes seconds of wall clock
+ * between reading a file and rewriting it, not microseconds. It is NOT a lock,
+ * and isn't trying to be one.
+ *
+ * Returns `{ ok: true, file }` with the same per-file shape `readContextFiles`
+ * emits, or `{ ok: false, error }` — the caller maps `error` onto a status.
+ */
+export async function writeContextFile(cwd, rel, content, expectedMtime) {
+  const name = whitelisted(rel);
+  if (!name) return { ok: false, error: "not a context file" };
+  if (typeof content !== "string") return { ok: false, error: "content required" };
+  if (Buffer.byteLength(content, "utf8") > MAX_FILE) return { ok: false, error: "too large" };
+
+  let root;
+  try {
+    root = await fsp.realpath(cwd);
+    if (!(await fsp.stat(root)).isDirectory()) return { ok: false, error: "not found" };
+  } catch {
+    return { ok: false, error: "not found" };
+  }
+
+  const target = path.join(root, name);
+  // Resolve the EXISTING file through symlinks, exactly as the read path does:
+  // a CLAUDE.md symlinked out of the project must not become a write primitive
+  // pointing at ~/.ssh/config. A file that doesn't exist yet resolves to the
+  // literal path under root, which containment then confirms.
+  let real;
+  let current = null;
+  try {
+    real = await fsp.realpath(target);
+    const st = await fsp.stat(real);
+    if (!st.isFile()) return { ok: false, error: "not a file" };
+    current = st;
+  } catch {
+    real = target;
+  }
+  if (!isInside(real, root)) return { ok: false, error: "outside project" };
+
+  // Optimistic concurrency. `undefined` opts out; `null` asserts "new file".
+  if (expectedMtime !== undefined) {
+    const seen = current ? new Date(current.mtimeMs).toISOString() : null;
+    if (seen !== expectedMtime) return { ok: false, error: "conflict", file: seen };
+  }
+
+  // `.claude/` may not exist yet when someone drafts the nested form.
+  try {
+    await fsp.mkdir(path.dirname(real), { recursive: true });
+  } catch {
+    return { ok: false, error: "write failed" };
+  }
+
+  // tmp + rename: an agent reading this file while it's being saved gets the
+  // old bytes or the new ones, never a truncated middle. Same directory, so
+  // the rename stays on one filesystem and is therefore atomic.
+  const tmp = `${real}.pounce-${process.pid}.tmp`;
+  try {
+    await fsp.writeFile(tmp, content, "utf8");
+    await fsp.rename(tmp, real);
+  } catch {
+    await fsp.rm(tmp, { force: true }).catch(() => {});
+    return { ok: false, error: "write failed" };
+  }
+
+  let st;
+  try {
+    st = await fsp.stat(real);
+  } catch {
+    return { ok: false, error: "write failed" };
+  }
+  return {
+    ok: true,
+    file: {
+      path: name.split(path.sep).join("/"),
+      name: path.basename(name),
+      size: st.size,
+      mtime: new Date(st.mtimeMs).toISOString(),
+      content,
+      truncated: false,
+    },
+  };
 }
 
 export { CONTEXT_FILES };

@@ -43,13 +43,48 @@ function parse(href: Href): Route {
 }
 
 /**
+ * Hrefs that open as a full PANE (their own tab) rather than a modal card.
+ *
+ * A modal is for something you do and dismiss. These are places you sit in and
+ * come back to — a Space is a project's whole history and its instruction
+ * files, which is reading and editing, not a dialog. They get a tab so they can
+ * live beside the sessions you're switching between.
+ */
+const PANES = new Set(["/space"]);
+
+/**
+ * Identity of an open tab: what makes two hrefs "the same thing already open".
+ *
+ * A session is its thread, so two threads get two tabs. A Space is just its
+ * PATH — deliberately not its key — because you are only ever in one space at
+ * a time: it IS the filter the sidebar is applying, so choosing another
+ * replaces it rather than stacking a second. Threads are documents you
+ * collect; a space is where you currently are.
+ */
+export function tabKey(r: Route): string {
+  if (r.path === "/session") return `session:${r.params.id}`;
+  return r.path;
+}
+
+/**
+ * Identity of the rendered SCREEN, which is finer-grained than its tab's.
+ *
+ * The Space tab keeps one identity while its `key` changes underneath it, so
+ * the screen has to remount on that change — otherwise you'd be reading one
+ * project's numbers under another project's name.
+ */
+export function screenKey(r: Route): string {
+  return r.path === "/space" ? `/space:${r.params.key ?? ""}` : tabKey(r);
+}
+
+/**
  * Desktop navigation state.
  *
- * `tabs` is the open set of sessions and `detail` is always `tabs[active]` (or
- * null when nothing is open) — screens keep reading `detail`, the tab strip
- * drives the rest. `dock` is the right-hand Changes pane, which on desktop
- * replaces the /changes modal: it's a companion to the session you're reading,
- * not something you dismiss to get back to work.
+ * `tabs` is the open set of sessions and panes, and `detail` is always
+ * `tabs[active]` (or null when nothing is open) — screens keep reading
+ * `detail`, the tab strip drives the rest. `dock` is the right-hand Changes
+ * pane, which on desktop replaces the /changes modal: it's a companion to the
+ * session you're reading, not something you dismiss to get back to work.
  */
 export const nav$ = observable<{
   tabs: Route[];
@@ -58,6 +93,15 @@ export const nav$ = observable<{
   modal: Route | null;
   dock: boolean;
   sidebar: boolean;
+  /**
+   * The space you're working in — ONE fact serving two surfaces.
+   *
+   * It narrows the sidebar's session list and it decides what the Space tab
+   * shows. Those are the same statement ("I'm in this project"), so they read
+   * the same value: a local `useState` in the sidebar could drift out of step
+   * with the tab the moment either side changed alone.
+   */
+  space: string | null;
 }>({
   tabs: [],
   active: 0,
@@ -65,6 +109,7 @@ export const nav$ = observable<{
   modal: null,
   dock: false,
   sidebar: true,
+  space: null,
 });
 
 /** Re-derive `detail` from the tab list — the single place that keeps the two
@@ -76,10 +121,11 @@ function syncDetail(): void {
   nav$.detail.set(tabs[active] ?? null);
 }
 
-/** Open a session: focus its existing tab if it has one, else append. */
+/** Open a session or pane: focus its existing tab if it has one, else append. */
 export function openTab(route: Route): void {
   const tabs = nav$.tabs.get();
-  const at = tabs.findIndex((t) => t.params.id === route.params.id);
+  const key = tabKey(route);
+  const at = tabs.findIndex((t) => tabKey(t) === key);
   if (at >= 0) {
     // Re-navigating to an open tab can carry new params (a search deep-link's
     // anchor, say) — replace it so the screen picks them up.
@@ -97,8 +143,31 @@ export function selectTab(index: number): void {
   syncDetail();
 }
 
+/**
+ * Enter a space, or leave it (`null`).
+ *
+ * One click, one meaning: picking a space in the sidebar narrows the session
+ * list AND opens that space's page, because those were never two intentions.
+ * (There used to be a separate eye button for the second half — a control for
+ * a selection the row click had already made.) Leaving closes the page again,
+ * so the sidebar can't sit filtered by a space with nothing on screen.
+ */
+export function selectSpace(key: string | null): void {
+  nav$.space.set(key);
+  if (key) {
+    openTab({ path: "/space", params: { key } });
+    return;
+  }
+  const at = nav$.tabs.get().findIndex((t) => t.path === "/space");
+  if (at >= 0) closeTab(at);
+}
+
 export function closeTab(index: number): void {
   const tabs = nav$.tabs.get();
+  // Closing the Space tab is the other way of saying "I'm done with this
+  // project", so it leaves the space too — otherwise the sidebar stays
+  // filtered to a space whose page is gone, with no obvious way back.
+  if (tabs[index]?.path === "/space") nav$.space.set(null);
   nav$.tabs.set(tabs.filter((_, i) => i !== index));
   // Closing a tab left of (or at) the active one shifts the selection left, so
   // the neighbour you were looking at stays focused rather than jumping.
@@ -112,7 +181,7 @@ function go(href: Href): void {
     nav$.modal.set(null);
     return;
   }
-  if (r.path === "/session") {
+  if (r.path === "/session" || PANES.has(r.path)) {
     nav$.modal.set(null);
     openTab(r);
     return;

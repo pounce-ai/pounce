@@ -43,7 +43,7 @@ import {
 } from "./agents/pty-turn.mjs";
 import { agentEnv, binPath, binVersion, primaryLanIp } from "./agents/env.mjs";
 import { publicConfig, readConfig, writeConfig } from "./agents/config.mjs";
-import { readContextFiles } from "./agents/context.mjs";
+import { readContextFiles, writeContextFile } from "./agents/context.mjs";
 import { createHistorySearch } from "./agents/search.mjs";
 import { createActivityIndex } from "./agents/activity-index.mjs";
 import { readQuota } from "./agents/quota.mjs";
@@ -1340,15 +1340,36 @@ const server = http.createServer(async (req, res) => {
       createReadStream(p).pipe(res);
       return;
     }
-    if (url.pathname === "/v1/context") {
-      // A project's agent-instruction files (CLAUDE.md/AGENTS.md), for reading
-      // in the app. Read-only and whitelist-scoped by design — see
-      // agents/context.mjs; edits go through an agent turn, not an endpoint.
+    if (url.pathname === "/v1/context" && req.method !== "POST") {
+      // A project's agent-instruction files (CLAUDE.md/AGENTS.md). Whitelist-
+      // scoped by design — see agents/context.mjs.
       const cwd = url.searchParams.get("cwd");
       if (!cwd) return send(res, 400, { error: "cwd required" });
       const out = await readContextFiles(cwd);
       if (!out) return send(res, 404, { error: "not found" });
       return send(res, 200, out);
+    }
+    if (url.pathname === "/v1/context" && req.method === "POST") {
+      // Save one context file. `mtime` is the version the client last read —
+      // omit it to force, send it to be told (409) when an agent turn edited
+      // the file underneath you rather than silently losing that edit.
+      const body = await readBody(req);
+      const { cwd, path: rel, content } = body;
+      if (!cwd || !rel) return send(res, 400, { error: "cwd and path required" });
+      // An ABSENT `mtime` means "force"; an explicit null means "I expect this
+      // file not to exist yet". `in` is what tells those two apart.
+      const expected = "mtime" in body ? body.mtime : undefined;
+      const out = await writeContextFile(cwd, rel, content, expected);
+      if (out.ok) return send(res, 200, { file: out.file });
+      const status =
+        out.error === "conflict"
+          ? 409
+          : out.error === "not found"
+            ? 404
+            : out.error === "write failed"
+              ? 500
+              : 400;
+      return send(res, status, { error: out.error, mtime: out.file ?? null });
     }
     if (url.pathname === "/v1/doctor") {
       return send(res, 200, { report: await host.doctor() });
@@ -1389,7 +1410,11 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/v1/activity") {
       const days = Math.min(400, Math.max(1, Number(url.searchParams.get("days") || 365)));
       const fresh = url.searchParams.get("fresh") === "1";
-      const key = `activity:${days}`;
+      // `repo` narrows the series to one repository's threads — the Spaces
+      // page, which asks "what has this project cost me", not "what have I
+      // done". It's the SAME transcript scan, just folded over fewer threads.
+      const repo = url.searchParams.get("repo");
+      const key = `activity:${days}:${repo ?? "*"}`;
       if (fresh) {
         cache.delete(key);
         // The billing report has its own 5-minute memo inside admin-cost.mjs.
@@ -1403,7 +1428,18 @@ const server = http.createServer(async (req, res) => {
         res,
         200,
         await cached(key, CACHE_MS, async () => {
-          const series = await activity.series(await getThreads(fresh), { days });
+          const all = await getThreads(fresh);
+          if (repo) {
+            // Ledger dollars only. The org billing report is per-workspace and
+            // ccusage's estimate is per-day-across-everything: neither can say
+            // which repo a dollar belongs to, so attributing either to one
+            // project would be inventing the number this whole path avoids.
+            return activity.series(
+              all.filter((t) => t.repo === repo),
+              { days, scoped: true },
+            );
+          }
+          const series = await activity.series(all, { days });
           // Precedence, cheapest-truth-last: estimate fills the holes, then the
           // billing report overwrites whatever it can speak for.
           return withAdminCost(await withEstimatedCost(series, days), days);

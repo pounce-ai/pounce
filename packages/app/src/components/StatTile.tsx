@@ -51,20 +51,23 @@ export function StatTile({
       <Text numberOfLines={1} style={[s.value, hero && s.valueHero]}>
         {shown}
       </Text>
-      {delta || hint ? (
-        <View style={s.footRow}>
-          {delta ? (
-            <Text style={[s.delta, { color: good ? theme.colors.success : theme.colors.warning }]}>
-              {delta}
-            </Text>
-          ) : null}
-          {hint ? (
-            <Text numberOfLines={1} style={s.hint}>
-              {hint}
-            </Text>
-          ) : null}
-        </View>
-      ) : null}
+      {/* Always present, even with nothing to say. A tile's footer comes and
+          goes with the data — Year has no prior year to compare against, so
+          every delta drops out — and rendering it conditionally made the whole
+          block shrink and jump the moment you changed period. Reserving the
+          line costs one row of empty space and keeps the grid still. */}
+      <View style={s.footRow}>
+        {delta ? (
+          <Text style={[s.delta, { color: good ? theme.colors.success : theme.colors.warning }]}>
+            {delta}
+          </Text>
+        ) : null}
+        {hint ? (
+          <Text numberOfLines={1} style={s.hint}>
+            {hint}
+          </Text>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -94,7 +97,9 @@ const s = StyleSheet.create((theme) => ({
   },
   value: { fontFamily: "JetBrainsMono", fontSize: 22, fontWeight: "600", color: theme.colors.fg },
   valueHero: { fontSize: 30, color: theme.colors.accent },
-  footRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  // Height reserved whether or not it has content, so a tile is the same size
+  // in every period. Matches the 11pt line the delta/hint text occupies.
+  footRow: { flexDirection: "row", alignItems: "center", gap: 6, minHeight: 14 },
   delta: { fontSize: 11, fontWeight: "600" },
   hint: { flex: 1, fontSize: 11, color: theme.colors.fgFaint },
 }));

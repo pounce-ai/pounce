@@ -826,6 +826,36 @@ export async function fetchActivity(days = 365, opts?: { fresh?: boolean }): Pro
   return mergeActivity(pages);
 }
 
+/**
+ * One SPACE's daily activity — one repository on one machine.
+ *
+ * Deliberately not a fan-out like `fetchActivity`: a Space is scoped to a
+ * single host by definition (the same repo on two machines is two Spaces with
+ * their own worktrees and their own agents), so merging hosts here would be
+ * answering a different question.
+ *
+ * The host returns only figures it can attribute to this repo, which means
+ * agent-reported dollars and nothing else — org billing totals and list-price
+ * estimates are whole-machine numbers and can't be split per project. Days
+ * therefore carry `cost: null` more often here than on the dashboard, and the
+ * UI must keep rendering that as "not knowable" rather than $0.
+ */
+export async function fetchSpaceActivity(
+  hostId: string,
+  repoKey: string,
+  days = 90,
+  opts?: { fresh?: boolean },
+): Promise<ActivityPage | null> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return null;
+  const qs = `days=${days}&repo=${encodeURIComponent(repoKey)}${opts?.fresh ? "&fresh=1" : ""}`;
+  try {
+    return await get<ActivityPage>(cfg, `/v1/activity?${qs}`, 120_000);
+  } catch {
+    return null;
+  }
+}
+
 /** One rolling rate-limit window as an agent reports it. */
 export interface QuotaWindow {
   label: string;
@@ -1043,6 +1073,63 @@ export async function fetchContextFiles(hostId: string, cwd: string): Promise<Co
     return await get<ContextFiles>(cfg, `/v1/context?cwd=${encodeURIComponent(cwd)}`, 20_000);
   } catch {
     return null;
+  }
+}
+
+/**
+ * The outcome of saving a context file.
+ *
+ * `conflict` is its own case rather than an error string because it's the one
+ * failure the user can act on: the file changed on the host (an agent turn
+ * edited it) since we read it, and the editor has to offer reload-or-overwrite
+ * instead of just reporting that something went wrong. `mtime` is what the host
+ * sees now, so a reload can be checked against it.
+ */
+export type SaveContextResult =
+  | { ok: true; file: ContextFile }
+  | { ok: false; conflict: true; mtime: string | null }
+  | { ok: false; conflict?: false; error: string };
+
+/**
+ * Write one of a project's context files on its host.
+ *
+ * `expectedMtime` is the version this client last read — pass it so a save
+ * can't silently overwrite an edit made while the editor was open. Pass `null`
+ * when creating a file that shouldn't exist yet, `undefined` to force.
+ */
+export async function saveContextFile(
+  hostId: string,
+  cwd: string,
+  filePath: string,
+  content: string,
+  expectedMtime?: string | null,
+): Promise<SaveContextResult> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return { ok: false, error: "This machine isn't paired any more." };
+  try {
+    const res = await fetch(`${await bridgeBase(cfg)}/v1/context`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        cwd,
+        path: filePath,
+        content,
+        // Only send the key when the caller supplied one — an absent `mtime`
+        // is what tells the host "force", and JSON.stringify drops undefined.
+        ...(expectedMtime === undefined ? {} : { mtime: expectedMtime }),
+      }),
+    });
+    const body = (await res.json().catch(() => null)) as {
+      file?: ContextFile;
+      error?: string;
+      mtime?: string | null;
+    } | null;
+    if (res.status === 409) return { ok: false, conflict: true, mtime: body?.mtime ?? null };
+    if (!res.ok || !body?.file)
+      return { ok: false, error: body?.error ?? `save failed (${res.status})` };
+    return { ok: true, file: body.file };
+  } catch {
+    return { ok: false, error: "Couldn't reach this machine." };
   }
 }
 

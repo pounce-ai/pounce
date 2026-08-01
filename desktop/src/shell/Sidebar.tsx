@@ -25,7 +25,7 @@ import { T } from "@pounce/app/ui/theme";
 import { GlassSurface } from "@pounce/app/ui/native/GlassSurface";
 import { DragRegion, TITLEBAR_INSET, TRAFFIC_LIGHT_INSET } from "@pounce/app/ui/native/DragRegion";
 import { appearance$, setAppearance, type AppearanceMode } from "@pounce/app/state/appearance";
-import { nav$ } from "../shims/router";
+import { nav$, selectSpace } from "../shims/router";
 import { deriveSpaces, spaceKeyOf, type Space } from "./Spaces";
 
 /** Tapping the appearance button cycles system → light → dark, and the glyph
@@ -56,7 +56,9 @@ export function Sidebar() {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [space, setSpace] = useState<string | null>(null);
+  // Shared with the shell rather than local: the same value drives this list's
+  // narrowing and the Space tab beside it (see selectSpace).
+  const space = useSelector(() => nav$.space.get());
   const [allSpaces, setAllSpaces] = useState(false);
   const appearanceMode = useSelector(() => appearance$.get());
 
@@ -261,9 +263,10 @@ export function Sidebar() {
                     space={sp}
                     showHost={showHost}
                     selected={space === sp.key}
-                    // Second click clears — a Space is a lens on the list, not a
-                    // mode you have to escape from.
-                    onPress={() => setSpace((cur) => (cur === sp.key ? null : sp.key))}
+                    // One click enters the space: narrows the list below AND
+                    // opens its page. Second click leaves — a Space is
+                    // somewhere you step into, not a mode you have to escape.
+                    onPress={() => selectSpace(space === sp.key ? null : sp.key)}
                   />
                 </Entrance>
               ))

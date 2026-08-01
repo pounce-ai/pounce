@@ -29,6 +29,7 @@ import {
   sumDays,
   zeroFill,
 } from "../services/activity";
+import { Animated, LinearTransition } from "../components/animation";
 import { ContributionGraph } from "../components/ContributionGraph";
 import { QuotaCard } from "../components/QuotaCard";
 import { MiniBarChart } from "../components/MiniBarChart";
@@ -44,6 +45,15 @@ const YEAR = 365;
 /** Matches the desktop sidebar's first section header offset (Sidebar's `grp`
  *  paddingTop), so the two columns' content lines up across the seam. */
 const SIDEBAR_SECTION_TOP = 9;
+/** The height tween when the period changes. Short and eased — the point is to
+ *  show that one thing became another, not to put on a show.
+ *
+ *  Carried by a bare Animated.View wrapper with no style of its own: unistyles
+ *  styles are proxies Reanimated reads as empty objects ("an empty object is
+ *  not a valid style value"), so the styled View has to sit INSIDE the animated
+ *  one rather than being it. */
+const HEAT_TRANSITION = LinearTransition.duration(220);
+
 const PERIODS: Period[] = ["week", "month", "year"];
 const PERIOD_LABEL: Record<Period, string> = { week: "Week", month: "Month", year: "Year" };
 
@@ -94,11 +104,30 @@ export default function DashboardScreen() {
   // One zero-filled year drives every view below, so the heatmap, the stats and
   // the streaks can never disagree about a day.
   const year = useMemo(() => zeroFill(q.data?.days ?? [], YEAR), [q.data]);
-  const heat = useMemo(() => quantize(year), [year]);
+  // The heatmap follows the period picker like everything else on this screen.
+  // Quantized over the WINDOW rather than the year, so the ramp describes the
+  // days you're looking at — a quiet week shown against a year's quartiles
+  // would be uniformly blank and say nothing.
+  const heat = useMemo(() => quantize(periodSlice(year, period).window), [year, period]);
+  /** A year is the weekday calendar; shorter windows are a strip of days (see
+   *  ContributionGraph's `rows`) — a week as a 7-row grid is two columns. */
+  const heatRows = period === "year" ? 7 : 1;
+  const heatTitle = period === "year" ? "Last 12 months" : `Last ${PERIOD_DAYS[period]} days`;
   const { window, previous } = useMemo(() => periodSlice(year, period), [year, period]);
   const now = useMemo(() => sumDays(window), [window]);
   const before = useMemo(() => sumDays(previous), [previous]);
+  // Two readings, deliberately.
+  //
+  //   `run`       the whole year — the all-time best, which the subtitle shows.
+  //   `windowRun` the chosen period — what the streak row shows.
+  //
+  // The row scopes ALL THREE of its figures, not just two. Mixing scopes looked
+  // broken: an all-time "36 day streak" beside a week's "7 longest" reads as a
+  // contradiction, since a longest can't be under a current. Windowed, every
+  // figure answers the same question ("in these days…") and they agree. Nothing
+  // is lost — the all-time best still has its place in the subtitle above.
   const run = useMemo(() => streaks(year), [year]);
+  const windowRun = useMemo(() => streaks(window), [window]);
   // One agent list for the whole screen: everything with activity in this
   // window, plus everything that reported a plan. Plan usage listing three
   // agents while "By agent" listed two was the same data answering two
@@ -232,8 +261,8 @@ export default function DashboardScreen() {
           ) : null}
         </View>
 
-        {/* Period selector — drives the stat tiles and the trend chart only;
-          the heatmap always shows the full year. */}
+        {/* Period selector — drives everything below it, the heatmap included:
+          the grid shows the chosen window, not a fixed year. */}
         {IS_DESKTOP ? null : segment}
 
         {q.isLoading ? (
@@ -250,107 +279,121 @@ export default function DashboardScreen() {
           </View>
         ) : (
           <>
+            {/* Height changes a lot between periods — a 7-row year calendar
+                down to a single strip of days — and snapping between them read
+                as a glitch. LinearTransition tweens the card and lets the tiles
+                below slide up rather than jump. Desktop's animation seam strips
+                `layout`, so it simply renders the end state. */}
+            <Animated.View layout={HEAT_TRANSITION}>
+              <View
+                style={s.card}
+                onLayout={(e: LayoutChangeEvent) => setHeatWidth(e.nativeEvent.layout.width - 28)}
+              >
+                <Text style={s.cardTitle}>{heatTitle}</Text>
+                <ContributionGraph
+                  days={heat}
+                  rows={heatRows}
+                  selected={selected}
+                  onSelectDay={setSelected}
+                  // The year grid fills only on desktop: 53 weeks stretched across
+                  // a 390pt phone would make each day a sliver, so the phone keeps
+                  // fixed cells and scrolls. A short window is the opposite case —
+                  // few columns, so it fills the card everywhere (capped by
+                  // MAX_STEP, or a week would be seven slabs).
+                  fillWidth={
+                    heatWidth > 0 && (heatRows === 1 || IS_DESKTOP) ? heatWidth : undefined
+                  }
+                />
+                <Text numberOfLines={1} style={s.detailLine}>
+                  {detail
+                    ? `${fmtDayLabel(detail.date)} — ${fmtCount(detail.messages)} messages · ${fmtTokens(
+                        detail.tokens,
+                      )}${
+                        detail.cost == null
+                          ? ""
+                          : ` · ${detail.costEstimated ? "~" : ""}${fmtCost(detail.cost)}${
+                              detail.costEstimated ? " est." : ""
+                            }`
+                      }`
+                    : IS_DESKTOP
+                      ? "Click a day for its detail"
+                      : "Tap a day for its detail"}
+                </Text>
+              </View>
+            </Animated.View>
+
             {/* Tokens lead, not dollars: token counts are the agents' own
               numbers and always exist, whereas a dollar figure only appears
               for turns an agent actually priced (see the caveat below). */}
-            <View style={[s.tileWrap, IS_DESKTOP && s.rowDesktop]}>
-              <View style={[s.tiles, IS_DESKTOP && s.flex1]}>
-                <StatTile
-                  label="Tokens"
-                  value={fmtTokens(now.tokens)}
-                  delta={fmtDelta(delta(now.tokens, before.tokens))}
-                  icon="sparkles"
-                  hero
-                />
-                {/* The label itself changes with provenance: "Reported" is what
+            <Animated.View layout={HEAT_TRANSITION}>
+              <View style={[s.tileWrap, IS_DESKTOP && s.rowDesktop]}>
+                <View style={[s.tiles, IS_DESKTOP && s.flex1]}>
+                  <StatTile
+                    label="Tokens"
+                    value={fmtTokens(now.tokens)}
+                    delta={fmtDelta(delta(now.tokens, before.tokens))}
+                    icon="sparkles"
+                    hero
+                  />
+                  {/* The label itself changes with provenance: "Reported" is what
                   agents billed, "Estimated" is tokens priced at public list
                   rates. Calling a list-price figure "reported spend" would be
                   the exact lie this dashboard is built to avoid. */}
-                <StatTile
-                  label={estimated ? "Estimated spend" : "Reported spend"}
-                  value={
-                    now.cost == null
-                      ? "—"
-                      : `${costComplete && !estimated ? "" : "~"}${fmtCost(now.cost)}`
-                  }
-                  delta={fmtDelta(delta(now.cost, before.cost))}
-                  hint={
-                    now.cost == null
-                      ? "not reported"
-                      : estimated
-                        ? "list price"
-                        : costComplete
-                          ? null
-                          : "partial"
-                  }
-                  icon="card-outline"
-                  inverse
-                />
+                  <StatTile
+                    label={estimated ? "Estimated spend" : "Reported spend"}
+                    value={
+                      now.cost == null
+                        ? "—"
+                        : `${costComplete && !estimated ? "" : "~"}${fmtCost(now.cost)}`
+                    }
+                    delta={fmtDelta(delta(now.cost, before.cost))}
+                    hint={
+                      now.cost == null
+                        ? "not reported"
+                        : estimated
+                          ? "list price"
+                          : costComplete
+                            ? null
+                            : "partial"
+                    }
+                    icon="card-outline"
+                    inverse
+                  />
+                </View>
+                <View style={[s.tiles, IS_DESKTOP && s.flex1]}>
+                  <StatTile
+                    label="Sessions"
+                    value={fmtCount(now.sessions)}
+                    delta={fmtDelta(delta(now.sessions, before.sessions))}
+                    icon="chatbubbles-outline"
+                  />
+                  <StatTile
+                    label="Messages"
+                    value={fmtCount(now.messages)}
+                    delta={fmtDelta(delta(now.messages, before.messages))}
+                    icon="git-commit-outline"
+                  />
+                </View>
               </View>
-              <View style={[s.tiles, IS_DESKTOP && s.flex1]}>
-                <StatTile
-                  label="Sessions"
-                  value={fmtCount(now.sessions)}
-                  delta={fmtDelta(delta(now.sessions, before.sessions))}
-                  icon="chatbubbles-outline"
-                />
-                <StatTile
-                  label="Messages"
-                  value={fmtCount(now.messages)}
-                  delta={fmtDelta(delta(now.messages, before.messages))}
-                  icon="git-commit-outline"
-                />
-              </View>
-            </View>
+            </Animated.View>
 
             <QuotaCard quotas={quotaQ.data ?? []} agents={agents.map((a) => a.agent)} />
 
             <View style={s.streakRow}>
               <View style={s.streakItem}>
-                <Text style={s.streakValue}>{run.current}</Text>
+                <Text style={s.streakValue}>{windowRun.current}</Text>
                 <Text style={s.streakLabel}>day streak</Text>
               </View>
               <View style={s.streakDivider} />
               <View style={s.streakItem}>
-                <Text style={s.streakValue}>{run.longest}</Text>
+                <Text style={s.streakValue}>{windowRun.longest}</Text>
                 <Text style={s.streakLabel}>longest</Text>
               </View>
               <View style={s.streakDivider} />
               <View style={s.streakItem}>
-                <Text style={s.streakValue}>{run.active}</Text>
+                <Text style={s.streakValue}>{windowRun.active}</Text>
                 <Text style={s.streakLabel}>active days</Text>
               </View>
-            </View>
-
-            <View
-              style={s.card}
-              onLayout={(e: LayoutChangeEvent) => setHeatWidth(e.nativeEvent.layout.width - 28)}
-            >
-              <Text style={s.cardTitle}>Last 12 months</Text>
-              <ContributionGraph
-                days={heat}
-                selected={selected}
-                onSelectDay={setSelected}
-                // Desktop only: on a phone the fixed cell size plus horizontal
-                // scroll is right, and stretching 53 weeks across 390pt would
-                // make each day a sliver.
-                fillWidth={IS_DESKTOP && heatWidth > 0 ? heatWidth : undefined}
-              />
-              <Text numberOfLines={1} style={s.detailLine}>
-                {detail
-                  ? `${fmtDayLabel(detail.date)} — ${fmtCount(detail.messages)} messages · ${fmtTokens(
-                      detail.tokens,
-                    )}${
-                      detail.cost == null
-                        ? ""
-                        : ` · ${detail.costEstimated ? "~" : ""}${fmtCost(detail.cost)}${
-                            detail.costEstimated ? " est." : ""
-                          }`
-                    }`
-                  : IS_DESKTOP
-                    ? "Click a day for its detail"
-                    : "Tap a day for its detail"}
-              </Text>
             </View>
 
             {/* Chart and agent totals are both half-width content; side by side

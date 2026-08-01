@@ -546,16 +546,37 @@ function recordSync(
 
 const MESSAGES_PER_THREAD_CAP = 500;
 
+/**
+ * What we last wrote for a thread — `count:lastEventId`.
+ *
+ * The collection persists by serialising ITSELF WHOLE to one MMKV key, so every
+ * touch costs a JSON.stringify of every message of every thread. The screen
+ * re-saves whenever a query's data object changes identity, and the "recent"
+ * query refetches every 2.5s during a live turn — so a long thread was
+ * re-serialising megabytes on the JS thread every few seconds, and new messages
+ * appeared late because that thread was busy. Transcripts are append-only, so
+ * count-plus-last-id is enough to recognise "nothing new" and skip the write.
+ */
+const lastSaved = new Map<string, string>();
+
 /** Persist a batch of chat events for a thread (upsert by event id) and trim the
  *  oldest beyond a per-thread cap so history can't grow unbounded. Called on
  *  turn completion / after a full re-fetch — never per streamed event, so the
  *  whole-collection localStorage write fires once per turn, not per token. */
 export function saveThreadMessages(threadId: string, events: TimelineEvent[]): void {
   if (events.length === 0) return;
+  const sig = `${events.length}:${events[events.length - 1]?.id ?? ""}`;
+  if (lastSaved.get(threadId) === sig) return;
+  lastSaved.set(threadId, sig);
+
   upsertRows(
     messages,
     events.map((e) => ({ id: `${threadId}:${e.id}`, threadId, event: e })),
   );
+  // Only walk the collection when this thread can actually be over the cap.
+  // `toArray` materialises EVERY row of EVERY thread, so doing it on each save
+  // was an O(all messages) scan plus a sort for, almost always, no deletions.
+  if (events.length < MESSAGES_PER_THREAD_CAP) return;
   const mine = messages.toArray
     .filter((m) => m.threadId === threadId)
     .sort((a, b) => (a.event.ts ?? "").localeCompare(b.event.ts ?? ""));
@@ -565,8 +586,15 @@ export function saveThreadMessages(threadId: string, events: TimelineEvent[]): v
   if (overflow.length) messages.delete(overflow);
 }
 
+/** Forget a thread's write signature — call when its rows are dropped, so the
+ *  next save isn't skipped as a duplicate of history that no longer exists. */
+function forgetSaved(threadId: string): void {
+  lastSaved.delete(threadId);
+}
+
 /** Delete every chat event belonging to a thread. */
 export function dropThreadMessages(threadId: string): void {
+  forgetSaved(threadId);
   const ids = messages.toArray.filter((m) => m.threadId === threadId).map((m) => m.id);
   deleteIds(messages, ids);
 }

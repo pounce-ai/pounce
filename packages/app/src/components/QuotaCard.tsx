@@ -62,16 +62,21 @@ export function QuotaCard({
   const rows = order.map((agent) => byAgent.get(agent) ?? placeholder(agent));
   if (!rows.length) return null;
   return (
-    <View style={s.card}>
+    <View style={s.section}>
       <Text style={s.title}>Plan usage</Text>
-      {/* Desktop lays the agents side by side: each is a short, self-contained
-          block, and stacking four of them turned one card into a column the
-          height of the window. */}
-      <View style={IS_DESKTOP ? s.columns : undefined}>
+      {/* A card PER AGENT, not one card holding all of them. Each agent is a
+          self-contained fact — its plan, its meter, its caveat — and boxing
+          them together made four unrelated readings look like one reading with
+          four parts. Desktop lays the cards side by side; a phone stacks them
+          with the section's gap between. */}
+      <View style={IS_DESKTOP ? s.columns : s.stack}>
         {rows.map((q) => {
           const stale = q.observedAt ? now - Date.parse(q.observedAt) > STALE_MS : false;
           return (
-            <View key={`${q.hostId}:${q.agent}`} style={[s.agentBlock, IS_DESKTOP && s.column]}>
+            <View
+              key={`${q.hostId}:${q.agent}`}
+              style={[s.agentCard, IS_DESKTOP ? s.column : null]}
+            >
               <View style={s.agentRow}>
                 <AgentLogo agent={q.agent} size={14} />
                 <Text style={s.agentName}>{agentLabel(q.agent)}</Text>
@@ -135,14 +140,8 @@ export function QuotaCard({
 }
 
 const s = StyleSheet.create((theme) => ({
-  card: {
-    gap: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surfaceAlt,
-    padding: 14,
-  },
+  // A titled section now, not a card: the cards are the agents inside it.
+  section: { gap: 10 },
   title: {
     fontSize: 11,
     fontWeight: "600",
@@ -150,11 +149,23 @@ const s = StyleSheet.create((theme) => ({
     letterSpacing: 0.5,
     color: theme.colors.fgFaint,
   },
-  agentBlock: { gap: 8 },
-  // One row of equal columns, divided rather than boxed — a border per agent
-  // would read as four cards inside a card.
-  columns: { flexDirection: "row", alignItems: "flex-start", gap: 18 },
+  agentCard: {
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceAlt,
+    padding: 14,
+  },
+  // One row of equal cards. They used to be borderless blocks sharing a single
+  // card; now each carries its own box, which is what makes four agents read as
+  // four readings instead of one with four parts.
+  columns: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
   column: { flex: 1, minWidth: 0 },
+  // The phone stacks them. This used to be no style at all, which left the
+  // blocks touching: the `gap` inside an agent doesn't separate one from the
+  // next.
+  stack: { gap: 10 },
   agentRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   agentName: { fontSize: 14, color: theme.colors.fg },
   plan: {

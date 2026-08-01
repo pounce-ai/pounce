@@ -16,10 +16,22 @@ import { Ionicons } from "@expo/vector-icons";
 import { AgentStatusIcon, COLOR } from "@pounce/app/ui";
 import { T } from "@pounce/app/ui/theme";
 import { DragRegion, TITLEBAR_INSET, TRAFFIC_LIGHT_INSET } from "@pounce/app/ui/native/DragRegion";
-import { useFavThreadSet, useThreads } from "@pounce/app/state/db/hooks";
+import { useFavThreadSet, useProjectNames, useThreads } from "@pounce/app/state/db/hooks";
 import { toggleFavThread } from "@pounce/app/state/stores";
 import { sessionChrome$ } from "@pounce/app/state/sessionChrome";
-import { closeTab, nav$, selectTab } from "../shims/router";
+import { closeTab, nav$, selectTab, tabKey, type Route } from "../shims/router";
+
+/** Icon per non-session tab — a page rather than a thread. */
+const PANE_ICON: Record<string, React.ComponentProps<typeof Ionicons>["name"]> = {
+  "/space": "folder-outline",
+};
+
+/** Display name for a `/space` tab, from its `repoId hostId` key. Falls back to
+ *  the bare repo id so a tab still reads sensibly while projects are syncing. */
+function spaceLabel(key: string | undefined, names: Record<string, string>): string {
+  const repoId = (key ?? "").split(" ")[0];
+  return names[repoId] ?? repoId.replace(/^repo:/, "") ?? "Space";
+}
 
 export function TabStrip() {
   const router = useRouter();
@@ -29,8 +41,12 @@ export function TabStrip() {
   const sidebar = useSelector(() => nav$.sidebar.get());
   const searchOpen = useSelector(() => sessionChrome$.searchOpen.get());
   const threads = useThreads();
+  const projectNames = useProjectNames();
   const favSet = useFavThreadSet();
-  const activeId = tabs[active]?.params.id ?? null;
+  // A pane tab (a Space) is a page, not a thread — the thread controls below
+  // would be describing a tab that isn't open any more.
+  const activeIsSession = !!tabs[active] && !PANE_ICON[tabs[active].path];
+  const activeId = (activeIsSession ? tabs[active]?.params.id : null) ?? null;
   const isFav = !!activeId && favSet.has(activeId);
 
   return (
@@ -55,25 +71,32 @@ export function TabStrip() {
         </Pressable>
       ) : null}
 
-      {tabs.map((tab, i) => {
+      {tabs.map((tab: Route, i) => {
         const id = tab.params.id;
-        const session = threads.find((t) => t.id === id);
+        const paneIcon = PANE_ICON[tab.path];
+        const session = paneIcon ? undefined : threads.find((t) => t.id === id);
+        // A Space tab is named after its project. The key encodes `repoId
+        // hostId`, so the display name comes from the same projects collection
+        // the sidebar reads — never a raw `repo:foo` id.
+        const paneLabel = paneIcon ? spaceLabel(tab.params.key, projectNames) : null;
         return (
           <Pressable
-            key={id}
+            key={tabKey(tab)}
             onPress={() => selectTab(i)}
             style={({ pressed }) => [s.tab, i === active ? s.tabActive : pressed && s.hover]}
           >
             {/* Always animated, including the active tab: with the session
                 header gone this glyph is the only place the thread's live state
                 is shown. */}
-            {session ? (
+            {paneIcon ? (
+              <Ionicons name={paneIcon} size={11} color={i === active ? COLOR.fg : COLOR.fgMuted} />
+            ) : session ? (
               <AgentStatusIcon agent={session.agent} activity={session.activity} size={11} />
             ) : (
               <View style={s.tabDotFallback} />
             )}
             <Text numberOfLines={1} style={[s.tabLabel, i === active && s.tabLabelActive]}>
-              {session?.title ?? "Thread"}
+              {paneLabel ?? session?.title ?? "Thread"}
             </Text>
             <Pressable
               onPress={() => closeTab(i)}
@@ -100,7 +123,7 @@ export function TabStrip() {
 
       {/* The open session's own controls, which used to sit in a header inside
           the pane. Only meaningful with a session open. */}
-      {tabs.length ? (
+      {activeIsSession ? (
         <>
           {/* Favourite is a toggle, not a menu item — it belongs where you can
               hit it in one click. Absent for new_* threads, which have no
@@ -132,20 +155,22 @@ export function TabStrip() {
           >
             <Ionicons name="ellipsis-horizontal" size={16} color={COLOR.fgMuted} />
           </Pressable>
+          {/* The Changes dock is a companion to a transcript — with a page tab
+              open there is no diff for it to show, so the control goes with the
+              rest of the thread chrome rather than lighting up on nothing. */}
+          <Pressable
+            onPress={() => nav$.dock.set(!dock)}
+            accessibilityLabel={dock ? "Hide changes" : "Show changes"}
+            style={({ pressed }) => [s.iconBtn, pressed && s.hover]}
+          >
+            <Ionicons
+              name={dock ? "reader" : "reader-outline"}
+              size={15}
+              color={dock ? COLOR.accent : COLOR.fgMuted}
+            />
+          </Pressable>
         </>
       ) : null}
-
-      <Pressable
-        onPress={() => nav$.dock.set(!dock)}
-        accessibilityLabel={dock ? "Hide changes" : "Show changes"}
-        style={({ pressed }) => [s.iconBtn, pressed && s.hover]}
-      >
-        <Ionicons
-          name={dock ? "reader" : "reader-outline"}
-          size={15}
-          color={dock ? COLOR.accent : COLOR.fgMuted}
-        />
-      </Pressable>
     </View>
   );
 }

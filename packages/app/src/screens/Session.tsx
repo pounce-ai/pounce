@@ -412,6 +412,7 @@ export default function SessionScreen() {
     envOpen: envSheet,
     setEnvOpen: setEnvSheet,
     tasksOpen,
+    setTasksOpen,
   } = useSessionChrome();
 
   // Sources attached to this thread (drag-drop on desktop / "+" in the
@@ -1245,10 +1246,7 @@ export default function SessionScreen() {
                 Desktop: never opens itself. A banner appearing over the composer
                 on every single message is noise; the status line carries the
                 count and you open the list when you want it. */}
-            {taskState &&
-            (DESKTOP
-              ? tasksOpen
-              : running || taskState.items.some((i) => i.status !== "completed")) ? (
+            {taskState && tasksOpen ? (
               <TaskProgressBar state={taskState} running={running} />
             ) : null}
             {queued.length > 0 ? (
@@ -1290,6 +1288,16 @@ export default function SessionScreen() {
               mode={
                 canSteer && showMode && !(live && !!session.cwd)
                   ? { label: modeLabel, active: activeMode !== "default", onPress: openMode }
+                  : null
+              }
+              tasks={
+                taskState?.items.length
+                  ? {
+                      done: taskState.items.filter((i) => i.status === "completed").length,
+                      total: taskState.items.length,
+                      open: tasksOpen,
+                      onPress: () => setTasksOpen(!tasksOpen),
+                    }
                   : null
               }
               markers={
