@@ -1,6 +1,6 @@
 /**
  * Plain (non-component) UI tokens. Lives apart from index.tsx so leaf modules
- * like agent-logos.tsx can import these without a circular dependency.
+ * like AgentLogo.tsx can import these without a circular dependency.
  */
 
 import { T } from "./theme";

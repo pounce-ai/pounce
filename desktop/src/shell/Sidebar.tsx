@@ -19,7 +19,7 @@ import type { Session } from "@pounce/shared";
 import { applyFilters, connection$, filters$, needsYou } from "@pounce/app/state/stores";
 import { useDevices, useIgnoredSet, useProjectNames, useThreads } from "@pounce/app/state/db/hooks";
 import { SidebarSessionsSkeleton, SidebarSpacesSkeleton } from "./SidebarSkeleton";
-import { Entrance } from "./motion";
+import { Entrance } from "./Motion";
 import { AgentStatusIcon, COLOR, INPUT_TWEAKS, timeAgo } from "@pounce/app/ui";
 import { T } from "@pounce/app/ui/theme";
 import { GlassSurface } from "@pounce/app/ui/native/GlassSurface";

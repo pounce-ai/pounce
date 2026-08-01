@@ -8,6 +8,7 @@
 import { useEffect, useRef } from "react";
 import { Animated, Easing, StyleSheet, View } from "react-native";
 import { T } from "../ui/theme";
+import { ActivityBones } from "./ActivityBones";
 
 export function usePulse(): Animated.Value {
   const pulse = useRef(new Animated.Value(1)).current;
@@ -161,3 +162,13 @@ const s = StyleSheet.create({
     paddingBottom: 12,
   },
 });
+
+/** Activity-shaped bones — desktop pulse (core Animated), shared layout. */
+export function ActivitySkeleton() {
+  const pulse = usePulse();
+  return (
+    <Animated.View style={{ opacity: pulse }} pointerEvents="none">
+      <ActivityBones />
+    </Animated.View>
+  );
+}

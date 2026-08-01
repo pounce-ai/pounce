@@ -15,9 +15,9 @@ import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { PounceIcon } from "./native/Icon";
 import type { IoniconName } from "./native/icon-map";
 import type { ActivityStatus } from "@pounce/shared";
-import { AgentLogo } from "./agent-logos";
+import { AgentLogo } from "./AgentLogo";
 
-// Shared tokens live in tokens.ts (no circular dep with agent-logos); re-export
+// Shared tokens live in tokens.ts (no circular dep with AgentLogo); re-export
 // them here so call sites keep importing everything from "../ui".
 export { COLOR, AGENT_LABEL, AGENT_HEX, agentLabel } from "./tokens";
 import { agentHex, agentLabel } from "./tokens";

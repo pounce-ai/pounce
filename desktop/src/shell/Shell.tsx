@@ -29,7 +29,7 @@ import { Sidebar } from "./Sidebar";
 import { TabStrip } from "./TabStrip";
 import { DiffDock, DOCK_HIDE_BELOW } from "./DiffDock";
 import { Splitter, SPLITTER_WIDTH } from "./Splitter";
-import { CrossFade } from "./motion";
+import { CrossFade } from "./Motion";
 import {
   MIN_TRANSCRIPT_WIDTH,
   SIDEBAR_DEFAULT_WIDTH,

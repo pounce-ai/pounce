@@ -9,7 +9,7 @@
 import { useState } from "react";
 import { StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import { BONE } from "@pounce/app/components/Skeleton";
-import { Shimmer } from "./motion";
+import { Shimmer } from "./Motion";
 
 /** The shimmer needs a pixel width to travel across, and the sidebar is
  *  user-resizable — so measure rather than assume. */

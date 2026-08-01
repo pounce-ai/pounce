@@ -30,6 +30,11 @@ jobs:
       - name: Lint (oxlint)
         run: bun run lint
 
+      # Casing drift only breaks on a case-sensitive filesystem, i.e. here and
+      # not on anyone's Mac — so this is the only place it can be caught.
+      - name: File naming
+        run: bun run check:naming
+
       # Incremental formatting: enforce oxfmt only on NEWLY ADDED files
       # (--diff-filter=A). Editing a pre-existing (unformatted) file must not
       # force a wholesale reformat of it — that buries real changes in mechanical

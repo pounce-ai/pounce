@@ -823,6 +823,18 @@ export async function fetchActivity(days = 365, opts?: { fresh?: boolean }): Pro
       }
     }),
   );
+  // Every host failed → we know NOTHING, which is not the same as knowing there
+  // was no activity. Swallowing this returned an empty-but-valid series, and
+  // the dashboard dutifully reported "No activity yet" to someone with months
+  // of history — the cold-cache first call had simply timed out while the host
+  // parsed its transcripts. Throwing lets the caller show a spinner, retry, and
+  // say "couldn't read" instead of asserting a zero.
+  //
+  // A PARTIAL failure still merges: one unreachable machine shouldn't blank the
+  // others, and `coverage` already records what couldn't be accounted for.
+  if (devices.length > 0 && pages.every((p) => p === null)) {
+    throw new Error("Couldn't read activity from any paired machine.");
+  }
   return mergeActivity(pages);
 }
 

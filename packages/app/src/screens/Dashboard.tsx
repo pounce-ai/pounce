@@ -34,6 +34,7 @@ import { ContributionGraph } from "../components/ContributionGraph";
 import { QuotaCard } from "../components/QuotaCard";
 import { MiniBarChart } from "../components/MiniBarChart";
 import { StatTile } from "../components/StatTile";
+import { ActivitySkeleton } from "../components/Skeleton";
 import {
   DashboardShareCard,
   SHARE_CARD_HEIGHT,
@@ -175,7 +176,12 @@ export default function DashboardScreen() {
   }, []);
 
   const canShare = !IS_DESKTOP && captureAvailable();
-  const empty = !q.isLoading && now.messages === 0 && run.longest === 0;
+  // "Nothing here" is a claim about the DATA, so it may only be made when the
+  // data actually arrived. A failed read is `q.isError`, handled separately —
+  // and sessions count, since agents that publish no dated tokens (opencode,
+  // cursor) appear only as sessions and the screen has a tile for them.
+  const empty =
+    !q.isLoading && !q.isError && now.messages === 0 && now.sessions === 0 && run.longest === 0;
 
   // A period picker is a toolbar control, not a page section. Full-bleed it
   // became a 960pt bar with a slab of accent in the middle; on desktop it sits
@@ -266,8 +272,28 @@ export default function DashboardScreen() {
         {IS_DESKTOP ? null : segment}
 
         {q.isLoading ? (
-          <View style={s.loading}>
-            <ActivityIndicator color={theme.colors.fgMuted} />
+          <ActivitySkeleton />
+        ) : q.isError ? (
+          // Couldn't read — say so and offer another go, rather than reporting
+          // a zero we don't know to be true. The first call on a machine with
+          // months of history parses every transcript it hasn't summarised yet,
+          // and that can outlast the request.
+          <View style={s.emptyWrap}>
+            <Text style={s.emptyEmoji}>🐾</Text>
+            <Text style={s.emptyTitle}>Couldn&apos;t read your history</Text>
+            <Text style={s.emptyBody}>
+              The machine didn&apos;t answer in time. If it&apos;s been a while since you opened
+              Pounce there, it may still be reading through your transcripts.
+            </Text>
+            <Pressable
+              onPress={() => {
+                forceFresh.current = false;
+                void q.refetch();
+              }}
+              style={({ pressed }) => [s.shareBtn, pressed && s.pressed]}
+            >
+              <Text style={s.shareLabel}>Try again</Text>
+            </Pressable>
           </View>
         ) : empty ? (
           <View style={s.emptyWrap}>

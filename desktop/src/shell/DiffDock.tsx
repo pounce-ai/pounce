@@ -17,7 +17,7 @@ import ChangesScreen from "@pounce/app/screens/Changes";
 import { T } from "@pounce/app/ui/theme";
 import { nav$ } from "../shims/router";
 import { Splitter, SPLITTER_WIDTH } from "./Splitter";
-import { CrossFade } from "./motion";
+import { CrossFade } from "./Motion";
 
 /** Below this the diff is too narrow to read, so the pane closes instead. */
 export const DOCK_HIDE_BELOW = 300;
