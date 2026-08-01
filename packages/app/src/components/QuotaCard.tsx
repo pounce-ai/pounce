@@ -20,6 +20,10 @@ function untilReset(iso: string | null, now: number): string | null {
 /** A snapshot older than this reads as history, not status. */
 const STALE_MS = 24 * 60 * 60_000;
 
+/** Narrowest an agent card may get before it wraps instead. Sized to hold
+ *  Claude's longest line — "2.3M/min · resets in 4h 9m" — on two lines. */
+const AGENT_CARD_MIN = 232;
+
 /** An agent the dashboard is counting that reported no plan at all — listed so
  *  the two cards agree, rather than silently dropped. */
 function placeholder(agent: string): AgentQuota {
@@ -160,8 +164,19 @@ const s = StyleSheet.create((theme) => ({
   // One row of equal cards. They used to be borderless blocks sharing a single
   // card; now each carries its own box, which is what makes four agents read as
   // four readings instead of one with four parts.
-  columns: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
-  column: { flex: 1, minWidth: 0 },
+  // Wrap, don't squeeze. Six agents in one row gave each a sixth of the width,
+  // which crushed Claude's block until "busiest on record" fell out of its own
+  // card. A card that won't fit belongs on the next line.
+  // `stretch`, not `flex-start`: agents carry different amounts of detail —
+  // Claude has a measured window, Cursor has one line — and letting each card
+  // size to its own content left a stubby Cursor beside a tall Claude. Stretch
+  // matches every card in a row to the tallest in THAT row (which is per flex
+  // line, so a wrapped row still sizes to its own contents).
+  columns: { flexDirection: "row", flexWrap: "wrap", alignItems: "stretch", gap: 10 },
+  // `minWidth` is the whole point — it used to be 0, which is what let them
+  // shrink without limit. `flexGrow` then shares the leftover so a row of two
+  // doesn't leave half the card width empty.
+  column: { flexBasis: AGENT_CARD_MIN, flexGrow: 1, minWidth: AGENT_CARD_MIN },
   // The phone stacks them. This used to be no style at all, which left the
   // blocks touching: the `gap` inside an agent doesn't separate one from the
   // next.

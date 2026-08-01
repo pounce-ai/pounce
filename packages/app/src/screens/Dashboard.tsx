@@ -137,7 +137,19 @@ export default function DashboardScreen() {
     () => [...new Set((quotaQ.data ?? []).map((q) => q.agent))],
     [quotaQ.data],
   );
-  const agents = useMemo(() => byAgentTotals(window, knownAgents), [window, knownAgents]);
+  // …but an agent with NOTHING to report is noise in both. An installed CLI you
+  // never ran, with no plan to speak of, was taking a card to say "no plan
+  // detected" and a row to say "0 sessions" — pushing the agents you actually
+  // use into a squeeze. Keep an agent if it did something in this window, or if
+  // it has a plan worth stating (a named tier, a meter, or a measured window).
+  const agents = useMemo(() => {
+    const quota = new Map((quotaQ.data ?? []).map((entry) => [entry.agent, entry]));
+    return byAgentTotals(window, knownAgents).filter((a) => {
+      if (a.sessions > 0 || a.messages > 0 || a.tokens > 0) return true;
+      const entry = quota.get(a.agent);
+      return !!(entry?.planType || entry?.windows.length || entry?.blocks?.current);
+    });
+  }, [window, knownAgents, quotaQ.data]);
   const partial = useMemo(() => partialAgents(q.data?.coverage ?? {}), [q.data]);
   const costComplete = q.data?.totals.costComplete !== false;
   // Estimated is a property of the SLICE on screen, not the whole series: a
