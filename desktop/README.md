@@ -58,10 +58,20 @@ cd desktop && bun install  # desktop's own RN 0.81 tree
 bun run macos              # builds + launches app and Metro
 ```
 
-If port 8081 is taken, run Metro elsewhere and point the app at it once:
-`bunx expo start --port 8082` +
-`defaults write com.pounce.desktop RCT_jsLocation "localhost:8082"`
+**Metro ports are pinned, and must stay that way: desktop 8083, mobile 8081.**
+`bun run start` here already passes `--port 8083`; point the app at it once with
+`defaults write com.pounce.desktop RCT_jsLocation "localhost:8083"`
 (`RCT_METRO_PORT` is compile-time in RN, not a runtime env var).
+
+Do NOT drop the `--port` flags back to a bare `expo start`. Both apps used to do
+that, so both defaulted to 8081 and whichever booted second was silently pushed
+to 8082 — meaning the iOS simulator would sometimes bundle from the DESKTOP
+Metro, whose config re-anchors `packages/app` into `desktop/node_modules` and
+fails with `Unable to resolve module react-native-gesture-handler from
+Providers.tsx`. Pinned ports let both apps run at once instead of killing one to
+test the other. The simulator selects its Metro the same way, via a sticky pref
+that ignores `simctl openurl`:
+`xcrun simctl spawn <SIM> defaults write com.pounce.app RCT_jsLocation "127.0.0.1:8081"`.
 
 The app is **unsandboxed on purpose** (see `PounceDesktop.entitlements`): the
 embedded bridge reads agent transcripts, drives agent CLIs, and runs git natively; off-LAN access rides the pounce-tunnel iroh p2p tunnel (apps/tunnel).

@@ -4,7 +4,7 @@
   "private": true,
   "main": "index.ts",
   "scripts": {
-    "start": "expo start",
+    "start": "expo start --port 8083",
     "macos": "rnc-cli run-macos",
     "windows": "rnc-cli run-windows",
     "autolink-windows": "react-native autolink-windows",
