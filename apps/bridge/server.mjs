@@ -692,21 +692,28 @@ const ACTIVITY_POPULATE_MS = Number(process.env.ACTIVITY_POPULATE_MS || 10 * 60_
  * inside it), and getting it wrong is invisible — a big number looks like a big
  * number. That is exactly how the dashboard came to report 327B where Codex's
  * own profile said 25.1B. ccusage tracks ~20 agents' formats as its whole job,
- * so it owns the reading; we keep only the arithmetic that decides what counts
- * as work, which is `total - cacheRead` (see agents/ccusage.mjs).
+ * so it owns the reading — and the figure it reports is the one we publish,
+ * unmodified. We add no arithmetic of our own on top (see agents/ccusage.mjs
+ * for why subtracting cache reads was tried and abandoned); the cached portion
+ * travels alongside under `usage` so the client can show the split.
  *
- * Authority is PER AGENT, not per day. ccusage cannot read Cursor, so Cursor
- * keeps the transcript-derived figure instead of being silently zeroed by an
- * authority that never had an opinion about it. For the agents it does read,
- * its silence on a day IS a zero.
+ * Authority is PER AGENT, not per day: an agent ccusage cannot read keeps
+ * whatever the transcript scan produced, rather than being zeroed by a source
+ * that never had an opinion about it. For the agents it DOES read, its silence
+ * on a day is a real zero.
+ *
+ * Today that guard is belt-and-braces — the scan only counts tokens for claude
+ * and codex (activity-index's TOKEN_AGENTS) and ccusage reads both — so nothing
+ * currently takes the fallback branch. It earns its keep the moment either set
+ * changes, and without it that change would silently zero an agent instead of
+ * leaving it alone.
  *
  * Not applied to repo-scoped series: ccusage reports per day across everything
  * and carries no cwd, so it cannot say which repo a token belongs to. The
  * Spaces page therefore stays on the transcript scan — see the `repo` branch in
  * /v1/activity.
  */
-async function withCcusageTokens(series, days) {
-  const since = new Date(Date.now() - (days - 1) * 86_400_000).toISOString().slice(0, 10);
+async function withCcusageTokens(series, since) {
   const usage = await ccusageDailyUsage({ since }).catch(() => ({ available: false }));
   if (!usage.available) return series;
   const byDay = usage.byDay || {};
@@ -786,8 +793,9 @@ async function withCcusageTokens(series, days) {
  * prices off as billing. See agents/ccusage.mjs for why a zero never arrives
  * here as a zero.
  */
-async function withEstimatedCost(series, days) {
-  const est = await estimatedDailyCost({ days }).catch(() => ({ available: false }));
+async function withEstimatedCost(series, days, since) {
+  // Same `since` the token read used, so both share one ccusage run.
+  const est = await estimatedDailyCost({ days, since }).catch(() => ({ available: false }));
   if (!est.available) return series;
   const byDay = est.byDay || {};
   let estimated = false;
@@ -1534,12 +1542,15 @@ const server = http.createServer(async (req, res) => {
             );
           }
           const series = await activity.series(all, { days });
+          // One window bound for both ccusage reads below, so they share a
+          // single memo entry and a single spawn instead of scanning twice.
+          const since = new Date(Date.now() - (days - 1) * 86_400_000).toISOString().slice(0, 10);
           // Tokens first: ccusage owns the reading of every agent it supports,
           // and attaches the breakdown the Tokens card drills into.
-          const counted = await withCcusageTokens(series, days);
+          const counted = await withCcusageTokens(series, since);
           // Then dollars, cheapest-truth-last: estimate fills the holes, then
           // the billing report overwrites whatever it can speak for.
-          return withAdminCost(await withEstimatedCost(counted, days), days);
+          return withAdminCost(await withEstimatedCost(counted, days, since), days);
         }),
       );
     }

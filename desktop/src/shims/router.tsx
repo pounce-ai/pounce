@@ -74,11 +74,12 @@ export function tabKey(r: Route): string {
  * project's numbers under another project's name.
  */
 export function screenKey(r: Route): string {
-  if (r.path === "/space") return `/space:${r.params.key ?? ""}`;
-  // Same reason as Space: one metric tab, but opening Sessions while Tokens is
-  // showing has to remount — otherwise you'd read one metric's breakdown under
-  // another metric's title.
-  if (r.path === "/metric") return `/metric:${r.params.key ?? ""}`;
+  // Every pane is "one tab, whose contents swap": a Space tab keeps its
+  // identity while `key` changes underneath it, and so does a Metric tab. The
+  // screen therefore has to remount on that change, or you read one project's
+  // (or one metric's) numbers under another's title. One rule for all panes
+  // rather than a branch per path — a new pane gets this by joining PANES.
+  if (PANES.has(r.path)) return `${r.path}:${r.params.key ?? ""}`;
   return tabKey(r);
 }
 

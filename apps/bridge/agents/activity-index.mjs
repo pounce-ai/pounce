@@ -7,15 +7,20 @@
  *                      (Claude's `message.usage` lines, Codex's `token_count`
  *                      rollout events).
  *
- *                      TOKENS MEANS FRESH TOKENS: what the model actually had
- *                      to process, EXCLUDING cache reads. This matters more
- *                      than it sounds — 92% of Codex's input tokens on a real
- *                      machine were cache reads, so counting them reported 327B
- *                      where Codex's own profile said 25.1B, a 13x lie. Cache
- *                      CREATION still counts: those tokens were processed once.
- *                      Re-reading the same context every turn is not new work,
- *                      and counting it makes a long conversation look like
- *                      enormous usage while agreeing with no vendor dashboard.
+ *                      TOKENS HERE MEANS FRESH TOKENS: what the model actually
+ *                      had to process, EXCLUDING cache reads (cache CREATION
+ *                      still counts — those tokens were processed once).
+ *
+ *                      Read that as a FALLBACK definition, not the product's.
+ *                      The host-wide series in server.mjs replaces these counts
+ *                      with ccusage's REPORTED TOTALS, which include cache
+ *                      reads, so the dashboard matches each agent's own profile
+ *                      page. This path survives for the repo-scoped series,
+ *                      where ccusage cannot attribute a token to a project.
+ *                      The two definitions differ by roughly 4-50x depending on
+ *                      the agent, so never sum a figure from here with one from
+ *                      there — see server.mjs's withCcusageTokens, which
+ *                      replaces per agent rather than merging.
  *
  *   DOLLARS            read from the cost ledger only (~/.pounce/usage.jsonl),
  *                      i.e. figures an agent actually reported. This module

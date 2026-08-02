@@ -365,6 +365,10 @@ export type Period = "week" | "month" | "year";
 
 export const PERIOD_DAYS: Record<Period, number> = { week: 7, month: 30, year: 365 };
 
+/** The picker's label for a period. Lives beside PERIOD_DAYS because four
+ *  screens render the same three buttons and had four copies of this. */
+export const PERIOD_LABEL: Record<Period, string> = { week: "Week", month: "Month", year: "Year" };
+
 /** The last `period` worth of days, plus the equally-long window before it. */
 export function periodSlice(
   days: readonly ActivityDay[],
@@ -507,7 +511,14 @@ export function usageBreakdown(days: readonly ActivityDay[]): {
 
   let any = false;
   let total = ZERO_USAGE;
-  const byAgent = new Map<string, { tokens: number; usage: UsageRow; models: ModelUsage[] }>();
+  // Models accumulate into a keyed map and are sorted ONCE at the end. Folding
+  // them with mergeModels per day meant a fresh Map, a concat and a full sort
+  // on every day x agent — ~365 sorts per mount over a year window, all but the
+  // last discarded — and this runs in render on every period change.
+  const byAgent = new Map<
+    string,
+    { tokens: number; usage: UsageRow; models: Map<string, ModelUsage> }
+  >();
   for (const d of days) {
     if (d.usage) {
       any = true;
@@ -516,19 +527,43 @@ export function usageBreakdown(days: readonly ActivityDay[]): {
     for (const [agent, v] of Object.entries(d.byAgent ?? {})) {
       if (!v.usage) continue;
       any = true;
-      const prev = byAgent.get(agent) ?? { tokens: 0, usage: ZERO_USAGE, models: [] };
-      byAgent.set(agent, {
-        tokens: prev.tokens + (v.tokens ?? 0),
-        usage: add(prev.usage, v.usage, v.tokens ?? 0, v.cost),
-        models: [...(mergeModels(prev.models, v.usage.models) ?? [])],
-      });
+      let acc = byAgent.get(agent);
+      if (!acc) {
+        acc = { tokens: 0, usage: ZERO_USAGE, models: new Map() };
+        byAgent.set(agent, acc);
+      }
+      acc.tokens += v.tokens ?? 0;
+      acc.usage = add(acc.usage, v.usage, v.tokens ?? 0, v.cost);
+      for (const m of v.usage.models ?? []) {
+        const prev = acc.models.get(m.model);
+        acc.models.set(
+          m.model,
+          prev
+            ? {
+                ...prev,
+                tokens: prev.tokens + m.tokens,
+                input: prev.input + m.input,
+                output: prev.output + m.output,
+                cacheCreate: prev.cacheCreate + m.cacheCreate,
+                cacheRead: prev.cacheRead + m.cacheRead,
+                total: prev.total + m.total,
+                cost: addCost(prev.cost, m.cost),
+              }
+            : m,
+        );
+      }
     }
   }
   if (!any) return null;
   return {
     total,
     agents: [...byAgent]
-      .map(([agent, v]) => ({ agent, tokens: v.tokens, usage: v.usage, models: v.models }))
+      .map(([agent, v]) => ({
+        agent,
+        tokens: v.tokens,
+        usage: v.usage,
+        models: [...v.models.values()].sort((x, y) => y.tokens - x.tokens),
+      }))
       .sort((a, b) => b.tokens - a.tokens),
   };
 }

@@ -435,16 +435,38 @@ export function parseDailyUsage(json) {
  * dashboard needs that distinction: unlike cost, a missing token figure is not
  * a nice-to-have that can quietly read zero.
  */
-export function dailyUsage({ since, until, now = new Date(), install = true } = {}) {
-  const from = since || new Date(now.getTime() - 364 * 24 * 60 * 60_000).toISOString().slice(0, 10);
+/**
+ * ONE `daily --by-agent` run for a window, shared by every reader of it.
+ *
+ * Tokens and dollars come out of the same payload, so this is memoized on the
+ * window rather than on the caller: the two used to build byte-identical argv
+ * under different memo keys and each pay for a full-history transcript scan
+ * (~2s, more on a cold machine), serially, on the same request.
+ *
+ * An absent binary starts an install but never WAITS on it. The download has a
+ * 120s ceiling and this sits on /v1/activity, so blocking would hang the
+ * dashboard's first load for up to two minutes to obtain a figure that is
+ * optional. The caller reports "unavailable" for this cycle and picks ccusage
+ * up on the next one; ensureCcusage keeps its own single-flight promise, so
+ * the fire-and-forget can't stack up.
+ */
+function dailyPayload(from, until) {
   const args = ["daily", "--json", "--no-color", "--by-agent", "--since", from.replace(/-/g, "")];
   if (until) args.push("--until", until.replace(/-/g, ""));
-  return cached(`u:${from}:${until || ""}`, async () => {
-    if (install) await ensureCcusage((m) => console.log(`[ccusage] ${m}`));
-    const json = await ccusageJson(args);
-    if (!json) return { available: false, byDay: {} };
-    return { available: true, byDay: parseDailyUsage(json) };
+  return cached(`daily:${from}:${until || ""}`, async () => {
+    if (!findCcusage()) {
+      ensureCcusage((m) => console.log(`[ccusage] ${m}`)).catch(() => {});
+      return null;
+    }
+    return ccusageJson(args);
   });
+}
+
+export function dailyUsage({ since, until, now = new Date() } = {}) {
+  const from = since || new Date(now.getTime() - 364 * 24 * 60 * 60_000).toISOString().slice(0, 10);
+  return dailyPayload(from, until).then((json) =>
+    json ? { available: true, byDay: parseDailyUsage(json) } : { available: false, byDay: {} },
+  );
 }
 
 /**
@@ -469,20 +491,15 @@ export function threadCost(agent, threadId) {
  * failed) — distinct from asking and being told nothing, which is an empty
  * `byDay` on an available report.
  */
-export function dailyCost({ days = 30, now = new Date() } = {}) {
-  const since = new Date(now.getTime() - (days - 1) * 24 * 60 * 60_000).toISOString().slice(0, 10);
-  return cached(`d:${since}`, async () => {
-    const json = await ccusageJson([
-      "daily",
-      "--json",
-      "--no-color",
-      "--by-agent",
-      "--since",
-      since.replace(/-/g, ""),
-    ]);
-    if (!json) return { available: false, byDay: {} };
-    return { available: true, byDay: parseDaily(json) };
-  });
+export function dailyCost({ days = 30, since, now = new Date() } = {}) {
+  // `since` lets the caller pin the SAME window the token read used, so both
+  // land on one memo entry and one spawn. Without it a call that straddles
+  // midnight would compute a different date and pay for a second full scan.
+  const from =
+    since || new Date(now.getTime() - (days - 1) * 24 * 60 * 60_000).toISOString().slice(0, 10);
+  return dailyPayload(from, null).then((json) =>
+    json ? { available: true, byDay: parseDaily(json) } : { available: false, byDay: {} },
+  );
 }
 
 /** Drop every memo — used when a refresh must actually re-read the transcripts. */

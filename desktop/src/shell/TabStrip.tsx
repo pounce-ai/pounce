@@ -18,6 +18,7 @@ import { T } from "@pounce/app/ui/theme";
 import { DragRegion, TITLEBAR_INSET, TRAFFIC_LIGHT_INSET } from "@pounce/app/ui/native/DragRegion";
 import { useFavThreadSet, useProjectNames, useThreads } from "@pounce/app/state/db/hooks";
 import { toggleFavThread } from "@pounce/app/state/stores";
+import type { MetricKey } from "@pounce/app/screens/Metric";
 import { sessionChrome$ } from "@pounce/app/state/sessionChrome";
 import { closeTab, nav$, selectTab, tabKey, type Route } from "../shims/router";
 
@@ -27,8 +28,11 @@ const PANE_ICON: Record<string, React.ComponentProps<typeof Ionicons>["name"]> =
   "/metric": "stats-chart-outline",
 };
 
-/** Display name for a `/metric` tab — the metric it opened. */
-const METRIC_LABEL: Record<string, string> = {
+/** Display name for a `/metric` tab. Deliberately terser than the page's own
+ *  title ("Spend" vs "Estimated spend") because a tab is a few characters wide,
+ *  but keyed by MetricKey so a new metric is a type error here rather than a
+ *  tab silently labelled "Metric". */
+const METRIC_LABEL: Record<MetricKey, string> = {
   tokens: "Tokens",
   spend: "Spend",
   sessions: "Sessions",
@@ -90,7 +94,7 @@ export function TabStrip() {
         const paneLabel = !paneIcon
           ? null
           : tab.path === "/metric"
-            ? (METRIC_LABEL[tab.params.key ?? ""] ?? "Metric")
+            ? (METRIC_LABEL[tab.params.key as MetricKey] ?? "Metric")
             : spaceLabel(tab.params.key, projectNames);
         return (
           <Pressable

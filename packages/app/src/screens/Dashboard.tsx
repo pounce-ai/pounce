@@ -20,6 +20,7 @@ import { fetchActivity, fetchQuota } from "../services/bridge";
 import {
   type ActivityDay,
   PERIOD_DAYS,
+  PERIOD_LABEL,
   type Period,
   byAgentTotals,
   delta,
@@ -35,6 +36,7 @@ import { ContributionGraph } from "../components/ContributionGraph";
 import { QuotaCard } from "../components/QuotaCard";
 import { MiniBarChart } from "../components/MiniBarChart";
 import { StatTile } from "../components/StatTile";
+import type { MetricKey } from "./Metric";
 import { ActivitySkeleton } from "../components/Skeleton";
 import {
   DashboardShareCard,
@@ -57,7 +59,6 @@ const SIDEBAR_SECTION_TOP = 9;
 const HEAT_TRANSITION = LinearTransition.duration(220);
 
 const PERIODS: Period[] = ["week", "month", "year"];
-const PERIOD_LABEL: Record<Period, string> = { week: "Week", month: "Month", year: "Year" };
 
 /**
  * The user's coding activity across every paired machine: a year-long heatmap,
@@ -140,8 +141,7 @@ export default function DashboardScreen() {
   // Each tile opens its own page, carrying the period it was tapped in so the
   // detail always opens on the window you were looking at.
   const openMetric = useCallback(
-    (key: "tokens" | "spend" | "sessions" | "messages") =>
-      router.push({ pathname: "/metric", params: { key, period } }),
+    (key: MetricKey) => router.push({ pathname: "/metric", params: { key, period } }),
     [router, period],
   );
   // One agent list for the whole screen: everything with activity in this
