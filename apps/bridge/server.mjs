@@ -49,7 +49,12 @@ import { createActivityIndex } from "./agents/activity-index.mjs";
 import { readQuota } from "./agents/quota.mjs";
 import { readBlocks } from "./agents/blocks.mjs";
 import { dailyCost, resetCostCache } from "./agents/admin-cost.mjs";
-import { dailyCost as estimatedDailyCost, resetCcusageCache } from "./agents/ccusage.mjs";
+import {
+  dailyCost as estimatedDailyCost,
+  dailyUsage as ccusageDailyUsage,
+  SUPPORTED as ccusageReads,
+  resetCcusageCache,
+} from "./agents/ccusage.mjs";
 
 const IS_WIN = process.platform === "win32";
 
@@ -677,6 +682,95 @@ const activity = createActivityIndex({
 // How often the background pass re-reads transcripts that changed. The index is
 // mtime-keyed, so a tick over unchanged threads is one stat() each.
 const ACTIVITY_POPULATE_MS = Number(process.env.ACTIVITY_POPULATE_MS || 10 * 60_000);
+
+/**
+ * Replace our own token counts with ccusage's, and attach the breakdown behind
+ * them.
+ *
+ * Why hand this over: what counts as a token is a per-agent convention that
+ * drifts (Anthropic reports cache reads beside the input, OpenAI reports them
+ * inside it), and getting it wrong is invisible — a big number looks like a big
+ * number. That is exactly how the dashboard came to report 327B where Codex's
+ * own profile said 25.1B. ccusage tracks ~20 agents' formats as its whole job,
+ * so it owns the reading; we keep only the arithmetic that decides what counts
+ * as work, which is `total - cacheRead` (see agents/ccusage.mjs).
+ *
+ * Authority is PER AGENT, not per day. ccusage cannot read Cursor, so Cursor
+ * keeps the transcript-derived figure instead of being silently zeroed by an
+ * authority that never had an opinion about it. For the agents it does read,
+ * its silence on a day IS a zero.
+ *
+ * Not applied to repo-scoped series: ccusage reports per day across everything
+ * and carries no cwd, so it cannot say which repo a token belongs to. The
+ * Spaces page therefore stays on the transcript scan — see the `repo` branch in
+ * /v1/activity.
+ */
+async function withCcusageTokens(series, days) {
+  const since = new Date(Date.now() - (days - 1) * 86_400_000).toISOString().slice(0, 10);
+  const usage = await ccusageDailyUsage({ since }).catch(() => ({ available: false }));
+  if (!usage.available) return series;
+  const byDay = usage.byDay || {};
+
+  /** Fold one ccusage day onto one series day. */
+  const merge = (d, u) => {
+    const out = { ...d, byAgent: { ...d.byAgent } };
+    // The day's own breakdown, for the Tokens card's detail view.
+    out.usage = {
+      input: u.input,
+      output: u.output,
+      cacheCreate: u.cacheCreate,
+      cacheRead: u.cacheRead,
+      total: u.total,
+    };
+    const seen = new Set();
+    for (const a of u.agents) {
+      seen.add(a.agent);
+      const cur = out.byAgent[a.agent];
+      out.byAgent[a.agent] = {
+        // An agent ccusage priced but we never saw still gets a row: it did
+        // work, we just had no dated tokens for it.
+        ...(cur ?? { sessions: 0, messages: 0, cost: null }),
+        tokens: a.tokens,
+        usage: {
+          input: a.input,
+          output: a.output,
+          cacheCreate: a.cacheCreate,
+          cacheRead: a.cacheRead,
+          total: a.total,
+          models: a.models,
+        },
+      };
+    }
+    // Supported agents ccusage stayed silent about did nothing priced that day.
+    for (const [agent, cur] of Object.entries(out.byAgent)) {
+      if (!seen.has(agent) && ccusageReads.has(agent)) out.byAgent[agent] = { ...cur, tokens: 0 };
+    }
+    // The day's headline is the sum of what we just wrote, so an unreadable
+    // agent (Cursor) still contributes its transcript figure.
+    out.tokens = Object.values(out.byAgent).reduce((n, a) => n + (a.tokens || 0), 0);
+    return out;
+  };
+
+  const daysOut = series.days.map((d) => (byDay[d.date] ? merge(d, byDay[d.date]) : d));
+  // Days ccusage saw that the transcript scan never did.
+  const known = new Set(daysOut.map((d) => d.date));
+  for (const [date, u] of Object.entries(byDay)) {
+    if (known.has(date)) continue;
+    daysOut.push(merge({ date, sessions: 0, messages: 0, tokens: 0, cost: null, byAgent: {} }, u));
+  }
+  daysOut.sort((a, b) => a.date.localeCompare(b.date));
+  return {
+    ...series,
+    days: daysOut,
+    totals: {
+      ...series.totals,
+      tokens: daysOut.reduce((n, d) => n + (d.tokens || 0), 0),
+    },
+    // So the client can say where the figure came from rather than implying
+    // every agent was measured the same way.
+    tokenSource: "ccusage",
+  };
+}
 
 /**
  * Fill days the official sources left blank with ccusage's list-price estimate.
@@ -1440,9 +1534,12 @@ const server = http.createServer(async (req, res) => {
             );
           }
           const series = await activity.series(all, { days });
-          // Precedence, cheapest-truth-last: estimate fills the holes, then the
-          // billing report overwrites whatever it can speak for.
-          return withAdminCost(await withEstimatedCost(series, days), days);
+          // Tokens first: ccusage owns the reading of every agent it supports,
+          // and attaches the breakdown the Tokens card drills into.
+          const counted = await withCcusageTokens(series, days);
+          // Then dollars, cheapest-truth-last: estimate fills the holes, then
+          // the billing report overwrites whatever it can speak for.
+          return withAdminCost(await withEstimatedCost(counted, days), days);
         }),
       );
     }

@@ -4,7 +4,7 @@
  * against an imagined payload would prove nothing.
  */
 import { describe, expect, it } from "vitest";
-import { parseDaily, parseSession } from "./ccusage.mjs";
+import { parseDaily, parseDailyUsage, parseSession } from "./ccusage.mjs";
 
 const ID = "57ffa931-fb3b-43a9-8b07-4a55c7efec62";
 
@@ -103,5 +103,146 @@ describe("parseDaily", () => {
     const json = { daily: [null, { period: "not-a-date", totalCost: 9 }, { totalCost: 9 }] };
     expect(parseDaily(json)).toEqual({});
     expect(parseDaily(null)).toEqual({});
+  });
+});
+
+/**
+ * The token figures, pinned.
+ *
+ * The headline is the agent's REPORTED TOTAL, deliberately not a derived one:
+ * a dashboard that subtracts cache reads shows a number no other tool reports
+ * and then has to explain why it differs from the agent's own profile page.
+ * The cached portion is carried separately so the UI can show the split.
+ *
+ * Both halves are invisible when broken — a big number looks like a big
+ * number — so they get tests.
+ */
+describe("parseDailyUsage", () => {
+  /** Real `daily --json --by-agent` output for 2026-07-25, whole. Every model
+   *  is kept because their four columns sum exactly to the day's — trimming any
+   *  of them would make the fixture stop adding up, which is the property the
+   *  detail view depends on. 99.1% of that day's total was re-read context. */
+  const payload = {
+    daily: [
+      {
+        period: "2026-07-25",
+        agent: "all",
+        inputTokens: 1941,
+        outputTokens: 442908,
+        cacheCreationTokens: 3017893,
+        cacheReadTokens: 379245020,
+        totalTokens: 382707762,
+        totalCost: 153.74491010000003,
+        agents: [
+          {
+            agent: "claude",
+            inputTokens: 1941,
+            outputTokens: 442908,
+            cacheCreationTokens: 3017893,
+            cacheReadTokens: 379245020,
+            totalTokens: 382707762,
+            totalCost: 153.74491010000003,
+            modelBreakdowns: [
+              {
+                modelName: "claude-opus-5",
+                inputTokens: 1014,
+                outputTokens: 321471,
+                cacheCreationTokens: 1214922,
+                cacheReadTokens: 149122012,
+                cost: 94.75207099999996,
+              },
+              {
+                modelName: "claude-sonnet-5",
+                inputTokens: 901,
+                outputTokens: 119199,
+                cacheCreationTokens: 1519455,
+                cacheReadTokens: 229765323,
+                cost: 53.22467660000001,
+              },
+              {
+                modelName: "claude-fable-5",
+                inputTokens: 2,
+                outputTokens: 295,
+                cacheCreationTokens: 268049,
+                cacheReadTokens: 20410,
+                cost: 5.396160000000001,
+              },
+              {
+                modelName: "claude-opus-4-8",
+                inputTokens: 24,
+                outputTokens: 1943,
+                cacheCreationTokens: 15467,
+                cacheReadTokens: 337275,
+                cost: 0.3720025,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  it("reports the agent's own total, undiminished", () => {
+    const day = parseDailyUsage(payload)["2026-07-25"];
+    // Not 3,462,742 (total minus cache reads) — that figure appears on no
+    // agent's profile page, so the dashboard would have to defend it.
+    expect(day.tokens).toBe(382_707_762);
+    expect(day.total).toBe(382_707_762);
+  });
+
+  it("carries the cached portion separately, for the subscript", () => {
+    const day = parseDailyUsage(payload)["2026-07-25"];
+    // 99.1% of that day. Shown beside the headline, never subtracted from it.
+    expect(day.cacheRead).toBe(379_245_020);
+    expect(day.cacheRead).toBeLessThan(day.total);
+  });
+
+  it("keeps the day's model rows summing to the day's headline", () => {
+    // The detail view has to add up to the card it opened from, or one of them
+    // is lying.
+    const day = parseDailyUsage(payload)["2026-07-25"];
+    const models = day.agents.flatMap((a) => a.models);
+    expect(models.reduce((n, m) => n + m.tokens, 0)).toBe(day.tokens);
+    expect(day.agents.reduce((n, a) => n + a.tokens, 0)).toBe(day.tokens);
+  });
+
+  it("orders agents and models by size, so the biggest reads first", () => {
+    const day = parseDailyUsage(payload)["2026-07-25"];
+    // By total: sonnet 231.4M, opus-5 150.7M, opus-4-8 354,709, fable 288,756.
+    // Note this differs from the order by COST — fable is the priciest of the
+    // four — which is exactly why the spend view sorts on dollars instead.
+    expect(day.agents[0].models.map((m) => m.model)).toEqual([
+      "claude-sonnet-5",
+      "claude-opus-5",
+      "claude-opus-4-8",
+      "claude-fable-5",
+    ]);
+  });
+
+  it("keeps a day it could not price, unlike the cost-only reader", () => {
+    // An unpriced day is still a real day of work; `cost: null` says the
+    // dollars are unknown without discarding the tokens.
+    const json = {
+      daily: [
+        { period: "2026-07-30", totalCost: 0, totalTokens: 500, cacheReadTokens: 100, agents: [] },
+      ],
+    };
+    const day = parseDailyUsage(json)["2026-07-30"];
+    expect(day.tokens).toBe(500);
+    expect(day.cost).toBeNull();
+  });
+
+  it("leaves the headline alone even if cacheRead outruns the total", () => {
+    // A malformed row can't distort the reported total, because nothing is
+    // subtracted from it — the failure mode the old arithmetic had to guard.
+    const json = {
+      daily: [{ period: "2026-07-30", totalTokens: 100, cacheReadTokens: 999, agents: [] }],
+    };
+    expect(parseDailyUsage(json)["2026-07-30"].tokens).toBe(100);
+  });
+
+  it("survives junk rows rather than throwing into the dashboard", () => {
+    expect(parseDailyUsage(null)).toEqual({});
+    expect(parseDailyUsage({ daily: [null, { period: "nope", totalTokens: 5 }] })).toEqual({});
   });
 });

@@ -35,14 +35,133 @@
  *      and is reported as null; a genuinely free model is indistinguishable, and
  *      showing nothing beats showing a confident $0.00.
  */
-import { existsSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { gunzipSync } from "node:zlib";
 import { spawn } from "node:child_process";
 import { agentEnv } from "./env.mjs";
 import { binOverride } from "./config.mjs";
 
 const EXE = process.platform === "win32" ? "ccusage.exe" : "ccusage";
+const POUNCE_BIN = path.join(os.homedir(), ".pounce", "bin");
+
+/**
+ * Pinned ccusage, auto-installed into ~/.pounce/bin when none is found — the
+ * same drop location as ctx and pounce-tunnel.
+ *
+ * v20 has no GitHub release assets: it ships as one npm package per platform
+ * carrying a single native executable at `package/bin/ccusage`. We fetch that
+ * tarball straight from the registry rather than running a package manager, so
+ * a bridge with no Node toolchain around it can still install.
+ *
+ * `integrity` is npm's own sha512 for the tarball, copied from the registry
+ * metadata. Bump the version and ALL six hashes together.
+ */
+const CCUSAGE_VERSION = "20.0.19";
+const CCUSAGE_ASSETS = {
+  "darwin-arm64":
+    "sha512-8b69h4tuMH1KNW+EYjFRJWpbWHXbMUtFu8cOCyFOQsR6lGxq37g0kzEGHSqG+iZEoUTHaabR5CE7ZHLhW9Q64A==",
+  "darwin-x64":
+    "sha512-YTsqIfsPo3qR9OMrwJtnJoq/fil7Jk5mzXV8k0Iejpiq7zysw4FfkjCeHr0UVJG8ihdqtE18o+xIk99p3v+5Ew==",
+  "linux-x64":
+    "sha512-VPbB6onrwOGojTKutFzeahttb98ZgmdsiQpOr/BJet1i3QdrmUGXGmJSt591xXrvVOVVgsC7/5wBELdWM9/bKA==",
+  "linux-arm64":
+    "sha512-4e+7hV3WrEpM7hQPQkh4/zNLTUSqzpd+vSSWl2y659+xQ+JCDLWqE6gzvXLMOAT/LTtcFtlrduIWDZt8VPceqQ==",
+  "win32-x64":
+    "sha512-KtDlTk07uv8cu6TlizB/RptcDiQePE1YSQe6uNNZTUnwVy9zq5R3fvUUFr9/d3FYHwimSGduoHXRS8Ta+Kmkrw==",
+  "win32-arm64":
+    "sha512-oOv4mZkapxzvQeAMI+jqfTOv/zN2x2AYPAD+F4AnYHQQL4n898axhH9uPd2Ls0U5CDlvfh1zDTyNILz8X9M15A==",
+};
+
+const INSTALL_TIMEOUT_MS = 120_000;
+
+/**
+ * Pull one member out of an uncompressed tar.
+ *
+ * A hand-rolled reader rather than the `tar` CLI: Windows only gained a bundled
+ * tar.exe in Win10 1803, and the format needed here is the simple half of it —
+ * 512-byte header blocks, NUL-padded name at 0, octal size at 124, file body
+ * rounded up to the next 512 boundary.
+ */
+function tarExtract(buf, member) {
+  for (let off = 0; off + 512 <= buf.length;) {
+    const name = buf.toString("utf8", off, off + 100).replace(/\0.*$/, "");
+    if (!name) break; // two NUL blocks mark the end of the archive
+    const size = parseInt(
+      buf
+        .toString("ascii", off + 124, off + 136)
+        .replace(/\0.*$/, "")
+        .trim(),
+      8,
+    );
+    if (!Number.isFinite(size)) break;
+    const body = off + 512;
+    if (name === member) return buf.subarray(body, body + size);
+    off = body + Math.ceil(size / 512) * 512;
+  }
+  return null;
+}
+
+/**
+ * Download the pinned ccusage for this platform into ~/.pounce/bin.
+ *
+ * Refuses to keep anything whose sha512 doesn't match npm's own integrity
+ * string. Returns the installed path, or null (unsupported platform, network
+ * failure, or a tarball that didn't contain the executable).
+ */
+async function downloadCcusage(log) {
+  const integrity = CCUSAGE_ASSETS[`${process.platform}-${process.arch}`];
+  if (!integrity) return null;
+  const pkg = `ccusage-${process.platform}-${process.arch}`;
+  const url = `https://registry.npmjs.org/@ccusage/${pkg}/-/${pkg}-${CCUSAGE_VERSION}.tgz`;
+  log(`downloading ccusage ${CCUSAGE_VERSION} (${pkg})…`);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), INSTALL_TIMEOUT_MS);
+  const dest = path.join(POUNCE_BIN, EXE);
+  const tmp = `${dest}.download`;
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, redirect: "follow" });
+    if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    const digest = `sha512-${createHash("sha512").update(buf).digest("base64")}`;
+    if (digest !== integrity) throw new Error(`checksum mismatch for ${pkg}`);
+    const bin = tarExtract(gunzipSync(buf), "package/bin/ccusage");
+    if (!bin?.length) throw new Error("tarball has no package/bin/ccusage");
+    mkdirSync(POUNCE_BIN, { recursive: true });
+    writeFileSync(tmp, bin);
+    chmodSync(tmp, 0o755);
+    renameSync(tmp, dest);
+    log(`ccusage installed at ${dest}`);
+    binCache = { at: 0, value: null };
+    return dest;
+  } catch (e) {
+    try {
+      unlinkSync(tmp);
+    } catch {}
+    log(`ccusage install failed: ${e?.message || e}`);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+let installing = null;
+
+/**
+ * Ensure a ccusage exists, installing the pinned build if not.
+ *
+ * At most one install runs at a time and a failure is not retried on every
+ * request — `installing` keeps the promise so a machine that is offline (or on
+ * an unsupported platform) settles into "no binary" rather than re-downloading.
+ */
+export function ensureCcusage(log = () => {}) {
+  const found = findCcusage();
+  if (found) return Promise.resolve(found);
+  installing ??= downloadCcusage(log);
+  return installing;
+}
 
 /** A full-history `daily` pass measured ~2s over a year of transcripts; a single
  *  `session` lookup ~0.5s. The ceiling is for a cold machine with far more. */
@@ -54,7 +173,7 @@ const TTL_MS = 5 * 60_000;
 
 /** Agents ccusage knows how to read. Anything else short-circuits without a
  *  spawn — Cursor is the live case, and asking would cost 0.5s to learn null. */
-const SUPPORTED = new Set([
+export const SUPPORTED = new Set([
   "claude",
   "codex",
   "opencode",
@@ -224,6 +343,108 @@ export function parseDaily(json) {
     byDay[date] = { total, byAgent };
   }
   return byDay;
+}
+
+/**
+ * The five token columns off any ccusage row (daily, per-agent, or per-model).
+ *
+ * `tokens` is the REPORTED TOTAL — `totalTokens`, exactly as ccusage read it out
+ * of the agent's own records. No arithmetic of ours sits on top of it.
+ *
+ * That's deliberate, and it's a reversal. An earlier version made the headline
+ * `total - cacheRead`, on the reasoning that re-read context isn't new work.
+ * It isn't — but subtracting it invented a figure no other tool reports, so the
+ * dashboard then disagreed with the lifetime total on the agent's own profile
+ * page and had to explain itself. Matching the source beats explaining a
+ * difference. `cacheRead` rides alongside so the UI can show the split as a
+ * subscript rather than a subtraction.
+ *
+ * The columns are still worth normalizing, because the agents disagree
+ * underneath: Anthropic reports `cache_read_input_tokens` as a field SEPARATE
+ * from `input_tokens`, while OpenAI reports `cached_input_tokens` as a SUBSET of
+ * it. ccusage reconciles both into one shape whose four columns sum to
+ * `totalTokens` with nothing double-counted (verified: for a Codex session whose
+ * raw file has input 126,414,563 including 116,586,880 cached, it reports
+ * inputTokens 9,491,457 with the cached amount moved into cacheReadTokens).
+ * Absorbing that per-agent divergence is what we get from the package.
+ */
+function tokensOf(row) {
+  const n = (v) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
+  const total = n(row?.totalTokens);
+  const cacheRead = n(row?.cacheReadTokens);
+  return {
+    // The REPORTED TOTAL, with no arithmetic of ours on top — see above.
+    tokens: total,
+    input: n(row?.inputTokens),
+    output: n(row?.outputTokens),
+    cacheCreate: n(row?.cacheCreationTokens),
+    cacheRead,
+    total,
+    cost: costOf(row),
+  };
+}
+
+/**
+ * Reshape `daily --by-agent` into the breakdown the Tokens card drills into:
+ * a day, the agents that ran that day, and the models each of them used.
+ *
+ * Unlike ./parseDaily (cost only, and silent on days it couldn't price), this
+ * keeps every day that has tokens — an unpriced day is still a real day of
+ * work, and `cost: null` says the dollars are unknown without hiding it.
+ */
+export function parseDailyUsage(json) {
+  const byDay = {};
+  for (const row of json?.daily ?? []) {
+    const date = typeof row?.period === "string" ? row.period.slice(0, 10) : null;
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    const day = tokensOf(row);
+    if (!day.total) continue;
+    day.agents = (row.agents ?? [])
+      .filter((a) => a?.agent)
+      .map((a) => ({
+        agent: a.agent,
+        ...tokensOf(a),
+        models: (a.modelBreakdowns ?? [])
+          .filter((m) => m?.modelName)
+          // A model row spells `cost`, not `totalCost`, and carries no total of
+          // its own — so normalize both before tokensOf sees it.
+          .map((m) => ({
+            model: m.modelName,
+            ...tokensOf({
+              ...m,
+              totalCost: m.cost,
+              totalTokens:
+                (m.inputTokens || 0) +
+                (m.outputTokens || 0) +
+                (m.cacheCreationTokens || 0) +
+                (m.cacheReadTokens || 0),
+            }),
+          }))
+          .sort((x, y) => y.tokens - x.tokens),
+      }))
+      .sort((x, y) => y.tokens - x.tokens);
+    byDay[date] = day;
+  }
+  return byDay;
+}
+
+/**
+ * Token usage per day for a window, as `{ available, byDay }`.
+ *
+ * `available: false` means we could not ask — no binary and no install. The
+ * dashboard needs that distinction: unlike cost, a missing token figure is not
+ * a nice-to-have that can quietly read zero.
+ */
+export function dailyUsage({ since, until, now = new Date(), install = true } = {}) {
+  const from = since || new Date(now.getTime() - 364 * 24 * 60 * 60_000).toISOString().slice(0, 10);
+  const args = ["daily", "--json", "--no-color", "--by-agent", "--since", from.replace(/-/g, "")];
+  if (until) args.push("--until", until.replace(/-/g, ""));
+  return cached(`u:${from}:${until || ""}`, async () => {
+    if (install) await ensureCcusage((m) => console.log(`[ccusage] ${m}`));
+    const json = await ccusageJson(args);
+    if (!json) return { available: false, byDay: {} };
+    return { available: true, byDay: parseDailyUsage(json) };
+  });
 }
 
 /**

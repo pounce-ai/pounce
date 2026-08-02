@@ -28,6 +28,22 @@ export interface ActivityDay {
   readonly cost: number | null;
   readonly costEstimated?: boolean;
   readonly byAgent?: Readonly<Record<string, AgentActivity>>;
+  /** Per repository. Sessions and messages only — see RepoActivity. */
+  readonly byRepo?: Readonly<Record<string, RepoActivity>>;
+  readonly usage?: TokenUsage;
+}
+
+/**
+ * What a space did, as the bridge can honestly attribute it.
+ *
+ * No tokens and no cost on purpose. Both now come from host-wide sources
+ * (ccusage for tokens, the billing report for dollars) that report per day
+ * across everything and can't say which repo a figure belongs to. Sessions and
+ * messages come from thread metadata, which does know.
+ */
+export interface RepoActivity {
+  readonly sessions?: number;
+  readonly messages?: number;
 }
 
 export interface AgentActivity {
@@ -36,6 +52,34 @@ export interface AgentActivity {
   readonly tokens?: number;
   readonly cost?: number | null;
   readonly costEstimated?: boolean;
+  readonly usage?: TokenUsage;
+}
+
+/**
+ * The columns behind a `tokens` figure — how the reported total breaks down.
+ *
+ * `tokens` equals `total`: the headline is the agent's OWN reported number, not
+ * a derived one. The four columns explain its composition; they never adjust it.
+ *
+ * The distinction worth surfacing is `cacheRead` (context re-sent from cache)
+ * versus everything else (fresh input, output, and cache writes). It runs from
+ * ~78% to ~98% of the total depending on the agent, so a reader who assumes the
+ * headline is all new input is badly wrong about what the number means — which
+ * is why the UI shows the cached share beside it rather than subtracting it.
+ */
+export interface TokenUsage {
+  readonly input: number;
+  readonly output: number;
+  readonly cacheCreate: number;
+  readonly cacheRead: number;
+  readonly total: number;
+  readonly models?: readonly ModelUsage[];
+}
+
+export interface ModelUsage extends TokenUsage {
+  readonly model: string;
+  readonly tokens: number;
+  readonly cost: number | null;
 }
 
 export interface ActivityTotals {
@@ -104,6 +148,67 @@ export function daysAgo(n: number, from: Date = new Date()): string {
   return dayKey(d);
 }
 
+/**
+ * Sum two token breakdowns — the same day on two machines is one day of work,
+ * and its columns add like any other counter.
+ *
+ * Absent on both sides stays absent: a `usage` of all zeros would claim the
+ * breakdown is known and empty, when what we mean is that nobody reported one
+ * (a host with no ccusage, or an agent it can't read).
+ */
+function addUsage(a?: TokenUsage, b?: TokenUsage): TokenUsage | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    input: a.input + b.input,
+    output: a.output + b.output,
+    cacheCreate: a.cacheCreate + b.cacheCreate,
+    cacheRead: a.cacheRead + b.cacheRead,
+    total: a.total + b.total,
+    models: mergeModels(a.models, b.models),
+  };
+}
+
+/** Same model on two hosts is one row; anything else appends. */
+function mergeModels(
+  a?: readonly ModelUsage[],
+  b?: readonly ModelUsage[],
+): readonly ModelUsage[] | undefined {
+  if (!a?.length) return b;
+  if (!b?.length) return a;
+  const by = new Map<string, ModelUsage>();
+  for (const m of [...a, ...b]) {
+    const prev = by.get(m.model);
+    by.set(
+      m.model,
+      prev
+        ? {
+            ...prev,
+            tokens: prev.tokens + m.tokens,
+            input: prev.input + m.input,
+            output: prev.output + m.output,
+            cacheCreate: prev.cacheCreate + m.cacheCreate,
+            cacheRead: prev.cacheRead + m.cacheRead,
+            total: prev.total + m.total,
+            cost: addCost(prev.cost, m.cost),
+          }
+        : m,
+    );
+  }
+  return [...by.values()].sort((x, y) => y.tokens - x.tokens);
+}
+
+function addRepo(dst: Record<string, RepoActivity>, src?: Readonly<Record<string, RepoActivity>>) {
+  if (!src) return;
+  for (const [repo, v] of Object.entries(src)) {
+    const prev = dst[repo];
+    dst[repo] = {
+      sessions: (prev?.sessions ?? 0) + (v.sessions ?? 0),
+      messages: (prev?.messages ?? 0) + (v.messages ?? 0),
+    };
+  }
+}
+
 function addAgent(
   dst: Record<string, AgentActivity>,
   src?: Readonly<Record<string, AgentActivity>>,
@@ -117,6 +222,7 @@ function addAgent(
       tokens: (prev?.tokens ?? 0) + (v.tokens ?? 0),
       cost: addCost(prev?.cost, v.cost),
       costEstimated: prev?.costEstimated || v.costEstimated,
+      usage: addUsage(prev?.usage, v.usage),
     };
   }
 }
@@ -129,7 +235,10 @@ function addAgent(
  * the dashboard must say so rather than imply the total is complete.
  */
 export function mergeActivity(pages: readonly (ActivityPage | null | undefined)[]): ActivityPage {
-  const byDate = new Map<string, ActivityDay & { byAgent: Record<string, AgentActivity> }>();
+  const byDate = new Map<
+    string,
+    ActivityDay & { byAgent: Record<string, AgentActivity>; byRepo: Record<string, RepoActivity> }
+  >();
   const totals = { ...EMPTY_TOTALS };
   const coverage: Record<string, Coverage> = {};
   for (const page of pages) {
@@ -145,8 +254,11 @@ export function mergeActivity(pages: readonly (ActivityPage | null | undefined)[
         cost: addCost(prev?.cost, day.cost),
         costEstimated: prev?.costEstimated || day.costEstimated,
         byAgent: prev?.byAgent ?? {},
+        byRepo: prev?.byRepo ?? {},
+        usage: addUsage(prev?.usage, day.usage),
       };
       addAgent(merged.byAgent, day.byAgent);
+      addRepo(merged.byRepo, day.byRepo);
       byDate.set(day.date, merged);
     }
     const t = page.totals;
@@ -349,4 +461,101 @@ export function partialAgents(coverage: Readonly<Record<string, Coverage>>): str
     .filter(([, c]) => c !== "full")
     .map(([agent]) => agent)
     .sort();
+}
+
+/** A token breakdown with its headline attached. */
+export interface UsageRow extends TokenUsage {
+  readonly tokens: number;
+  readonly cost: number | null;
+}
+
+const ZERO_USAGE: UsageRow = {
+  tokens: 0,
+  input: 0,
+  output: 0,
+  cacheCreate: 0,
+  cacheRead: 0,
+  total: 0,
+  cost: null,
+};
+
+/**
+ * Roll a window's days up into the table behind the Tokens card: the window
+ * total, then a row per agent, each with its models.
+ *
+ * Returns `null` when no day in the window carried a breakdown — the caller
+ * shows "no detail available" rather than a table of zeros, which would claim
+ * the answer is "nothing" when it is really "nobody reported".
+ *
+ * The headline is summed from the per-day `tokens` the bridge already reported,
+ * never recomputed here. One definition, one place: if this re-derived it, the
+ * card and its detail view could drift apart.
+ */
+export function usageBreakdown(days: readonly ActivityDay[]): {
+  total: UsageRow;
+  agents: { agent: string; tokens: number; usage: UsageRow; models: readonly ModelUsage[] }[];
+} | null {
+  const add = (a: UsageRow, b: TokenUsage, tokens: number, cost?: number | null): UsageRow => ({
+    tokens: a.tokens + tokens,
+    input: a.input + b.input,
+    output: a.output + b.output,
+    cacheCreate: a.cacheCreate + b.cacheCreate,
+    cacheRead: a.cacheRead + b.cacheRead,
+    total: a.total + b.total,
+    cost: addCost(a.cost, cost ?? null),
+  });
+
+  let any = false;
+  let total = ZERO_USAGE;
+  const byAgent = new Map<string, { tokens: number; usage: UsageRow; models: ModelUsage[] }>();
+  for (const d of days) {
+    if (d.usage) {
+      any = true;
+      total = add(total, d.usage, d.tokens || 0, d.cost);
+    }
+    for (const [agent, v] of Object.entries(d.byAgent ?? {})) {
+      if (!v.usage) continue;
+      any = true;
+      const prev = byAgent.get(agent) ?? { tokens: 0, usage: ZERO_USAGE, models: [] };
+      byAgent.set(agent, {
+        tokens: prev.tokens + (v.tokens ?? 0),
+        usage: add(prev.usage, v.usage, v.tokens ?? 0, v.cost),
+        models: [...(mergeModels(prev.models, v.usage.models) ?? [])],
+      });
+    }
+  }
+  if (!any) return null;
+  return {
+    total,
+    agents: [...byAgent]
+      .map(([agent, v]) => ({ agent, tokens: v.tokens, usage: v.usage, models: v.models }))
+      .sort((a, b) => b.tokens - a.tokens),
+  };
+}
+
+/**
+ * Sessions and messages per space, over a window.
+ *
+ * Sorted by sessions: the question this answers is "where does the work
+ * happen", and a space with many short sessions is a more useful answer than
+ * one long one. Threads with no repo arrive under "" and the caller labels
+ * them — they're dropped from neither the rows nor the total, so the parts add
+ * up to the headline.
+ */
+export function byRepoTotals(
+  days: readonly ActivityDay[],
+): { repo: string; sessions: number; messages: number }[] {
+  const acc = new Map<string, { sessions: number; messages: number }>();
+  for (const d of days) {
+    for (const [repo, v] of Object.entries(d.byRepo ?? {})) {
+      const prev = acc.get(repo) ?? { sessions: 0, messages: 0 };
+      acc.set(repo, {
+        sessions: prev.sessions + (v.sessions ?? 0),
+        messages: prev.messages + (v.messages ?? 0),
+      });
+    }
+  }
+  return [...acc]
+    .map(([repo, v]) => ({ repo, ...v }))
+    .sort((a, b) => b.sessions - a.sessions || b.messages - a.messages);
 }

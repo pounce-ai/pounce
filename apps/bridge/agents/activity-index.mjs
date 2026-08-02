@@ -5,8 +5,17 @@
  *
  *   TOKENS / MESSAGES  scanned per DAY out of the agents' own transcripts
  *                      (Claude's `message.usage` lines, Codex's `token_count`
- *                      rollout events). These are the agent's own numbers with
- *                      a date attached — no arithmetic beyond summing them.
+ *                      rollout events).
+ *
+ *                      TOKENS MEANS FRESH TOKENS: what the model actually had
+ *                      to process, EXCLUDING cache reads. This matters more
+ *                      than it sounds — 92% of Codex's input tokens on a real
+ *                      machine were cache reads, so counting them reported 327B
+ *                      where Codex's own profile said 25.1B, a 13x lie. Cache
+ *                      CREATION still counts: those tokens were processed once.
+ *                      Re-reading the same context every turn is not new work,
+ *                      and counting it makes a long conversation look like
+ *                      enormous usage while agreeing with no vendor dashboard.
  *
  *   DOLLARS            read from the cost ledger only (~/.pounce/usage.jsonl),
  *                      i.e. figures an agent actually reported. This module
@@ -37,7 +46,9 @@ const TOKEN_AGENTS = new Set(["claude", "codex"]);
 /** Claude Code's marker for a turn it wrote itself — no API call, no usage. */
 const SYNTHETIC_MODEL = "<synthetic>";
 
-const CACHE_VERSION = 1;
+// 2: tokens exclude cache reads, and Codex's duplicate token_count events no
+// longer double-count. Bumping discards caches built under the old arithmetic.
+const CACHE_VERSION = 2;
 const MAX_DAYS = 400;
 const PARSE_CONCURRENCY = 4;
 
@@ -71,7 +82,7 @@ async function forEachLine(file, start, onLine) {
   return consumed;
 }
 
-const emptyAcc = () => ({ byDay: {} });
+const emptyAcc = () => ({ byDay: {}, cum: null });
 
 function bump(acc, day, tokens, messages = 1) {
   if (!day) return;
@@ -80,7 +91,12 @@ function bump(acc, day, tokens, messages = 1) {
   acc.byDay[day].messages += messages;
 }
 
-/** Claude Code: one assistant line per API call, `message.usage` inline. */
+/**
+ * Claude Code: one assistant line per API call, `message.usage` inline.
+ *
+ * Cache READS are excluded (see the header). Cache CREATION is not: writing the
+ * cache means the model processed those tokens for the first time.
+ */
 function parseClaudeLine(acc, line) {
   let o;
   try {
@@ -92,17 +108,23 @@ function parseClaudeLine(acc, line) {
   const u = o.message?.usage;
   if (!u || o.message.model === SYNTHETIC_MODEL) return;
   const total =
-    (u.input_tokens || 0) +
-    (u.output_tokens || 0) +
-    (u.cache_read_input_tokens || 0) +
-    (u.cache_creation_input_tokens || 0);
+    (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0);
   bump(acc, dayOf(o.timestamp), total);
 }
 
 /**
- * Codex: `token_count` events carry `last_token_usage`, the delta for the call
- * just made. (`total_token_usage` is cumulative but gets rebased when a session
- * compacts, so summing the deltas is the figure that matches what ran.)
+ * Codex: `token_count` events carry `last_token_usage` (the request just made)
+ * and `total_token_usage` (the running sum of those).
+ *
+ * `last_token_usage` is NOT a delta of new work — it is the whole request, so it
+ * grows with the conversation as the context is re-sent. Summing it is only
+ * correct because the cumulative is the sum of exactly those values.
+ *
+ * The trap is that Codex re-emits `token_count` with UNCHANGED values — 58 of
+ * 937 events in one local session. Blindly summing `last` counted those again.
+ * So the cumulative is the source of truth: advance = how much it moved. A
+ * cumulative that DROPS means the session compacted and rebased, and the new
+ * value is the work since; one that stands still means nothing happened.
  */
 function parseCodexLine(acc, line) {
   let o;
@@ -113,9 +135,27 @@ function parseCodexLine(acc, line) {
   }
   const p = o.payload;
   if (!p || o.type !== "event_msg" || p.type !== "token_count") return;
-  const u = p.info?.last_token_usage;
+  const info = p.info;
+  const u = info?.last_token_usage;
   if (!u) return;
-  bump(acc, dayOf(o.timestamp), u.total_tokens || 0);
+
+  const cum = info.total_token_usage?.total_tokens;
+  const cached = u.cached_input_tokens || 0;
+  const gross = u.total_tokens || 0;
+  let delta;
+  if (cum == null) {
+    delta = gross; // older rollouts with no cumulative — take the event at face value
+  } else if (acc.cum == null || cum < acc.cum) {
+    delta = cum === 0 ? gross : Math.min(gross, cum); // first event, or a post-compaction rebase
+    acc.cum = cum;
+  } else if (cum > acc.cum) {
+    acc.cum = cum;
+    delta = gross;
+  } else {
+    return; // cumulative stood still: a duplicate event, not another request
+  }
+  // Fresh tokens only: this request minus whatever was served from its cache.
+  bump(acc, dayOf(o.timestamp), Math.max(0, delta - cached));
 }
 
 const PARSERS = { claude: parseClaudeLine, codex: parseCodexLine };
@@ -221,6 +261,9 @@ export function createActivityIndex({
         : null;
     const acc = emptyAcc();
     if (resume) {
+      // Codex's running cumulative has to survive a resumed parse — without it
+      // the first event after the resume point reads as a brand-new session.
+      acc.cum = resume.cum ?? null;
       for (const [d, v] of Object.entries(resume.byDay || {})) {
         acc.byDay[d] = { tokens: v.tokens || 0, messages: v.messages || 0 };
       }
@@ -234,6 +277,7 @@ export function createActivityIndex({
       mtimeMs: st.mtimeMs,
       size: st.size,
       parsedBytes,
+      cum: acc.cum,
       byDay: trimDays(acc.byDay),
     };
     entries.set(key, entry);
@@ -321,13 +365,34 @@ export function createActivityIndex({
     const byDate = new Map();
     const day = (date) => {
       if (!byDate.has(date)) {
-        byDate.set(date, { date, sessions: 0, messages: 0, tokens: 0, cost: null, byAgent: {} });
+        byDate.set(date, {
+          date,
+          sessions: 0,
+          messages: 0,
+          tokens: 0,
+          cost: null,
+          byAgent: {},
+          byRepo: {},
+        });
       }
       return byDate.get(date);
     };
     const agentOn = (d, agent) => {
       d.byAgent[agent] ??= { sessions: 0, messages: 0, tokens: 0, cost: null };
       return d.byAgent[agent];
+    };
+    /**
+     * Per-repository counts — "which project did this happen in", which the
+     * per-agent view can't answer.
+     *
+     * Sessions and messages ONLY, deliberately no tokens: the token headline now
+     * comes from ccusage, which reports per day across everything and carries no
+     * cwd. A per-repo token figure would have to come from the transcript scan
+     * instead, and would therefore not add up to the number above it.
+     */
+    const repoOn = (d, repo) => {
+      d.byRepo[repo] ??= { sessions: 0, messages: 0 };
+      return d.byRepo[repo];
     };
     const totals = { sessions: 0, messages: 0, tokens: 0, cost: null, costComplete: true };
     const coverage = {};
@@ -340,11 +405,15 @@ export function createActivityIndex({
 
     for (const [i, t] of threads.entries()) {
       coverage[t.agent] ??= TOKEN_AGENTS.has(t.agent) ? "tokens" : "sessions-only";
+      // A thread with no repo is grouped under "" and labelled by the client —
+      // dropping it would make the per-space rows quietly fail to add up.
+      const repo = t.repo || "";
       const started = dayOf(t.createdAt);
       if (started && (!since || started >= since)) {
         const d = day(started);
         d.sessions++;
         agentOn(d, t.agent).sessions++;
+        repoOn(d, repo).sessions++;
         totals.sessions++;
       }
       for (const [date, v] of Object.entries(perDays[i])) {
@@ -355,6 +424,7 @@ export function createActivityIndex({
         const a = agentOn(d, t.agent);
         a.messages += v.messages;
         a.tokens += v.tokens;
+        repoOn(d, repo).messages += v.messages;
         totals.messages += v.messages;
         totals.tokens += v.tokens;
       }
