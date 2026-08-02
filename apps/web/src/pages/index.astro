@@ -3,7 +3,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Pounce — control your coding agents from your phone</title>
-<meta name="description" content="Pounce puts Claude, Codex, Cursor & opencode in your pocket. Run npx use-pounce, scan one QR, and watch every agent work in real time across all your machines — steer by voice, review the diff, and ship. iOS live on the App Store." />
+<meta name="description" content="Pounce puts Claude, Codex, Cursor & opencode in your pocket. Run npx use-pounce, scan one QR, and watch every agent work in real time across all your machines — steer by voice, track tokens and spend, review the diff, and ship. Open source (MIT), built on Expo and Iroh. iOS live on the App Store." />
 <link rel="canonical" href="https://use-pounce.com/" />
 <meta name="robots" content="index, follow" />
 <!-- Open Graph -->
@@ -11,13 +11,13 @@
 <meta property="og:type" content="website" />
 <meta property="og:url" content="https://use-pounce.com/" />
 <meta property="og:title" content="Pounce — your coding agents, in your pocket" />
-<meta property="og:description" content="Watch Claude, Codex, Cursor & opencode work in real time across every machine you own, steer by voice, and ship from your phone. Now live on the App Store." />
+<meta property="og:description" content="Watch Claude, Codex, Cursor & opencode work in real time across every machine you own, steer by voice, track tokens and spend, and ship from your phone. Open source, MIT licensed. Now live on the App Store." />
 <meta property="og:image" content="https://use-pounce.com/assets/icon.png" />
 <meta property="og:image:alt" content="Pounce — control your coding agents from your phone" />
 <!-- Twitter -->
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Pounce — your coding agents, in your pocket" />
-<meta name="twitter:description" content="Watch Claude, Codex, Cursor & opencode work in real time across every machine you own, steer by voice, and ship from your phone. Now live on the App Store." />
+<meta name="twitter:description" content="Watch Claude, Codex, Cursor & opencode work in real time across every machine you own, steer by voice, track tokens and spend, and ship from your phone. Open source, MIT licensed. Now live on the App Store." />
 <meta name="twitter:image" content="https://use-pounce.com/assets/icon.png" />
 <meta name="theme-color" content="#0b0b0e" />
 <link rel="icon" href="/assets/favicon.png" />
@@ -81,11 +81,9 @@
   .nav-cta{padding:9px 17px;border-radius:10px;background:var(--ink);color:#0b0b0e!important;font-weight:600;
     font-family:var(--body);transition:transform .2s,box-shadow .2s}
   .nav-cta:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(0,0,0,.4)}
-  @media(max-width:820px){.nav-links a.lnk,.nav-live{display:none}}
 
   /* ---- hero ---- */
   .hero{padding:76px 0 30px;display:grid;grid-template-columns:1.02fr .98fr;gap:52px;align-items:center}
-  @media(max-width:960px){.hero{grid-template-columns:1fr;gap:44px;padding-top:52px}}
   .h-copy{max-width:600px}
   h1{font-size:clamp(44px,6.6vw,78px);font-weight:800;margin:22px 0 20px}
   h1 .lead-line{display:block}
@@ -157,7 +155,6 @@
   .phone--float{position:absolute;right:-3%;bottom:-40px;width:162px;padding:7px;border-radius:32px;z-index:3;
     box-shadow:0 40px 70px -24px rgba(0,0,0,.9)}
   .phone--float .screen{border-radius:27px}
-  @media(max-width:400px){.phone--float{width:140px;right:-2%}}
   /* reel: phone with caption + progress BELOW it (never over the screenshot) */
   .reel-col{position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;gap:26px}
   .reel-caption{text-align:center;max-width:340px}
@@ -183,8 +180,6 @@
   .tag.ship{bottom:13%;left:-9%;animation-delay:1.9s}
   .tag.ship .led{background:var(--violet-bright);box-shadow:0 0 0 3px rgba(124,92,255,.2)}
   @keyframes bob{50%{transform:translateY(-13px)}}
-  @media(max-width:1080px){.tag.needs{left:0}.tag.run{right:0}.tag.ship{left:0}}
-  @media(max-width:520px){.tag{display:none}}
 
   /* ---- section scaffolding ---- */
   section{padding:92px 0}
@@ -198,7 +193,6 @@
   .cli-band{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center;
     border:1px solid var(--line);border-radius:26px;padding:44px 42px;
     background:radial-gradient(120% 140% at 0% 0%,rgba(124,92,255,.10),transparent 55%),linear-gradient(180deg,var(--panel),var(--bg-2))}
-  @media(max-width:900px){.cli-band{grid-template-columns:1fr;gap:32px;padding:32px 24px}}
   .cli-band .sec-lead{font-size:16.5px}
   .cli-band .sec-lead b{color:var(--ink);font-weight:600}
   .term{border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,.12);background:#0a0a10;
@@ -217,8 +211,6 @@
 
   /* ---- platforms band ---- */
   .platforms{margin-top:48px;display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
-  @media(max-width:900px){.platforms{grid-template-columns:1fr 1fr}}
-  @media(max-width:520px){.platforms{grid-template-columns:1fr}}
   .plat{position:relative;display:block;padding:24px;border:1px solid var(--line);border-radius:20px;
     background:linear-gradient(180deg,var(--panel),var(--bg-2));transition:transform .25s,border-color .25s;overflow:hidden}
   .plat:hover{transform:translateY(-6px);border-color:rgba(124,92,255,.4)}
@@ -241,8 +233,6 @@
   /* ---- features ---- */
   .features{margin-top:48px;display:grid;grid-template-columns:repeat(3,1fr);gap:1px;
     background:var(--line);border:1px solid var(--line);border-radius:22px;overflow:hidden}
-  @media(max-width:860px){.features{grid-template-columns:1fr 1fr}}
-  @media(max-width:560px){.features{grid-template-columns:1fr}}
   .feat{background:var(--bg-2);padding:30px 26px;transition:background .25s}
   .feat:hover{background:var(--panel)}
   .feat .fn{font-family:var(--mono);font-size:12px;color:var(--violet-bright)}
@@ -251,8 +241,6 @@
 
   /* ---- screens gallery ---- */
   .gallery{margin-top:52px;display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
-  @media(max-width:900px){.gallery{grid-template-columns:1fr 1fr;max-width:640px;margin-inline:auto}}
-  @media(max-width:440px){.gallery{grid-template-columns:1fr;max-width:300px}}
   .shot-fig{display:flex;flex-direction:column;gap:16px}
   .device{border-radius:30px;padding:8px;background:linear-gradient(160deg,#1a1922,#0c0b11);
     border:1px solid rgba(255,255,255,.1);box-shadow:0 34px 60px -30px rgba(0,0,0,.85);transition:transform .3s}
@@ -263,14 +251,12 @@
 
   /* ---- steps ---- */
   .steps{margin-top:48px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;counter-reset:s}
-  @media(max-width:800px){.steps{grid-template-columns:1fr}}
   .step{position:relative;padding:28px 24px;border:1px solid var(--line);border-radius:20px;background:var(--bg-2)}
   .step::before{counter-increment:s;content:"0" counter(s);font-family:var(--mono);font-weight:600;font-size:13px;
     color:var(--violet-bright);display:block;margin-bottom:16px}
   .step h3{font-size:19px;font-weight:600;margin-bottom:8px}
   .step p{color:var(--ink-dim);font-size:14.5px}
   .step .wire{position:absolute;top:38px;right:-11px;color:var(--line);z-index:2}
-  @media(max-width:800px){.step .wire{display:none}}
 
   /* ---- final cta ---- */
   .cta{position:relative;text-align:center;border:1px solid rgba(124,92,255,.28);border-radius:30px;
@@ -294,6 +280,90 @@
     *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
     .screen .frame{opacity:1}
   }
+
+  /* ---- analytics ---- */
+  .analytics{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:clamp(28px,5vw,64px);align-items:center}
+  .an-shot .device{max-width:330px;margin:0 auto}
+  .an-copy{display:flex;flex-direction:column;gap:26px}
+  .an-item h3{font-size:clamp(19px,2.2vw,23px);margin-bottom:9px}
+  .an-item p{color:var(--ink-dim);font-size:16px;max-width:52ch}
+
+  /* ---- open source ---- */
+  .os-band{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:clamp(28px,5vw,56px);
+    padding:clamp(26px,4vw,46px);border-radius:24px;border:1px solid var(--line);
+    background:linear-gradient(150deg,rgba(124,92,255,.10),rgba(18,18,24,.75) 55%);align-items:center}
+  .os-actions{display:flex;flex-wrap:wrap;gap:13px;margin-top:26px}
+  .built-on{display:flex;flex-direction:column;gap:14px}
+  .bo-title{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
+  .bo{display:block;padding:16px 18px;border-radius:15px;border:1px solid var(--line);
+    background:rgba(11,11,14,.5);transition:border-color .2s,transform .2s,background .2s}
+  .bo:hover{border-color:rgba(124,92,255,.5);background:rgba(124,92,255,.07);transform:translateY(-2px)}
+  .bo b{display:block;font-family:var(--disp);font-size:17px;margin-bottom:5px}
+  .bo span{display:block;font-size:14.2px;line-height:1.55;color:var(--ink-dim)}
+
+  /* ============================================================
+     RESPONSIVE — one deliberate ladder, not a pile of one-offs.
+     Four stops: 1040 (grids to one column), 860 (nav + type),
+     640 (phone), 460 (small phone). Earlier ad-hoc breakpoints
+     are superseded here rather than left to fight each other.
+     ============================================================ */
+  @media(max-width:1040px){
+    .hero{grid-template-columns:1fr;gap:44px;padding-top:52px}
+    .tag.needs,.tag.ship{left:0}.tag.run{right:0}
+    .cli-band{grid-template-columns:1fr;gap:32px;padding:32px 24px}
+    .platforms{grid-template-columns:1fr 1fr}
+    .gallery{grid-template-columns:1fr 1fr;max-width:640px;margin-inline:auto}
+    .analytics,.os-band{grid-template-columns:1fr}
+    .an-shot{order:-1}
+    .an-shot .device{max-width:290px}
+  }
+  @media(max-width:860px){
+    body{font-size:16.2px}
+    .wrap{padding:0 20px}
+    /* The nav used to drop EVERY link below 820px, leaving a bare logo and
+       no way to reach docs or the repo from a phone. Keep the links, drop
+       the decoration, and let them sit tighter. */
+    .nav-links{gap:18px;font-size:12.5px}
+    .nav-live{display:none}
+    .nav-links a.lnk{display:inline}
+    section{padding:clamp(48px,8vw,72px) 0}
+    .sec-lead{max-width:none}
+    .features{grid-template-columns:1fr 1fr}
+    .steps{grid-template-columns:1fr}
+    .step .wire{display:none}
+  }
+  @media(max-width:640px){
+    .wrap{padding:0 16px}
+    .nav-in{height:60px}
+    .brand{font-size:18px}
+    .brand img{width:26px;height:26px}
+    /* Below this the full link set can't fit honestly — keep the two that
+       matter (Docs, GitHub) plus the download CTA. */
+    .nav-links a.lnk:not([href="/docs/getting-started"]):not([href*="github.com/pounce-ai/pounce"]){display:none}
+    .cta-row .btn,.os-actions .btn{flex:1 1 100%;justify-content:center}
+    .npx{width:100%;justify-content:center}
+    .npx-note{display:none}
+    .an-item p{font-size:15.4px}
+    /* Floating callout tags overlap the artwork below this width. */
+    .tag{display:none}
+    .platforms,.features{grid-template-columns:1fr}
+    .gallery{grid-template-columns:1fr;max-width:320px}
+    .foot-in{flex-direction:column;align-items:flex-start;gap:14px}
+    .foot-links{flex-wrap:wrap;gap:14px 18px}
+  }
+  @media(max-width:460px){
+    .nav-links{gap:12px}
+    .nav-cta{padding:8px 13px;font-size:14px}
+    .trust{font-size:12px;gap:7px}
+    .an-shot .device{max-width:100%}
+    .os-band{padding:20px 18px;border-radius:18px}
+    .bo{padding:14px 15px}
+    .phone--float{width:140px;right:-2%}
+  }
+  /* Nothing may push the page sideways — the one rule that makes a layout
+     feel finished on a phone regardless of what's inside it. */
+  img,svg,video{max-width:100%;height:auto}
+  .term,.gallery,.features,.platforms,.steps{min-width:0}
 </style>
 </head>
 <body>
@@ -306,10 +376,11 @@
     <a class="brand" href="#top"><img src="/assets/icon.png" alt="Pounce" /> pounce</a>
     <div class="nav-links">
       <a class="lnk" href="#features">Features</a>
+      <a class="lnk" href="#analytics">Analytics</a>
       <a class="lnk" href="/docs/getting-started">Docs</a>
       <a class="lnk" href="/how-it-works">How it works</a>
       <a class="lnk" href="/changelog">Changelog</a>
-      <a class="lnk" href="https://github.com/pounce-ai/pounce" target="_blank" rel="noopener">GitHub</a>
+      <a class="lnk" href="https://github.com/pounce-ai/pounce" target="_blank" rel="noopener">Open source</a>
       <span class="nav-live"><span class="led"></span>iOS&nbsp;live</span>
       <a class="nav-cta" href="https://apps.apple.com/app/id6779601425" target="_blank" rel="noopener">Download</a>
     </div>
@@ -350,6 +421,8 @@
       <span class="chip">opencode</span>
       <span class="sep">/</span>
       <span>Pair in one QR scan</span>
+      <span class="sep">/</span>
+      <span>Open source · MIT</span>
     </div>
   </div>
 
@@ -513,6 +586,73 @@
   </div>
 </section>
 
+<!-- analytics -->
+<section id="analytics">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="kicker">know what you're spending</span>
+      <h2 class="sec-title">Every token, accounted for</h2>
+      <p class="sec-lead">Pounce reads the usage your agents already write to disk — no extra instrumentation, nothing sent anywhere. Tokens, spend, sessions and messages across every machine and every agent, from a week to a year.</p>
+    </div>
+    <div class="analytics">
+      <figure class="an-shot reveal">
+        <div class="device"><img src="/assets/shot-activity.png" alt="Pounce Activity screen — tokens, estimated spend, sessions and messages across every agent, with a contribution heatmap and per-plan usage" loading="lazy" /></div>
+      </figure>
+      <div class="an-copy">
+        <div class="an-item reveal">
+          <h3>The number your agent reports</h3>
+          <p>Token counts come straight from each agent's own records, so they match the figure on your Claude or Codex account page. The cached share sits beside the total — most of a long session is context re-read from cache, and that's cheap, not waste.</p>
+        </div>
+        <div class="an-item reveal">
+          <h3>Tap any figure to open it up</h3>
+          <p>Every stat opens onto its own page: a week/month/year trend, then a breakdown by agent, by model, and by project. That's where you find the model quietly costing more than the bigger one next to it.</p>
+        </div>
+        <div class="an-item reveal">
+          <h3>Plan usage, not guesswork</h3>
+          <p>On a subscription the marginal cost of a turn is zero, so Pounce shows how much of each rolling rate-limit window you've burned and when it resets. Dollar figures are labelled list price — never passed off as a bill.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- open source + what it's built on -->
+<section id="open-source">
+  <div class="wrap">
+    <div class="os-band reveal">
+      <div class="os-copy">
+        <span class="kicker">open source</span>
+        <h2 class="sec-title" style="font-size:clamp(26px,3.6vw,40px)">Read the code. It's all there.</h2>
+        <p class="sec-lead">Pounce is <b>MIT licensed</b> and developed in the open — the phone app, the desktop app, the Bridge that hosts your agents, and the tunnel that reaches them. Your agents run on your machines and your transcripts stay there, and you don't have to take our word for any of it.</p>
+        <div class="os-actions">
+          <a class="btn btn--ghost" href="https://github.com/pounce-ai/pounce" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.7.5.9 5.3.9 11.6c0 4.9 3.2 9.1 7.6 10.6.6.1.8-.2.8-.6v-2c-3.1.7-3.8-1.5-3.8-1.5-.5-1.3-1.2-1.7-1.2-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.1 1.7 1.1 1 1.7 2.6 1.2 3.2.9.1-.7.4-1.2.7-1.5-2.5-.3-5.1-1.2-5.1-5.5 0-1.2.4-2.2 1.1-3-.1-.3-.5-1.4.1-2.9 0 0 .9-.3 3 1.1.9-.2 1.8-.4 2.8-.4s1.9.1 2.8.4c2.1-1.4 3-1.1 3-1.1.6 1.5.2 2.6.1 2.9.7.8 1.1 1.8 1.1 3 0 4.3-2.6 5.2-5.1 5.5.4.3.8 1 .8 2.1v3.1c0 .4.2.7.8.6 4.4-1.5 7.6-5.7 7.6-10.6C23.1 5.3 18.3.5 12 .5z"/></svg>
+            <span class="t"><small class="acc">pounce-ai/pounce</small><span>Star on GitHub</span></span>
+          </a>
+          <a class="btn btn--ghost" href="https://github.com/pounce-ai/pounce/blob/main/LICENSE" target="_blank" rel="noopener">
+            <span class="t"><small class="acc">permissive</small><span>MIT License</span></span>
+          </a>
+        </div>
+      </div>
+      <div class="built-on">
+        <div class="bo-title mono">built on</div>
+        <a class="bo" href="https://expo.dev" target="_blank" rel="noopener">
+          <b>Expo</b>
+          <span>The phone app is React Native on Expo — one codebase for iOS and Android, shipped with EAS. The desktop app runs the very same screens on React&nbsp;Native for macOS.</span>
+        </a>
+        <a class="bo" href="https://www.iroh.computer" target="_blank" rel="noopener">
+          <b>Iroh</b>
+          <span>Reaching your machine from anywhere is direct peer-to-peer over Iroh — that's why there's no VPN, no port-forwarding and no server of ours in the middle.</span>
+        </a>
+        <a class="bo" href="https://github.com/ccusage/ccusage" target="_blank" rel="noopener">
+          <b>ccusage</b>
+          <span>Usage figures are read by ccusage, the de-facto reader for coding-agent records — so the numbers match what your agent reports, not our interpretation of it.</span>
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- final cta -->
 <section>
   <div class="wrap">
@@ -544,6 +684,7 @@
       <a href="https://github.com/pounce-ai/pounce/releases/latest" target="_blank" rel="noopener">Bridge</a>
       <a href="/how-it-works">How it works</a>
       <a href="/privacy">Privacy</a>
+      <a href="https://github.com/pounce-ai/pounce/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
     </div>
     <div class="foot-c">© 2026 Pounce AI</div>
   </div>
