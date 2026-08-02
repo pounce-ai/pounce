@@ -1,4 +1,4 @@
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { PounceIcon } from "../ui/native/Icon";
 import type { IoniconName } from "../ui/native/icon-map";
@@ -20,6 +20,7 @@ export function StatTile({
   hero,
   numeric,
   format,
+  onPress,
 }: {
   label: string;
   /** Pre-formatted fallback, and what's shown when there's nothing to tween
@@ -35,6 +36,10 @@ export function StatTile({
    *  same number moving. */
   numeric?: number | null;
   format?: (n: number) => string;
+  /** Makes the tile a button into its own detail. A chevron appears beside the
+   *  label so the tile reads as openable rather than as a number that happens
+   *  to respond to touch. */
+  onPress?: () => void;
 }) {
   const { theme } = useUnistyles();
   const up = delta?.startsWith("+");
@@ -42,11 +47,14 @@ export function StatTile({
   const animatable = numeric != null && Number.isFinite(numeric) && !!format;
   const tweened = useTweenedNumber(animatable ? numeric : 0);
   const shown = animatable ? format(tweened) : value;
-  return (
-    <View style={[s.tile, hero && s.tileHero]}>
+  const body = (
+    <>
       <View style={s.labelRow}>
         {icon ? <PounceIcon name={icon} size={11} color={theme.colors.fgFaint} /> : null}
         <Text style={s.label}>{label}</Text>
+        {onPress ? (
+          <PounceIcon name="chevron-forward" size={11} color={theme.colors.fgFaint} />
+        ) : null}
       </View>
       <Text numberOfLines={1} style={[s.value, hero && s.valueHero]}>
         {shown}
@@ -68,7 +76,23 @@ export function StatTile({
           </Text>
         ) : null}
       </View>
-    </View>
+    </>
+  );
+  // Two real elements rather than one `Box = onPress ? Pressable : View`: only
+  // Pressable accepts a FUNCTION as `style`, and a plain View given one drops
+  // the style entirely — silently, with no warning. That turned every
+  // non-tappable tile into unstyled text (no card, no border, no flex) while
+  // the one tappable tile looked fine, which is a nasty way to find out.
+  if (!onPress) return <View style={[s.tile, hero && s.tileHero]}>{body}</View>;
+  return (
+    <Pressable
+      style={({ pressed }) => [s.tile, hero && s.tileHero, pressed && s.pressed]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}: ${value}. Show breakdown`}
+    >
+      {body}
+    </Pressable>
   );
 }
 
@@ -87,6 +111,7 @@ const s = StyleSheet.create((theme) => ({
     borderColor: "rgba(124, 111, 240, 0.4)",
     backgroundColor: "rgba(124, 111, 240, 0.08)",
   },
+  pressed: { opacity: 0.72 },
   labelRow: { flexDirection: "row", alignItems: "center", gap: 4 },
   label: {
     fontSize: 11,

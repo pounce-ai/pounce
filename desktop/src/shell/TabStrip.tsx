@@ -24,6 +24,15 @@ import { closeTab, nav$, selectTab, tabKey, type Route } from "../shims/router";
 /** Icon per non-session tab — a page rather than a thread. */
 const PANE_ICON: Record<string, React.ComponentProps<typeof Ionicons>["name"]> = {
   "/space": "folder-outline",
+  "/metric": "stats-chart-outline",
+};
+
+/** Display name for a `/metric` tab — the metric it opened. */
+const METRIC_LABEL: Record<string, string> = {
+  tokens: "Tokens",
+  spend: "Spend",
+  sessions: "Sessions",
+  messages: "Messages",
 };
 
 /** Display name for a `/space` tab, from its `repoId hostId` key. Falls back to
@@ -78,7 +87,11 @@ export function TabStrip() {
         // A Space tab is named after its project. The key encodes `repoId
         // hostId`, so the display name comes from the same projects collection
         // the sidebar reads — never a raw `repo:foo` id.
-        const paneLabel = paneIcon ? spaceLabel(tab.params.key, projectNames) : null;
+        const paneLabel = !paneIcon
+          ? null
+          : tab.path === "/metric"
+            ? (METRIC_LABEL[tab.params.key ?? ""] ?? "Metric")
+            : spaceLabel(tab.params.key, projectNames);
         return (
           <Pressable
             key={tabKey(tab)}

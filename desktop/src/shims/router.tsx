@@ -50,7 +50,7 @@ function parse(href: Href): Route {
  * files, which is reading and editing, not a dialog. They get a tab so they can
  * live beside the sessions you're switching between.
  */
-const PANES = new Set(["/space"]);
+const PANES = new Set(["/space", "/metric"]);
 
 /**
  * Identity of an open tab: what makes two hrefs "the same thing already open".
@@ -74,7 +74,12 @@ export function tabKey(r: Route): string {
  * project's numbers under another project's name.
  */
 export function screenKey(r: Route): string {
-  return r.path === "/space" ? `/space:${r.params.key ?? ""}` : tabKey(r);
+  if (r.path === "/space") return `/space:${r.params.key ?? ""}`;
+  // Same reason as Space: one metric tab, but opening Sessions while Tokens is
+  // showing has to remount — otherwise you'd read one metric's breakdown under
+  // another metric's title.
+  if (r.path === "/metric") return `/metric:${r.params.key ?? ""}`;
+  return tabKey(r);
 }
 
 /**

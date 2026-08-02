@@ -11,6 +11,7 @@ import {
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "expo-router";
 import { PounceIcon } from "../ui/native/Icon";
 import { AgentLogo, IS_DESKTOP } from "../ui";
 import { agentLabel } from "../ui/tokens";
@@ -70,6 +71,7 @@ const PERIOD_LABEL: Record<Period, string> = { week: "Week", month: "Month", yea
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const { theme } = useUnistyles();
+  const router = useRouter();
   const [period, setPeriod] = useState<Period>("month");
   const [selected, setSelected] = useState<string | null>(null);
   const [chartWidth, setChartWidth] = useState(0);
@@ -129,6 +131,19 @@ export default function DashboardScreen() {
   // is lost — the all-time best still has its place in the subtitle above.
   const run = useMemo(() => streaks(year), [year]);
   const windowRun = useMemo(() => streaks(window), [window]);
+  // How much of the window's token total was re-read context. A subscript on
+  // the Tokens tile, not a deduction from it.
+  const cachedTokens = useMemo(
+    () => window.reduce((n, d) => n + (d.usage?.cacheRead ?? 0), 0),
+    [window],
+  );
+  // Each tile opens its own page, carrying the period it was tapped in so the
+  // detail always opens on the window you were looking at.
+  const openMetric = useCallback(
+    (key: "tokens" | "spend" | "sessions" | "messages") =>
+      router.push({ pathname: "/metric", params: { key, period } }),
+    [router, period],
+  );
   // One agent list for the whole screen: everything with activity in this
   // window, plus everything that reported a plan. Plan usage listing three
   // agents while "By agent" listed two was the same data answering two
@@ -370,8 +385,15 @@ export default function DashboardScreen() {
                     label="Tokens"
                     value={fmtTokens(now.tokens)}
                     delta={fmtDelta(delta(now.tokens, before.tokens))}
+                    // The headline is the agents' own reported total; this says
+                    // how much of it was context re-read from cache rather than
+                    // new input. Shown beside the figure, never taken off it —
+                    // subtracting would produce a number that matches no
+                    // agent's own profile page.
+                    hint={cachedTokens > 0 ? `${fmtTokens(cachedTokens)} cached` : null}
                     icon="sparkles"
                     hero
+                    onPress={() => openMetric("tokens")}
                   />
                   {/* The label itself changes with provenance: "Reported" is what
                   agents billed, "Estimated" is tokens priced at public list
@@ -396,6 +418,7 @@ export default function DashboardScreen() {
                     }
                     icon="card-outline"
                     inverse
+                    onPress={() => openMetric("spend")}
                   />
                 </View>
                 <View style={[s.tiles, IS_DESKTOP && s.flex1]}>
@@ -404,12 +427,14 @@ export default function DashboardScreen() {
                     value={fmtCount(now.sessions)}
                     delta={fmtDelta(delta(now.sessions, before.sessions))}
                     icon="chatbubbles-outline"
+                    onPress={() => openMetric("sessions")}
                   />
                   <StatTile
                     label="Messages"
                     value={fmtCount(now.messages)}
                     delta={fmtDelta(delta(now.messages, before.messages))}
                     icon="git-commit-outline"
+                    onPress={() => openMetric("messages")}
                   />
                 </View>
               </View>

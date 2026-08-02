@@ -50,6 +50,7 @@ import SyncHistoryScreen from "@pounce/app/screens/SyncHistory";
 import DiagnosticsScreen from "@pounce/app/screens/Diagnostics";
 import PairScreen from "../screens/Pair";
 import SpaceScreen from "@pounce/app/screens/Space";
+import MetricScreen from "@pounce/app/screens/Metric";
 import { FilterSheetContent } from "@pounce/app/components/FilterSheet";
 
 /** Filters as a routed modal card (same href as mobile) — the shared sheet
@@ -77,6 +78,7 @@ function FiltersModal() {
  *  container for a page you read, edit, and come back to. */
 const PANE_SCREENS: Record<string, ComponentType> = {
   "/space": SpaceScreen,
+  "/metric": MetricScreen,
 };
 
 const MODALS: Record<string, { component: ComponentType; width: number; height: number }> = {
