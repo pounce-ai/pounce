@@ -80,7 +80,7 @@ const slimThread = (t) => ({
   activity: t.activity,
 });
 
-export async function runMcpServer({ port }) {
+export async function runMcpServer({ port, version = "0.0.0" }) {
   const get = makeClient(port);
 
   // Fail fast with a fixable message rather than surfacing every tool call as
@@ -95,7 +95,9 @@ export async function runMcpServer({ port }) {
     process.exit(1);
   }
 
-  const server = new McpServer({ name: "pounce", version: "0.1.0" });
+  // Report the real package version — MCP clients surface this, and a
+  // hardcoded one makes every release look identical.
+  const server = new McpServer({ name: "pounce", version });
 
   server.tool(
     "search_history",

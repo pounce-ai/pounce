@@ -514,7 +514,7 @@ try {
     ].find(existsSync);
     if (!mcpEntry) throw new Error("mcp server missing — run `bun run build` in apps/cli");
     const { runMcpServer } = await import(pathToFileURL(mcpEntry).href);
-    await runMcpServer({ port: opts.port });
+    await runMcpServer({ port: opts.port, version: PKG.version });
   } else if (cmd === "version") console.log(PKG.version);
   else if (cmd === "help") console.log(HELP);
   else {
