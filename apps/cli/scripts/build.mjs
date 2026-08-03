@@ -20,6 +20,9 @@ const PKG = path.resolve(HERE, "..");
 // also has subpath imports, e.g. zigpty/idle).
 const EXTERNAL = [
   "@agentclientprotocol/sdk",
+  "@modelcontextprotocol/sdk",
+  "@modelcontextprotocol/sdk/*",
+  "zod",
   "@wterm/core",
   "qrcode",
   "qrcode-terminal",
@@ -39,4 +42,21 @@ execFileSync(
   ],
   { stdio: "inherit", cwd: PKG },
 );
-console.log("built dist/launcher.mjs");
+
+// `pounce mcp` — bundled the same way and for the same reason: `files` ships
+// only bin/ and dist/, so anything under src/ never reaches the published
+// package. The MCP SDK and zod stay external — they're ordinary dependencies
+// npm installs and resolves at runtime.
+execFileSync(
+  process.env.BUN_BIN || "bun",
+  [
+    "build",
+    path.join(PKG, "src/mcp.mjs"),
+    "--target=node",
+    ...EXTERNAL.flatMap((e) => ["--external", e]),
+    "--outfile",
+    path.join(PKG, "dist/mcp.mjs"),
+  ],
+  { stdio: "inherit", cwd: PKG },
+);
+console.log("built dist/launcher.mjs + dist/mcp.mjs");

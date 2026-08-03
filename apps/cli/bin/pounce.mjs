@@ -10,6 +10,7 @@
  *
  *   pounce            start + QR + wait for the phone
  *   pounce qr         start + QR, don't wait
+ *   pounce mcp        serve this machine's agent history over MCP (stdio)
  *   pounce status     bridge/tunnel/phone status
  *   pounce stop       stop the background bridge (and its tunnel)
  *   pounce logs [-f]  show the bridge log
@@ -35,7 +36,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import qrcode from "qrcode-terminal";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -474,11 +475,16 @@ ${bold("pounce")} — pair your phone with this machine ${dim(`(use-pounce v${PK
   ${bold("pounce status")}     bridge / tunnel / phone status
   ${bold("pounce stop")}       stop the background bridge and its tunnel
   ${bold("pounce logs")} [-f]  show (or follow) the bridge log
+  ${bold("pounce mcp")}        serve your agent history to other AI tools over MCP ${dim("(stdio)")}
 
   --port <n>      bridge port                      ${dim("(default 8099)")}
   --token <t>     pairing token                    ${dim("(default: random, kept in ~/.pounce)")}
   --lan           skip the iroh tunnel — QR works on this Wi-Fi only
   --foreground    run the bridge attached to this terminal
+
+Give any MCP-capable agent your cross-agent history:
+  ${dim("claude mcp add pounce -- npx use-pounce mcp")}
+Read-only: search history, list threads, read a thread, read your markers.
 
 Off-LAN pairing rides an iroh p2p tunnel (no port-forwarding): scan the QR
 from anywhere — including a machine you're SSH'd into — and the phone
@@ -497,7 +503,19 @@ try {
   else if (cmd === "status") await cmdStatus(opts);
   else if (cmd === "stop") await cmdStop(opts);
   else if (cmd === "logs") cmdLogs(opts);
-  else if (cmd === "version") console.log(PKG.version);
+  else if (cmd === "mcp") {
+    // Import lazily: the MCP SDK is only needed for this one command, and
+    // pairing (the hot path) shouldn't pay to load it.
+    // dist/ in the published package, src/ when run from the monorepo —
+    // same resolution the bridge launcher uses above.
+    const mcpEntry = [
+      path.join(HERE, "..", "dist", "mcp.mjs"),
+      path.join(HERE, "..", "src", "mcp.mjs"),
+    ].find(existsSync);
+    if (!mcpEntry) throw new Error("mcp server missing — run `bun run build` in apps/cli");
+    const { runMcpServer } = await import(pathToFileURL(mcpEntry).href);
+    await runMcpServer({ port: opts.port });
+  } else if (cmd === "version") console.log(PKG.version);
   else if (cmd === "help") console.log(HELP);
   else {
     console.error(red(`unknown command: ${cmd}`));

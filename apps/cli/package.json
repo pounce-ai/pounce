@@ -38,10 +38,12 @@
     "@agentclientprotocol/claude-agent-acp": "^0.58.1",
     "@agentclientprotocol/codex-acp": "^1.1.2",
     "@agentclientprotocol/sdk": "^1.2.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@wterm/core": "^0.3.0",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
-    "zigpty": "^0.2.1"
+    "zigpty": "^0.2.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "vitest": "^2.1.0"
