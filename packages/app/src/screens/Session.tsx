@@ -44,6 +44,7 @@ import {
   isMarked,
   isThreadInteractive,
   markOpened,
+  mergeRemoteMarkers,
   modelForThread,
   pendingPrompts$,
   pendingTurns$,
@@ -70,8 +71,10 @@ import {
   diffTotals,
   fetchGitChanges,
   fetchMessages,
+  fetchThreadMarkers,
   fetchUsage,
   interruptTurn,
+  pushMarker,
   respondPermission,
   respondPrompt,
   searchMessages,
@@ -300,6 +303,22 @@ export default function SessionScreen() {
   useEffect(() => {
     refreshUsage();
   }, [refreshUsage]);
+
+  // Pull markers made on another device once per thread open. Additive: a
+  // local override always wins, so a partial read can't undo one (and a failed
+  // read resolves to [] rather than an empty authoritative set).
+  useEffect(() => {
+    if (!host || !id || id.startsWith("new_")) return;
+    let cancelled = false;
+    fetchThreadMarkers(host, id)
+      .then((remote) => {
+        if (!cancelled && remote.length) mergeRemoteMarkers(id, remote);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [host, id]);
 
   const retry = useCallback(() => {
     void recentQ.refetch();
@@ -591,9 +610,15 @@ export default function SessionScreen() {
     (ev: TimelineEvent) => {
       // Optimistic ids are replaced on refetch — a toggle here would orphan.
       if (ev.id.startsWith("opt:")) return;
+      // Mirror every toggle to the machine that owns the thread, so a second
+      // device (and the bridge's own consumers) see it. Best-effort by design.
+      const toggle = () => {
+        const next = toggleMarker(id!, ev, session?.agent);
+        if (host) void pushMarker(host, id!, ev.id, next);
+      };
       // Desktop has no ActionSheetIOS — long-press toggles the marker directly.
       if (DESKTOP) {
-        toggleMarker(id!, ev, session?.agent);
+        toggle();
         return;
       }
       const marked = isMarked(id!, ev, session?.agent);
@@ -604,12 +629,12 @@ export default function SessionScreen() {
       ActionSheetIOS.showActionSheetWithOptions(
         { options, cancelButtonIndex: options.length - 1 },
         (i) => {
-          if (i === 0) toggleMarker(id!, ev, session?.agent);
+          if (i === 0) toggle();
           else if (i === 1 && text) Clipboard.setString(text);
         },
       );
     },
-    [id],
+    [id, host, session?.agent],
   );
 
   // One message → one streamed turn. Only pre-delivery errors propagate (so the

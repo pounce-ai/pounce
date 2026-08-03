@@ -471,15 +471,34 @@ export function setAgentCaps(agentId: string, caps: AgentCapabilities): void {
   upsertRows(agentCaps, [{ ...caps, id: agentId }]);
 }
 
-export function toggleMarker(sessionId: string, ev: TimelineEvent, agent?: string): void {
+/** Flip a marker locally. Returns the override that now applies, or null when
+ *  the toggle landed back on the default and the override was dropped — the
+ *  caller mirrors exactly that to the bridge (see `pushMarker`). This module
+ *  stays free of service imports: services/bridge already imports from here, so
+ *  reaching back would close a require cycle. */
+export function toggleMarker(sessionId: string, ev: TimelineEvent, agent?: string): boolean | null {
   const key = `${sessionId}|${ev.id}`;
   const next = !isMarked(sessionId, ev, agent);
   // Store only deviations from the default so the collection stays sparse.
   if (next === defaultMarked(ev, agent)) {
     if (markers.has(key)) markers.delete(key);
-  } else {
-    upsertRows(markers, [{ id: key, marked: next }]);
+    return null;
   }
+  upsertRows(markers, [{ id: key, marked: next }]);
+  return next;
+}
+
+/** Merge overrides the bridge holds (made on another device) into the local
+ *  collection. ADDITIVE ONLY: an override this device already has wins, so a
+ *  stale or partial read can never silently undo a local marker. */
+export function mergeRemoteMarkers(
+  sessionId: string,
+  remote: { eventId: string; marked: boolean }[],
+): void {
+  const rows = remote
+    .filter((r) => r?.eventId && !markers.has(`${sessionId}|${r.eventId}`))
+    .map((r) => ({ id: `${sessionId}|${r.eventId}`, marked: !!r.marked }));
+  if (rows.length) upsertRows(markers, rows);
 }
 
 /** Merge a rename/emoji patch for a device; empty values clear the override. */
