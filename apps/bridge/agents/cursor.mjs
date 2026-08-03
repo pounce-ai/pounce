@@ -18,7 +18,16 @@
  *        writing cursor-agent). Reasoning is stored redacted (opaque), so
  *        history shows no thinking; the LIVE stream still carries real thinking.
  */
-import { existsSync, readdirSync, statSync, watch } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  watch,
+  writeFileSync,
+} from "node:fs";
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import os from "node:os";
@@ -36,6 +45,27 @@ import { openSqliteReadOnly } from "./sqlite.mjs";
 
 const BIN = "cursor-agent";
 const CHATS_DIR = path.join(os.homedir(), ".cursor", "chats");
+/** Last known `cursor-agent status` verdict — see authStatus for why. */
+const AUTH_FILE = path.join(os.homedir(), ".pounce", "cursor-auth.json");
+
+function readAuthCache() {
+  try {
+    const o = JSON.parse(readFileSync(AUTH_FILE, "utf8"));
+    return typeof o?.at === "number" && o.result ? o : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeAuthCache(result) {
+  if (!result) return;
+  try {
+    mkdirSync(path.dirname(AUTH_FILE), { recursive: true });
+    const tmp = `${AUTH_FILE}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify({ at: Date.now(), result }));
+    renameSync(tmp, AUTH_FILE);
+  } catch {}
+}
 const RUNNING_WINDOW_MS = 120_000;
 const LIVE_EXTENDED_WINDOW_MS = 2 * 60 * 60_000;
 const TURN_TIMEOUT_MS = Number(process.env.BRIDGE_TURN_TIMEOUT_MS || 300_000);
@@ -85,12 +115,35 @@ export class CursorAdapter {
    * block until `cursor-agent login` (browser OAuth) or CURSOR_API_KEY is set —
    * so diagnostics surface "installed but not signed in" like gh does. Parses
    * `cursor-agent status` stdout ("✓ Logged in as <email>" / "Not logged in").
-   * Returns { required, authenticated, account } (never throws). Cached ~60s
-   * since isAvailable (every /v1/agents) and the doctor both call it.
+   * Returns { required, authenticated, account } (never throws).
+   *
+   * `cursor-agent status` is a NETWORK call — measured at 2-3s, and it was the
+   * whole of the bridge's cold start once the other agents stopped spawning
+   * (claude/codex/opencode together came to ~27ms). A 60s in-process cache
+   * doesn't help a process that just booted, and isAvailable runs on every
+   * /v1/agents, so the answer is persisted: serve the last known verdict
+   * immediately and refresh in the background when it's older than a minute.
+   * A login or logout therefore shows up one call late instead of costing every
+   * caller three seconds.
    */
   authStatus() {
     if (this._auth && Date.now() - this._auth.at < 60_000) return this._auth.promise;
-    const promise = this._probeAuth();
+
+    const disk = readAuthCache();
+    if (disk) {
+      // Serve stale, revalidate behind it.
+      this._auth = { at: Date.now(), promise: Promise.resolve(disk.result) };
+      if (Date.now() - disk.at > 60_000) void this._refreshAuth();
+      return this._auth.promise;
+    }
+    return this._refreshAuth();
+  }
+
+  _refreshAuth() {
+    const promise = this._probeAuth().then((result) => {
+      writeAuthCache(result);
+      return result;
+    });
     this._auth = { at: Date.now(), promise };
     return promise;
   }

@@ -8,7 +8,15 @@
  */
 import os from "node:os";
 import path from "node:path";
-import { existsSync, readlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { readConfig, binOverride } from "./config.mjs";
 
@@ -229,11 +237,83 @@ function addCwd(map, name, cwd) {
 }
 
 /**
- * Probe whether a CLI answers `--version` (≤5s). Resolves the trimmed version
- * string or null. Used for `isAvailable` so an agent without its binary simply
- * doesn't appear in the app — same UX as the old daemon's `available` flag.
+ * Locate a binary on the agent PATH without running it. Returns an absolute
+ * path or null. Pure stat work — the cheap half of "is this agent installed?".
+ */
+export function resolveBin(name) {
+  const pinned = binOverride(name);
+  if (pinned) return existsSync(pinned) ? pinned : null;
+  const exts = IS_WIN ? (process.env.PATHEXT || ".EXE;.CMD;.BAT").split(";") : [""];
+  for (const dir of (agentEnv().PATH || "").split(path.delimiter)) {
+    if (!dir) continue;
+    for (const ext of exts) {
+      const full = path.join(dir, name + ext);
+      try {
+        if (existsSync(full)) return full;
+      } catch {}
+    }
+  }
+  return null;
+}
+
+/**
+ * Version cache, persisted across restarts at ~/.pounce/bin-versions.json.
+ *
+ * Keyed on the binary's absolute path plus its mtime and size, so an upgraded
+ * CLI misses the cache and gets re-probed while an unchanged one never does.
+ */
+const VERSION_FILE = path.join(os.homedir(), ".pounce", "bin-versions.json");
+let versionCache;
+
+function loadVersionCache() {
+  if (versionCache) return versionCache;
+  try {
+    versionCache = JSON.parse(readFileSync(VERSION_FILE, "utf8"));
+  } catch {
+    versionCache = {};
+  }
+  return versionCache;
+}
+
+function saveVersionCache() {
+  try {
+    mkdirSync(path.dirname(VERSION_FILE), { recursive: true });
+    const tmp = `${VERSION_FILE}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(versionCache));
+    renameSync(tmp, VERSION_FILE); // atomic: a torn file would cost a re-probe
+  } catch {}
+}
+
+/**
+ * The trimmed first line of a CLI's `--version`, or null when it isn't
+ * installed or doesn't answer. Backs `isAvailable`, so an agent without its
+ * binary simply doesn't appear in the app.
+ *
+ * Spawning is the last resort, not the first. `isAvailable` runs on every
+ * /v1/agents AND inside getThreads, both cached for only 20s — so the old
+ * unconditional probe respawned every agent CLI three times a minute forever,
+ * and cost 1.4s of a 2.1s cold start (measured, 4 agents). A missing binary now
+ * costs one stat, and an unchanged one costs a stat plus a JSON lookup.
  */
 export async function binVersion(bin, args = ["--version"]) {
-  const { code, out } = await runCollect(binPath(bin), args, { env: agentEnv(), maxBytes: 4096 });
-  return code === 0 ? out.trim().split("\n")[0] || "" : null;
+  const resolved = resolveBin(binPath(bin));
+  if (!resolved) return null; // not installed — nothing to spawn
+
+  let stamp = null;
+  try {
+    const st = statSync(resolved);
+    stamp = `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return null;
+  }
+  const key = `${resolved}|${args.join(" ")}`;
+  const cache = loadVersionCache();
+  const hit = cache[key];
+  if (hit && hit.stamp === stamp) return hit.version;
+
+  const { code, out } = await runCollect(resolved, args, { env: agentEnv(), maxBytes: 4096 });
+  const version = code === 0 ? out.trim().split("\n")[0] || "" : null;
+  cache[key] = { stamp, version };
+  saveVersionCache();
+  return version;
 }

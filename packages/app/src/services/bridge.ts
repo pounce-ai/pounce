@@ -381,7 +381,7 @@ async function streamThreadsFromBridge(
 /**
  * Progressive connect-time sync: fetch each device's status/agents, then stream
  * its threads page-by-page, rebuilding the store after each batch so the list
- * fills in as pages land instead of blocking on the whole (cold-dial) fetch.
+ * fills in as pages land instead of blocking on the whole fetch.
  * Used only on connect — pull-to-refresh/periodic stay on the atomic batch path
  * to avoid a shrink-then-grow flicker over already-shown data.
  */
@@ -1168,6 +1168,48 @@ export function gitCommit(hostId: string, cwd: string, message: string) {
 }
 export function gitPush(hostId: string, cwd: string) {
   return gitPost<{ ok: boolean; output?: string }>(hostId, "/v1/git/push", { cwd });
+}
+
+export interface MarkerOverride {
+  threadId: string;
+  eventId: string;
+  marked: boolean;
+}
+
+/**
+ * Mirror a marker toggle to the machine that owns the thread.
+ *
+ * Fire-and-forget: markers are an override layer over a default the client
+ * computes itself, so the local collection stays authoritative for rendering
+ * and a failed push costs cross-device visibility, never the user's own state.
+ * `marked: null` clears the override (the toggle landed back on the default).
+ */
+export function pushMarker(
+  hostId: string,
+  threadId: string,
+  eventId: string,
+  marked: boolean | null,
+) {
+  return gitPost<{ ok: boolean }>(hostId, "/v1/markers", { threadId, eventId, marked });
+}
+
+/** Overrides the bridge holds for one thread — markers made on another device. */
+export async function fetchThreadMarkers(
+  hostId: string,
+  threadId: string,
+): Promise<MarkerOverride[]> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return [];
+  try {
+    const { markers } = await get<{ markers: MarkerOverride[] }>(
+      cfg,
+      `/v1/markers?thread=${encodeURIComponent(threadId)}`,
+      15_000,
+    );
+    return markers ?? [];
+  } catch {
+    return []; // a failed read is never authoritative — merge nothing
+  }
 }
 export function gitPR(
   hostId: string,

@@ -9,7 +9,11 @@
  * strictly more precise than a TTL.
  */
 export class HistoryCache {
-  constructor({ maxEntries = 8, maxTotalBytes = 32 * 1024 * 1024 } = {}) {
+  // The byte cap is the real memory guard, so the entry count only needs to be
+  // high enough that ordinary browsing doesn't evict. At 8, scrolling a ninth
+  // thread threw away a parsed history worth 133ms to rebuild (measured on a
+  // 100MB transcript; a warm hit is 0.0ms).
+  constructor({ maxEntries = 48, maxTotalBytes = 32 * 1024 * 1024 } = {}) {
     this.maxEntries = maxEntries;
     this.maxTotalBytes = maxTotalBytes;
     this.map = new Map(); // key -> { events, bytes } (Map order = LRU order)

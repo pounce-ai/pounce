@@ -55,6 +55,7 @@ export class CodexAdapter {
       root: ROOT,
       match: (name) => FILE_RE.test(name),
       scanFile: (file, st) => this._scanRollout(file, st),
+      cacheName: "codex",
     });
   }
 

@@ -17,6 +17,8 @@
  */
 import http from "node:http";
 import net from "node:net";
+import { createHash } from "node:crypto";
+import { gzip } from "node:zlib";
 import { execFileSync, spawn } from "node:child_process";
 import {
   createReadStream,
@@ -32,6 +34,13 @@ import { pathToFileURL } from "node:url";
 import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import { createHost } from "./agents/host.mjs";
+import {
+  clearThreadMarkers,
+  listMarkers,
+  replaceThreadMarkers,
+  setMarker,
+} from "./agents/markers.mjs";
+import { Store } from "./agents/store.mjs";
 import { toAtif } from "./agents/atif.mjs";
 import { resolvePermission } from "./agents/acp.mjs";
 import {
@@ -103,8 +112,8 @@ async function cached(key, ttl, fn) {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < ttl) return hit.value;
   // Coalesce: with a client syncing every ~10s and the warm loop every 15s, a
-  // slow (cold-dial) probe outlives the interval — without this, every tick
-  // spawned ANOTHER probe process and they accumulated unboundedly.
+  // slow refresh outlives the interval — without this, every tick started
+  // ANOTHER one and they accumulated unboundedly.
   const pending = inflight.get(key);
   if (pending) return pending;
   const run = (async () => {
@@ -433,7 +442,12 @@ function repoInfo(cwd) {
 // machine) and fold worktree sessions into that project's folder instead of a
 // generic, collision-prone "Workspace". All worktrees under one workspace share
 // an origin, so resolve once per workspace id and cache the hit permanently.
-const wsRepoCache = new Map(); // workspace id -> real repo name
+//
+// Persisted: a resolved workspace→repo mapping is a fact about a directory that
+// doesn't change, and rediscovering it costs a `git rev-parse` per workspace on
+// every boot. Only successes are stored — an unresolved workspace stays absent
+// so it retries (a worktree can be archived before it's ever resolved).
+const wsRepoCache = new Store("worktree-repos");
 
 /** Origin repo name for a worktree cwd, via its git common dir (…/<repo>/.git). */
 async function realRepoForWorktree(cwd) {
@@ -504,8 +518,8 @@ async function listThreads(agent, onPage) {
 
 /** Stream threads to `sink` page-by-page as the daemon paginates — same per-thread
  *  shaping getThreads does (provisional activity + worktree→repo fold), applied
- *  per page so the app can render progressively instead of blocking on every
- *  cold-dial page. */
+ *  per page so the app can render progressively instead of blocking until the
+ *  whole list is built. */
 async function streamThreads(sink) {
   const agents = await getAgents();
   // Same as getThreads: list threads for every JSONL agent that has sessions on
@@ -557,8 +571,7 @@ async function getThreads(fresh = false) {
     }
 
     // Enrich live threads with real activity from their turn history in the
-    // background. Each probe is a fresh Iroh round-trip, so awaiting all of them
-    // here previously made the first sync take ~40s. Instead we mutate these same
+    // background rather than blocking the list on it. We mutate these same
     // objects in place; since the cache holds these references, the next poll
     // (the app refreshes on an interval) serves the enriched data.
     void enrichThreadActivity(threads);
@@ -1100,13 +1113,67 @@ function readBody(req) {
   });
 }
 
+/** Below this, gzip's ~20-byte envelope and the CPU cost aren't worth it. */
+const GZIP_MIN_BYTES = 1024;
+
+/**
+ * JSON response with conditional-GET validation and gzip.
+ *
+ * The etag is hashed from the bytes actually being sent, NOT from a version
+ * counter over the session index: `getThreads` hands out object references that
+ * `enrichThreadActivity` mutates in place afterwards, and `flagAwaitingPrompt`
+ * folds in PTY prompt state that never touches disk. Neither shows up in an
+ * fs.watch-derived counter, so a counter would serve 304s over exactly the
+ * updates the app polls for. Hashing the payload is correct by construction.
+ *
+ * Order matters: hash first and return 304 BEFORE gzip runs, so an unchanged
+ * poll — the common case at the app's ~10s sync — costs one sha1 instead of a
+ * full compress plus transfer.
+ *
+ * Request details ride on `res.reqInfo`, stamped by the main handler, so the
+ * ~40 existing call sites need no change.
+ */
 function send(res, code, body) {
   const json = JSON.stringify(body);
-  res.writeHead(code, {
+  const info = res.reqInfo || {};
+  const headers = {
     "content-type": "application/json",
     "access-control-allow-origin": "*",
+    vary: "accept-encoding",
+  };
+
+  // Validators only apply to a cacheable GET carrying a real body.
+  if (info.method === "GET" && code === 200) {
+    headers.etag = `W/"${createHash("sha1").update(json).digest("base64url").slice(0, 22)}"`;
+    // "no-cache" = store it, but revalidate every time — never serve stale.
+    // Required: the app calls bare `fetch` with no cache hints, so without an
+    // explicit directive the platform HTTP caches (NSURLSession URLCache,
+    // OkHttp) fall back to heuristic freshness and may never send
+    // If-None-Match at all, leaving the 304 path dead.
+    headers["cache-control"] = "no-cache";
+    if (info.ifNoneMatch === headers.etag) {
+      res.writeHead(304, headers);
+      return res.end();
+    }
+  }
+
+  const buf = Buffer.from(json);
+  if (!info.gzip || buf.length < GZIP_MIN_BYTES) {
+    res.writeHead(code, headers);
+    return res.end(buf);
+  }
+  // Async gzip: a multi-MB thread list must not stall the event loop while turn
+  // and thread SSE streams are live on other sockets. Fall back to identity if
+  // compression fails — the body is still valid, just larger.
+  gzip(buf, (err, out) => {
+    if (res.writableEnded) return;
+    if (err) {
+      res.writeHead(code, headers);
+      return res.end(buf);
+    }
+    res.writeHead(code, { ...headers, "content-encoding": "gzip" });
+    res.end(out);
   });
-  res.end(json);
 }
 
 let lastClientSeen = 0; // updated on every authed app request — a liveness signal
@@ -1243,6 +1310,13 @@ tick(); setInterval(tick, 1200);
 </script></body></html>`;
 
 const server = http.createServer(async (req, res) => {
+  // Everything send() needs from the request, captured once so the response
+  // helper stays a (res, code, body) call at ~40 sites.
+  res.reqInfo = {
+    method: req.method,
+    gzip: /\bgzip\b/.test(req.headers["accept-encoding"] || ""),
+    ifNoneMatch: req.headers["if-none-match"] || null,
+  };
   const url = new URL(req.url, "http://x");
   if (url.pathname === "/health") return send(res, 200, { ok: true });
 
@@ -1295,8 +1369,8 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/v1/threads")
       return send(res, 200, { threads: await getThreads(url.searchParams.get("fresh") === "1") });
     // SSE variant: emit each page of threads as it arrives so the app's initial
-    // connect renders progressively instead of blocking ~a minute on all the
-    // cold-dial pages. `data: {threads:[...]}` per page, then `data: {done:true}`.
+    // connect renders progressively instead of blocking until every page is
+    // built. `data: {threads:[...]}` per page, then `data: {done:true}`.
     if (url.pathname === "/v1/threads/stream") {
       res.writeHead(200, {
         "content-type": "text/event-stream",
@@ -1754,6 +1828,31 @@ const server = http.createServer(async (req, res) => {
       const { token } = await readBody(req);
       if (token && pushTokens.delete(token)) savePushTokens();
       return send(res, 200, { ok: true });
+    }
+    // Markers — the user's jump-to points in a thread. Overrides only; the
+    // client still computes the default for every event (see agents/markers.mjs).
+    if (url.pathname === "/v1/markers" && req.method === "GET") {
+      const thread = url.searchParams.get("thread") || null;
+      return send(res, 200, { markers: await listMarkers(thread) });
+    }
+    if (url.pathname === "/v1/markers" && req.method === "POST") {
+      const { threadId, eventId, marked } = await readBody(req);
+      if (!threadId || !eventId) return send(res, 400, { error: "threadId and eventId required" });
+      await setMarker(threadId, eventId, marked === null ? null : !!marked);
+      return send(res, 200, { ok: true, markers: await listMarkers(threadId) });
+    }
+    // Whole-thread replace: the app owns the full override set for a thread it
+    // has open, so a sync pushes the thread rather than diffing. Idempotent.
+    if (url.pathname === "/v1/markers/thread" && req.method === "PUT") {
+      const { threadId, markers } = await readBody(req);
+      if (!threadId) return send(res, 400, { error: "threadId required" });
+      const n = await replaceThreadMarkers(threadId, markers || []);
+      return send(res, 200, { ok: true, count: n });
+    }
+    if (url.pathname === "/v1/markers" && req.method === "DELETE") {
+      const thread = url.searchParams.get("thread");
+      if (!thread) return send(res, 400, { error: "thread required" });
+      return send(res, 200, { ok: true, cleared: await clearThreadMarkers(thread) });
     }
     if (url.pathname === "/v1/turn/permission" && req.method === "POST") {
       const { requestId, optionId } = await readBody(req);
