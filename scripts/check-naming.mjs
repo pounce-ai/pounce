@@ -64,7 +64,10 @@ function namedAfterAComponent(src, base) {
 /** A file that only re-exports another module is named after what it forwards. */
 function isReExportOnly(src) {
   const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-  const lines = code.split("\n").map((l) => l.trim()).filter(Boolean);
+  const lines = code
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
   return lines.length > 0 && lines.every((l) => /^export\s+(\*|\{|type\s)/.test(l));
 }
 
@@ -94,7 +97,10 @@ function walk(dir, { router }) {
 
     if (!pascal && namedAfterAComponent(src, base)) {
       const want = base[0].toUpperCase() + base.slice(1);
-      problems.push([full, `exports the component \`${want}\` — the file should be ${want}${path.extname(entry.name)}`]);
+      problems.push([
+        full,
+        `exports the component \`${want}\` — the file should be ${want}${path.extname(entry.name)}`,
+      ]);
     }
   }
 }
