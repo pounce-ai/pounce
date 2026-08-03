@@ -1,9 +1,9 @@
 /**
  * Per-thread usage — the shape every adapter's getUsage() returns.
  *
- * Hard rule: a dollar figure appears here ONLY if the agent itself reported
- * one. We removed the price table that used to live in server.mjs; nothing in
- * the bridge multiplies tokens by a rate any more. In practice:
+ * Hard rule: an adapter puts a dollar figure here ONLY if the agent itself
+ * reported one. No adapter multiplies tokens by a rate — the price table that
+ * used to live in server.mjs is gone and is not coming back. In practice:
  *
  *   claude    tokens from the transcript; USD only for turns the bridge drove
  *             (captured off the stream-json result envelope → cost-ledger)
@@ -12,9 +12,16 @@
  *             consumption and plan type instead of dollars
  *   cursor    neither
  *
- * `cost: null` means "not knowable", which is distinct from a real `0`. When
- * cost covers only part of a thread (Claude threads with turns taken outside
- * Pounce), `costComplete` is false and the UI marks the number as partial.
+ * `costSource` says which of three kinds of number this is, and they are not
+ * interchangeable: "agent" is what the tool reported, "admin-api" is what the
+ * org was billed, and "ccusage-est" is tokens priced at public list rates by
+ * ../agents/ccusage.mjs. The estimate is applied ABOVE this layer (host.mjs
+ * fills a null, server.mjs fills a null day) precisely so that adapters keep
+ * reporting only what they know, and so a real figure is never overwritten.
+ *
+ * `cost: null` therefore means no source at all could speak — distinct from a
+ * real `0`. When cost covers only part of a thread (Claude threads with turns
+ * taken outside Pounce), `costComplete` is false and the UI marks it partial.
  *
  * Context fill (`contextUsed` / `contextWindow`) is a different measurement to
  * the cumulative `tokens` above and must not be confused with it: `tokens.total`

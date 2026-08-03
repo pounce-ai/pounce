@@ -26,6 +26,7 @@ import { deriveTaskTimeline } from "../components/taskEvents";
 import { TaskProgressBar } from "../components/TaskProgress";
 import { WorkingIndicator } from "../components/WorkingIndicator";
 import { TimelineSkeleton } from "../components/Skeleton";
+import { useSessionChrome, usePublishTasks, usePublishUsage } from "../state/sessionChrome";
 import { Composer, type ComposerHandle, type ComposerSubmit } from "../components/Composer";
 import { DropZone, type DroppedFile } from "../components/DropZone";
 import { MarkerSheet, type Marker } from "../components/MarkerSheet";
@@ -43,6 +44,7 @@ import {
   isMarked,
   isThreadInteractive,
   markOpened,
+  mergeRemoteMarkers,
   modelForThread,
   pendingPrompts$,
   pendingTurns$,
@@ -69,8 +71,10 @@ import {
   diffTotals,
   fetchGitChanges,
   fetchMessages,
+  fetchThreadMarkers,
   fetchUsage,
   interruptTurn,
+  pushMarker,
   respondPermission,
   respondPrompt,
   searchMessages,
@@ -81,7 +85,7 @@ import {
   type ThreadUsage,
 } from "../services/bridge";
 import { PounceIcon } from "../ui/native/Icon";
-import { ACTIVITY_LABEL, AgentStatusIcon, BranchChip, pickSheet } from "../ui";
+import { ACTIVITY_LABEL, AgentStatusIcon, BranchChip, INPUT_TWEAKS, pickSheet } from "../ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "../ui/agent-meta";
 
 /** Desktop renders this screen in a wide pane: pickers use Alert instead of
@@ -288,6 +292,8 @@ export default function SessionScreen() {
   // Token/cost usage for the status bar — best-effort, refreshed on open and
   // after each turn. Skipped for freshly-created (new_*) threads.
   const [usage, setUsage] = useState<ThreadUsage | null>(null);
+  // Desktop's status bar renders this instead of a header summary; no-op on mobile.
+  usePublishUsage(usage);
   const refreshUsage = useCallback(() => {
     if (!live || !session?.id || session.id.startsWith("new_")) return;
     fetchUsage(session.hostId, session.agent, session.id, session.cwd)
@@ -297,6 +303,22 @@ export default function SessionScreen() {
   useEffect(() => {
     refreshUsage();
   }, [refreshUsage]);
+
+  // Pull markers made on another device once per thread open. Additive: a
+  // local override always wins, so a partial read can't undo one (and a failed
+  // read resolves to [] rather than an empty authoritative set).
+  useEffect(() => {
+    if (!host || !id || id.startsWith("new_")) return;
+    let cancelled = false;
+    fetchThreadMarkers(host, id)
+      .then((remote) => {
+        if (!cancelled && remote.length) mergeRemoteMarkers(id, remote);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [host, id]);
 
   const retry = useCallback(() => {
     void recentQ.refetch();
@@ -387,6 +409,8 @@ export default function SessionScreen() {
   // views disagree about which task is current.
   const tasks = useMemo(() => deriveTaskTimeline(rawEvents), [rawEvents]);
   const taskState = tasks.state;
+  // Desktop's status line renders the count and owns the toggle; no-op on mobile.
+  usePublishTasks(taskState);
 
   // --- markers: user messages by default, overrides for adds/removals ---
   const listRef = useRef<LegendListRef>(null);
@@ -399,7 +423,16 @@ export default function SessionScreen() {
   );
 
   const [markerSheet, setMarkerSheet] = useState(false);
-  const [envSheet, setEnvSheet] = useState(false);
+  // Search + "…" are local state on mobile (the screen owns its header) and
+  // shell-owned on desktop, where the tab strip renders those buttons instead.
+  const {
+    searchOpen: threadSearchOpen,
+    setSearchOpen: setThreadSearchOpen,
+    envOpen: envSheet,
+    setEnvOpen: setEnvSheet,
+    tasksOpen,
+    setTasksOpen,
+  } = useSessionChrome();
 
   // Sources attached to this thread (drag-drop on desktop / "+" in the
   // Environment sheet). Dropping records the reference and appends an @path
@@ -520,7 +553,6 @@ export default function SessionScreen() {
 
   // --- In-thread search: header toggle, debounced query against this thread's
   // history index (event-level hits), prev/next hop with yellow highlight.
-  const [threadSearchOpen, setThreadSearchOpen] = useState(false);
   const [threadQuery, setThreadQuery] = useState("");
   const [threadHits, setThreadHits] = useState<MessageSearchHit[]>([]);
   const [threadHitIdx, setThreadHitIdx] = useState(0);
@@ -565,20 +597,28 @@ export default function SessionScreen() {
     // would spam the bridge for nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadSearchOpen, threadQuery, session?.hostId, session?.agent, id]);
+  // `setThreadSearchOpen` comes from the chrome seam, not useState — it isn't a
+  // guaranteed-stable identity, so it has to be a dependency.
   const closeThreadSearch = useCallback(() => {
     setThreadSearchOpen(false);
     setThreadQuery("");
     setThreadHits([]);
     setSearchHighlight(undefined);
-  }, []);
+  }, [setThreadSearchOpen]);
 
   const onLongPressEvent = useCallback(
     (ev: TimelineEvent) => {
       // Optimistic ids are replaced on refetch — a toggle here would orphan.
       if (ev.id.startsWith("opt:")) return;
+      // Mirror every toggle to the machine that owns the thread, so a second
+      // device (and the bridge's own consumers) see it. Best-effort by design.
+      const toggle = () => {
+        const next = toggleMarker(id!, ev, session?.agent);
+        if (host) void pushMarker(host, id!, ev.id, next);
+      };
       // Desktop has no ActionSheetIOS — long-press toggles the marker directly.
       if (DESKTOP) {
-        toggleMarker(id!, ev, session?.agent);
+        toggle();
         return;
       }
       const marked = isMarked(id!, ev, session?.agent);
@@ -589,12 +629,12 @@ export default function SessionScreen() {
       ActionSheetIOS.showActionSheetWithOptions(
         { options, cancelButtonIndex: options.length - 1 },
         (i) => {
-          if (i === 0) toggleMarker(id!, ev, session?.agent);
+          if (i === 0) toggle();
           else if (i === 1 && text) Clipboard.setString(text);
         },
       );
     },
-    [id],
+    [id, host, session?.agent],
   );
 
   // One message → one streamed turn. Only pre-delivery errors propagate (so the
@@ -910,72 +950,81 @@ export default function SessionScreen() {
       {/* Desktop: the whole pane is a drop target — dragging files/folders from
           Finder adds them as sources. No-op wrapper on mobile. */}
       <DropZone style={{ flex: 1 }} onDropFiles={onDropFiles}>
-        {/* Header */}
-        <View style={[s.header, { paddingTop: insets.top }]}>
-          <View style={s.headerRow}>
-            {/* Desktop's sidebar is always visible — a back button has nothing
+        {/* Header. Desktop has none: the tab carries the title and the live
+            agent glyph, the status bar carries branch/checkout/usage, and the
+            tab strip carries search and "…". A header here would just say all
+            of it a second time. Only the find-in-thread bar remains, and only
+            while it's open. */}
+        <View style={[s.header, DESKTOP ? s.headerDesktop : { paddingTop: insets.top }]}>
+          {!DESKTOP ? (
+            <View style={s.headerRow}>
+              {/* Desktop's sidebar is always visible — a back button has nothing
               to go back to, so it's mobile-only. */}
-            {!DESKTOP ? (
-              <Pressable
-                onPress={() => router.back()}
-                style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
-              >
-                <Text style={s.backGlyph}>‹</Text>
-              </Pressable>
-            ) : null}
-            <AgentStatusIcon agent={session.agent} activity={headerActivity} size={18} />
-            <View style={s.flex1}>
-              <Text numberOfLines={1} style={s.headerTitle}>
-                {session.title}
-              </Text>
-              <View style={s.headerSubRow}>
-                {/* "Idle" reads as a broken state to users (the synced record
+              {!DESKTOP ? (
+                <Pressable
+                  onPress={() => router.back()}
+                  style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
+                >
+                  <Text style={s.backGlyph}>‹</Text>
+                </Pressable>
+              ) : null}
+              <AgentStatusIcon agent={session.agent} activity={headerActivity} size={18} />
+              <View style={s.flex1}>
+                {!DESKTOP ? (
+                  <Text numberOfLines={1} style={s.headerTitle}>
+                    {session.title}
+                  </Text>
+                ) : null}
+                <View style={s.headerSubRow}>
+                  {/* "Idle" reads as a broken state to users (the synced record
                     lags live turns, so it shows mid-work) — only surface
                     activity when there's something to say. */}
-                {headerActivity !== "idle" ? (
-                  <Text style={s.activityLabel}>{ACTIVITY_LABEL[headerActivity]}</Text>
-                ) : null}
-                {session.branch ? (
-                  <View style={s.shrink}>
-                    <BranchChip
-                      branch={session.branch}
-                      worktree={session.worktree}
-                      size={10}
-                      color={theme.colors.fgFaint}
-                    />
-                  </View>
-                ) : null}
-                <ThreadUsageSummary usage={usage} />
+                  {headerActivity !== "idle" ? (
+                    <Text style={s.activityLabel}>{ACTIVITY_LABEL[headerActivity]}</Text>
+                  ) : null}
+                  {session.branch ? (
+                    <View style={s.shrink}>
+                      <BranchChip
+                        branch={session.branch}
+                        worktree={session.worktree}
+                        size={10}
+                        color={theme.colors.fgFaint}
+                      />
+                    </View>
+                  ) : null}
+                  <ThreadUsageSummary usage={usage} />
+                </View>
               </View>
-            </View>
-            {/* Favourite + markers live in the "…" sheet — the header stays
+              {/* Favourite + markers live in the "…" sheet — the header stays
               back / title / search / more. */}
-            <Pressable
-              onPress={() => (threadSearchOpen ? closeThreadSearch() : setThreadSearchOpen(true))}
-              style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
-            >
-              <PounceIcon
-                name="search"
-                size={18}
-                color={threadSearchOpen ? theme.colors.accent : theme.colors.fgMuted}
-              />
-            </Pressable>
-            <Pressable
-              onPress={() => setEnvSheet(true)}
-              style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
-            >
-              <PounceIcon
-                name="ellipsis-horizontal"
-                size={20}
-                color={running ? theme.colors.danger : theme.colors.fgMuted}
-              />
-            </Pressable>
-          </View>
+              <Pressable
+                onPress={() => (threadSearchOpen ? closeThreadSearch() : setThreadSearchOpen(true))}
+                style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
+              >
+                <PounceIcon
+                  name="search"
+                  size={18}
+                  color={threadSearchOpen ? theme.colors.accent : theme.colors.fgMuted}
+                />
+              </Pressable>
+              <Pressable
+                onPress={() => setEnvSheet(true)}
+                style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
+              >
+                <PounceIcon
+                  name="ellipsis-horizontal"
+                  size={20}
+                  color={running ? theme.colors.danger : theme.colors.fgMuted}
+                />
+              </Pressable>
+            </View>
+          ) : null}
           {threadSearchOpen ? (
-            <View style={s.searchRow}>
-              <View style={s.searchField}>
-                <PounceIcon name="search" size={13} color={theme.colors.fgFaint} />
+            <View style={[s.searchRow, DESKTOP && s.searchRowDesktop]}>
+              <View style={[s.searchField, DESKTOP && s.searchFieldDesktop]}>
+                <PounceIcon name="search" size={DESKTOP ? 12 : 13} color={theme.colors.fgFaint} />
                 <TextInput
+                  {...INPUT_TWEAKS}
                   value={threadQuery}
                   onChangeText={setThreadQuery}
                   placeholder="Find in this thread…"
@@ -983,7 +1032,7 @@ export default function SessionScreen() {
                   autoFocus
                   autoCapitalize="none"
                   autoCorrect={false}
-                  style={s.searchInput}
+                  style={[s.searchInput, DESKTOP && s.searchInputDesktop]}
                 />
                 {threadSearching ? (
                   <ActivityIndicator size="small" color={theme.colors.fgFaint} />
@@ -996,25 +1045,44 @@ export default function SessionScreen() {
               <Pressable
                 disabled={!threadHits.length}
                 onPress={() => goToHit(threadHits, threadHitIdx - 1, threadQuery.trim())}
-                style={({ pressed }) => [s.hitBtn, pressed && s.pressed60]}
+                style={({ pressed }) => [
+                  s.hitBtn,
+                  DESKTOP && s.hitBtnDesktop,
+                  pressed && s.pressed60,
+                ]}
               >
                 <PounceIcon
                   name="chevron-up"
-                  size={17}
+                  size={DESKTOP ? 14 : 17}
                   color={threadHits.length ? theme.colors.fgMuted : theme.colors.fgFaint}
                 />
               </Pressable>
               <Pressable
                 disabled={!threadHits.length}
                 onPress={() => goToHit(threadHits, threadHitIdx + 1, threadQuery.trim())}
-                style={({ pressed }) => [s.hitBtn, pressed && s.pressed60]}
+                style={({ pressed }) => [
+                  s.hitBtn,
+                  DESKTOP && s.hitBtnDesktop,
+                  pressed && s.pressed60,
+                ]}
               >
                 <PounceIcon
                   name="chevron-down"
-                  size={17}
+                  size={DESKTOP ? 14 : 17}
                   color={threadHits.length ? theme.colors.fgMuted : theme.colors.fgFaint}
                 />
               </Pressable>
+              {/* Desktop needs its own dismiss: the toggle that opened this
+                  lives up in the tab strip, which is a long way to travel to
+                  close a bar that's right here. */}
+              {DESKTOP ? (
+                <Pressable
+                  onPress={closeThreadSearch}
+                  style={({ pressed }) => [s.hitBtn, s.hitBtnDesktop, pressed && s.pressed60]}
+                >
+                  <PounceIcon name="close" size={14} color={theme.colors.fgMuted} />
+                </Pressable>
+              ) : null}
             </View>
           ) : null}
         </View>
@@ -1196,10 +1264,14 @@ export default function SessionScreen() {
                 Archived session — worktree was removed. Read-only.
               </Text>
             ) : null}
-            {/* Live task progress. Shown for the whole turn, and afterwards only
-              while work remains — a finished checklist stays in the transcript
-              rather than lingering above the composer. */}
-            {taskState && (running || taskState.items.some((i) => i.status !== "completed")) ? (
+            {/* Live task progress.
+                Mobile: shown for the whole turn, and afterwards only while work
+                remains — a finished checklist stays in the transcript rather
+                than lingering above the composer.
+                Desktop: never opens itself. A banner appearing over the composer
+                on every single message is noise; the status line carries the
+                count and you open the list when you want it. */}
+            {taskState && tasksOpen ? (
               <TaskProgressBar state={taskState} running={running} />
             ) : null}
             {queued.length > 0 ? (
@@ -1243,6 +1315,16 @@ export default function SessionScreen() {
                   ? { label: modeLabel, active: activeMode !== "default", onPress: openMode }
                   : null
               }
+              tasks={
+                taskState?.items.length
+                  ? {
+                      done: taskState.items.filter((i) => i.status === "completed").length,
+                      total: taskState.items.length,
+                      open: tasksOpen,
+                      onPress: () => setTasksOpen(!tasksOpen),
+                    }
+                  : null
+              }
               markers={
                 markers.length
                   ? { count: markers.length, onPress: () => setMarkerSheet(true) }
@@ -1283,6 +1365,9 @@ const s = StyleSheet.create((theme) => ({
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.bgElevated,
   },
+  // One tight row on desktop (no title line to make room for) — and no fill,
+  // so the transcript reads as one surface from the tab strip down.
+  headerDesktop: { backgroundColor: "transparent" },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1314,6 +1399,28 @@ const s = StyleSheet.create((theme) => ({
     paddingHorizontal: 10,
   },
   searchInput: { height: 36, flex: 1, fontSize: 14, color: theme.colors.fg },
+  // Desktop find bar: a strip of window chrome, not a phone search field. The
+  // 36pt pill with a 12pt radius reads as a form control dropped into the
+  // titlebar stack; at 24pt with a hairline border it reads as part of it.
+  searchRowDesktop: {
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingTop: 6,
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  searchFieldDesktop: {
+    height: 24,
+    gap: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    paddingHorizontal: 7,
+  },
+  searchInputDesktop: { height: 22, fontSize: 12.5 },
+  hitBtnDesktop: { height: 24, width: 24, borderRadius: 5 },
   hitCount: { fontSize: 12, fontVariant: ["tabular-nums"], color: theme.colors.fgMuted },
   hitBtn: { height: 36, width: 32, alignItems: "center", justifyContent: "center" },
   transcriptArea: { flex: 1, alignItems: "center" },

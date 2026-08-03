@@ -8,11 +8,52 @@
  */
 import os from "node:os";
 import path from "node:path";
-import { existsSync, readlinkSync } from "node:fs";
-import { spawn } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
 import { readConfig, binOverride } from "./config.mjs";
 
 const IS_WIN = process.platform === "win32";
+
+/**
+ * The PATH the user actually has in a terminal, read once from their login
+ * shell.
+ *
+ * The hardcoded list below covers the common installers, but not a tool kept
+ * somewhere personal — and that's exactly the case a GUI launch breaks, because
+ * Finder/Dock give a process `/usr/bin:/bin:/usr/sbin:/sbin` and nothing else.
+ * (Found via `cursor-agent`, which lives in ~/.superset/bin here: it resolved
+ * when the bridge was started from a terminal and vanished when the app spawned
+ * it.) A login shell is the only thing that knows the user's real PATH, so ask
+ * it once and cache — it costs a few hundred ms on first use and nothing after.
+ */
+let loginPathCache;
+function loginShellPath() {
+  if (loginPathCache !== undefined) return loginPathCache;
+  loginPathCache = null;
+  if (IS_WIN) return loginPathCache;
+  try {
+    const shell = process.env.SHELL || "/bin/zsh";
+    const r = spawnSync(shell, ["-lc", 'printf %s "$PATH"'], {
+      encoding: "utf8",
+      timeout: 4000,
+      // A login shell that prompts or writes noise must not hang the bridge.
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const out = r.stdout?.trim();
+    if (out && out.includes(path.delimiter)) loginPathCache = out;
+  } catch {
+    // Keep null: the hardcoded dirs below still apply.
+  }
+  return loginPathCache;
+}
 
 export function agentEnv() {
   const home = os.homedir();
@@ -38,7 +79,15 @@ export function agentEnv() {
   // and any `#!/usr/bin/env node` shebang inside a wrapper resolve to the pinned
   // toolchain. Then the caller's PATH, then their extra dirs, then our defaults.
   const overrideDirs = Object.values(cfg.bins).map((p) => path.dirname(p));
-  const PATH = [...overrideDirs, process.env.PATH || "", ...cfg.extraPath, ...extra.filter(Boolean)]
+  // Login-shell PATH sits after the caller's own but before our guesses: it's
+  // the user's real setup, and more trustworthy than a hardcoded list.
+  const PATH = [
+    ...overrideDirs,
+    process.env.PATH || "",
+    loginShellPath() || "",
+    ...cfg.extraPath,
+    ...extra.filter(Boolean),
+  ]
     .filter(Boolean)
     .join(path.delimiter);
   // cfg.env comes before PATH so our computed PATH always wins.
@@ -188,11 +237,83 @@ function addCwd(map, name, cwd) {
 }
 
 /**
- * Probe whether a CLI answers `--version` (≤5s). Resolves the trimmed version
- * string or null. Used for `isAvailable` so an agent without its binary simply
- * doesn't appear in the app — same UX as the old daemon's `available` flag.
+ * Locate a binary on the agent PATH without running it. Returns an absolute
+ * path or null. Pure stat work — the cheap half of "is this agent installed?".
+ */
+export function resolveBin(name) {
+  const pinned = binOverride(name);
+  if (pinned) return existsSync(pinned) ? pinned : null;
+  const exts = IS_WIN ? (process.env.PATHEXT || ".EXE;.CMD;.BAT").split(";") : [""];
+  for (const dir of (agentEnv().PATH || "").split(path.delimiter)) {
+    if (!dir) continue;
+    for (const ext of exts) {
+      const full = path.join(dir, name + ext);
+      try {
+        if (existsSync(full)) return full;
+      } catch {}
+    }
+  }
+  return null;
+}
+
+/**
+ * Version cache, persisted across restarts at ~/.pounce/bin-versions.json.
+ *
+ * Keyed on the binary's absolute path plus its mtime and size, so an upgraded
+ * CLI misses the cache and gets re-probed while an unchanged one never does.
+ */
+const VERSION_FILE = path.join(os.homedir(), ".pounce", "bin-versions.json");
+let versionCache;
+
+function loadVersionCache() {
+  if (versionCache) return versionCache;
+  try {
+    versionCache = JSON.parse(readFileSync(VERSION_FILE, "utf8"));
+  } catch {
+    versionCache = {};
+  }
+  return versionCache;
+}
+
+function saveVersionCache() {
+  try {
+    mkdirSync(path.dirname(VERSION_FILE), { recursive: true });
+    const tmp = `${VERSION_FILE}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(versionCache));
+    renameSync(tmp, VERSION_FILE); // atomic: a torn file would cost a re-probe
+  } catch {}
+}
+
+/**
+ * The trimmed first line of a CLI's `--version`, or null when it isn't
+ * installed or doesn't answer. Backs `isAvailable`, so an agent without its
+ * binary simply doesn't appear in the app.
+ *
+ * Spawning is the last resort, not the first. `isAvailable` runs on every
+ * /v1/agents AND inside getThreads, both cached for only 20s — so the old
+ * unconditional probe respawned every agent CLI three times a minute forever,
+ * and cost 1.4s of a 2.1s cold start (measured, 4 agents). A missing binary now
+ * costs one stat, and an unchanged one costs a stat plus a JSON lookup.
  */
 export async function binVersion(bin, args = ["--version"]) {
-  const { code, out } = await runCollect(binPath(bin), args, { env: agentEnv(), maxBytes: 4096 });
-  return code === 0 ? out.trim().split("\n")[0] || "" : null;
+  const resolved = resolveBin(binPath(bin));
+  if (!resolved) return null; // not installed — nothing to spawn
+
+  let stamp = null;
+  try {
+    const st = statSync(resolved);
+    stamp = `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return null;
+  }
+  const key = `${resolved}|${args.join(" ")}`;
+  const cache = loadVersionCache();
+  const hit = cache[key];
+  if (hit && hit.stamp === stamp) return hit.version;
+
+  const { code, out } = await runCollect(resolved, args, { env: agentEnv(), maxBytes: 4096 });
+  const version = code === 0 ? out.trim().split("\n")[0] || "" : null;
+  cache[key] = { stamp, version };
+  saveVersionCache();
+  return version;
 }

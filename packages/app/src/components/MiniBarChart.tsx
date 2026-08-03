@@ -20,7 +20,7 @@ export interface Bar {
 export function MiniBarChart({
   bars,
   width,
-  height = 96,
+  height: heightProp,
   selected,
   onSelect,
   emptyLabel = "No activity yet",
@@ -28,12 +28,15 @@ export function MiniBarChart({
   bars: readonly Bar[];
   /** Measured container width — the caller owns layout. */
   width: number;
+  /** Measured container height; falls back to the phone default. */
   height?: number;
   selected?: string | null;
   onSelect?: (key: string) => void;
   emptyLabel?: string;
 }) {
   const hex = hexFor(useColorScheme());
+  // 96 is the phone default; desktop measures its card and passes the real one.
+  const height = heightProp && heightProp > 0 ? heightProp : 96;
   const max = useMemo(() => bars.reduce((m, b) => Math.max(m, b.value), 0), [bars]);
 
   if (!bars.length || max <= 0) {

@@ -40,6 +40,7 @@ import {
   useProjects,
   useThreads,
 } from "../state/db/hooks";
+import { spaceKeyOf } from "../state/spaces";
 import { SessionCard } from "../components/SessionCard";
 import { LiveStrip } from "../components/LiveStrip";
 import { SessionListSkeleton } from "../components/Skeleton";
@@ -58,6 +59,10 @@ type Row =
   | {
       type: "header";
       repoId: string;
+      /** `repoId hostId` for the group's newest session — the Space this folder
+       *  opens as. A folder can span machines; the one you touched last is the
+       *  one you mean. */
+      spaceKey: string;
       name: string;
       count: number;
       attention: number;
@@ -175,6 +180,7 @@ export default function HomeScreen() {
       rows.push({
         type: "header",
         repoId,
+        spaceKey: spaceKeyOf(glist[0]),
         name: repos[repoId]?.name ?? repoId.replace(/^repo:/, ""),
         count: glist.length,
         attention: glist.filter(needsYou).length,
@@ -215,16 +221,25 @@ export default function HomeScreen() {
     );
   };
 
-  const onLongPressRepo = (repoId: string, name: string) => {
+  /** A folder's insights — its spend, its cadence, its agent instructions.
+   *  Reached from the chart button on the header row; also offered here, since
+   *  the long-press sheet is where people look for what a row can do. */
+  const openSpace = (spaceKey: string) =>
+    router.push({ pathname: "/space", params: { key: spaceKey } });
+
+  const onLongPressRepo = (repoId: string, name: string, spaceKey: string) => {
     const fav = isFavRepo(repoId);
     ActionSheetIOS.showActionSheetWithOptions(
       {
         title: name,
-        options: [fav ? "Unfavourite folder" : "Favourite folder", "Cancel"],
-        cancelButtonIndex: 1,
+        // One word for this thing everywhere: a Space is a repo on a machine,
+        // and the phone used to call the same object a folder or a project.
+        options: [fav ? "Unfavourite space" : "Favourite space", "Open space", "Cancel"],
+        cancelButtonIndex: 2,
       },
       (i) => {
         if (i === 0) toggleFavRepo(repoId);
+        else if (i === 1) openSpace(spaceKey);
       },
     );
   };
@@ -333,7 +348,8 @@ export default function HomeScreen() {
               deviceEmoji={item.deviceEmoji}
               onPress={() => toggleGroup(item.repoId)}
               onAdd={() => newInRepo(item.repoId)}
-              onLongPress={() => onLongPressRepo(item.repoId, item.name)}
+              onOpen={() => openSpace(item.spaceKey)}
+              onLongPress={() => onLongPressRepo(item.repoId, item.name, item.spaceKey)}
             />
           ) : (
             <View style={s.sessionRow}>
@@ -450,6 +466,7 @@ function DirHeader({
   deviceEmoji: emoji,
   onPress,
   onAdd,
+  onOpen,
   onLongPress,
 }: {
   name: string;
@@ -461,6 +478,7 @@ function DirHeader({
   deviceEmoji?: string;
   onPress: () => void;
   onAdd: () => void;
+  onOpen: () => void;
   onLongPress: () => void;
 }) {
   const { theme } = useUnistyles();
@@ -492,10 +510,26 @@ function DirHeader({
         </View>
       ) : null}
       <Text style={s.groupCount}>{count}</Text>
-      {/* Nested Pressable + its own hit target so tapping "+" starts a task in
-          this folder instead of toggling the section. */}
+      {/* Nested Pressables with their own hit targets so these don't toggle the
+          section. The eye opens the project's insights — its spend, its
+          cadence, its agent instructions. It's a visible control rather than
+          the long-press it used to be: tapping this row already means
+          "collapse", so opening the project needs a target of its own, and a
+          gesture nobody can see is a feature nobody finds. */}
+      <Pressable
+        onPress={onOpen}
+        accessibilityLabel={`${name} insights`}
+        hitSlop={8}
+        style={({ pressed }) => [s.addBtn, pressed && s.pressed60]}
+      >
+        {/* An eye, not a bar chart: the chart glyph is the Activity TAB's icon,
+            and repeating it on a row would promise the tab rather than this one
+            folder. An eye reads as "look at this one". */}
+        <PounceIcon name="eye-outline" size={16} color={theme.colors.fgMuted} />
+      </Pressable>
       <Pressable
         onPress={onAdd}
+        accessibilityLabel={`New task in ${name}`}
         hitSlop={8}
         style={({ pressed }) => [s.addBtn, pressed && s.pressed60]}
       >

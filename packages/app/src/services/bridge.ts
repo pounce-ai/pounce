@@ -381,7 +381,7 @@ async function streamThreadsFromBridge(
 /**
  * Progressive connect-time sync: fetch each device's status/agents, then stream
  * its threads page-by-page, rebuilding the store after each batch so the list
- * fills in as pages land instead of blocking on the whole (cold-dial) fetch.
+ * fills in as pages land instead of blocking on the whole fetch.
  * Used only on connect — pull-to-refresh/periodic stay on the atomic batch path
  * to avoid a shrink-then-grow flicker over already-shown data.
  */
@@ -729,12 +729,13 @@ export async function fetchMessages(
 /**
  * Per-thread usage, read from the host's own agent records.
  *
- * Tokens are always the agent's own counts. `cost` is present ONLY when the
- * agent itself reported dollars — the bridge no longer prices tokens, so a
- * missing cost means "not knowable", never "zero". In practice OpenCode reports
- * cost for all history, Claude only for turns Pounce drove (`costComplete`
- * false when it covers part of a thread), and Codex never — it bills against a
- * plan and reports `rateLimit` consumption instead.
+ * Tokens are always the agent's own counts. For `cost`, check `costSource`
+ * before showing the number: OpenCode reports real dollars for all history,
+ * Claude only for turns Pounce drove (`costComplete` false when it covers part
+ * of a thread), and Codex never — it bills against a plan and reports
+ * `rateLimit` consumption instead. Where no agent reports one, the bridge falls
+ * back to ccusage's list-price ESTIMATE, which must be labelled as such; a
+ * missing cost still means "not knowable", never "zero".
  */
 export interface ThreadUsage {
   available: boolean;
@@ -750,8 +751,13 @@ export interface ThreadUsage {
   };
   cost?: number | null;
   costComplete?: boolean;
-  /** "agent" when a real dollar figure came from the CLI; null when absent. */
-  costSource?: "agent" | null;
+  /**
+   * Where the dollars came from, and they are not interchangeable:
+   *   "agent"       the CLI reported it — a real, billed figure
+   *   "ccusage-est" tokens priced at public list rates; show it as approximate
+   *   null          no cost at all
+   */
+  costSource?: "agent" | "ccusage-est" | null;
   messages?: number;
   /** Context window of the model that ran, when the agent states it. */
   contextWindow?: number | null;
@@ -817,7 +823,49 @@ export async function fetchActivity(days = 365, opts?: { fresh?: boolean }): Pro
       }
     }),
   );
+  // Every host failed → we know NOTHING, which is not the same as knowing there
+  // was no activity. Swallowing this returned an empty-but-valid series, and
+  // the dashboard dutifully reported "No activity yet" to someone with months
+  // of history — the cold-cache first call had simply timed out while the host
+  // parsed its transcripts. Throwing lets the caller show a spinner, retry, and
+  // say "couldn't read" instead of asserting a zero.
+  //
+  // A PARTIAL failure still merges: one unreachable machine shouldn't blank the
+  // others, and `coverage` already records what couldn't be accounted for.
+  if (devices.length > 0 && pages.every((p) => p === null)) {
+    throw new Error("Couldn't read activity from any paired machine.");
+  }
   return mergeActivity(pages);
+}
+
+/**
+ * One SPACE's daily activity — one repository on one machine.
+ *
+ * Deliberately not a fan-out like `fetchActivity`: a Space is scoped to a
+ * single host by definition (the same repo on two machines is two Spaces with
+ * their own worktrees and their own agents), so merging hosts here would be
+ * answering a different question.
+ *
+ * The host returns only figures it can attribute to this repo, which means
+ * agent-reported dollars and nothing else — org billing totals and list-price
+ * estimates are whole-machine numbers and can't be split per project. Days
+ * therefore carry `cost: null` more often here than on the dashboard, and the
+ * UI must keep rendering that as "not knowable" rather than $0.
+ */
+export async function fetchSpaceActivity(
+  hostId: string,
+  repoKey: string,
+  days = 90,
+  opts?: { fresh?: boolean },
+): Promise<ActivityPage | null> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return null;
+  const qs = `days=${days}&repo=${encodeURIComponent(repoKey)}${opts?.fresh ? "&fresh=1" : ""}`;
+  try {
+    return await get<ActivityPage>(cfg, `/v1/activity?${qs}`, 120_000);
+  } catch {
+    return null;
+  }
 }
 
 /** One rolling rate-limit window as an agent reports it. */
@@ -828,13 +876,42 @@ export interface QuotaWindow {
   resetsAt: string | null;
 }
 
+/**
+ * Rolling-window usage MEASURED from the agent's own transcripts, for agents
+ * that publish no meter. Deliberately carries no percentage: the window's size
+ * isn't knowable locally, and inferring a ceiling from your busiest past window
+ * turns a guess into a gauge (see agents/blocks.mjs).
+ */
+export interface UsageBlocks {
+  agent: string;
+  windowHours: number;
+  current: {
+    startedAt: string;
+    resetsAt: string;
+    tokens: number;
+    messages: number;
+    tokensPerMin: number;
+  } | null;
+  /** Busiest window within `scannedDays` — context, NOT a limit, and NOT an
+   *  all-time high: the bridge reads only each transcript's tail. */
+  peak: { tokens: number; startedAt: string };
+  weeklyTokens: number;
+  scannedDays: number;
+}
+
 export interface AgentQuota {
   hostId: string;
   agent: string;
   planType: string | null;
+  /** Why there are no `windows`, for agents that name a plan but publish no
+   *  meter locally (Claude, Cursor, opencode). Absent when a meter exists. */
+  note?: string | null;
   /** When the agent last reported this — it can be days stale. */
   observedAt: string | null;
   windows: QuotaWindow[];
+  /** Our own measurement, kept out of `windows` so a derived figure can never
+   *  be mistaken for one the agent reported. */
+  blocks?: UsageBlocks | null;
 }
 
 /**
@@ -1011,6 +1088,63 @@ export async function fetchContextFiles(hostId: string, cwd: string): Promise<Co
   }
 }
 
+/**
+ * The outcome of saving a context file.
+ *
+ * `conflict` is its own case rather than an error string because it's the one
+ * failure the user can act on: the file changed on the host (an agent turn
+ * edited it) since we read it, and the editor has to offer reload-or-overwrite
+ * instead of just reporting that something went wrong. `mtime` is what the host
+ * sees now, so a reload can be checked against it.
+ */
+export type SaveContextResult =
+  | { ok: true; file: ContextFile }
+  | { ok: false; conflict: true; mtime: string | null }
+  | { ok: false; conflict?: false; error: string };
+
+/**
+ * Write one of a project's context files on its host.
+ *
+ * `expectedMtime` is the version this client last read — pass it so a save
+ * can't silently overwrite an edit made while the editor was open. Pass `null`
+ * when creating a file that shouldn't exist yet, `undefined` to force.
+ */
+export async function saveContextFile(
+  hostId: string,
+  cwd: string,
+  filePath: string,
+  content: string,
+  expectedMtime?: string | null,
+): Promise<SaveContextResult> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return { ok: false, error: "This machine isn't paired any more." };
+  try {
+    const res = await fetch(`${await bridgeBase(cfg)}/v1/context`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        cwd,
+        path: filePath,
+        content,
+        // Only send the key when the caller supplied one — an absent `mtime`
+        // is what tells the host "force", and JSON.stringify drops undefined.
+        ...(expectedMtime === undefined ? {} : { mtime: expectedMtime }),
+      }),
+    });
+    const body = (await res.json().catch(() => null)) as {
+      file?: ContextFile;
+      error?: string;
+      mtime?: string | null;
+    } | null;
+    if (res.status === 409) return { ok: false, conflict: true, mtime: body?.mtime ?? null };
+    if (!res.ok || !body?.file)
+      return { ok: false, error: body?.error ?? `save failed (${res.status})` };
+    return { ok: true, file: body.file };
+  } catch {
+    return { ok: false, error: "Couldn't reach this machine." };
+  }
+}
+
 async function gitPost<T>(hostId: string, path: string, body: object): Promise<T | null> {
   const cfg = await deviceForHost(hostId);
   if (!cfg) return null;
@@ -1034,6 +1168,48 @@ export function gitCommit(hostId: string, cwd: string, message: string) {
 }
 export function gitPush(hostId: string, cwd: string) {
   return gitPost<{ ok: boolean; output?: string }>(hostId, "/v1/git/push", { cwd });
+}
+
+export interface MarkerOverride {
+  threadId: string;
+  eventId: string;
+  marked: boolean;
+}
+
+/**
+ * Mirror a marker toggle to the machine that owns the thread.
+ *
+ * Fire-and-forget: markers are an override layer over a default the client
+ * computes itself, so the local collection stays authoritative for rendering
+ * and a failed push costs cross-device visibility, never the user's own state.
+ * `marked: null` clears the override (the toggle landed back on the default).
+ */
+export function pushMarker(
+  hostId: string,
+  threadId: string,
+  eventId: string,
+  marked: boolean | null,
+) {
+  return gitPost<{ ok: boolean }>(hostId, "/v1/markers", { threadId, eventId, marked });
+}
+
+/** Overrides the bridge holds for one thread — markers made on another device. */
+export async function fetchThreadMarkers(
+  hostId: string,
+  threadId: string,
+): Promise<MarkerOverride[]> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return [];
+  try {
+    const { markers } = await get<{ markers: MarkerOverride[] }>(
+      cfg,
+      `/v1/markers?thread=${encodeURIComponent(threadId)}`,
+      15_000,
+    );
+    return markers ?? [];
+  } catch {
+    return []; // a failed read is never authoritative — merge nothing
+  }
 }
 export function gitPR(
   hostId: string,

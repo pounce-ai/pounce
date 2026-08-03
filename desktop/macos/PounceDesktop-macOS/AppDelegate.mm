@@ -98,6 +98,19 @@ static void PounceStartBridge(void)
   self.window.contentView.wantsLayer = YES;
   self.window.contentView.layer.backgroundColor = bg.CGColor;
 
+  // Unified titlebar: the app draws its own chrome (sidebar top row + tab
+  // strip), so the system titlebar becomes an invisible strip that only carries
+  // the traffic lights. Content extends the full height of the window behind
+  // them — the sidebar reserves TITLEBAR_INSET points of top padding so nothing
+  // lands under the buttons, and <DragRegion> (PounceGlass.mm) gives the strip
+  // back its drag/double-click-to-zoom behaviour.
+  self.window.styleMask |= NSWindowStyleMaskFullSizeContentView;
+  self.window.titlebarAppearsTransparent = YES;
+  self.window.titleVisibility = NSWindowTitleHidden;
+  // The traffic lights sit over the sidebar's vibrancy; a separator hairline
+  // across the top would cut the sidebar off from the content pane.
+  self.window.toolbar = nil;
+
   // Own the window's lifecycle: the red close button should hide the window
   // (app + bridge keep running, reachable from the tray), not tear it down.
   // releasedWhenClosed=NO is belt-and-suspenders so `self.window` stays valid.

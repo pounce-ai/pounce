@@ -142,6 +142,7 @@ export class ClaudeAdapter {
       root: ROOT,
       match: (name) => name.endsWith(".jsonl"),
       scanFile: (file, st) => scanTranscript(file, st),
+      cacheName: "claude",
     });
   }
 

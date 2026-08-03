@@ -24,7 +24,7 @@ export default defineConfig({
         },
         {
           label: "Using Pounce",
-          items: ["docs/agents", "docs/remote-access", "docs/desktop", "docs/cli"],
+          items: ["docs/agents", "docs/remote-access", "docs/desktop", "docs/cli", "docs/mcp"],
         },
         {
           label: "Help",

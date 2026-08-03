@@ -34,6 +34,18 @@ Installed globally (`npm i -g use-pounce`), the command is just `pounce`.
 | `--lan`        | Skip the tunnel — the QR pairs on this Wi-Fi only    |
 | `--foreground` | Run the Bridge attached to this terminal             |
 
+## Giving other agents your history
+
+`pounce mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io)
+server over stdio, so Claude Code, Cursor and any other MCP client can search
+everything you've done across every agent on this machine:
+
+```sh
+claude mcp add pounce -- npx use-pounce mcp
+```
+
+It's read-only — see [MCP server](/docs/mcp) for the tools and setup.
+
 ## What it puts on your machine
 
 - **Bridge** — an HTTP server on port `8099` that reads your coding-agent

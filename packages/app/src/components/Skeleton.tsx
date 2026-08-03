@@ -9,6 +9,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { Skeleton } from "boneyard-js/native";
+import { ActivityBones } from "./ActivityBones";
 
 /**
  * A static card-shaped template. Boneyard renders it, snapshots the native
@@ -138,3 +139,27 @@ const TIMELINE_LAYOUT = {
   paddingBottom: 12,
   paddingTop: 12,
 } as const;
+
+/**
+ * Activity-shaped bones for the first load.
+ *
+ * That fetch is the slowest in the app — on a machine with months of history
+ * the host parses every transcript it hasn't summarised yet — so this is what
+ * people actually look at, and a lone spinner said nothing about what was
+ * coming. The layout lives in ./ActivityBones so desktop's fork matches.
+ */
+export function ActivitySkeleton() {
+  const pulse = useSharedValue(1);
+  useEffect(() => {
+    pulse.value = withRepeat(
+      withSequence(withTiming(0.45, { duration: 650 }), withTiming(1, { duration: 650 })),
+      -1,
+    );
+  }, [pulse]);
+  const style = useAnimatedStyle(() => ({ opacity: pulse.value }));
+  return (
+    <Animated.View style={style} pointerEvents="none">
+      <ActivityBones />
+    </Animated.View>
+  );
+}

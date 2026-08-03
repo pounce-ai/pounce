@@ -144,6 +144,7 @@ export function Composer({
   diffStat,
   model,
   mode,
+  tasks,
   markers,
   usage,
   ref,
@@ -170,6 +171,10 @@ export function Composer({
   /** Permission-mode control pill (null to hide). */
   mode?: { label: string; active: boolean; onPress: () => void } | null;
   /** Marker jump-list pill — bookmark glyph + count (null to hide). */
+  /** The turn's checklist as a toggle — desktop puts the same control in its
+   *  status bar. Sits before the marker pill: it describes the turn you're
+   *  watching, whereas markers are about the history behind it. */
+  tasks?: { done: number; total: number; open: boolean; onPress: () => void } | null;
   markers?: { count: number; onPress: () => void } | null;
   /** Thread usage — drives the context-fill ring (hidden unless the agent
    *  reports both a window and a recent request size). */
@@ -566,8 +571,12 @@ export function Composer({
       {/* Live "listening" affordance while dictating. */}
       {listening ? <ListeningBanner /> : null}
 
-      {/* Model / mode / marker pills sit above the glass pill as compact capsules. */}
-      {model || mode || markers ? (
+      {/* Two clusters above the glass pill. Left is what the agent IS — its
+          model and mode. Right is what this turn HOLDS — its checklist and the
+          markers through its history. They read as two groups because they
+          answer two questions; spreading all four edge to edge made the middle
+          one look unrelated to either neighbour. */}
+      {model || mode || tasks || markers ? (
         <View style={s.pillRow}>
           {model ? <ControlPill agent={agent} label={model.label} onPress={model.onPress} /> : null}
           {mode ? (
@@ -576,6 +585,15 @@ export function Composer({
               label={mode.label}
               active={mode.active}
               onPress={mode.onPress}
+            />
+          ) : null}
+          <View style={s.flex1} />
+          {tasks ? (
+            <ControlPill
+              icon={tasks.done === tasks.total ? "checkmark-circle" : "ellipse-outline"}
+              label={`${tasks.done}/${tasks.total}`}
+              active={tasks.open}
+              onPress={tasks.onPress}
             />
           ) : null}
           {markers ? (
@@ -855,7 +873,8 @@ const s = StyleSheet.create((theme) => ({
     marginBottom: 8,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    // A flexible spacer splits the row instead of space-between, which would
+    // push every pill to its own third of the width.
     gap: 6,
   },
   controlRow: { marginTop: 4, flexDirection: "row", alignItems: "center", gap: 6 },

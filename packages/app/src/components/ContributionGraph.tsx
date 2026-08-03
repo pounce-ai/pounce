@@ -17,6 +17,9 @@ import { monthOf } from "../ui/format";
 export const CELL = 11;
 export const GAP = 2;
 const STEP = CELL + GAP;
+/** Ceiling for a filled cell. Without it, `fillWidth` over a handful of columns
+ *  grows each cell without bound and the grid reads as slabs, not a calendar. */
+const MAX_STEP = 18;
 const ROWS = 7;
 
 /**
@@ -54,6 +57,8 @@ export function ContributionGraph({
   selected,
   onSelectDay,
   compact,
+  fillWidth,
+  rows = ROWS,
 }: {
   /** Chronological, gap-free, quantized (see services/activity). */
   days: readonly HeatDay[];
@@ -61,24 +66,46 @@ export function ContributionGraph({
   onSelectDay?: (date: string) => void;
   /** Share-card mode: no scroll, no labels — the caller sizes the window. */
   compact?: boolean;
+  /**
+   * Grid height in cells. 7 is the calendar — a column per week, a row per
+   * weekday, which is what a year wants. Pass 1 for a short window: a fortnight
+   * as a 7-row calendar is two lonely columns, whereas a single strip of days
+   * reads immediately and fills the width it is given.
+   */
+  rows?: number;
+  /** Grow the cells to fill this width instead of using the fixed phone size.
+   *  A 53-week grid at 11pt cells is ~690pt wide; in a desktop card twice that,
+   *  it sits in the left half with dead space beside it. Never shrinks below
+   *  the phone size — on a narrow card the horizontal scroll still applies. */
+  fillWidth?: number;
 }) {
   const scheme = useColorScheme();
   const ramp = RAMP[scheme === "light" ? "light" : "dark"];
   const scrollRef = useRef<ScrollView>(null);
 
   // Start each column on a Sunday so weekday rows line up like a calendar.
+  // Meaningless for a single strip, where a column IS a day.
   const leadingBlanks = useMemo(() => {
-    if (!days.length) return 0;
+    if (!days.length || rows === 1) return 0;
     const [y, m, d] = days[0].date.split("-").map(Number);
     return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-  }, [days]);
+  }, [days, rows]);
 
-  const cols = Math.ceil((days.length + leadingBlanks) / ROWS);
-  const width = Math.max(1, cols * STEP - GAP);
-  const height = ROWS * STEP - GAP;
+  const cols = Math.ceil((days.length + leadingBlanks) / rows);
+  // Fill the width when asked, but never past MAX_STEP: a short window has few
+  // columns, and unbounded growth turns a fortnight into a row of slabs.
+  const step =
+    fillWidth && cols
+      ? Math.min(MAX_STEP, Math.max(STEP, Math.floor((fillWidth + GAP) / cols)))
+      : STEP;
+  const cell = step - GAP;
+  const width = Math.max(1, cols * step - GAP);
+  const height = rows * step - GAP;
+  // Month labels describe a week-per-column calendar; a day strip has no months
+  // to mark, and the caller titles the window instead.
   const labels = useMemo(
-    () => (compact ? [] : monthLabels(days, leadingBlanks)),
-    [compact, days, leadingBlanks],
+    () => (compact || rows === 1 ? [] : monthLabels(days, leadingBlanks)),
+    [compact, days, leadingBlanks, rows],
   );
 
   // Open on today (the right edge) — the recent weeks are what people look at.
@@ -93,24 +120,28 @@ export function ContributionGraph({
       disabled={!onSelectDay}
       onPress={(e) => {
         const { locationX, locationY } = e.nativeEvent;
-        const col = Math.floor(locationX / STEP);
-        const row = Math.floor(locationY / STEP);
-        if (row < 0 || row >= ROWS || col < 0) return;
-        const idx = col * ROWS + row - leadingBlanks;
+        const col = Math.floor(locationX / step);
+        const row = Math.floor(locationY / step);
+        if (row < 0 || row >= rows || col < 0) return;
+        const idx = col * rows + row - leadingBlanks;
         const hit = days[idx];
         if (hit) onSelectDay?.(hit.date);
       }}
     >
-      <Svg width={width} height={height}>
+      {/* pointerEvents="none": RNSVG's view swallows the click on macOS, so the
+          Pressable above never sees it and selecting a day did nothing. The
+          grid is decorative — hit-testing is arithmetic on locationX/Y, not on
+          the rects — so it has no reason to take events. */}
+      <Svg width={width} height={height} pointerEvents="none">
         {days.map((d, i) => {
           const slot = i + leadingBlanks;
           return (
             <Rect
               key={d.date}
-              x={Math.floor(slot / ROWS) * STEP}
-              y={(slot % ROWS) * STEP}
-              width={CELL}
-              height={CELL}
+              x={Math.floor(slot / rows) * step}
+              y={(slot % rows) * step}
+              width={cell}
+              height={cell}
               rx={2}
               fill={ramp[d.level]}
               // Selection reads as a ring, so it survives on any ramp step.
@@ -136,7 +167,7 @@ export function ContributionGraph({
         <View>
           <View style={[s.labelRow, { width }]}>
             {labels.map((l) => (
-              <Text key={`${l.col}:${l.label}`} style={[s.monthLabel, { left: l.col * STEP }]}>
+              <Text key={`${l.col}:${l.label}`} style={[s.monthLabel, { left: l.col * step }]}>
                 {l.label}
               </Text>
             ))}

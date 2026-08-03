@@ -27,6 +27,7 @@ import {
 } from "./events.mjs";
 import { agentEnv, binVersion, binPath } from "./env.mjs";
 import { noUsage, usageResult } from "./usage.mjs";
+import { openSqliteReadOnly } from "./sqlite.mjs";
 
 const DATA_DIR = path.join(os.homedir(), ".local", "share", "opencode");
 const DB_FILE = path.join(DATA_DIR, "opencode.db");
@@ -69,12 +70,14 @@ export class OpencodeAdapter {
     this._db = null;
     try {
       if (existsSync(DB_FILE)) {
-        const { DatabaseSync } = await import("node:sqlite");
-        this._db = new DatabaseSync(DB_FILE, { readOnly: true });
-        this._watchDb();
+        // Runtime-agnostic: the shipped app runs on Bun, which has no
+        // node:sqlite — reaching for it directly sent every desktop user down
+        // the legacy-file fallback below and showed a fraction of their history.
+        this._db = await openSqliteReadOnly(DB_FILE);
+        if (this._db) this._watchDb();
       }
     } catch {
-      this._db = null; // e.g. runtime without node:sqlite — file-store fallback below
+      this._db = null; // no sqlite at all — file-store fallback below
     }
     return this._db;
   }

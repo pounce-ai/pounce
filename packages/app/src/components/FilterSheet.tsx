@@ -131,6 +131,24 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
 /** The sheet's body — shared by the RN-Modal variant above (desktop) and the
  *  native formSheet route on mobile (apps/mobile app/filters.tsx). The parent
  *  supplies the container (backdrop/sheet chrome) and vertical gap. */
+/**
+ * The branch / project pickers.
+ *
+ * On a phone these are bounded scrollers inside the sheet — the sheet itself
+ * can't grow past the screen. On desktop the sheet is a modal card that already
+ * scrolls, and a scroller inside a scroller swallows the trackpad and clips
+ * rows mid-height; there the list just flows and the card scrolls it. Both
+ * lists are search-narrowed, so length is the user's to control either way.
+ */
+function OptionList({ maxHeight, children }: { maxHeight: number; children: React.ReactNode }) {
+  if (IS_DESKTOP) return <View>{children}</View>;
+  return (
+    <ScrollView style={{ maxHeight }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+      {children}
+    </ScrollView>
+  );
+}
+
 export function FilterSheetContent({ onClose }: { onClose: () => void }) {
   const { theme } = useUnistyles();
   const { height } = useWindowDimensions();
@@ -171,7 +189,13 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
     );
   // Distinct branch/worktree values for the searchable list; the query both
   // narrows the list and (as before) live-filters the thread list by substring.
-  const branchOptions = useMemo(() => branchesInScope(rawThreads), [rawThreads]);
+  // Only the branches inside the spaces you picked — see the section below for
+  // why an unscoped list is noise rather than a filter.
+  const branchOptions = useMemo(
+    () =>
+      branchesInScope(f.repos.length ? rawThreads.filter((t) => f.repos.includes(t.repoId)) : []),
+    [rawThreads, f.repos],
+  );
   const shownBranches = useMemo(() => {
     const q = f.branchQuery.trim().toLowerCase();
     return q ? branchOptions.filter((b) => b.toLowerCase().includes(q)) : branchOptions;
@@ -276,80 +300,13 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
         </View>
       ) : null}
 
-      {/* Branch / worktree — a searchable list of the distinct branches and
-            worktrees in scope. Typing narrows the list and (as before) live-
-            filters threads by substring; tapping a row pins that exact value. */}
-      {branchOptions.length ? (
-        <View style={s.section}>
-          <View style={s.rowBetween}>
-            <Text style={s.sectionLabel}>Branch / worktree</Text>
-            {f.branchQuery ? (
-              <Pressable
-                onPress={() => filters$.branchQuery.set("")}
-                style={({ pressed }) => pressed && s.pressed60}
-              >
-                <Text style={s.clearSmall}>Clear</Text>
-              </Pressable>
-            ) : null}
-          </View>
-          <View style={s.searchRow}>
-            <PounceIcon name="git-branch-outline" size={14} color={theme.colors.fgFaint} />
-            <TextInput
-              value={f.branchQuery}
-              onChangeText={(t) => filters$.branchQuery.set(t)}
-              placeholder="Search branch or worktree…"
-              placeholderTextColor={theme.colors.fgFaint}
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={[s.input, IS_DESKTOP && s.inputDesktop]}
-            />
-            {f.branchQuery ? (
-              <Pressable
-                onPress={() => filters$.branchQuery.set("")}
-                hitSlop={8}
-                style={({ pressed }) => pressed && s.pressed60}
-              >
-                <PounceIcon name="close-circle" size={15} color={theme.colors.fgFaint} />
-              </Pressable>
-            ) : null}
-          </View>
-          <ScrollView
-            style={{ maxHeight: 180 }}
-            keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled
-          >
-            {shownBranches.map((b) => {
-              const active = f.branchQuery === b;
-              return (
-                <Pressable
-                  key={b}
-                  onPress={() => filters$.branchQuery.set(active ? "" : b)}
-                  style={({ pressed }) => [s.optionRow, pressed && s.pressedHover]}
-                >
-                  <PounceIcon
-                    name={active ? "checkmark-circle" : "git-branch-outline"}
-                    size={16}
-                    color={active ? theme.colors.accent : theme.colors.fgMuted}
-                  />
-                  <Text numberOfLines={1} style={[s.optionText, active ? s.textAccent : s.textFg]}>
-                    {b}
-                  </Text>
-                </Pressable>
-              );
-            })}
-            {shownBranches.length === 0 ? (
-              <Text style={s.emptyText}>No branches match.</Text>
-            ) : null}
-          </ScrollView>
-        </View>
-      ) : null}
-
-      {/* Project last — its searchable, scrollable list is the tallest section,
-            so the compact Device/Agent chips read first above it. */}
+      {/* Space comes before Branch: a branch only means something inside a
+            project ("main" exists in all of them), so you pick the place first
+            and then narrow within it. */}
       {repos.length > 1 ? (
         <View style={s.section}>
           <View style={s.rowBetween}>
-            <Text style={s.sectionLabel}>Project</Text>
+            <Text style={s.sectionLabel}>Space</Text>
             {f.repos.length ? (
               <Pressable
                 onPress={() => filters$.repos.set([])}
@@ -359,25 +316,21 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
               </Pressable>
             ) : null}
           </View>
-          {/* Searchable, multi-select folder list. Tap a row to toggle it in the
-                filter; tap the eye to permanently hide a folder everywhere. */}
+          {/* Searchable, multi-select list. Tap a row to toggle it in the
+                filter; tap the eye to permanently hide a space everywhere. */}
           <View style={s.searchRow}>
             <PounceIcon name="search" size={14} color={theme.colors.fgFaint} />
             <TextInput
               value={repoQuery}
               onChangeText={setRepoQuery}
-              placeholder="Search folders…"
+              placeholder="Search spaces…"
               placeholderTextColor={theme.colors.fgFaint}
               autoCapitalize="none"
               autoCorrect={false}
               style={[s.input, IS_DESKTOP && s.inputDesktop]}
             />
           </View>
-          <ScrollView
-            style={{ maxHeight: folderMax }}
-            keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled
-          >
+          <OptionList maxHeight={folderMax}>
             {shownRepos.map((r) => {
               const ignored = isRepoIgnored(r.id);
               const selected = f.repos.includes(r.id);
@@ -432,8 +385,74 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
                 </View>
               );
             })}
-            {shownRepos.length === 0 ? <Text style={s.emptyText}>No folders match.</Text> : null}
-          </ScrollView>
+            {shownRepos.length === 0 ? <Text style={s.emptyText}>No spaces match.</Text> : null}
+          </OptionList>
+        </View>
+      ) : null}
+
+      {/* Branch / worktree, scoped to the chosen space(s). Typing narrows the
+            list and live-filters threads by substring; tapping a row pins that
+            exact value. Hidden until a space is picked: an unscoped list mixes
+            every project's branches together, where a dozen identical "main"
+            rows tell you nothing about which one you'd be filtering to. */}
+      {f.repos.length && branchOptions.length ? (
+        <View style={s.section}>
+          <View style={s.rowBetween}>
+            <Text style={s.sectionLabel}>Branch / worktree</Text>
+            {f.branchQuery ? (
+              <Pressable
+                onPress={() => filters$.branchQuery.set("")}
+                style={({ pressed }) => pressed && s.pressed60}
+              >
+                <Text style={s.clearSmall}>Clear</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          <View style={s.searchRow}>
+            <PounceIcon name="git-branch-outline" size={14} color={theme.colors.fgFaint} />
+            <TextInput
+              value={f.branchQuery}
+              onChangeText={(t) => filters$.branchQuery.set(t)}
+              placeholder="Search branch or worktree…"
+              placeholderTextColor={theme.colors.fgFaint}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={[s.input, IS_DESKTOP && s.inputDesktop]}
+            />
+            {f.branchQuery ? (
+              <Pressable
+                onPress={() => filters$.branchQuery.set("")}
+                hitSlop={8}
+                style={({ pressed }) => pressed && s.pressed60}
+              >
+                <PounceIcon name="close-circle" size={15} color={theme.colors.fgFaint} />
+              </Pressable>
+            ) : null}
+          </View>
+          <OptionList maxHeight={180}>
+            {shownBranches.map((b) => {
+              const active = f.branchQuery === b;
+              return (
+                <Pressable
+                  key={b}
+                  onPress={() => filters$.branchQuery.set(active ? "" : b)}
+                  style={({ pressed }) => [s.optionRow, pressed && s.pressedHover]}
+                >
+                  <PounceIcon
+                    name={active ? "checkmark-circle" : "git-branch-outline"}
+                    size={16}
+                    color={active ? theme.colors.accent : theme.colors.fgMuted}
+                  />
+                  <Text numberOfLines={1} style={[s.optionText, active ? s.textAccent : s.textFg]}>
+                    {b}
+                  </Text>
+                </Pressable>
+              );
+            })}
+            {shownBranches.length === 0 ? (
+              <Text style={s.emptyText}>No branches match.</Text>
+            ) : null}
+          </OptionList>
         </View>
       ) : null}
 

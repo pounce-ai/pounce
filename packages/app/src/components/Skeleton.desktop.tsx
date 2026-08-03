@@ -8,8 +8,9 @@
 import { useEffect, useRef } from "react";
 import { Animated, Easing, StyleSheet, View } from "react-native";
 import { T } from "../ui/theme";
+import { ActivityBones } from "./ActivityBones";
 
-function usePulse(): Animated.Value {
+export function usePulse(): Animated.Value {
   const pulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     const loop = Animated.loop(
@@ -34,7 +35,12 @@ function usePulse(): Animated.Value {
   return pulse;
 }
 
-const BONE = "rgba(255,255,255,0.11)";
+/**
+ * Bone fill. A semantic surface, not a white overlay: `rgba(255,255,255,…)`
+ * only reads as a bone on a dark background — in the light appearance it was
+ * white-on-white and the whole skeleton vanished.
+ */
+export const BONE = T.surfaceHover;
 
 /** One skeleton card shaped like a SessionCard. */
 export function SessionCardSkeleton() {
@@ -156,3 +162,13 @@ const s = StyleSheet.create({
     paddingBottom: 12,
   },
 });
+
+/** Activity-shaped bones — desktop pulse (core Animated), shared layout. */
+export function ActivitySkeleton() {
+  const pulse = usePulse();
+  return (
+    <Animated.View style={{ opacity: pulse }} pointerEvents="none">
+      <ActivityBones />
+    </Animated.View>
+  );
+}

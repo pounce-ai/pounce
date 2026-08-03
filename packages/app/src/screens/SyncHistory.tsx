@@ -104,7 +104,7 @@ export default function SyncHistoryScreen() {
                       <Text style={s.cardAgo}>{timeAgo(entry.at)} ago</Text>
                     </View>
                     <Text style={s.cardSummary}>
-                      {total} new update{total === 1 ? "" : "s"} across {entry.repos.length} folder
+                      {total} new update{total === 1 ? "" : "s"} across {entry.repos.length} space
                       {entry.repos.length === 1 ? "" : "s"}
                     </Text>
                     <View style={s.repoList}>

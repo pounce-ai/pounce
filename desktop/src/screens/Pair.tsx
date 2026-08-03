@@ -5,9 +5,8 @@
  * (loopback-only endpoint), so this screen just displays it.
  */
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { SvgXml } from "react-native-svg";
-import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import {
   fetchLocalBridgeInfo,
@@ -18,7 +17,6 @@ import { COLOR } from "@pounce/app/ui";
 import { T } from "@pounce/app/ui/theme";
 
 export default function PairScreen() {
-  const router = useRouter();
   const [info, setInfo] = useState<LocalBridgeInfo | null>(null);
   const [qr, setQr] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -51,14 +49,10 @@ export default function PairScreen() {
 
   return (
     <View style={s.root}>
+      {/* No close button here: the shell draws one in every modal card's
+          top-right corner, and a second one in the same spot read as "✕✕". */}
       <View style={s.header}>
         <Text style={s.headerTitle}>Pair your phone</Text>
-        <Pressable
-          onPress={() => router.back()}
-          style={({ pressed }) => [s.closeBtn, pressed && s.pressed60]}
-        >
-          <Ionicons name="close" size={18} color={COLOR.fgMuted} />
-        </Pressable>
       </View>
 
       <View style={s.content}>
@@ -121,8 +115,6 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
   },
   headerTitle: { flex: 1, fontSize: 15, fontWeight: "600", color: T.fg },
-  closeBtn: { height: 32, width: 32, alignItems: "center", justifyContent: "center" },
-  pressed60: { opacity: 0.6 },
   content: {
     flex: 1,
     alignItems: "center",

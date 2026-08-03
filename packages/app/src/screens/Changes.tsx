@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Linking, Pressable, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { KeyboardAvoidingView, Platform } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -22,15 +31,27 @@ import { extOf } from "../components/diffPatch";
 import { seenFiles$, setSeenFile } from "../state/stores";
 import { useSelector } from "@legendapp/state/react";
 import { useThread } from "../state/db/hooks";
-import { IS_DESKTOP, pickSheet } from "../ui";
+import { INPUT_TWEAKS, IS_DESKTOP, pickSheet } from "../ui";
 
 /** Branches where committing directly is almost never intended. */
 const isMainBranch = (b: string | null | undefined) => b === "main" || b === "master";
 
 const NO_SEEN: string[] = [];
 
-export default function ChangesScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+/**
+ * `embedded` is the desktop's docked pane: the same screen rendered beside a
+ * transcript instead of over it, so it drops the sheet's window insets and
+ * takes its thread id and dismissal from the shell rather than the router.
+ */
+export interface ChangesScreenProps {
+  embedded?: boolean;
+  threadId?: string;
+  onClose?: () => void;
+}
+
+export default function ChangesScreen({ embedded, threadId, onClose }: ChangesScreenProps = {}) {
+  const { id: routeId } = useLocalSearchParams<{ id: string }>();
+  const id = threadId ?? routeId;
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { theme } = useUnistyles();
@@ -43,6 +64,7 @@ export default function ChangesScreen() {
   // Draft is the default PR mode — the chevron on the button switches it.
   const [prDraft, setPrDraft] = useState(true);
   const [layout, setLayout] = useState<"unified" | "split">("unified");
+  const [focused, setFocused] = useState(false);
   // GitHub-style file filter: by extension, via a dropdown with counts.
   const [extFilter, setExtFilter] = useState<string | null>(null);
   // Files marked "Seen" — persisted per thread so they come back collapsed.
@@ -70,6 +92,11 @@ export default function ChangesScreen() {
 
   const totals = useMemo(() => diffTotals(changes?.files ?? []), [changes?.files]);
   const fileCount = changes?.files.length ?? 0;
+  // `files` comes from `git status --untracked-files=all`, but the patch and the
+  // per-file counts come from `git diff HEAD` — which excludes untracked files.
+  // A brand-new checkout is therefore "N files" with an empty patch; listing
+  // them beats rendering an empty diff viewer.
+  const hasPatch = (changes?.diff ?? "").trim().length > 0;
 
   /** Extensions present in the change set, with counts — ordered by count. */
   const extensions = useMemo(() => {
@@ -221,35 +248,54 @@ export default function ChangesScreen() {
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       // Sheet presentation on mobile: the sheet's top edge already clears the
-      // status bar, so window insets would just paint a blank band.
-      style={[s.root, { paddingTop: IS_DESKTOP ? insets.top + 6 : 6 }]}
+      // status bar, so window insets would just paint a blank band. The docked
+      // pane sits inside the shell's chrome and needs neither.
+      style={[s.root, { paddingTop: embedded ? 6 : IS_DESKTOP ? insets.top + 6 : 6 }]}
     >
-      {/* Header */}
+      {/* Header. Docked, this is a single line: title and counts side by side,
+          dismissal on the right where macOS puts it, and no branch — the shell's
+          status bar already spells the branch out in full, where this pane only
+          had room to truncate it. Full-screen/mobile keeps the stacked header,
+          which has the width for a subtitle and no status bar to defer to. */}
       <View style={s.header}>
-        <Pressable
-          onPress={() => router.back()}
-          style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
-        >
-          <PounceIcon name="chevron-down" size={22} color={theme.colors.fg} />
-        </Pressable>
-        <View style={s.titleWrap}>
-          <Text style={s.title}>Changes</Text>
-          <View style={s.metaRow}>
-            {changes?.branch ? (
-              <Text numberOfLines={1} style={s.branch}>
-                ⎇ {changes.branch}
-              </Text>
-            ) : null}
-            {fileCount > 0 ? (
+        {!embedded ? (
+          <Pressable
+            onPress={() => (onClose ? onClose() : router.back())}
+            style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
+          >
+            <PounceIcon name="chevron-down" size={22} color={theme.colors.fg} />
+          </Pressable>
+        ) : null}
+        <View style={embedded ? s.titleRowCompact : s.titleWrap}>
+          <Text style={embedded ? s.titleCompact : s.title}>Changes</Text>
+          {embedded ? (
+            fileCount > 0 ? (
               <Text numberOfLines={1} style={s.counts}>
-                {fileCount} file{fileCount === 1 ? "" : "s"} ·{" "}
+                {fileCount} file{fileCount === 1 ? "" : "s"}
+                {"  "}
                 <Text style={s.diffAdd}>+{totals.add}</Text>{" "}
                 <Text style={s.diffDel}>−{totals.del}</Text>
               </Text>
-            ) : null}
-          </View>
+            ) : null
+          ) : (
+            <View style={s.metaRow}>
+              {changes?.branch ? (
+                <Text numberOfLines={1} style={s.branch}>
+                  ⎇ {changes.branch}
+                </Text>
+              ) : null}
+              {fileCount > 0 ? (
+                <Text numberOfLines={1} style={s.counts}>
+                  {fileCount} file{fileCount === 1 ? "" : "s"} ·{" "}
+                  <Text style={s.diffAdd}>+{totals.add}</Text>{" "}
+                  <Text style={s.diffDel}>−{totals.del}</Text>
+                </Text>
+              ) : null}
+            </View>
+          )}
         </View>
-        {IS_DESKTOP && fileCount > 0 ? (
+        {/* Split view needs width the docked pane doesn't have. */}
+        {IS_DESKTOP && !embedded && fileCount > 0 ? (
           <View style={s.layoutToggle}>
             {(["unified", "split"] as const).map((l) => (
               <Pressable
@@ -284,8 +330,17 @@ export default function ChangesScreen() {
           </Pressable>
         ) : null}
         <Pressable onPress={load} style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}>
-          <PounceIcon name="refresh" size={18} color={theme.colors.fgMuted} />
+          <PounceIcon name="refresh" size={16} color={theme.colors.fgMuted} />
         </Pressable>
+        {embedded ? (
+          <Pressable
+            onPress={() => (onClose ? onClose() : router.back())}
+            accessibilityLabel="Close changes"
+            style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
+          >
+            <PounceIcon name="close" size={16} color={theme.colors.fgMuted} />
+          </Pressable>
+        ) : null}
       </View>
 
       {/* Diff */}
@@ -300,6 +355,21 @@ export default function ChangesScreen() {
             <Text style={s.emptyTitle}>Working tree clean</Text>
             <Text style={s.emptyBody}>No uncommitted changes in this worktree.</Text>
           </View>
+        ) : !hasPatch ? (
+          <ScrollView contentContainerStyle={s.fileListBody}>
+            <Text style={s.fileListNote}>
+              New files git isn’t tracking yet — there’s no diff to show until they’re staged.
+            </Text>
+            {changes?.files.map((file) => (
+              <View key={file.path} style={s.fileRow}>
+                <PounceIcon name="document-outline" size={13} color={theme.colors.fgFaint} />
+                <Text numberOfLines={1} style={s.filePath}>
+                  {file.path}
+                </Text>
+                <Text style={s.fileStatus}>{file.status}</Text>
+              </View>
+            ))}
+          </ScrollView>
         ) : (
           <DiffView
             patch={changes?.diff ?? ""}
@@ -313,14 +383,20 @@ export default function ChangesScreen() {
 
       {/* Actions */}
       {fileCount > 0 ? (
-        <View style={[s.footer, { paddingBottom: insets.bottom + 8 }]}>
+        <View style={[s.footer, { paddingBottom: embedded ? 10 : insets.bottom + 8 }]}>
+          {/* AppKit draws its focus ring as a square-cornered rect, which leaves
+              four gaps around a rounded field — every input in the app turns it
+              off (INPUT_TWEAKS) and draws its own focus edge instead. */}
           <TextInput
+            {...INPUT_TWEAKS}
             value={message}
             onChangeText={setMessage}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
             editable={!busy}
             placeholder="Commit message — leave empty to generate…"
             placeholderTextColor={theme.colors.fgFaint}
-            style={s.input}
+            style={[s.input, focused && s.inputFocused]}
             multiline
           />
           <View style={s.actionsRow}>
@@ -422,6 +498,7 @@ const s = StyleSheet.create((theme) => ({
   pressed70: { opacity: 0.7 },
   titleWrap: { minWidth: 0, flex: 1 },
   title: { fontSize: 17, fontWeight: "600", color: theme.colors.fg },
+  titleCompact: { fontSize: 13, fontWeight: "600", color: theme.colors.fg },
   metaRow: { marginTop: 2, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 },
   branch: { flexShrink: 1, fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fgFaint },
   counts: { flexShrink: 0, fontSize: 12, color: theme.colors.fgMuted },
@@ -453,7 +530,29 @@ const s = StyleSheet.create((theme) => ({
   filterText: { fontSize: 12, fontWeight: "500" },
   accentText: { color: theme.colors.accent },
   mutedText: { color: theme.colors.fgMuted },
+  // Docked header: title and counts on one baseline instead of stacked.
+  titleRowCompact: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
   diffWrap: { flex: 1, borderTopWidth: 1, borderColor: theme.colors.border },
+  fileListBody: { paddingHorizontal: 12, paddingVertical: 10, gap: 2 },
+  fileListNote: {
+    marginBottom: 8,
+    fontSize: 11.5,
+    lineHeight: 16,
+    color: theme.colors.fgMuted,
+  },
+  fileRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 3 },
+  filePath: {
+    flex: 1,
+    fontFamily: "JetBrainsMono",
+    fontSize: 11,
+    color: theme.colors.fg,
+  },
+  fileStatus: { flexShrink: 0, fontSize: 10.5, color: theme.colors.fgFaint },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
   emptyEmoji: { fontSize: 40 },
@@ -473,13 +572,21 @@ const s = StyleSheet.create((theme) => ({
   input: {
     maxHeight: 90,
     minHeight: 40,
-    borderRadius: 16,
+    borderRadius: 12,
     backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 12,
-    paddingTop: 8,
+    // Even top/bottom padding — a lone paddingTop left the first line riding
+    // high in the box (textAlignVertical is Android-only, so symmetric padding
+    // is what centres a multiline field).
+    paddingVertical: 10,
     fontSize: 14,
+    lineHeight: 18,
     color: theme.colors.fg,
+    // Border always present so focusing doesn't reflow the field by 1px.
+    borderWidth: 1,
+    borderColor: "transparent",
   },
+  inputFocused: { borderColor: theme.colors.accent },
   actionsRow: { marginTop: 8, flexDirection: "row", gap: 8 },
   commitBtn: {
     height: 36,

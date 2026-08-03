@@ -17,6 +17,8 @@
  */
 import http from "node:http";
 import net from "node:net";
+import { createHash } from "node:crypto";
+import { gzip } from "node:zlib";
 import { execFileSync, spawn } from "node:child_process";
 import {
   createReadStream,
@@ -32,6 +34,13 @@ import { pathToFileURL } from "node:url";
 import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import { createHost } from "./agents/host.mjs";
+import {
+  clearThreadMarkers,
+  listMarkers,
+  replaceThreadMarkers,
+  setMarker,
+} from "./agents/markers.mjs";
+import { Store } from "./agents/store.mjs";
 import { toAtif } from "./agents/atif.mjs";
 import { resolvePermission } from "./agents/acp.mjs";
 import {
@@ -43,11 +52,18 @@ import {
 } from "./agents/pty-turn.mjs";
 import { agentEnv, binPath, binVersion, primaryLanIp } from "./agents/env.mjs";
 import { publicConfig, readConfig, writeConfig } from "./agents/config.mjs";
-import { readContextFiles } from "./agents/context.mjs";
+import { readContextFiles, writeContextFile } from "./agents/context.mjs";
 import { createHistorySearch } from "./agents/search.mjs";
 import { createActivityIndex } from "./agents/activity-index.mjs";
 import { readQuota } from "./agents/quota.mjs";
+import { readBlocks } from "./agents/blocks.mjs";
 import { dailyCost, resetCostCache } from "./agents/admin-cost.mjs";
+import {
+  dailyCost as estimatedDailyCost,
+  dailyUsage as ccusageDailyUsage,
+  SUPPORTED as ccusageReads,
+  resetCcusageCache,
+} from "./agents/ccusage.mjs";
 
 const IS_WIN = process.platform === "win32";
 
@@ -96,8 +112,8 @@ async function cached(key, ttl, fn) {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < ttl) return hit.value;
   // Coalesce: with a client syncing every ~10s and the warm loop every 15s, a
-  // slow (cold-dial) probe outlives the interval — without this, every tick
-  // spawned ANOTHER probe process and they accumulated unboundedly.
+  // slow refresh outlives the interval — without this, every tick started
+  // ANOTHER one and they accumulated unboundedly.
   const pending = inflight.get(key);
   if (pending) return pending;
   const run = (async () => {
@@ -426,7 +442,12 @@ function repoInfo(cwd) {
 // machine) and fold worktree sessions into that project's folder instead of a
 // generic, collision-prone "Workspace". All worktrees under one workspace share
 // an origin, so resolve once per workspace id and cache the hit permanently.
-const wsRepoCache = new Map(); // workspace id -> real repo name
+//
+// Persisted: a resolved workspace→repo mapping is a fact about a directory that
+// doesn't change, and rediscovering it costs a `git rev-parse` per workspace on
+// every boot. Only successes are stored — an unresolved workspace stays absent
+// so it retries (a worktree can be archived before it's ever resolved).
+const wsRepoCache = new Store("worktree-repos");
 
 /** Origin repo name for a worktree cwd, via its git common dir (…/<repo>/.git). */
 async function realRepoForWorktree(cwd) {
@@ -497,8 +518,8 @@ async function listThreads(agent, onPage) {
 
 /** Stream threads to `sink` page-by-page as the daemon paginates — same per-thread
  *  shaping getThreads does (provisional activity + worktree→repo fold), applied
- *  per page so the app can render progressively instead of blocking on every
- *  cold-dial page. */
+ *  per page so the app can render progressively instead of blocking until the
+ *  whole list is built. */
 async function streamThreads(sink) {
   const agents = await getAgents();
   // Same as getThreads: list threads for every JSONL agent that has sessions on
@@ -550,8 +571,7 @@ async function getThreads(fresh = false) {
     }
 
     // Enrich live threads with real activity from their turn history in the
-    // background. Each probe is a fresh Iroh round-trip, so awaiting all of them
-    // here previously made the first sync take ~40s. Instead we mutate these same
+    // background rather than blocking the list on it. We mutate these same
     // objects in place; since the cache holds these references, the next poll
     // (the app refreshes on an interval) serves the enriched data.
     void enrichThreadActivity(threads);
@@ -675,6 +695,183 @@ const activity = createActivityIndex({
 // How often the background pass re-reads transcripts that changed. The index is
 // mtime-keyed, so a tick over unchanged threads is one stat() each.
 const ACTIVITY_POPULATE_MS = Number(process.env.ACTIVITY_POPULATE_MS || 10 * 60_000);
+
+/**
+ * Replace our own token counts with ccusage's, and attach the breakdown behind
+ * them.
+ *
+ * Why hand this over: what counts as a token is a per-agent convention that
+ * drifts (Anthropic reports cache reads beside the input, OpenAI reports them
+ * inside it), and getting it wrong is invisible — a big number looks like a big
+ * number. That is exactly how the dashboard came to report 327B where Codex's
+ * own profile said 25.1B. ccusage tracks ~20 agents' formats as its whole job,
+ * so it owns the reading — and the figure it reports is the one we publish,
+ * unmodified. We add no arithmetic of our own on top (see agents/ccusage.mjs
+ * for why subtracting cache reads was tried and abandoned); the cached portion
+ * travels alongside under `usage` so the client can show the split.
+ *
+ * Authority is PER AGENT, not per day: an agent ccusage cannot read keeps
+ * whatever the transcript scan produced, rather than being zeroed by a source
+ * that never had an opinion about it. For the agents it DOES read, its silence
+ * on a day is a real zero.
+ *
+ * Today that guard is belt-and-braces — the scan only counts tokens for claude
+ * and codex (activity-index's TOKEN_AGENTS) and ccusage reads both — so nothing
+ * currently takes the fallback branch. It earns its keep the moment either set
+ * changes, and without it that change would silently zero an agent instead of
+ * leaving it alone.
+ *
+ * Not applied to repo-scoped series: ccusage reports per day across everything
+ * and carries no cwd, so it cannot say which repo a token belongs to. The
+ * Spaces page therefore stays on the transcript scan — see the `repo` branch in
+ * /v1/activity.
+ */
+async function withCcusageTokens(series, since) {
+  const usage = await ccusageDailyUsage({ since }).catch(() => ({ available: false }));
+  if (!usage.available) return series;
+  const byDay = usage.byDay || {};
+
+  /** Fold one ccusage day onto one series day. */
+  const merge = (d, u) => {
+    const out = { ...d, byAgent: { ...d.byAgent } };
+    // The day's own breakdown, for the Tokens card's detail view.
+    out.usage = {
+      input: u.input,
+      output: u.output,
+      cacheCreate: u.cacheCreate,
+      cacheRead: u.cacheRead,
+      total: u.total,
+    };
+    const seen = new Set();
+    for (const a of u.agents) {
+      seen.add(a.agent);
+      const cur = out.byAgent[a.agent];
+      out.byAgent[a.agent] = {
+        // An agent ccusage priced but we never saw still gets a row: it did
+        // work, we just had no dated tokens for it.
+        ...(cur ?? { sessions: 0, messages: 0, cost: null }),
+        tokens: a.tokens,
+        usage: {
+          input: a.input,
+          output: a.output,
+          cacheCreate: a.cacheCreate,
+          cacheRead: a.cacheRead,
+          total: a.total,
+          models: a.models,
+        },
+      };
+    }
+    // Supported agents ccusage stayed silent about did nothing priced that day.
+    for (const [agent, cur] of Object.entries(out.byAgent)) {
+      if (!seen.has(agent) && ccusageReads.has(agent)) out.byAgent[agent] = { ...cur, tokens: 0 };
+    }
+    // The day's headline is the sum of what we just wrote, so an unreadable
+    // agent (Cursor) still contributes its transcript figure.
+    out.tokens = Object.values(out.byAgent).reduce((n, a) => n + (a.tokens || 0), 0);
+    return out;
+  };
+
+  const daysOut = series.days.map((d) => (byDay[d.date] ? merge(d, byDay[d.date]) : d));
+  // Days ccusage saw that the transcript scan never did.
+  const known = new Set(daysOut.map((d) => d.date));
+  for (const [date, u] of Object.entries(byDay)) {
+    if (known.has(date)) continue;
+    daysOut.push(merge({ date, sessions: 0, messages: 0, tokens: 0, cost: null, byAgent: {} }, u));
+  }
+  daysOut.sort((a, b) => a.date.localeCompare(b.date));
+  return {
+    ...series,
+    days: daysOut,
+    totals: {
+      ...series.totals,
+      tokens: daysOut.reduce((n, d) => n + (d.tokens || 0), 0),
+    },
+    // So the client can say where the figure came from rather than implying
+    // every agent was measured the same way.
+    tokenSource: "ccusage",
+  };
+}
+
+/**
+ * Fill days the official sources left blank with ccusage's list-price estimate.
+ *
+ * Runs BEFORE withAdminCost so the billing report still overwrites anything it
+ * covers: the precedence is reported > billed > estimated, and this is the
+ * bottom of it. A day that already has a dollar figure is never touched, so no
+ * real number is ever replaced by a guess — the fill only reaches `cost: null`,
+ * which is the state that used to render as "not knowable".
+ *
+ * Every estimated figure is flagged `costEstimated: true` at whatever level it
+ * landed (day, agent, totals) so the app can mark it rather than passing list
+ * prices off as billing. See agents/ccusage.mjs for why a zero never arrives
+ * here as a zero.
+ */
+async function withEstimatedCost(series, days, since) {
+  // Same `since` the token read used, so both share one ccusage run.
+  const est = await estimatedDailyCost({ days, since }).catch(() => ({ available: false }));
+  if (!est.available) return series;
+  const byDay = est.byDay || {};
+  let estimated = false;
+  const daysOut = series.days.map((d) => {
+    const e = byDay[d.date];
+    if (!e) return d;
+    const out = { ...d, byAgent: { ...d.byAgent } };
+    if (out.cost == null) {
+      out.cost = e.total;
+      out.costEstimated = true;
+      estimated = true;
+    }
+    for (const [agent, cost] of Object.entries(e.byAgent)) {
+      const cur = out.byAgent[agent];
+      // An agent with no row at all still gets one: it did work that day, we
+      // just had no dated token counts for it (opencode and cursor keep none).
+      if (!cur) {
+        out.byAgent[agent] = { sessions: 0, messages: 0, tokens: 0, cost, costEstimated: true };
+        estimated = true;
+      } else if (cur.cost == null) {
+        out.byAgent[agent] = { ...cur, cost, costEstimated: true };
+        estimated = true;
+      }
+    }
+    return out;
+  });
+  // Days ccusage saw that the series never did — same reasoning as the billing
+  // overlay: a day with spend and no readable transcript still happened.
+  const known = new Set(daysOut.map((d) => d.date));
+  for (const [date, e] of Object.entries(byDay)) {
+    if (known.has(date)) continue;
+    const byAgent = {};
+    for (const [agent, cost] of Object.entries(e.byAgent)) {
+      byAgent[agent] = { sessions: 0, messages: 0, tokens: 0, cost, costEstimated: true };
+    }
+    daysOut.push({
+      date,
+      sessions: 0,
+      messages: 0,
+      tokens: 0,
+      cost: e.total,
+      costEstimated: true,
+      byAgent,
+    });
+    estimated = true;
+  }
+  if (!estimated) return series;
+  let total = null;
+  for (const d of daysOut) if (d.cost != null) total = (total ?? 0) + d.cost;
+  daysOut.sort((a, b) => a.date.localeCompare(b.date));
+  return {
+    ...series,
+    days: daysOut,
+    totals: {
+      ...series.totals,
+      cost: total == null ? null : Math.round(total * 100) / 100,
+      // `costComplete` keeps its meaning — whether every agent reported its own
+      // dollars — and stays false here. `costEstimated` is the separate fact
+      // that some of this total was priced rather than billed.
+      costEstimated: true,
+    },
+  };
+}
 
 /**
  * Overlay the organization's official daily spend onto the activity series,
@@ -916,13 +1113,67 @@ function readBody(req) {
   });
 }
 
+/** Below this, gzip's ~20-byte envelope and the CPU cost aren't worth it. */
+const GZIP_MIN_BYTES = 1024;
+
+/**
+ * JSON response with conditional-GET validation and gzip.
+ *
+ * The etag is hashed from the bytes actually being sent, NOT from a version
+ * counter over the session index: `getThreads` hands out object references that
+ * `enrichThreadActivity` mutates in place afterwards, and `flagAwaitingPrompt`
+ * folds in PTY prompt state that never touches disk. Neither shows up in an
+ * fs.watch-derived counter, so a counter would serve 304s over exactly the
+ * updates the app polls for. Hashing the payload is correct by construction.
+ *
+ * Order matters: hash first and return 304 BEFORE gzip runs, so an unchanged
+ * poll — the common case at the app's ~10s sync — costs one sha1 instead of a
+ * full compress plus transfer.
+ *
+ * Request details ride on `res.reqInfo`, stamped by the main handler, so the
+ * ~40 existing call sites need no change.
+ */
 function send(res, code, body) {
   const json = JSON.stringify(body);
-  res.writeHead(code, {
+  const info = res.reqInfo || {};
+  const headers = {
     "content-type": "application/json",
     "access-control-allow-origin": "*",
+    vary: "accept-encoding",
+  };
+
+  // Validators only apply to a cacheable GET carrying a real body.
+  if (info.method === "GET" && code === 200) {
+    headers.etag = `W/"${createHash("sha1").update(json).digest("base64url").slice(0, 22)}"`;
+    // "no-cache" = store it, but revalidate every time — never serve stale.
+    // Required: the app calls bare `fetch` with no cache hints, so without an
+    // explicit directive the platform HTTP caches (NSURLSession URLCache,
+    // OkHttp) fall back to heuristic freshness and may never send
+    // If-None-Match at all, leaving the 304 path dead.
+    headers["cache-control"] = "no-cache";
+    if (info.ifNoneMatch === headers.etag) {
+      res.writeHead(304, headers);
+      return res.end();
+    }
+  }
+
+  const buf = Buffer.from(json);
+  if (!info.gzip || buf.length < GZIP_MIN_BYTES) {
+    res.writeHead(code, headers);
+    return res.end(buf);
+  }
+  // Async gzip: a multi-MB thread list must not stall the event loop while turn
+  // and thread SSE streams are live on other sockets. Fall back to identity if
+  // compression fails — the body is still valid, just larger.
+  gzip(buf, (err, out) => {
+    if (res.writableEnded) return;
+    if (err) {
+      res.writeHead(code, headers);
+      return res.end(buf);
+    }
+    res.writeHead(code, { ...headers, "content-encoding": "gzip" });
+    res.end(out);
   });
-  res.end(json);
 }
 
 let lastClientSeen = 0; // updated on every authed app request — a liveness signal
@@ -1059,6 +1310,13 @@ tick(); setInterval(tick, 1200);
 </script></body></html>`;
 
 const server = http.createServer(async (req, res) => {
+  // Everything send() needs from the request, captured once so the response
+  // helper stays a (res, code, body) call at ~40 sites.
+  res.reqInfo = {
+    method: req.method,
+    gzip: /\bgzip\b/.test(req.headers["accept-encoding"] || ""),
+    ifNoneMatch: req.headers["if-none-match"] || null,
+  };
   const url = new URL(req.url, "http://x");
   if (url.pathname === "/health") return send(res, 200, { ok: true });
 
@@ -1111,8 +1369,8 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/v1/threads")
       return send(res, 200, { threads: await getThreads(url.searchParams.get("fresh") === "1") });
     // SSE variant: emit each page of threads as it arrives so the app's initial
-    // connect renders progressively instead of blocking ~a minute on all the
-    // cold-dial pages. `data: {threads:[...]}` per page, then `data: {done:true}`.
+    // connect renders progressively instead of blocking until every page is
+    // built. `data: {threads:[...]}` per page, then `data: {done:true}`.
     if (url.pathname === "/v1/threads/stream") {
       res.writeHead(200, {
         "content-type": "text/event-stream",
@@ -1258,15 +1516,36 @@ const server = http.createServer(async (req, res) => {
       createReadStream(p).pipe(res);
       return;
     }
-    if (url.pathname === "/v1/context") {
-      // A project's agent-instruction files (CLAUDE.md/AGENTS.md), for reading
-      // in the app. Read-only and whitelist-scoped by design — see
-      // agents/context.mjs; edits go through an agent turn, not an endpoint.
+    if (url.pathname === "/v1/context" && req.method !== "POST") {
+      // A project's agent-instruction files (CLAUDE.md/AGENTS.md). Whitelist-
+      // scoped by design — see agents/context.mjs.
       const cwd = url.searchParams.get("cwd");
       if (!cwd) return send(res, 400, { error: "cwd required" });
       const out = await readContextFiles(cwd);
       if (!out) return send(res, 404, { error: "not found" });
       return send(res, 200, out);
+    }
+    if (url.pathname === "/v1/context" && req.method === "POST") {
+      // Save one context file. `mtime` is the version the client last read —
+      // omit it to force, send it to be told (409) when an agent turn edited
+      // the file underneath you rather than silently losing that edit.
+      const body = await readBody(req);
+      const { cwd, path: rel, content } = body;
+      if (!cwd || !rel) return send(res, 400, { error: "cwd and path required" });
+      // An ABSENT `mtime` means "force"; an explicit null means "I expect this
+      // file not to exist yet". `in` is what tells those two apart.
+      const expected = "mtime" in body ? body.mtime : undefined;
+      const out = await writeContextFile(cwd, rel, content, expected);
+      if (out.ok) return send(res, 200, { file: out.file });
+      const status =
+        out.error === "conflict"
+          ? 409
+          : out.error === "not found"
+            ? 404
+            : out.error === "write failed"
+              ? 500
+              : 400;
+      return send(res, status, { error: out.error, mtime: out.file ?? null });
     }
     if (url.pathname === "/v1/doctor") {
       return send(res, 200, { report: await host.doctor() });
@@ -1307,20 +1586,45 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/v1/activity") {
       const days = Math.min(400, Math.max(1, Number(url.searchParams.get("days") || 365)));
       const fresh = url.searchParams.get("fresh") === "1";
-      const key = `activity:${days}`;
+      // `repo` narrows the series to one repository's threads — the Spaces
+      // page, which asks "what has this project cost me", not "what have I
+      // done". It's the SAME transcript scan, just folded over fewer threads.
+      const repo = url.searchParams.get("repo");
+      const key = `activity:${days}:${repo ?? "*"}`;
       if (fresh) {
         cache.delete(key);
         // The billing report has its own 5-minute memo inside admin-cost.mjs.
         // Without this, someone who just fixed a rejected Admin key pulls to
         // refresh and still gets the stale "not authorized" answer.
         resetCostCache();
+        // Same for the estimate, which also memos its (slower) transcript scan.
+        resetCcusageCache();
       }
       return send(
         res,
         200,
         await cached(key, CACHE_MS, async () => {
-          const series = await activity.series(await getThreads(fresh), { days });
-          return withAdminCost(series, days);
+          const all = await getThreads(fresh);
+          if (repo) {
+            // Ledger dollars only. The org billing report is per-workspace and
+            // ccusage's estimate is per-day-across-everything: neither can say
+            // which repo a dollar belongs to, so attributing either to one
+            // project would be inventing the number this whole path avoids.
+            return activity.series(
+              all.filter((t) => t.repo === repo),
+              { days, scoped: true },
+            );
+          }
+          const series = await activity.series(all, { days });
+          // One window bound for both ccusage reads below, so they share a
+          // single memo entry and a single spawn instead of scanning twice.
+          const since = new Date(Date.now() - (days - 1) * 86_400_000).toISOString().slice(0, 10);
+          // Tokens first: ccusage owns the reading of every agent it supports,
+          // and attaches the breakdown the Tokens card drills into.
+          const counted = await withCcusageTokens(series, since);
+          // Then dollars, cheapest-truth-last: estimate fills the holes, then
+          // the billing report overwrites whatever it can speak for.
+          return withAdminCost(await withEstimatedCost(counted, days, since), days);
         }),
       );
     }
@@ -1330,7 +1634,16 @@ const server = http.createServer(async (req, res) => {
       return send(
         res,
         200,
-        await cached("quota", 60_000, async () => ({ quota: await readQuota() })),
+        await cached("quota", 60_000, async () => {
+          const quota = await readQuota();
+          // Claude publishes no meter, but its transcripts date every turn — so
+          // the current rolling window and its burn rate ARE derivable. Attached
+          // under `blocks` (never merged into `windows`) so the client can't
+          // mistake a measurement of our own for a figure the agent reported.
+          const blocks = await readBlocks().catch(() => null);
+          if (blocks && quota[blocks.agent]) quota[blocks.agent].blocks = blocks;
+          return { quota };
+        }),
       );
     }
     if (url.pathname === "/v1/warm" && req.method === "POST") {
@@ -1515,6 +1828,31 @@ const server = http.createServer(async (req, res) => {
       const { token } = await readBody(req);
       if (token && pushTokens.delete(token)) savePushTokens();
       return send(res, 200, { ok: true });
+    }
+    // Markers — the user's jump-to points in a thread. Overrides only; the
+    // client still computes the default for every event (see agents/markers.mjs).
+    if (url.pathname === "/v1/markers" && req.method === "GET") {
+      const thread = url.searchParams.get("thread") || null;
+      return send(res, 200, { markers: await listMarkers(thread) });
+    }
+    if (url.pathname === "/v1/markers" && req.method === "POST") {
+      const { threadId, eventId, marked } = await readBody(req);
+      if (!threadId || !eventId) return send(res, 400, { error: "threadId and eventId required" });
+      await setMarker(threadId, eventId, marked === null ? null : !!marked);
+      return send(res, 200, { ok: true, markers: await listMarkers(threadId) });
+    }
+    // Whole-thread replace: the app owns the full override set for a thread it
+    // has open, so a sync pushes the thread rather than diffing. Idempotent.
+    if (url.pathname === "/v1/markers/thread" && req.method === "PUT") {
+      const { threadId, markers } = await readBody(req);
+      if (!threadId) return send(res, 400, { error: "threadId required" });
+      const n = await replaceThreadMarkers(threadId, markers || []);
+      return send(res, 200, { ok: true, count: n });
+    }
+    if (url.pathname === "/v1/markers" && req.method === "DELETE") {
+      const thread = url.searchParams.get("thread");
+      if (!thread) return send(res, 400, { error: "thread required" });
+      return send(res, 200, { ok: true, cleared: await clearThreadMarkers(thread) });
     }
     if (url.pathname === "/v1/turn/permission" && req.method === "POST") {
       const { requestId, optionId } = await readBody(req);

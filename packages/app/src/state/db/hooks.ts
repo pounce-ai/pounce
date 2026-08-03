@@ -192,8 +192,15 @@ export function useMessages(threadId: string | undefined): TimelineEvent[] {
           : q.from({ m: messages }),
       [threadId],
     ).data as MessageRow[] | undefined) ?? [];
+  // `rows` is a fresh array every render, so keying the memo on it re-filtered
+  // and re-mapped the whole transcript — hundreds of events — on every single
+  // render of the session screen, and handed back a new array that invalidated
+  // everything downstream. Key on the CONTENT instead: chat history is
+  // append-only, so a count and the last id identify it.
+  const sig = threadId ? `${rows.length}:${rows[rows.length - 1]?.id ?? ""}` : "";
   return useMemo(
     () => (threadId ? rows.filter((m) => m.threadId === threadId).map((m) => m.event) : []),
-    [rows, threadId],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `sig` stands in for `rows`
+    [sig, threadId],
   );
 }

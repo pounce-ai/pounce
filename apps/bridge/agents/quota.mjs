@@ -10,19 +10,43 @@
  * wrote on this machine. Nothing is derived, and nothing calls out to a
  * provider — see agents/admin-cost.mjs for the opt-in path that does.
  *
- * Coverage today:
- *   codex   full. Every `token_count` rollout event carries a `rate_limits`
- *           snapshot with a primary (5h) and secondary (weekly) window.
- *   claude  none. Claude Code receives its limits in API response headers and
- *           writes none of it to disk — verified across the transcript corpus,
- *           where every "rate limit" hit was prose in a conversation, not a
- *           field. Its quota would have to come from turns the bridge drives.
+ * Coverage today — only Codex publishes a live METER locally. The rest publish
+ * their plan IDENTITY, which is worth showing: a card that lists one agent
+ * reads as "the others are idle", when the truth is "the others don't say".
+ *
+ *   codex     meter. Every `token_count` rollout event carries a `rate_limits`
+ *             snapshot with a primary (5h) and secondary (weekly) window.
+ *   claude    plan only. `~/.claude/.credentials.json` names the tier
+ *             (subscriptionType / rateLimitTier); the consumption arrives in
+ *             API response headers and is never written to disk — verified by
+ *             scanning a full transcript for structured rate-limit fields and
+ *             finding none.
+ *   cursor    plan only, and not from a file: `cursor-agent about --format
+ *             json` reports `subscriptionTier`.
+ *   opencode  plan only. The `opencode-go` credential says a hosted plan is
+ *             configured, but nothing local carries its allowance — `opencode
+ *             stats` is spend derived from the same session DB the activity
+ *             chart already reads. A real Go meter needs a call to opencode's
+ *             API, which belongs in the opt-in path (agents/admin-cost.mjs),
+ *             not here.
+ *
+ * Reading credentials files: only the non-secret plan fields are touched, and
+ * nothing read here is ever returned verbatim — tokens are not parsed, logged
+ * or forwarded.
  */
-import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
 
+import { agentEnv, binPath } from "./env.mjs";
+
+const execFile = promisify(execFileCb);
+
 const CODEX_ROOT = path.join(os.homedir(), ".codex", "sessions");
+const CLAUDE_CREDS = path.join(os.homedir(), ".claude", ".credentials.json");
+const OPENCODE_AUTH = path.join(os.homedir(), ".local", "share", "opencode", "auth.json");
 
 /** Only the tail of a rollout is read: `rate_limits` rides every token_count
  *  event, so the newest snapshot is always near the end, and these files run to
@@ -117,6 +141,62 @@ function window(w, label) {
   };
 }
 
+/** Pretty name for Claude's rate-limit tier: `default_claude_max_20x` → "Max 20x".
+ *  Falls back to the plain subscription type when the tier is unfamiliar. */
+function claudePlanLabel(subscriptionType, rateLimitTier) {
+  const m = /claude_(max)_(\d+)x/.exec(rateLimitTier ?? "");
+  if (m) return `Max ${m[2]}x`;
+  if (/pro/i.test(rateLimitTier ?? "")) return "Pro";
+  return subscriptionType ? subscriptionType.replace(/^\w/, (c) => c.toUpperCase()) : null;
+}
+
+/** Claude's plan name. Only two non-secret fields are read from the credentials
+ *  file; the tokens beside them are never parsed or returned. */
+function readClaudePlan() {
+  if (!existsSync(CLAUDE_CREDS)) return null;
+  try {
+    const o = JSON.parse(readFileSync(CLAUDE_CREDS, "utf8"))?.claudeAiOauth ?? {};
+    const label = claudePlanLabel(o.subscriptionType, o.rateLimitTier);
+    return label ? { planType: label, note: "Anthropic doesn't publish limits locally" } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** opencode: a hosted plan is only *configured* — its allowance isn't local. */
+function readOpencodePlan() {
+  if (!existsSync(OPENCODE_AUTH)) return null;
+  try {
+    const auth = JSON.parse(readFileSync(OPENCODE_AUTH, "utf8")) ?? {};
+    if (auth["opencode-go"]) return { planType: "Go", note: "allowance not published locally" };
+    // A bare API key is pay-as-you-go: there's no plan window to be near.
+    if (auth.opencode) return { planType: null, note: "pay-as-you-go, no plan window" };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Cursor keeps nothing useful on disk, but its CLI reports the tier. Short
+ *  timeout and a swallowed failure: a missing or slow CLI must never hold up
+ *  the dashboard. */
+async function readCursorPlan() {
+  try {
+    // agentEnv() is how every other adapter finds a CLI: a GUI app inherits
+    // none of the shell's PATH, so a bare "cursor-agent" resolves only when the
+    // bridge was started from a terminal.
+    const { stdout } = await execFile(binPath("cursor-agent"), ["about", "--format", "json"], {
+      timeout: 6000,
+      maxBuffer: 1 << 20,
+      env: agentEnv(),
+    });
+    const tier = JSON.parse(stdout)?.subscriptionTier;
+    return tier ? { planType: tier, note: "no local meter" } : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Current quota per agent. Agents with nothing to report are simply absent —
  * an empty object means "no plan metering visible on this host", which the UI
@@ -142,6 +222,20 @@ export async function readQuota() {
         };
       }
     }
+  }
+
+  // Agents with a plan but no local meter. They carry an empty `windows` and a
+  // `note` saying why, so the card can list them honestly instead of implying
+  // they're unused. Cursor's read shells out, so it runs alongside the rest.
+  const [claude, cursor] = await Promise.all([Promise.resolve(readClaudePlan()), readCursorPlan()]);
+  const opencode = readOpencodePlan();
+  for (const [agent, plan] of [
+    ["claude", claude],
+    ["cursor", cursor],
+    ["opencode", opencode],
+  ]) {
+    if (plan)
+      out[agent] = { planType: plan.planType, note: plan.note, observedAt: null, windows: [] };
   }
   return out;
 }

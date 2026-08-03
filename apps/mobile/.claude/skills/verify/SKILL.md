@@ -14,7 +14,7 @@ All app code is JS (`packages/app`), so the installed dev client (`com.pounce.ap
 BRIDGE_PORT=8123 node apps/bridge/server.mjs   # run_in_background
 
 # 2. Metro
-cd apps/mobile && bunx expo start --port 8081  # run_in_background
+cd apps/mobile && bun run start                # pinned :8081 (desktop is :8083)
 
 # 3. Sim (booted iPhone 17: AFFEC86E-2C7B-46CC-B147-EFDCE5CF2DF8)
 xcrun simctl launch <SIM> com.pounce.app       # dev client auto-connects to :8081

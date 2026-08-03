@@ -15,6 +15,7 @@ import { CodexAdapter } from "./codex.mjs";
 import { OpencodeAdapter } from "./opencode.mjs";
 import { CursorAdapter } from "./cursor.mjs";
 import { acpAvailable, startAcpTurn } from "./acp.mjs";
+import { threadCost } from "./ccusage.mjs";
 import { buildDoctorReport } from "./doctor.mjs";
 
 export function createHost({ version = () => null } = {}) {
@@ -82,14 +83,29 @@ export function createHost({ version = () => null } = {}) {
       return adapter(agent).getActivity(threadId);
     },
 
-    /** Per-thread token usage, and cost only where the agent itself reports it
-     *  (see ./usage.mjs). Adapters without a usage source say so rather than
-     *  having the bridge estimate one. */
-    getUsage(agent, threadId) {
+    /** Per-thread token usage. Dollars come from the agent itself where it
+     *  reports them (see ./usage.mjs); where it doesn't, ccusage's list-price
+     *  estimate fills the hole, tagged so the UI can mark it as approximate.
+     *
+     *  The fill is deliberately only for `cost == null`. A partial official
+     *  figure (a Claude thread with turns taken outside Pounce) keeps its own
+     *  number and its `costComplete: false` marker rather than being replaced
+     *  by an estimate — a real, incomplete number is not a gap. */
+    async getUsage(agent, threadId) {
       const a = adapter(agent);
-      return a.getUsage
-        ? a.getUsage(threadId)
-        : Promise.resolve({ available: false, reason: "unsupported-agent" });
+      if (!a.getUsage) return { available: false, reason: "unsupported-agent" };
+      const usage = await a.getUsage(threadId);
+      if (!usage?.available || usage.cost != null) return usage;
+      const est = await threadCost(agent, threadId).catch(() => null);
+      if (!est) return usage;
+      return {
+        ...usage,
+        cost: Math.round(est.cost * 10000) / 10000,
+        // ccusage reads the whole transcript, so unlike the ledger this covers
+        // every turn in the thread — partial only in that it's priced, not billed.
+        costComplete: true,
+        costSource: "ccusage-est",
+      };
     },
 
     /** On-disk transcript path for a thread, or null when the adapter keeps its
