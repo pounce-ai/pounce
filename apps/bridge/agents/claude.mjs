@@ -44,6 +44,9 @@ const CLAUDE_MODE = {
 };
 // A turn started outside the bridge shows as "running" while its file is this fresh.
 const RUNNING_WINDOW_MS = 120_000;
+// A transcript touched inside this window is treated as still being written.
+// Sized to cover the pause between an agent's prose and its next tool call.
+const FOREIGN_WRITE_WINDOW_MS = 90_000;
 // With a live agent process confirmed in the thread's cwd, a quiet mid-turn
 // transcript stays "running" this long (covers long tool calls/builds).
 const LIVE_EXTENDED_WINDOW_MS = 2 * 60 * 60_000;
@@ -170,6 +173,9 @@ function isRealUserLine(o) {
 
 export class ClaudeAdapter {
   constructor({ turns }) {
+    // threadId -> when a turn WE ran last wrote it, so our own writes are not
+    // mistaken for another process (see isForeignWriter).
+    this.ownWrites = new Map();
     this.id = "claude";
     this.displayName = "Claude Code";
     this.description = "Anthropic's Claude Code CLI";
@@ -543,6 +549,31 @@ export class ClaudeAdapter {
     return judgeTranscript(file, liveInCwd);
   }
 
+  /**
+   * Is something OTHER than us appending to this thread's transcript right now?
+   *
+   * Deliberately cruder than getActivity: any write inside the window counts,
+   * whatever the tail looks like, because the tail cannot distinguish "agent
+   * finished" from "agent paused mid-turn after some prose". A false positive
+   * only delays a follow-up — the user is told to retry — whereas a false
+   * negative forks a live session, which is unrecoverable from the app.
+   *
+   * Our own turns write the same file, so a turn this adapter just ran is
+   * excluded; `turns.isRunning` covers one still in flight.
+   */
+  async isForeignWriter(threadId) {
+    if (this.turns.isRunning("claude", threadId)) return false;
+    const ownedAt = this.ownWrites.get(threadId);
+    if (ownedAt && Date.now() - ownedAt < FOREIGN_WRITE_WINDOW_MS) return false;
+    try {
+      const file = await this.findFile(threadId);
+      if (!file) return false;
+      return Date.now() - statSync(file).mtimeMs < FOREIGN_WRITE_WINDOW_MS;
+    } catch {
+      return false;
+    }
+  }
+
   listModels() {
     // The claude CLI resolves aliases/full ids itself; a static list keeps the
     // picker useful without a daemon to ask. Default mirrors the CLI default.
@@ -605,8 +636,17 @@ export class ClaudeAdapter {
       // task with full permissions — observed forking a session that then
       // killed this very bridge. Refuse while the transcript tail shows an
       // in-flight turn; the user can retry once it settles.
+      //
+      // getActivity alone is not enough: judgeTranscript calls an assistant
+      // turn ending in TEXT "completed" whatever its age, which is right for
+      // the thread list but wrong here — an agent that has just written prose
+      // between two tool calls looks exactly like one that finished. That gap
+      // let a resume through and forked a live session (the fork replayed the
+      // whole conversation into a new id, which then surfaced as a duplicate
+      // thread). So this path also refuses on a transcript that is simply
+      // still being written.
       const act = await this.getActivity(threadId).catch(() => null);
-      if (act?.activity === "running") {
+      if (act?.activity === "running" || (await this.isForeignWriter(threadId))) {
         return failedTurn(
           sessionId,
           "This thread is currently active in another Claude Code session on the host — wait for it to finish, then retry.",
@@ -721,6 +761,10 @@ export class ClaudeAdapter {
       settled = true;
       acc.clear();
       this.turns.release(entry);
+      // Stamp both ids: a resume can report a different session_id than we asked
+      // for, and either may be the one a follow-up resumes.
+      this.ownWrites.set(sessionId, Date.now());
+      if (threadId) this.ownWrites.set(threadId, Date.now());
       // Resuming a session that's LIVE in another window (terminal/FleetView)
       // doesn't run an independent turn — claude delivers the message into the
       // running session and returns without a reply, and the child can linger.
