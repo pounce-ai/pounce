@@ -211,17 +211,40 @@ export class OpencodeAdapter {
         } else if (d.type === "tool") {
           const callId = d.callID || part.id;
           const st = d.state || {};
+          // File-editing tools carry the real unified diff in state.metadata.diff.
+          // Without this the card showed the raw {oldString,newString} blob as
+          // input and "Edit applied successfully." as output — measured 1,896
+          // discarded diffs (1,634 edit + 262 apply_patch) on a real store.
+          const patch = unifiedFromOpencode(st.metadata?.diff, st.input?.filePath);
           add(
             toolCall(
               { ...base, id: callId },
               {
                 name: d.tool === "bash" ? "shell" : d.tool || "tool",
-                input: d.tool === "bash" ? { command: st.input?.command || "" } : (st.input ?? {}),
+                input:
+                  d.tool === "bash"
+                    ? { command: st.input?.command || "" }
+                    : // The diff below says what changed; repeating both sides of
+                      // the edit in the input just buries the card.
+                      patch
+                      ? { filePath: st.input?.filePath || "" }
+                      : (st.input ?? {}),
                 status: st.status === "error" ? "error" : "success",
               },
             ),
           );
-          if (st.output) {
+          if (patch) {
+            add(
+              toolResult(
+                { ...base, id: `${callId}:o` },
+                {
+                  toolCallId: callId,
+                  content: { kind: "diff", path: st.input?.filePath || "", patch },
+                  isError: st.status === "error",
+                },
+              ),
+            );
+          } else if (st.output) {
             add(
               toolResult(
                 { ...base, id: `${callId}:o` },
@@ -233,8 +256,12 @@ export class OpencodeAdapter {
               ),
             );
           }
+        } else if (d.type === "compaction") {
+          // Otherwise the transcript silently jumps where history was dropped.
+          add(systemEvent(base, "Context compacted", "info"));
         }
-        // step-start / step-finish / snapshot parts: plumbing, skipped.
+        // step-start / step-finish / snapshot / patch parts: plumbing, skipped.
+        // (`patch` is only {hash, files[]} — a snapshot marker with no diff text.)
       }
     }
 
@@ -430,13 +457,19 @@ export class OpencodeAdapter {
         emit(thinking(base(id), part.text));
       } else if (part.type === "tool" && part.state) {
         const callId = part.callID || id;
+        // Same as the history path: edit/apply_patch carry the real unified diff
+        // in state.metadata.diff (verified against opencode 1.17.4's
+        // `run --format json`), while `output` is only "Edit applied successfully."
+        const patch = unifiedFromOpencode(part.state.metadata?.diff, part.state.input?.filePath);
         emit(
           toolCall(base(callId), {
             name: part.tool === "bash" ? "shell" : part.tool || "tool",
             input:
               part.tool === "bash"
                 ? { command: part.state.input?.command || "" }
-                : (part.state.input ?? {}),
+                : patch
+                  ? { filePath: part.state.input?.filePath || "" }
+                  : (part.state.input ?? {}),
             status:
               part.state.status === "completed"
                 ? "success"
@@ -445,7 +478,16 @@ export class OpencodeAdapter {
                   : "running",
           }),
         );
-        if (part.state.output && part.state.status !== "running") {
+        if (part.state.status === "running") return;
+        if (patch) {
+          emit(
+            toolResult(base(`${callId}:o`), {
+              toolCallId: callId,
+              content: { kind: "diff", path: part.state.input?.filePath || "", patch },
+              isError: part.state.status === "error",
+            }),
+          );
+        } else if (part.state.output) {
           emit(
             toolResult(base(`${callId}:o`), {
               toolCallId: callId,
@@ -590,6 +632,30 @@ export class OpencodeAdapter {
 
 function msIso(ms) {
   return typeof ms === "number" && ms > 0 ? new Date(ms).toISOString() : null;
+}
+
+/**
+ * Normalize opencode's `state.metadata.diff` for the app's diff viewer.
+ *
+ * opencode emits Subversion-flavoured unified diffs:
+ *   Index: /abs/path
+ *   ===================================================================
+ *   --- /abs/path
+ *   +++ /abs/path
+ *   @@ -1,3 +1,4 @@
+ * splitPatch() keys on `diff --git`, so without a synthetic header the whole
+ * patch collapses into one unnamed file. The `Index:`/`===` preamble isn't
+ * recognised as diff metadata either, so it would render as context lines.
+ * Returns "" when there is no hunk content to show.
+ */
+function unifiedFromOpencode(diff, filePath) {
+  if (typeof diff !== "string" || !diff.includes("@@")) return "";
+  const body = diff
+    .split("\n")
+    .filter((l) => !l.startsWith("Index: ") && !/^=+$/.test(l))
+    .join("\n");
+  const p = filePath || /^---\s+(.+)$/m.exec(body)?.[1]?.trim() || "file";
+  return `diff --git a/${p} b/${p}\n${body}`;
 }
 
 function failedTurn(threadId, message, onEvent) {
