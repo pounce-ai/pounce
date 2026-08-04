@@ -395,7 +395,11 @@ const Row = memo(function Row({
     case "terminal_event":
       return <Term data={event.data} stream={event.stream} />;
     case "system_event":
-      return <Meta text={event.message} level={event.level} />;
+      return event.detail ? (
+        <MetaDetail id={event.id} text={event.message} detail={event.detail} level={event.level} />
+      ) : (
+        <Meta text={event.message} level={event.level} />
+      );
     case "permission_request":
       return <PermissionCard event={event} onRespond={onRespondPermission} />;
     case "prompt_request":
@@ -939,6 +943,52 @@ function Meta({ text, level }: { text: string; level?: "info" | "warning" | "err
   return <Text style={[s.meta, level === "error" ? s.textDanger : s.textFaint]}>{text}</Text>;
 }
 
+/**
+ * A system note carrying long-form context (the summary a compaction carried
+ * over). Stays a one-line note until tapped — it's bookkeeping, not a turn, and
+ * inlining it would bury the surrounding conversation.
+ */
+function MetaDetail({
+  id,
+  text,
+  detail,
+  level,
+}: {
+  /** This row's event id — see `openId` below. */
+  id: string;
+  text: string;
+  detail: string;
+  level?: "info" | "warning" | "error";
+}) {
+  // Rows are recycled: key the expansion to the event id so an open summary
+  // can't bleed into whatever event this component instance shows next.
+  const [openId, setOpenId] = useState<string | null>(null);
+  const open = openId === id;
+  return (
+    <View>
+      <Pressable
+        onPress={() => setOpenId(open ? null : id)}
+        // The note is an 11px line — without slop the tap target is ~17pt tall,
+        // which is under the touch minimum and fiddly with a mouse too.
+        hitSlop={{ top: 10, bottom: 10, left: 0, right: 0 }}
+        style={({ pressed }) => (pressed ? s.pressed80 : null)}
+      >
+        {/* pointerEvents="none": RCTText takes the mouse-down for selection on
+            macOS, so the Pressable above never sees it and tapping the note did
+            nothing — same swallow ContributionGraph hits with RNSVG. */}
+        <Text pointerEvents="none" style={[s.meta, level === "error" ? s.textDanger : s.textFaint]}>
+          {text} {open ? "▾" : "▸"}
+        </Text>
+      </Pressable>
+      {open ? (
+        <View style={s.metaDetailBox}>
+          <Text style={[s.monoText12, s.textMuted]}>{detail}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 /* Soft accent/warning/danger tints (the old accent/40-style alpha classes) have
  * no PlatformColor equivalent, so they stay literal rgba of the palette hexes. */
 const ACCENT_BORDER = "rgba(124, 111, 240, 0.4)";
@@ -1102,4 +1152,13 @@ const s = StyleSheet.create((theme) => ({
   termBox: { borderRadius: 12, backgroundColor: "#000000", padding: 8 },
   termTextOut: { color: "#d6d6d6" },
   meta: { paddingVertical: 2, textAlign: "center", fontSize: 11 },
+  metaDetailBox: {
+    marginTop: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceAlt,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
 }));

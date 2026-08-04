@@ -42,11 +42,12 @@ export const toolResult = (base, { toolCallId, content, isError = false }) => ({
   result: { toolCallId, content, isError, durationMs: null },
 });
 
-export const systemEvent = (base, message, level = "warning") => ({
+export const systemEvent = (base, message, level = "warning", detail) => ({
   ...base,
   type: "system_event",
   message,
   level,
+  ...(detail ? { detail } : {}),
 });
 
 export const permissionRequest = (base, { requestId, toolName, toolTitle, options }) => ({
