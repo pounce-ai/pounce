@@ -67,6 +67,7 @@ function extract(s, name) {
  * @property {RegExp[]} [dropLines]      Whole lines to drop (e.g. Codex's AGENTS.md header).
  * @property {{ name: string, args: string }} [command]  Tags → slash-command chip.
  * @property {{ stdout: string[], stderr: string[] }} [output]  Tags → output note.
+ * @property {RegExp[]} [dropOutput]     Captured output that is TUI chrome, not real output.
  * @property {string[]} [present]        Presentation tags removed from prose during full parse.
  */
 
@@ -86,6 +87,11 @@ const CLAUDE = {
     stdout: ["local-command-stdout", "bash-stdout"],
     stderr: ["local-command-stderr", "bash-stderr"],
   },
+  // `/compact` "prints" a receipt that is really TUI chrome — it points at a
+  // Claude Code keybinding (ctrl+o) that means nothing outside that terminal.
+  // We surface the compaction as its own note, with the summary foldable, so
+  // showing this too would be both redundant and a promise we can't keep.
+  dropOutput: [/^Compacted\b.*$/i],
   present: [
     "command-name",
     "command-args",
@@ -163,7 +169,8 @@ export function parseUserMessage(raw, agent) {
     const captured = stderr ?? stdout;
     if (captured != null) {
       const text = stripAnsi(captured).trim();
-      if (text) output = { text, isError: stderr != null };
+      const chrome = (rules.dropOutput ?? []).some((re) => re.test(text));
+      if (text && !chrome) output = { text, isError: stderr != null };
     }
   }
 

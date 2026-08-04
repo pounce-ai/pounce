@@ -42,6 +42,22 @@ describe("parseUserMessage — claude", () => {
     ).toBe("Bold done");
   });
 
+  it("drops /compact's TUI receipt instead of showing it as output", () => {
+    // Verbatim from a real transcript, ANSI dim codes and all. It advertises a
+    // Claude Code keybinding that does nothing here, and we render the
+    // compaction as its own foldable note anyway.
+    const raw =
+      "<local-command-stdout>\x1b[2mCompacted (ctrl+o to see full summary)\x1b[22m</local-command-stdout>";
+    expect(p(raw).output).toBeUndefined();
+    expect(isEmptyUserMessage(p(raw))).toBe(true);
+  });
+
+  it("keeps real stdout that merely starts with a similar word", () => {
+    expect(p("<local-command-stdout>Compacting the archive…</local-command-stdout>").output).toEqual(
+      { text: "Compacting the archive…", isError: false },
+    );
+  });
+
   it("treats a lone caveat/system-reminder envelope as empty", () => {
     expect(isEmptyUserMessage(p("<local-command-caveat>Caveat: …</local-command-caveat>"))).toBe(
       true,

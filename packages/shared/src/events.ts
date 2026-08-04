@@ -94,6 +94,11 @@ export interface SystemEvent extends TimelineBase {
   readonly message: string;
   /** Preserved raw `type` when an unknown upstream variant was normalized. */
   readonly source?: string;
+  /**
+   * Long-form body folded behind the one-line `message` — currently the
+   * carried-over summary on a compaction note. Rendered collapsed.
+   */
+  readonly detail?: string;
 }
 
 /** One choice offered for a pending permission (ACP `session/request_permission`). */

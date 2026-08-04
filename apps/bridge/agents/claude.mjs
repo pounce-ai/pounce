@@ -52,6 +52,8 @@ const TURN_TIMEOUT_MS = Number(process.env.BRIDGE_TURN_TIMEOUT_MS || 300_000);
 const MAX_HISTORY_BYTES = 8 * 1024 * 1024;
 // Cap a single streamed item's accumulated text (matches the old acc cap intent).
 const MAX_STREAM_ITEM_BYTES = 2 * 1024 * 1024;
+// Compaction summaries run long; keep the folded copy readable, not verbatim.
+const MAX_COMPACT_DETAIL = 8 * 1024;
 
 /** Preview/title text for a raw first user message (mirrors server cleanPreview). */
 function cleanPreview(raw) {
@@ -115,9 +117,19 @@ function turnMetrics(sessionId, o) {
   };
 }
 
+/**
+ * Records the CLI writes as `type:"user"` purely to re-seed the model's context
+ * — the post-compaction summary is the only one so far. Claude Code flags them
+ * `isVisibleInTranscriptOnly` and keeps them out of its own chat view; without
+ * this check they render as a giant purple user bubble nobody typed.
+ */
+function isTranscriptOnly(o) {
+  return !!(o.isVisibleInTranscriptOnly || o.isCompactSummary);
+}
+
 /** Is this user record an actual human message (not meta, not a tool result)? */
 function isRealUserLine(o) {
-  if (o.type !== "user" || o.isMeta || o.isSidechain) return false;
+  if (o.type !== "user" || o.isMeta || o.isSidechain || isTranscriptOnly(o)) return false;
   const c = o.message?.content;
   if (typeof c === "string") return !!c.trim();
   if (Array.isArray(c)) return c.some((b) => b?.type === "text" && b.text?.trim());
@@ -275,14 +287,8 @@ export class ClaudeAdapter {
       }
       return cur;
     };
-    const add = (ev, startsTurn = false) => {
-      const b = bucket(startsTurn);
-      const size =
-        (ev.text?.length || 0) * 2 +
-        (ev.result?.content?.text?.length || 0) * 2 +
-        (ev.result?.content?.patch?.length || 0) * 2 +
-        200;
-      b.events.push(ev);
+    /** Bill `size` to the newest turn and evict old ones until we're back in budget. */
+    const charge = (b, size) => {
       b.bytes += size;
       totalBytes += size;
       while (
@@ -294,6 +300,17 @@ export class ClaudeAdapter {
         truncated = true;
       }
     };
+    const add = (ev, startsTurn = false) => {
+      const b = bucket(startsTurn);
+      const size =
+        (ev.text?.length || 0) * 2 +
+        (ev.result?.content?.text?.length || 0) * 2 +
+        (ev.result?.content?.patch?.length || 0) * 2 +
+        200;
+      b.events.push(ev);
+      charge(b, size);
+      return { ev, bucket: b };
+    };
 
     let rl;
     try {
@@ -301,6 +318,9 @@ export class ClaudeAdapter {
     } catch {
       return [];
     }
+    // Set by a compact_boundary record and readable only by the record directly
+    // after it — the summary the CLI always writes there.
+    let pendingCompact = null;
     for await (const line of rl) {
       if (!line) continue;
       let o;
@@ -309,11 +329,29 @@ export class ClaudeAdapter {
       } catch {
         continue;
       }
+      const lastCompact = pendingCompact;
+      pendingCompact = null;
       const ts = o.timestamp || new Date().toISOString();
       const base = (id) => ({ id, conversationId: threadId, seq: 0, ts });
 
       if (o.type === "user") {
         if (o.isMeta || o.isSidechain) continue;
+        // The compaction summary is written as a user turn (that's how it gets
+        // back into the model's context) but it isn't one. Fold it into the
+        // "Conversation compacted" note the CLI wrote on the line just before,
+        // so the carried-over context stays readable without a fake user bubble.
+        if (isTranscriptOnly(o)) {
+          if (o.isCompactSummary && lastCompact) {
+            const body = stripNoise(contentText(o.message?.content), "claude")
+              .replace(/^This session is being continued from[^]*?Summary:\s*/i, "")
+              .trim();
+            if (body) {
+              lastCompact.ev.detail = body.slice(0, MAX_COMPACT_DETAIL);
+              charge(lastCompact.bucket, lastCompact.ev.detail.length * 2);
+            }
+          }
+          continue;
+        }
         const c = o.message?.content;
         if (typeof c === "string") {
           const text = stripNoise(c, "claude");
@@ -380,7 +418,8 @@ export class ClaudeAdapter {
             k(m.preTokens) && k(m.postTokens)
               ? ` (${k(m.preTokens)} → ${k(m.postTokens)} tokens)`
               : "";
-          add(
+          // Held so the summary record on the next line can attach itself.
+          pendingCompact = add(
             systemEvent(base(o.uuid || `cb:${ts}`), `Conversation compacted${span}`, "info"),
             true,
           );
@@ -865,7 +904,8 @@ function judgeTranscript(file, liveInCwd = null) {
       return { activity: "completed", lastActivityAt };
     }
     if (o.type === "user") {
-      if (o.isMeta) continue;
+      // Neither meta records nor the compaction summary are a pending prompt.
+      if (o.isMeta || isTranscriptOnly(o)) continue;
       // Tool result or a fresh user prompt with no reply yet → mid-turn.
       return { activity: recent ? "running" : "completed", lastActivityAt };
     }

@@ -21,6 +21,8 @@ export interface AgentRules {
   command?: { name: string; args: string };
   /** Tags whose content collapses to an output note. */
   output?: { stdout: string[]; stderr: string[] };
+  /** Captured output that is really TUI chrome — dropped instead of shown. */
+  dropOutput?: RegExp[];
   /** Presentation tags removed from the prose during a full parse. */
   present?: string[];
 }
