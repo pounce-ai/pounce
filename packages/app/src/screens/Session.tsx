@@ -822,6 +822,20 @@ export default function SessionScreen() {
     setQueued(queueRef.current);
   }, []);
 
+  // A send can strand: if the turn lands somewhere other than this thread (a
+  // resume that forks into its own session, say) the host echo never arrives,
+  // so the optimistic row would sit at "Sending…" forever. Timeline offers a
+  // Retry once that times out — drop the dead echo first so a successful
+  // resend doesn't leave the thread showing the message twice.
+  const onRetrySend = useCallback(
+    (ev: TimelineEvent) => {
+      const text = ev.type === "user_message" ? ev.text : "";
+      setLiveEvents((e) => e.filter((x) => x.id !== ev.id));
+      if (text.trim()) void onSubmit({ text, images: [] });
+    },
+    [onSubmit],
+  );
+
   const stop = useCallback(async () => {
     if (!session) return;
     // Cancel pending follow-ups and halt the drain loop, then interrupt the turn.
@@ -1129,6 +1143,7 @@ export default function SessionScreen() {
                   anchorToId={anchorId}
                   onLongPressEvent={onLongPressEvent}
                   onRunCommand={canSteer ? onRunCommand : undefined}
+                  onRetrySend={canSteer ? onRetrySend : undefined}
                   onAtBottomChange={setAtBottom}
                   onRespondPermission={(requestId, optionId) => {
                     if (session?.hostId)
