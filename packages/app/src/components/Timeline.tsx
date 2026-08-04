@@ -981,8 +981,12 @@ function MetaDetail({
         </Text>
       </Pressable>
       {open ? (
+        // The summary is prose markdown (numbered sections, bold, code fences),
+        // not command output — plain mono Text showed the ** and ``` literally.
+        // `secondary` renders it a step down from a real turn: this is carried-
+        // over context, and it should read that way before a word is read.
         <View style={s.metaDetailBox}>
-          <Text style={[s.monoText12, s.textMuted]}>{detail}</Text>
+          <MessageMarkdown text={detail} role="assistant" secondary />
         </View>
       ) : null}
     </View>

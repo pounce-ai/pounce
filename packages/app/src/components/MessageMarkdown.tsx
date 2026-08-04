@@ -198,6 +198,7 @@ export function MessageMarkdown({
   onRun,
   singleBlock,
   contextMenuItems,
+  secondary,
 }: {
   text: string;
   role: "user" | "assistant";
@@ -211,7 +212,11 @@ export function MessageMarkdown({
   singleBlock?: boolean;
   /** Extra actions on the native text-selection menu, e.g. "Comment". */
   contextMenuItems?: MarkdownContextMenuItem[];
+  /** Render as secondary material rather than a conversation turn — see
+   *  SECONDARY_SCALE. */
+  secondary?: boolean;
 }) {
+  const scale = secondary ? SECONDARY_SCALE : 1;
   // User turns and live streaming (incomplete fences) stay on the native
   // markdown path; settled assistant turns get syntax-highlighted code blocks.
   // Memoized so a row re-render (recycling, marker toggle) doesn't re-split.
@@ -224,11 +229,19 @@ export function MessageMarkdown({
         role={role}
         streaming={streaming}
         contextMenuItems={contextMenuItems}
+        scale={scale}
       />
     );
   }
   if (segments.length === 1 && segments[0].type === "md") {
-    return <MarkdownBody text={text} role="assistant" contextMenuItems={contextMenuItems} />;
+    return (
+      <MarkdownBody
+        text={text}
+        role="assistant"
+        contextMenuItems={contextMenuItems}
+        scale={scale}
+      />
+    );
   }
   return (
     <View style={{ gap: 8 }}>
@@ -239,9 +252,10 @@ export function MessageMarkdown({
             lang={seg.lang}
             code={seg.code}
             onRun={seg.runnable ? onRun : undefined}
+            secondary={secondary}
           />
         ) : (
-          <MarkdownBody key={`m${i}`} text={seg.text} role="assistant" />
+          <MarkdownBody key={`m${i}`} text={seg.text} role="assistant" scale={scale} />
         ),
       )}
     </View>
@@ -249,21 +263,50 @@ export function MessageMarkdown({
 }
 
 /** One markdown span rendered by the native engine, with a plain-text fallback. */
+/**
+ * Type scale for text that ISN'T a conversation turn — a carried-over
+ * compaction summary, reference material, anything the reader should clock as
+ * secondary before they read a word of it. Shrinking every fontSize/lineHeight
+ * in the built style keeps the vertical rhythm intact, which per-call-site
+ * font overrides would not.
+ */
+export const SECONDARY_SCALE = 0.85;
+
+function scaleStyle(style: MarkdownStyle, scale: number): MarkdownStyle {
+  if (scale === 1) return style;
+  const round = (n: number) => Math.round(n * scale * 10) / 10;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(style)) {
+    if (!value || typeof value !== "object") {
+      out[key] = value;
+      continue;
+    }
+    const entry: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+    if (typeof entry.fontSize === "number") entry.fontSize = round(entry.fontSize);
+    if (typeof entry.lineHeight === "number") entry.lineHeight = round(entry.lineHeight);
+    out[key] = entry;
+  }
+  return out as MarkdownStyle;
+}
+
 function MarkdownBody({
   text,
   role,
   streaming,
   contextMenuItems,
+  scale = 1,
 }: {
   text: string;
   role: "user" | "assistant";
   streaming?: boolean;
   contextMenuItems?: MarkdownContextMenuItem[];
+  /** <1 renders the whole body one step down — see SECONDARY_SCALE. */
+  scale?: number;
 }) {
   const scheme = useColorScheme();
   const markdownStyle = useMemo(
-    () => (role === "user" ? buildUserStyle(scheme) : buildAssistantStyle(scheme)),
-    [role, scheme],
+    () => scaleStyle(role === "user" ? buildUserStyle(scheme) : buildAssistantStyle(scheme), scale),
+    [role, scheme, scale],
   );
   const paced = usePacedText(text, !!streaming);
   // Live turns run remend off the JS thread (streamdown's remend-processor
@@ -333,11 +376,16 @@ const CodeBlock = memo(function CodeBlock({
   lang,
   code,
   onRun,
+  secondary,
 }: {
   lang: string;
   code: string;
   onRun?: (c: string) => void;
+  /** Match the surrounding secondary body so the card doesn't out-shout it. */
+  secondary?: boolean;
 }) {
+  const codeSize = secondary ? 12.5 * SECONDARY_SCALE : 12.5;
+  const codeLine = secondary ? 18 * SECONDARY_SCALE : 18;
   const { theme } = useUnistyles();
   const light = useColorScheme() === "light";
   const prismLang = PRISM_LANG[lang] ?? lang;
@@ -398,7 +446,7 @@ const CodeBlock = memo(function CodeBlock({
               {tokens.map((line, i) => (
                 <View key={i} style={s.codeLine}>
                   {line.length === 0 ? (
-                    <Text style={{ fontSize: 12.5, lineHeight: 18 }}> </Text>
+                    <Text style={{ fontSize: codeSize, lineHeight: codeLine }}> </Text>
                   ) : null}
                   {line.map((token, j) => {
                     const { style } = getTokenProps({ token });
@@ -407,8 +455,8 @@ const CodeBlock = memo(function CodeBlock({
                         key={j}
                         style={{
                           fontFamily: MONO,
-                          fontSize: 12.5,
-                          lineHeight: 18,
+                          fontSize: codeSize,
+                          lineHeight: codeLine,
                           color: (style?.color as string) ?? (light ? "#24292e" : "#cdd0d6"),
                           fontStyle: style?.fontStyle as "italic" | undefined,
                         }}
