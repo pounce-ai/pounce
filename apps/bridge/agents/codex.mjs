@@ -29,6 +29,9 @@ import { noUsage, usageResult } from "./usage.mjs";
 
 const ROOT = path.join(os.homedir(), ".codex", "sessions");
 const INDEX_FILE = path.join(os.homedir(), ".codex", "session_index.jsonl");
+// Codex refreshes this from the server; it is the account's real model list.
+const MODELS_FILE = path.join(os.homedir(), ".codex", "models_cache.json");
+const CONFIG_FILE = path.join(os.homedir(), ".codex", "config.toml");
 const RUNNING_WINDOW_MS = 120_000;
 // With a live codex process confirmed in the thread's cwd, a quiet mid-turn
 // transcript stays "running" this long (covers long tool calls/builds).
@@ -246,6 +249,8 @@ export class CodexAdapter {
     // refetches. Only for messages/reasoning — tool-call ids are referenced by
     // their outputs (`${callId}:o`) and must stay paired, so leave those raw.
     const idCount = new Map();
+    // apply_patch call id -> unified diff, consumed by the paired output.
+    const patches = new Map();
     const uniq = (id) => {
       const n = idCount.get(id) || 0;
       idCount.set(id, n + 1);
@@ -283,28 +288,55 @@ export class CodexAdapter {
           }
           // developer role: injected instructions — skip.
         } else if (p.type === "reasoning") {
-          const text = (p.summary || [])
-            .map((s) => s?.text || "")
+          // `summary` is only populated when reasoning summaries are enabled;
+          // otherwise the text sits in `content[]` (and, when the model encrypts
+          // it, only in `encrypted_content`, which we cannot render). Reading
+          // `summary` alone dropped 861/861 reasoning items on a real transcript.
+          const text = [...(p.summary || []), ...(Array.isArray(p.content) ? p.content : [])]
+            .map((s) => (typeof s === "string" ? s : s?.text || ""))
             .join("\n")
             .trim();
           if (text) add(thinking(base(uniq(p.id || `r:${ts}`)), text));
         } else if (p.type === "function_call" || p.type === "custom_tool_call") {
           const callId = p.call_id || p.id || `c:${ts}`;
-          add(toolCall(base(callId), codexCall(p)));
+          const call = codexCall(p);
+          // Remember the patch so the paired output can render as a diff.
+          if (call.name === "apply_patch") {
+            const patch = patchFromApplyPatch(call.input?.patch);
+            if (patch) patches.set(callId, patch);
+          }
+          add(toolCall(base(callId), call));
         } else if (p.type === "function_call_output" || p.type === "custom_tool_call_output") {
           const callId = p.call_id || `c:${ts}`;
+          const patch = patches.get(callId);
           add(
             toolResult(base(`${callId}:o`), {
               toolCallId: callId,
-              content: { kind: "text", text: codexOutput(p.output) },
+              content: patch
+                ? { kind: "diff", path: firstPatchPath(patch), patch }
+                : { kind: "text", text: codexOutput(p.output) },
               isError: false,
             }),
           );
+          patches.delete(callId);
+        } else if (p.type === "web_search_call") {
+          // Otherwise dropped entirely — 27 searches vanished from one transcript.
+          const q = p.action?.query || (p.action?.queries || []).join("\n") || "";
+          const callId = p.call_id || p.id || `ws:${ts}`;
+          add(toolCall(base(callId), { name: "web_search", input: { query: q } }));
         }
         continue;
       }
       if (o.type === "event_msg" && p.type === "turn_aborted") {
         add(systemEvent(base(`ab:${ts}`), "Turn interrupted", "warning"));
+      }
+      // Compaction silently removed history mid-thread; without a marker the
+      // transcript just appears to jump.
+      if (o.type === "event_msg" && p.type === "context_compacted") {
+        add(systemEvent(base(`cx:${ts}`), "Context compacted", "info"));
+      }
+      if (o.type === "event_msg" && p.type === "thread_rolled_back") {
+        add(systemEvent(base(`rb:${ts}`), "Thread rolled back", "warning"));
       }
     }
 
@@ -354,33 +386,61 @@ export class CodexAdapter {
     return { activity: "completed", lastActivityAt };
   }
 
+  /**
+   * Models come from Codex's OWN cache (~/.codex/models_cache.json), which the
+   * CLI refreshes from the server — i.e. the account's real, current list.
+   *
+   * This was previously a hardcoded pair, and a hardcoded list goes stale
+   * silently: it offered `gpt-5.2-codex` / `gpt-5.1-codex-mini` long after both
+   * had gone, and the account rejected them with
+   * "model is not supported when using Codex with a ChatGPT account" (HTTP 400).
+   * The CLI has no `models` subcommand to ask instead, so read what it stores.
+   *
+   * The default is whatever config.toml actually selects, never a guess.
+   */
   listModels() {
-    // No daemon to ask and `codex exec` picks its own default; expose the
-    // common choices. Harmless if the CLI knows more.
-    return [
-      {
-        id: "gpt-5.2-codex",
-        name: "GPT-5.2 Codex",
-        description: null,
-        isDefault: true,
-        deprecated: false,
-      },
-      {
-        id: "gpt-5.1-codex-mini",
-        name: "GPT-5.1 Codex Mini",
-        description: null,
-        isDefault: false,
-        deprecated: false,
-      },
-    ];
+    const configured = configuredModel();
+    const models = readModelsCache();
+    if (!models.length) {
+      // No cache yet (fresh install, or never online). Offer only what config
+      // selects rather than inventing ids the account may reject.
+      return configured
+        ? [
+            {
+              id: configured,
+              name: configured,
+              description: null,
+              isDefault: true,
+              deprecated: false,
+            },
+          ]
+        : [];
+    }
+    // A configured model missing from the cache is exactly the broken state
+    // above — don't mark it default; fall back to the highest-priority entry.
+    const def = models.some((m) => m.slug === configured) ? configured : models[0].slug;
+    return models.map((m) => ({
+      id: m.slug,
+      name: m.display_name || m.slug,
+      description: m.description || null,
+      isDefault: m.slug === def,
+      deprecated: false,
+    }));
   }
 
   /**
    * `codex exec --json [resume <id>]` — emits JSONL: thread.started,
    * item.started/updated/completed (agent_message / reasoning /
-   * command_execution / file_change / …), turn.completed / turn.failed.
-   * NOTE: schema verified against docs, not a live binary (none on the dev
-   * machine); parsing is defensive and history refetch backstops any gaps.
+   * command_execution / file_change / error), turn.started, turn.completed /
+   * turn.failed.
+   *
+   * VERIFIED against codex-cli 0.146 (live capture, incl. a resumed turn).
+   * Two behaviours the docs do not spell out, both of which broke rendering:
+   *   - `item.id` is `item_0, item_1, …` and RESTARTS every turn, so ids must
+   *     be namespaced per turn before they reach the app.
+   *   - `file_change.changes[]` is only `{path, kind}` — no diff text is ever
+   *     supplied, so there is no patch to render from the stream alone.
+   * Keep parsing defensive; history refetch backstops any remaining gaps.
    */
   startTurn({ threadId, text, cwd, permissionMode, model }, onEvent) {
     this.turns.assertCapacity();
@@ -410,6 +470,12 @@ export class CodexAdapter {
     const entry = this.turns.register("codex", [threadId || "codex:pending"], child);
 
     let seq = 0;
+    // Codex numbers items `item_0, item_1, …` and RESTARTS at item_0 on every
+    // resumed turn (verified against codex-cli 0.146). Emitting those ids raw
+    // made turn 2's item_1 collide with turn 1's, so the app either rejected the
+    // insert or overwrote the earlier message. Namespace them per turn — the
+    // history parser already guards the same hazard with uniq().
+    const turnKey = `ct${Date.now().toString(36)}`;
     let realThreadId = threadId || null;
     const now = () => new Date().toISOString();
     const base = (id) => ({ id, conversationId: realThreadId, seq: ++seq, ts: now() });
@@ -449,7 +515,14 @@ export class CodexAdapter {
         it
       ) {
         const streaming = o.type !== "item.completed";
-        const id = it.id || `codex:${seq}`;
+        const id = `${turnKey}:${it.id || seq}`;
+        const kind = it.item_type || it.type;
+        if (kind === "error") {
+          // Codex reports config/model problems as completed items, not as the
+          // top-level `error` event this handler used to check exclusively.
+          emit(systemEvent(base(`${id}:e`), String(it.message || "codex error"), "warning"));
+          return;
+        }
         if (it.item_type === "agent_message" || it.type === "agent_message") {
           if (it.text) emit(assistantMessage(base(id), it.text, streaming));
         } else if (it.item_type === "reasoning" || it.type === "reasoning") {
@@ -475,12 +548,30 @@ export class CodexAdapter {
             );
           }
         } else if (it.item_type === "file_change" || it.type === "file_change") {
-          const patch = (it.changes || []).map((c) => c.diff || "").join("\n");
-          if (patch)
+          // Real `changes[]` entries are only `{path, kind}` — codex-cli 0.146
+          // ships NO diff text here. The old code joined `c.diff` into an empty
+          // string and then skipped on `if (patch)`, so edits were invisible.
+          // Emit the card regardless, and use a diff body only if one exists.
+          const changes = it.changes || [];
+          emit(
+            toolCall(base(id), {
+              name: "edit",
+              input: { paths: changes.map((c) => c.path).filter(Boolean) },
+              status: streaming ? "running" : "success",
+            }),
+          );
+          const patch = changes
+            .map((c) => c.diff || "")
+            .join("\n")
+            .trim();
+          const summary = changes.map((c) => `${c.kind || "update"}: ${c.path || ""}`).join("\n");
+          if (patch || summary)
             emit(
               toolResult(base(`${id}:d`), {
                 toolCallId: id,
-                content: { kind: "diff", path: it.changes?.[0]?.path || "", patch },
+                content: patch
+                  ? { kind: "diff", path: changes[0]?.path || "", patch }
+                  : { kind: "text", text: summary },
                 isError: false,
               }),
             );
@@ -557,32 +648,141 @@ export class CodexAdapter {
   }
 }
 
-/** Shape a codex function/tool call like the daemon did (shell → {command}). */
+/**
+ * Selectable models from Codex's cache, best-priority first. `visibility:
+ * "hide"` marks internal entries (e.g. `codex-auto-review`) that are not
+ * user-choosable, so they never reach the picker.
+ */
+function readModelsCache() {
+  try {
+    const raw = JSON.parse(readFileSync(MODELS_FILE, "utf8"));
+    const list = Array.isArray(raw?.models) ? raw.models : [];
+    return list
+      .filter((m) => m?.slug && m.visibility !== "hide")
+      .sort(
+        (a, b) => (a.priority ?? Number.MAX_SAFE_INTEGER) - (b.priority ?? Number.MAX_SAFE_INTEGER),
+      );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Top-level `model = "…"` from ~/.codex/config.toml. Stops at the first table
+ * header: `[projects."…"]` and friends carry their own keys, and a per-project
+ * `model` is not the global default.
+ */
+function configuredModel() {
+  try {
+    for (const line of readFileSync(CONFIG_FILE, "utf8").split("\n")) {
+      const s = line.trim();
+      if (s.startsWith("[")) break;
+      const m = /^model\s*=\s*["']([^"']+)["']/.exec(s);
+      if (m) return m[1];
+    }
+  } catch {}
+  return null;
+}
+
+/** Tool names whose payload is a shell command — rendered as a terminal card. */
+const SHELL_TOOLS = new Set(["shell", "exec", "exec_command", "local_shell", "container.exec"]);
+
+/**
+ * Shape a codex function/tool call like the daemon did (shell → {command}).
+ *
+ * Two wire shapes, and only one was handled before: `function_call` carries a
+ * JSON string in `arguments`, while `custom_tool_call` (apply_patch, exec)
+ * carries a FREEFORM string in `input`. Reading only `arguments` left every
+ * custom tool with an empty input — measured at 96/151 tool cards blank on a
+ * real host, including 95/95 `exec` calls.
+ */
 function codexCall(p) {
   const name = p.name || p.tool || "tool";
-  let input = {};
-  try {
-    input = typeof p.arguments === "string" ? JSON.parse(p.arguments) : p.arguments || {};
-  } catch {
-    input = { arguments: p.arguments };
+  const raw = p.arguments ?? p.input;
+
+  // apply_patch's payload is the patch envelope itself, never JSON.
+  if (name === "apply_patch") {
+    return { name, input: { patch: typeof raw === "string" ? raw : "" }, status: "success" };
   }
-  if ((name === "shell" || name === "exec_command" || name === "container.exec") && input) {
+
+  let input;
+  if (typeof raw === "string") {
+    try {
+      input = JSON.parse(raw);
+    } catch {
+      // Freeform custom-tool payload — keep the text rather than dropping it.
+      input = SHELL_TOOLS.has(name) ? { command: raw } : { text: raw };
+    }
+  } else {
+    input = raw || {};
+  }
+  if (input && typeof input === "object" && SHELL_TOOLS.has(name)) {
     const cmd = Array.isArray(input.command)
       ? input.command.join(" ")
-      : input.command || input.cmd || "";
+      : input.command || input.cmd || input.script || input.text || "";
     return { name: "shell", input: { command: String(cmd) }, status: "success" };
   }
   return { name, input, status: "success" };
 }
 
-/** function_call_output.output is often a JSON envelope {output, metadata}. */
+/**
+ * Tool output arrives in three shapes: a bare string, a `{output, metadata}`
+ * envelope, or a JSON array of `{type:"input_text", text}` content parts (what
+ * `exec` returns). Only the first two were unwrapped, so array results rendered
+ * as a raw JSON blob complete with `input_text` keys.
+ */
 function codexOutput(raw) {
-  if (typeof raw !== "string") return raw == null ? "" : JSON.stringify(raw);
+  if (typeof raw !== "string") return raw == null ? "" : partsText(raw);
   try {
     const o = JSON.parse(raw);
     if (o && typeof o.output === "string") return o.output;
+    if (Array.isArray(o)) return partsText(o);
   } catch {}
   return raw;
+}
+
+/** First file path in a synthetic unified diff, for the result header. */
+function firstPatchPath(patch) {
+  const m = /^diff --git a\/(.*) b\/(.*)$/m.exec(patch || "");
+  return m?.[2] || m?.[1] || "";
+}
+
+/** Join an array of content parts (or stringify anything else). */
+function partsText(v) {
+  if (Array.isArray(v)) {
+    const text = v
+      .map((c) => (typeof c === "string" ? c : typeof c?.text === "string" ? c.text : ""))
+      .join("");
+    if (text.trim()) return text;
+  }
+  return JSON.stringify(v);
+}
+
+/**
+ * Convert codex's `apply_patch` envelope into a unified diff the app can render.
+ *
+ * Codex emits `*** Begin Patch / *** Update File: <path> / +-lines / *** End
+ * Patch`, which is not a unified diff — splitPatch() keys on `diff --git`, so
+ * without synthetic headers the whole patch collapses into one unnamed file.
+ * Returns "" when nothing file-shaped is found.
+ */
+function patchFromApplyPatch(src) {
+  if (typeof src !== "string" || !src.includes("*** ")) return "";
+  const out = [];
+  let inFile = false;
+  for (const line of src.split("\n")) {
+    const m = /^\*\*\* (Add|Update|Delete) File: (.+)$/.exec(line);
+    if (m) {
+      const path = m[2].trim();
+      out.push(`diff --git a/${path} b/${path}`);
+      inFile = true;
+      continue;
+    }
+    // Other directives (Begin/End Patch, Move to:) carry no hunk content.
+    if (line.startsWith("*** ")) continue;
+    if (inFile) out.push(line);
+  }
+  return out.length ? out.join("\n") : "";
 }
 
 function failedTurn(threadId, message, onEvent) {
