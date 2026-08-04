@@ -15,6 +15,7 @@ import { T } from "../ui/theme";
 import { splitCodeBlocks } from "./runnableBlocks";
 import { highlightLines, themeFor } from "./highlight";
 import { usePacedText } from "./pacedText";
+import { SECONDARY_SCALE } from "../ui/tokens";
 
 const BASE: Record<"user" | "assistant", TextStyle> = {
   user: { fontSize: 15, lineHeight: 21, color: T.onAccent },
@@ -36,6 +37,7 @@ export function MessageMarkdown({
   streaming,
   onRun,
   singleBlock,
+  secondary,
 }: {
   text: string;
   role: "user" | "assistant";
@@ -48,8 +50,20 @@ export function MessageMarkdown({
    *  <Text>, which has no selection-menu hook. Callers that offer a
    *  select-to-comment action must also offer a button-driven path. */
   contextMenuItems?: MarkdownContextMenuItem[];
+  /** Render as secondary material rather than a conversation turn — see
+   *  SECONDARY_SCALE. */
+  secondary?: boolean;
 }) {
-  const base = BASE[role];
+  const base = useMemo(() => {
+    const b = BASE[role];
+    if (!secondary) return b;
+    const round = (n: number) => Math.round(n * SECONDARY_SCALE * 10) / 10;
+    return {
+      ...b,
+      fontSize: round(b.fontSize as number),
+      lineHeight: round(b.lineHeight as number),
+    };
+  }, [role, secondary]);
   const onUser = role === "user";
   // Settled assistant turns get code blocks lifted out (Run cards); streaming
   // turns render on the single path (incomplete fences would mis-split).

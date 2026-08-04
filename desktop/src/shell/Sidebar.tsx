@@ -212,6 +212,19 @@ export function Sidebar() {
             style={s.searchInput}
             autoFocus
           />
+          {/* Clear. Without this the only ways out were closing the whole
+              search toggle or selecting the text and deleting it — and the
+              arrow beside it navigates rather than clears, so it reads like a
+              clear button that isn't one. */}
+          {query ? (
+            <Pressable
+              onPress={() => setQuery("")}
+              accessibilityLabel="Clear search"
+              style={({ pressed }) => pressed && s.pressed60}
+            >
+              <Ionicons name="close-circle" size={15} color={COLOR.fgFaint} />
+            </Pressable>
+          ) : null}
           {/* The box filters titles/branches locally; this promotes the same
               query into full message-body search. A visible row rather than
               Enter-to-submit: rn-macos onSubmitEditing is unreliable. */}

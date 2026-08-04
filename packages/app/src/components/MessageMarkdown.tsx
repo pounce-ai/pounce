@@ -26,6 +26,7 @@ import { splitCodeBlocks } from "../components/runnableBlocks";
 import { usePacedText } from "./pacedText";
 import { COLOR } from "../ui";
 import { hexFor } from "../ui/theme-hex";
+import { SECONDARY_SCALE } from "../ui/tokens";
 
 const MONO = "JetBrainsMono";
 
@@ -263,14 +264,6 @@ export function MessageMarkdown({
 }
 
 /** One markdown span rendered by the native engine, with a plain-text fallback. */
-/**
- * Type scale for text that ISN'T a conversation turn — a carried-over
- * compaction summary, reference material, anything the reader should clock as
- * secondary before they read a word of it. Shrinking every fontSize/lineHeight
- * in the built style keeps the vertical rhythm intact, which per-call-site
- * font overrides would not.
- */
-export const SECONDARY_SCALE = 0.85;
 
 function scaleStyle(style: MarkdownStyle, scale: number): MarkdownStyle {
   if (scale === 1) return style;

@@ -94,3 +94,11 @@ export function agentLabel(agent: string): string {
 export const HIGHLIGHT = "#B3E561";
 /** The same colour as a wash behind matched text. */
 export const HIGHLIGHT_BG = "rgba(179, 229, 97, 0.22)";
+
+/**
+ * Type scale for text that ISN'T a conversation turn — a carried-over
+ * compaction summary, reference material, anything the reader should clock as
+ * secondary before they read a word of it. Lives here because both markdown
+ * renderers (native md4c on mobile, the hand-rolled one on desktop) need it.
+ */
+export const SECONDARY_SCALE = 0.85;
