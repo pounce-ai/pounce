@@ -325,7 +325,15 @@ const Row = memo(function Row({
       return (
         <Pressable onLongPress={onLongPress} delayLongPress={350}>
           <SearchHighlight term={highlightTerm}>
-            <UserRow text={event.text} agent={agent} images={event.images} />
+            <UserRow
+              text={event.text}
+              agent={agent}
+              images={event.images}
+              // `opt:` ids are the local echo Session.tsx renders on send; the
+              // host's own echo replaces them the moment the turn is accepted,
+              // so one still on screen has not been acknowledged.
+              pending={event.id.startsWith("opt:")}
+            />
           </SearchHighlight>
         </Pressable>
       );
@@ -440,21 +448,34 @@ function UserRow({
   text,
   agent,
   images,
+  pending,
 }: {
   text: string;
   agent?: string;
   images?: readonly MessageImage[];
+  /** Not yet acknowledged by the host — see the `opt:` check in Row. */
+  pending?: boolean;
 }) {
+  const { theme } = useUnistyles();
   const p = useMemo(() => parseUserMessage(text, agent), [text, agent]);
   const hasImages = !!images?.length;
   // An image-only message (no prose) must still render, so don't bail on empty.
   if (isEmptyUserMessage(p) && !hasImages) return null;
   return (
-    <View style={s.gap6}>
+    <View style={[s.gap6, pending && s.pendingRow]}>
       {p.command ? <CommandChip name={p.command.name} args={p.command.args} /> : null}
       {p.output ? <OutputNote text={p.output.text} isError={p.output.isError} /> : null}
       {hasImages ? <InlineImages images={images!} /> : null}
       {p.text ? <Bubble role="user" text={p.text} /> : null}
+      {/* The bubble alone reads as delivered. Until the host acks the turn it
+          hasn't been — the message may still be in flight, or queued against a
+          host that is offline — so say so rather than let the UI imply it. */}
+      {pending ? (
+        <View style={s.pendingNote}>
+          <PounceIcon name="time-outline" size={9} color={theme.colors.fgFaint} />
+          <Text style={s.pendingLabel}>Sending…</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -1156,6 +1177,10 @@ const s = StyleSheet.create((theme) => ({
   termBox: { borderRadius: 12, backgroundColor: "#000000", padding: 8 },
   termTextOut: { color: "#d6d6d6" },
   meta: { paddingVertical: 2, textAlign: "center", fontSize: 11 },
+  /** Unacknowledged send: dimmed so it reads as provisional at a glance. */
+  pendingRow: { opacity: 0.55 },
+  pendingNote: { flexDirection: "row", alignItems: "center", gap: 4, justifyContent: "flex-end" },
+  pendingLabel: { fontSize: 10, color: theme.colors.fgFaint },
   metaDetailBox: {
     marginTop: 4,
     borderRadius: 8,
