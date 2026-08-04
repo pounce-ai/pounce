@@ -105,7 +105,20 @@ const CLAUDE = {
 
 /** @type {AgentRules} */
 const CODEX = {
-  noise: ["INSTRUCTIONS", "environment_context", "user_instructions", "system-reminder"],
+  // `codex_internal_context` (goal re-injection), `recommended_plugins` (an
+  // install advert) and `turn_aborted` are all injected as *user* turns by
+  // recent codex builds — measured on a real host: 23 + 5 occurrences across 25
+  // threads, each also starting a phantom turn in the timeline. `turn_aborted`
+  // is already surfaced properly as a "Turn interrupted" system event.
+  noise: [
+    "INSTRUCTIONS",
+    "environment_context",
+    "user_instructions",
+    "system-reminder",
+    "codex_internal_context",
+    "recommended_plugins",
+    "turn_aborted",
+  ],
   dropLines: [/^#\s*AGENTS\.md instructions for .+$/gim],
 };
 
