@@ -118,6 +118,22 @@ function turnMetrics(sessionId, o) {
 }
 
 /**
+ * A user record that is nothing but a bare slash command, e.g. "/compact".
+ *
+ * Claude Code records such an invocation TWICE: once as the raw typed line and
+ * again as a `<command-name>…</command-name>` envelope, which is the one that
+ * renders as a command chip. Showing both put a plain "/compact" prose bubble
+ * above the chip. Across the local corpus every bare record was `/compact` (13
+ * of them; no other command double-records) and 10 were followed by their
+ * envelope 9-50 records later — too variable to pair positionally, so drop the
+ * bare line and let the envelope stand. For the 3 with no envelope the
+ * compact_boundary note still marks that a compaction happened.
+ */
+function isBareSlashCommand(text) {
+  return /^\/[\w:-]+$/.test(text.trim());
+}
+
+/**
  * Records the CLI writes as `type:"user"` purely to re-seed the model's context
  * — the post-compaction summary is the only one so far. Claude Code flags them
  * `isVisibleInTranscriptOnly` and keeps them out of its own chat view; without
@@ -146,7 +162,8 @@ function clampMarkdown(text, max) {
 function isRealUserLine(o) {
   if (o.type !== "user" || o.isMeta || o.isSidechain || isTranscriptOnly(o)) return false;
   const c = o.message?.content;
-  if (typeof c === "string") return !!c.trim();
+  // A bare "/compact" is not the thread's subject — keep scanning for prose.
+  if (typeof c === "string") return !!c.trim() && !isBareSlashCommand(c);
   if (Array.isArray(c)) return c.some((b) => b?.type === "text" && b.text?.trim());
   return false;
 }
@@ -370,7 +387,8 @@ export class ClaudeAdapter {
         const c = o.message?.content;
         if (typeof c === "string") {
           const text = stripNoise(c, "claude");
-          if (text.trim()) add(userMessage(base(o.uuid || `u:${ts}`), text), true);
+          if (text.trim() && !isBareSlashCommand(text))
+            add(userMessage(base(o.uuid || `u:${ts}`), text), true);
           continue;
         }
         if (!Array.isArray(c)) continue;
