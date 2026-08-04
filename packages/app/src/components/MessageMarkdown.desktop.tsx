@@ -8,12 +8,14 @@
  * mobile implementation, including shell "Run" cards via runnableBlocks.
  */
 import { Fragment, useMemo, type ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View, type TextStyle } from "react-native";
+import { Pressable, StyleSheet, Text, useColorScheme, View, type TextStyle } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLOR } from "../ui";
 import { T } from "../ui/theme";
 import { splitCodeBlocks } from "./runnableBlocks";
+import { highlightLines, themeFor } from "./highlight";
 import { usePacedText } from "./pacedText";
+import { SECONDARY_SCALE } from "../ui/tokens";
 
 const BASE: Record<"user" | "assistant", TextStyle> = {
   user: { fontSize: 15, lineHeight: 21, color: T.onAccent },
@@ -35,6 +37,7 @@ export function MessageMarkdown({
   streaming,
   onRun,
   singleBlock,
+  secondary,
 }: {
   text: string;
   role: "user" | "assistant";
@@ -47,8 +50,20 @@ export function MessageMarkdown({
    *  <Text>, which has no selection-menu hook. Callers that offer a
    *  select-to-comment action must also offer a button-driven path. */
   contextMenuItems?: MarkdownContextMenuItem[];
+  /** Render as secondary material rather than a conversation turn — see
+   *  SECONDARY_SCALE. */
+  secondary?: boolean;
 }) {
-  const base = BASE[role];
+  const base = useMemo(() => {
+    const b = BASE[role];
+    if (!secondary) return b;
+    const round = (n: number) => Math.round(n * SECONDARY_SCALE * 10) / 10;
+    return {
+      ...b,
+      fontSize: round(b.fontSize as number),
+      lineHeight: round(b.lineHeight as number),
+    };
+  }, [role, secondary]);
   const onUser = role === "user";
   // Settled assistant turns get code blocks lifted out (Run cards); streaming
   // turns render on the single path (incomplete fences would mis-split).
@@ -109,31 +124,74 @@ function CodeCard({
           </Pressable>
         ) : null}
       </View>
-      <Text selectable style={s.codeCardBody}>
-        {code}
-      </Text>
+      <HighlightedCode code={code} lang={lang} />
     </View>
   );
 }
 
+/** Fenced-block body, syntax-highlighted. Rangi is pure JS, so desktop gets the
+ *  same highlighting as mobile from the same module — this body used to render
+ *  as flat unhighlighted text. */
+function HighlightedCode({ code, lang }: { code: string; lang: string }) {
+  const light = useColorScheme() === "light";
+  const hlTheme = themeFor(light);
+  const lines = useMemo(() => highlightLines(code, lang, light), [code, lang, light]);
+  return (
+    <Text selectable style={s.codeCardBody}>
+      {lines.map((spans, i) => (
+        <Text key={i}>
+          {i > 0 ? "\n" : ""}
+          {spans.map((span, j) => (
+            <Text key={j} style={{ color: span.color ?? hlTheme.fg }}>
+              {span.text}
+            </Text>
+          ))}
+        </Text>
+      ))}
+    </Text>
+  );
+}
+
 // --- tiny markdown block renderer (pure JS/RN) ---
+
+// Code first so ** or _ inside a code span stays literal; emphasis and links
+// after. One pass over the whole string — splitting on code spans first (as
+// this used to) puts the two ** markers of `**`code`**` into different pieces,
+// so the emphasis never matches and the asterisks render as text.
+const INLINE_RE = /(`[^`\n]+`)|(\*\*[^*]+\*\*)|(\*[^*\n]+\*)|(_[^_\n]+_)|(\[[^\]]+\]\([^)]+\))/g;
+
+/** Guards against a pathological nest; real markdown never goes this deep. */
+const MAX_INLINE_DEPTH = 4;
 
 function renderInline(
   text: string,
   keyBase: string,
   baseStyle: TextStyle,
   onUser: boolean,
+  depth = 0,
 ): ReactNode[] {
   const out: ReactNode[] = [];
-  const parts = text.split(/(`[^`\n]+`)/g);
-  parts.forEach((part, pi) => {
-    if (!part) return;
-    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+  const rx = new RegExp(INLINE_RE.source, "g");
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let si = 0;
+  const plain = (from: number, to: number) => {
+    if (to > from)
+      out.push(
+        <Text key={`${keyBase}:t${si++}`} style={baseStyle}>
+          {text.slice(from, to)}
+        </Text>,
+      );
+  };
+  while ((m = rx.exec(text)) !== null) {
+    plain(last, m.index);
+    const tok = m[0];
+    if (tok.startsWith("`")) {
       // Purple chip so inline code pops out of prose (white-on-white/20 inside
       // the accent user bubble, where purple-on-purple would vanish).
       out.push(
         <Text
-          key={`${keyBase}:c${pi}`}
+          key={`${keyBase}:c${si++}`}
           style={[
             s.inlineCode,
             onUser
@@ -141,53 +199,39 @@ function renderInline(
               : { color: "#a99cf5", backgroundColor: "rgba(124,111,240,0.16)" },
           ]}
         >
-          {part.slice(1, -1)}
+          {tok.slice(1, -1)}
         </Text>,
       );
-      return;
-    }
-    const rx = /(\*\*[^*]+\*\*|\*[^*\n]+\*|_[^_\n]+_|\[[^\]]+\]\([^)]+\))/g;
-    let last = 0;
-    let m: RegExpExecArray | null;
-    let si = 0;
-    while ((m = rx.exec(part)) !== null) {
-      if (m.index > last) {
-        out.push(
-          <Text key={`${keyBase}:t${pi}:${si++}`} style={baseStyle}>
-            {part.slice(last, m.index)}
-          </Text>,
-        );
-      }
-      const tok = m[0];
-      if (tok.startsWith("**")) {
-        out.push(
-          <Text key={`${keyBase}:b${pi}:${si++}`} style={[baseStyle, s.semibold]}>
-            {tok.slice(2, -2)}
-          </Text>,
-        );
-      } else if (tok.startsWith("[")) {
-        out.push(
-          <Text key={`${keyBase}:l${pi}:${si++}`} style={[baseStyle, s.link]}>
-            {tok.slice(1, tok.indexOf("]"))}
-          </Text>,
-        );
-      } else {
-        out.push(
-          <Text key={`${keyBase}:i${pi}:${si++}`} style={[baseStyle, s.italic]}>
-            {tok.slice(1, -1)}
-          </Text>,
-        );
-      }
-      last = m.index + tok.length;
-    }
-    if (last < part.length) {
+    } else if (tok.startsWith("[")) {
       out.push(
-        <Text key={`${keyBase}:t${pi}:end`} style={baseStyle}>
-          {part.slice(last)}
+        <Text key={`${keyBase}:l${si++}`} style={[baseStyle, s.link]}>
+          {tok.slice(1, tok.indexOf("]"))}
+        </Text>,
+      );
+    } else {
+      // Emphasis: recurse so a code span (or a link) inside bold/italic still
+      // renders as itself. RN nested <Text> inherits, so the merged style
+      // carries down.
+      const bold = tok.startsWith("**");
+      const inner = bold ? tok.slice(2, -2) : tok.slice(1, -1);
+      const style = [baseStyle, bold ? s.semibold : s.italic] as TextStyle[];
+      out.push(
+        <Text key={`${keyBase}:${bold ? "b" : "i"}${si++}`} style={style}>
+          {depth < MAX_INLINE_DEPTH
+            ? renderInline(
+                inner,
+                `${keyBase}:${si}`,
+                Object.assign({}, ...style),
+                onUser,
+                depth + 1,
+              )
+            : inner}
         </Text>,
       );
     }
-  });
+    last = m.index + tok.length;
+  }
+  plain(last, text.length);
   return out;
 }
 

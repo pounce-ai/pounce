@@ -1,77 +1,14 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { Text, useColorScheme, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { Highlight, Prism, themes } from "prism-react-renderer";
+import { highlightLines, themeFor } from "./highlight";
 import { classifyLine, extOf, splitPatch } from "./diffPatch";
 
-// prism-react-renderer bundles a limited language set (no bash/ruby/java/…), so
-// a shell command or a non-TS diff would fall back to plain text. Register the
-// extra grammars onto its Prism instance. Order matters: the prismjs component
-// files attach to globalThis.Prism, so set it BEFORE requiring them — require()
-// runs in statement order, whereas `import` is hoisted. Static paths only, so
-// Metro can resolve them. This also lights up ```bash markdown blocks (same Prism).
-// Only self-contained grammars: these depend on clike/css (already bundled).
-// Avoid ones needing markup-templating (php) — it registers a global
-// after-tokenize hook that then crashes EVERY tokenize when the dep is missing.
-(globalThis as { Prism?: unknown }).Prism = Prism;
-/* eslint-disable @typescript-eslint/no-require-imports */
-require("prismjs/components/prism-bash");
-require("prismjs/components/prism-ruby");
-require("prismjs/components/prism-java");
-require("prismjs/components/prism-toml");
-require("prismjs/components/prism-scss");
-/* eslint-enable @typescript-eslint/no-require-imports */
+// Rangi ships bash/ruby/java/toml/scss and 80-odd more in one zero-dependency
+// package, so the old `globalThis.Prism = …`-before-static-`require()` dance
+// (and its "one missing grammar dependency breaks every tokenize" hazard) is gone.
 
 const MONO = "JetBrainsMono";
-
-/** Language tags / file extensions → Prism language ids. Unknown → plain. */
-const PRISM_LANG: Record<string, string> = {
-  ts: "typescript",
-  tsx: "tsx",
-  js: "javascript",
-  jsx: "jsx",
-  mjs: "javascript",
-  cjs: "javascript",
-  py: "python",
-  rb: "ruby",
-  sh: "bash",
-  shell: "bash",
-  zsh: "bash",
-  bash: "bash",
-  console: "bash",
-  "shell-session": "bash",
-  yml: "yaml",
-  yaml: "yaml",
-  json: "json",
-  md: "markdown",
-  markdown: "markdown",
-  "c++": "cpp",
-  cpp: "cpp",
-  cc: "cpp",
-  "c#": "csharp",
-  cs: "csharp",
-  c: "c",
-  h: "c",
-  rs: "rust",
-  go: "go",
-  java: "java",
-  kt: "kotlin",
-  swift: "swift",
-  css: "css",
-  scss: "scss",
-  html: "markup",
-  xml: "markup",
-  svg: "markup",
-  sql: "sql",
-  toml: "toml",
-  diff: "diff",
-  rb2: "ruby",
-  php: "php",
-};
-export function prismLang(tag: string): string {
-  const t = tag.replace(/^\./, "").toLowerCase();
-  return PRISM_LANG[t] ?? t;
-}
 
 /**
  * Inline, Prism-highlighted code as nested <Text> — flows inside a flex row and
@@ -92,39 +29,24 @@ export const HlText = memo(function HlText({
   numberOfLines?: number;
 }) {
   const light = useColorScheme() === "light";
+  const hlTheme = themeFor(light);
+  const lines = useMemo(() => highlightLines(code, language, light), [code, language, light]);
   return (
-    <Highlight
-      code={code}
-      language={prismLang(language) || "text"}
-      theme={light ? themes.github : themes.vsDark}
+    <Text
+      numberOfLines={numberOfLines}
+      style={{ fontFamily: MONO, fontSize: size, lineHeight: size + 5.5 }}
     >
-      {({ tokens, getTokenProps }) => (
-        <Text
-          numberOfLines={numberOfLines}
-          style={{ fontFamily: MONO, fontSize: size, lineHeight: size + 5.5 }}
-        >
-          {tokens.map((line, i) => (
-            <Text key={i}>
-              {i > 0 ? "\n" : ""}
-              {line.map((token, j) => {
-                const { style } = getTokenProps({ token });
-                return (
-                  <Text
-                    key={j}
-                    style={{
-                      color: (style?.color as string) ?? (light ? "#24292e" : "#cdd0d6"),
-                      fontStyle: style?.fontStyle as "italic" | undefined,
-                    }}
-                  >
-                    {token.content}
-                  </Text>
-                );
-              })}
+      {lines.map((spans, i) => (
+        <Text key={i}>
+          {i > 0 ? "\n" : ""}
+          {spans.map((span, j) => (
+            <Text key={j} style={{ color: span.color ?? hlTheme.fg }}>
+              {span.text}
             </Text>
           ))}
         </Text>
-      )}
-    </Highlight>
+      ))}
+    </Text>
   );
 });
 
@@ -210,7 +132,7 @@ export const DiffBlock = memo(function DiffBlock({
   );
 });
 
-/** File extension (`.ts`, `.json`, or `other`) → Prism language. */
+/** File extension (`.ts`, `.json`, or `other`) → highlighter language id. */
 const EXT_LANG: Record<string, string> = {
   ".ts": "typescript",
   ".tsx": "tsx",
@@ -229,9 +151,9 @@ const EXT_LANG: Record<string, string> = {
   ".md": "markdown",
   ".css": "css",
   ".scss": "scss",
-  ".html": "markup",
-  ".xml": "markup",
-  ".svg": "markup",
+  ".html": "html",
+  ".xml": "xml",
+  ".svg": "svg",
   ".sql": "sql",
   ".go": "go",
   ".rs": "rust",

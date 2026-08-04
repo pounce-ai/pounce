@@ -112,6 +112,7 @@ export const Timeline = memo(function Timeline({
   highlight,
   anchorToId,
   tasks,
+  onRetrySend,
 }: {
   events: TimelineEvent[];
   /** Which agent produced these events — selects the body-cleaning rules. */
@@ -157,6 +158,8 @@ export const Timeline = memo(function Timeline({
    * back to positional numbering and could map updates onto the wrong task.
    */
   tasks: TaskTimeline;
+  /** Resend a stranded optimistic message (see PENDING_TIMEOUT_MS). */
+  onRetrySend?: (ev: TimelineEvent) => void;
 }) {
   // Pair each tool result with its call so the call row renders both as one
   // accordion; the paired result rows are dropped from the list data.
@@ -227,6 +230,7 @@ export const Timeline = memo(function Timeline({
             onRespondPrompt={onRespondPrompt}
             onSendInput={onSendInput}
             highlightTerm={highlight && item.id === highlight.id ? highlight.term : undefined}
+            onRetrySend={onRetrySend}
           />
         )}
         // A blended average across the row types (short user bubbles / meta lines
@@ -290,6 +294,7 @@ const Row = memo(function Row({
   onRespondPrompt,
   onSendInput,
   highlightTerm,
+  onRetrySend,
 }: {
   event: TimelineEvent;
   agent?: string;
@@ -315,6 +320,8 @@ const Row = memo(function Row({
   onSendInput?: (data: string) => void;
   /** Set on the search deep-link target row — yellow accent + matched term. */
   highlightTerm?: string;
+  /** Resend a stranded optimistic message. */
+  onRetrySend?: (ev: TimelineEvent) => void;
 }) {
   const onLongPress = onLongPressEvent ? () => onLongPressEvent(event) : undefined;
   switch (event.type) {
@@ -325,7 +332,16 @@ const Row = memo(function Row({
       return (
         <Pressable onLongPress={onLongPress} delayLongPress={350}>
           <SearchHighlight term={highlightTerm}>
-            <UserRow text={event.text} agent={agent} images={event.images} />
+            <UserRow
+              text={event.text}
+              agent={agent}
+              images={event.images}
+              // `opt:` ids are the local echo Session.tsx renders on send; the
+              // host's own echo replaces them the moment the turn is accepted,
+              // so one still on screen has not been acknowledged.
+              pending={event.id.startsWith("opt:")}
+              onRetry={onRetrySend ? () => onRetrySend(event) : undefined}
+            />
           </SearchHighlight>
         </Pressable>
       );
@@ -436,25 +452,70 @@ function AssistantBubble({
   );
 }
 
+/**
+ * How long an unacknowledged send waits before it's called undelivered. Long
+ * enough to cover a slow host accepting a turn, short enough that a message
+ * that will never land doesn't sit there claiming to be on its way.
+ */
+const PENDING_TIMEOUT_MS = 30_000;
+
 function UserRow({
   text,
   agent,
   images,
+  pending,
+  onRetry,
 }: {
   text: string;
   agent?: string;
   images?: readonly MessageImage[];
+  /** Not yet acknowledged by the host — see the `opt:` check in Row. */
+  pending?: boolean;
+  /** Resend this message, dropping the stranded echo. */
+  onRetry?: () => void;
 }) {
+  const { theme } = useUnistyles();
+  // A pending row can strand: if the turn lands somewhere other than this
+  // thread (a resume that forks, say) the host echo never arrives and nothing
+  // else would ever clear "Sending…".
+  const [timedOut, setTimedOut] = useState(false);
+  useEffect(() => {
+    if (!pending) {
+      setTimedOut(false);
+      return;
+    }
+    const t = setTimeout(() => setTimedOut(true), PENDING_TIMEOUT_MS);
+    return () => clearTimeout(t);
+  }, [pending]);
   const p = useMemo(() => parseUserMessage(text, agent), [text, agent]);
   const hasImages = !!images?.length;
   // An image-only message (no prose) must still render, so don't bail on empty.
   if (isEmptyUserMessage(p) && !hasImages) return null;
   return (
-    <View style={s.gap6}>
+    <View style={[s.gap6, pending && s.pendingRow]}>
       {p.command ? <CommandChip name={p.command.name} args={p.command.args} /> : null}
       {p.output ? <OutputNote text={p.output.text} isError={p.output.isError} /> : null}
       {hasImages ? <InlineImages images={images!} /> : null}
       {p.text ? <Bubble role="user" text={p.text} /> : null}
+      {/* The bubble alone reads as delivered. Until the host acks the turn it
+          hasn't been — the message may still be in flight, or queued against a
+          host that is offline — so say so rather than let the UI imply it. */}
+      {pending && !timedOut ? (
+        <View style={s.pendingNote}>
+          <PounceIcon name="time-outline" size={9} color={theme.colors.fgFaint} />
+          <Text style={s.pendingLabel}>Sending…</Text>
+        </View>
+      ) : null}
+      {pending && timedOut ? (
+        <View style={s.pendingNote}>
+          <Text style={[s.pendingLabel, s.textDanger]}>Not delivered</Text>
+          {onRetry ? (
+            <Pressable onPress={onRetry} hitSlop={8}>
+              <Text style={s.retryLabel}>Retry</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -981,8 +1042,12 @@ function MetaDetail({
         </Text>
       </Pressable>
       {open ? (
+        // The summary is prose markdown (numbered sections, bold, code fences),
+        // not command output — plain mono Text showed the ** and ``` literally.
+        // `secondary` renders it a step down from a real turn: this is carried-
+        // over context, and it should read that way before a word is read.
         <View style={s.metaDetailBox}>
-          <Text style={[s.monoText12, s.textMuted]}>{detail}</Text>
+          <MessageMarkdown text={detail} role="assistant" secondary />
         </View>
       ) : null}
     </View>
@@ -1152,6 +1217,11 @@ const s = StyleSheet.create((theme) => ({
   termBox: { borderRadius: 12, backgroundColor: "#000000", padding: 8 },
   termTextOut: { color: "#d6d6d6" },
   meta: { paddingVertical: 2, textAlign: "center", fontSize: 11 },
+  /** Unacknowledged send: dimmed so it reads as provisional at a glance. */
+  pendingRow: { opacity: 0.55 },
+  pendingNote: { flexDirection: "row", alignItems: "center", gap: 4, justifyContent: "flex-end" },
+  pendingLabel: { fontSize: 10, color: theme.colors.fgFaint },
+  retryLabel: { fontSize: 10, fontWeight: "600", color: theme.colors.accent },
   metaDetailBox: {
     marginTop: 4,
     borderRadius: 8,

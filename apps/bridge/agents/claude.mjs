@@ -118,6 +118,22 @@ function turnMetrics(sessionId, o) {
 }
 
 /**
+ * A user record that is nothing but a bare slash command, e.g. "/compact".
+ *
+ * Claude Code records such an invocation TWICE: once as the raw typed line and
+ * again as a `<command-name>…</command-name>` envelope, which is the one that
+ * renders as a command chip. Showing both put a plain "/compact" prose bubble
+ * above the chip. Across the local corpus every bare record was `/compact` (13
+ * of them; no other command double-records) and 10 were followed by their
+ * envelope 9-50 records later — too variable to pair positionally, so drop the
+ * bare line and let the envelope stand. For the 3 with no envelope the
+ * compact_boundary note still marks that a compaction happened.
+ */
+function isBareSlashCommand(text) {
+  return /^\/[\w:-]+$/.test(text.trim());
+}
+
+/**
  * Records the CLI writes as `type:"user"` purely to re-seed the model's context
  * — the post-compaction summary is the only one so far. Claude Code flags them
  * `isVisibleInTranscriptOnly` and keeps them out of its own chat view; without
@@ -127,11 +143,27 @@ function isTranscriptOnly(o) {
   return !!(o.isVisibleInTranscriptOnly || o.isCompactSummary);
 }
 
+/**
+ * Cut `text` to at most `max` chars on a line boundary. The client renders this
+ * as markdown, so a mid-token slice leaves a dangling `**` or an unclosed fence
+ * and the tail renders as literal punctuation. Closes an odd code fence too.
+ */
+function clampMarkdown(text, max) {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  const nl = cut.lastIndexOf("\n");
+  // Only honour the line break if it isn't pathologically early (one giant line).
+  let out = (nl > max * 0.5 ? cut.slice(0, nl) : cut).trimEnd();
+  if ((out.match(/^```/gm) || []).length % 2) out += "\n```";
+  return `${out}\n\n_(summary truncated)_`;
+}
+
 /** Is this user record an actual human message (not meta, not a tool result)? */
 function isRealUserLine(o) {
   if (o.type !== "user" || o.isMeta || o.isSidechain || isTranscriptOnly(o)) return false;
   const c = o.message?.content;
-  if (typeof c === "string") return !!c.trim();
+  // A bare "/compact" is not the thread's subject — keep scanning for prose.
+  if (typeof c === "string") return !!c.trim() && !isBareSlashCommand(c);
   if (Array.isArray(c)) return c.some((b) => b?.type === "text" && b.text?.trim());
   return false;
 }
@@ -346,7 +378,7 @@ export class ClaudeAdapter {
               .replace(/^This session is being continued from[^]*?Summary:\s*/i, "")
               .trim();
             if (body) {
-              lastCompact.ev.detail = body.slice(0, MAX_COMPACT_DETAIL);
+              lastCompact.ev.detail = clampMarkdown(body, MAX_COMPACT_DETAIL);
               charge(lastCompact.bucket, lastCompact.ev.detail.length * 2);
             }
           }
@@ -355,7 +387,8 @@ export class ClaudeAdapter {
         const c = o.message?.content;
         if (typeof c === "string") {
           const text = stripNoise(c, "claude");
-          if (text.trim()) add(userMessage(base(o.uuid || `u:${ts}`), text), true);
+          if (text.trim() && !isBareSlashCommand(text))
+            add(userMessage(base(o.uuid || `u:${ts}`), text), true);
           continue;
         }
         if (!Array.isArray(c)) continue;
