@@ -18,7 +18,7 @@ import {
 export type MarkdownContextMenuItem = NonNullable<
   React.ComponentProps<typeof EnrichedMarkdownText>["contextMenuItems"]
 >[number];
-import { Highlight, themes } from "prism-react-renderer";
+import { highlightLines, themeFor } from "./highlight";
 import * as WebBrowser from "expo-web-browser";
 import { StreamdownText } from "react-native-streamdown";
 import type { RemendOptions } from "remend";
@@ -342,35 +342,11 @@ function MarkdownBody({
   );
 }
 
-/** Map our fenced-block language tags to Prism language ids (aliases prism
- *  doesn't know natively). Unknown → passed through; empty → plain text. */
-const PRISM_LANG: Record<string, string> = {
-  ts: "typescript",
-  tsx: "tsx",
-  js: "javascript",
-  jsx: "jsx",
-  mjs: "javascript",
-  cjs: "javascript",
-  py: "python",
-  rb: "ruby",
-  sh: "bash",
-  shell: "bash",
-  zsh: "bash",
-  console: "bash",
-  "shell-session": "bash",
-  yml: "yaml",
-  md: "markdown",
-  "c++": "cpp",
-  "c#": "csharp",
-  text: "",
-  txt: "",
-  "": "",
-};
-
 /**
  * A fenced code block: a code card with a language header (and a "Run" action
- * for shell blocks), Prism-highlighted and horizontally scrollable for long
- * lines. Prism theme + card fill follow the system scheme.
+ * for shell blocks), syntax-highlighted and horizontally scrollable for long
+ * lines. Highlight theme + card fill follow the system scheme. Language tags
+ * are resolved in ./highlight — rangi knows our aliases natively.
  */
 const CodeBlock = memo(function CodeBlock({
   lang,
@@ -388,7 +364,10 @@ const CodeBlock = memo(function CodeBlock({
   const codeLine = secondary ? 18 * SECONDARY_SCALE : 18;
   const { theme } = useUnistyles();
   const light = useColorScheme() === "light";
-  const prismLang = PRISM_LANG[lang] ?? lang;
+  const hlTheme = themeFor(light);
+  // Highlighting is regex work over the whole block — keep it off the render
+  // path for recycled rows that re-render on every marker/scroll tick.
+  const lines = useMemo(() => highlightLines(code, lang, light), [code, lang, light]);
   // Brief "Copied" confirmation on the copy action; timer cleared on re-tap so
   // rapid taps don't flicker.
   const [copied, setCopied] = useState(false);
@@ -436,40 +415,28 @@ const CodeBlock = memo(function CodeBlock({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ padding: 10 }}
       >
-        <Highlight
-          code={code}
-          language={prismLang || "text"}
-          theme={light ? themes.github : themes.vsDark}
-        >
-          {({ tokens, getTokenProps }) => (
-            <View>
-              {tokens.map((line, i) => (
-                <View key={i} style={s.codeLine}>
-                  {line.length === 0 ? (
-                    <Text style={{ fontSize: codeSize, lineHeight: codeLine }}> </Text>
-                  ) : null}
-                  {line.map((token, j) => {
-                    const { style } = getTokenProps({ token });
-                    return (
-                      <Text
-                        key={j}
-                        style={{
-                          fontFamily: MONO,
-                          fontSize: codeSize,
-                          lineHeight: codeLine,
-                          color: (style?.color as string) ?? (light ? "#24292e" : "#cdd0d6"),
-                          fontStyle: style?.fontStyle as "italic" | undefined,
-                        }}
-                      >
-                        {token.content}
-                      </Text>
-                    );
-                  })}
-                </View>
+        <View>
+          {lines.map((spans, i) => (
+            <View key={i} style={s.codeLine}>
+              {spans.length === 0 ? (
+                <Text style={{ fontSize: codeSize, lineHeight: codeLine }}> </Text>
+              ) : null}
+              {spans.map((span, j) => (
+                <Text
+                  key={j}
+                  style={{
+                    fontFamily: MONO,
+                    fontSize: codeSize,
+                    lineHeight: codeLine,
+                    color: span.color ?? hlTheme.fg,
+                  }}
+                >
+                  {span.text}
+                </Text>
               ))}
             </View>
-          )}
-        </Highlight>
+          ))}
+        </View>
       </ScrollView>
     </View>
   );
