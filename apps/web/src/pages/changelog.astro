@@ -1,12 +1,53 @@
 ---
 import { getCollection, render } from "astro:content";
+import { fetchReleases, releaseKey } from "../lib/releases";
 
 const entries = (await getCollection("changelog")).sort(
   (a, b) => b.data.date.valueOf() - a.data.date.valueOf(),
 );
-const rendered = await Promise.all(
+const written = await Promise.all(
   entries.map(async (entry) => ({ entry, Content: (await render(entry)).Content })),
 );
+
+// Every shipped artifact announces itself on GitHub; pulling those in keeps the
+// page current without anyone remembering to write a post. A hand-written entry
+// wins where both cover the same version — it's the one with something to say.
+const covered = new Set(entries.map((e) => releaseKey(e.data.component, e.data.version)));
+const releases = (await fetchReleases()).filter(
+  (r) => !covered.has(releaseKey(r.component, r.version)),
+);
+
+type Item = {
+  id: string;
+  date: Date;
+  component: string;
+  version?: string;
+  title: string;
+  link?: string;
+  Content?: (typeof written)[number]["Content"];
+  html?: string;
+};
+
+const items: Item[] = [
+  ...written.map(({ entry, Content }) => ({
+    id: entry.id,
+    date: entry.data.date,
+    component: entry.data.component,
+    version: entry.data.version,
+    title: entry.data.title,
+    link: entry.data.link,
+    Content,
+  })),
+  ...releases.map((r) => ({
+    id: r.id,
+    date: r.date,
+    component: r.component,
+    version: r.version,
+    title: r.title,
+    link: r.link,
+    html: r.html,
+  })),
+].sort((a, b) => b.date.valueOf() - a.date.valueOf());
 
 const COMPONENT_LABELS: Record<string, string> = {
   ios: "iPhone",
@@ -143,19 +184,21 @@ const fmt = (d: Date) =>
   </div>
 
   <div class="log">
-    {rendered.map(({ entry, Content }) => (
-      <article class="entry" id={entry.id}>
+    {items.map((item) => (
+      <article class="entry" id={item.id}>
         <div class="meta">
-          <time datetime={entry.data.date.toISOString().slice(0, 10)}>{fmt(entry.data.date)}</time>
-          <span class={`chip ${entry.data.component}`}>{COMPONENT_LABELS[entry.data.component]}</span>
-          {entry.data.version && <span class="ver">v{entry.data.version}</span>}
+          <time datetime={item.date.toISOString().slice(0, 10)}>{fmt(item.date)}</time>
+          <span class={`chip ${item.component}`}>{COMPONENT_LABELS[item.component] ?? item.component}</span>
+          {item.version && <span class="ver">v{item.version}</span>}
         </div>
         <h2>
-          {entry.data.link
-            ? <a href={entry.data.link} target="_blank" rel="noopener">{entry.data.title}</a>
-            : entry.data.title}
+          {item.link
+            ? <a href={item.link} target="_blank" rel="noopener">{item.title}</a>
+            : item.title}
         </h2>
-        <div class="body"><Content /></div>
+        <div class="body">
+          {item.Content ? <item.Content /> : <Fragment set:html={item.html} />}
+        </div>
       </article>
     ))}
   </div>
