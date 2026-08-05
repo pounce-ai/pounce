@@ -215,7 +215,7 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
           />
         </Pressable>
       )}
-      <View style={s.rowBetween}>
+      <View style={[s.rowBetween, IS_DESKTOP && s.headerDesktop]}>
         <Text style={s.title}>Filter</Text>
         {hasFilter ? (
           <Pressable
@@ -523,6 +523,10 @@ const s = StyleSheet.create((theme) => ({
   grabber: { alignItems: "center", gap: 4, paddingBottom: 2, paddingTop: 2 },
   grabberBar: { height: 4, width: 40, borderRadius: 999, backgroundColor: theme.colors.border },
   rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  // The desktop shell floats one close button over every modal at top:10/right:10,
+  // 24pt wide — so it reaches 34pt in from the card edge while this body is only
+  // padded 16pt. Without the extra inset the × lands on top of "Clear all".
+  headerDesktop: { paddingRight: 24 },
   title: { fontSize: 18, fontWeight: "700", color: theme.colors.fg },
   clearRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   clearText: { fontSize: 13, color: theme.colors.fgMuted },
