@@ -13,6 +13,17 @@ pounce logs -f   # watch the Bridge log live
 (If you haven't installed globally, prefix with `npx use-pounce` → `npx
 use-pounce status`, etc.)
 
+## Diagnostics, from the phone
+
+**Settings → Diagnostics** runs the same checks without going near a terminal —
+useful when the machine in question is in another room, or another country.
+
+It reports whether the Bridge is reachable, which agents it can see and which
+it can only read history for, and where each one's sessions live on disk. An
+agent showing as *history only* means Pounce can read its past work but can't
+start new turns — usually its command isn't on the Bridge's `PATH`. See [An
+agent doesn't show up](#an-agent-doesnt-show-up).
+
 ## The phone can't find my machine after scanning
 
 - **Same Wi-Fi?** If you started with `--lan`, the phone must be on the same

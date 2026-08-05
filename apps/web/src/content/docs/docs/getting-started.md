@@ -42,18 +42,29 @@ up.
 ## What you'll see
 
 - **Home** — every agent, on every machine you've paired, with the threads
-  that **need your input** floated to the top.
+  that **need your input** floated to the top. Get a notification the moment
+  one starts waiting on you.
 - **A live session** — reasoning, tool calls, and diffs streaming in real
   time. Reply, redirect, or answer prompts right there; hold to talk if your
   hands are full.
-- **Changes** — the diff for any session. Commit, push, or open a PR from your
-  phone.
+- **[Changes](/docs/changes)** — the diff for any session. Commit, push, or
+  open a PR from your phone.
+- **[Spaces](/docs/spaces)** — your work grouped by project, with worktrees
+  filed under the project they came from.
+- **[Search](/docs/search)** — every session you've ever run, across all four
+  agents and every machine.
+- **[Activity](/docs/activity)** — what you've built, what it cost, and which
+  agent did it.
 
 ## Next steps
 
 - Pair more machines the same way — they all show up in one fleet.
+- [Spaces](/docs/spaces) — how Pounce organises projects, worktrees and
+  machines.
 - [Supported agents](/docs/agents) — what works with Claude Code, Codex,
   Cursor, and opencode.
 - [Away from home](/docs/remote-access) — how remote access works, and how to
   pair a machine you only reach over SSH.
+- [Agent instructions](/docs/context) — reading the `CLAUDE.md` steering a
+  project.
 - [CLI reference](/docs/cli) — everything `npx use-pounce` can do.
