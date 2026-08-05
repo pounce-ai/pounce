@@ -753,10 +753,44 @@ export function forgetDevice(id: string): void {
   cascadeCleanup();
 }
 
-/** Reconcile every store against the real paired-device list. deviceId() is
- *  URL-derived, so re-pairing the same machine under a new address mints a new
- *  device id and orphans the threads synced under the old one — with no device
- *  row left to delete them, they'd haunt "Jump back in". Sweep anything whose
+/**
+ * Fold everything synced under `fromId` onto `toId` — the same machine, found
+ * twice.
+ *
+ * Devices used to be identified by the address they were paired at, so one Mac
+ * reached over the LAN, over loopback and through the emulator's 10.0.2.2 alias
+ * became three devices. The bridge now reports a stable id for itself, and when
+ * a sync reveals that an existing device is really one we already have, its rows
+ * move here rather than being deleted: threads are re-pointed at the surviving
+ * host (their ids are the agent's own, identical from either address, so this is
+ * a field update and never collides), and a device override is carried across
+ * only if the survivor hasn't got one — an explicit choice on the device you
+ * kept outranks one made against a duplicate.
+ */
+export function mergeDevice(fromId: string, toId: string): void {
+  if (fromId === toId) return;
+  const moved = threads.toArray
+    .filter((s) => s.hostId === fromId)
+    .map((s) => ({ ...s, hostId: toId }));
+  if (moved.length) upsertRows(threads, moved);
+
+  const override = deviceOverrides.get(fromId);
+  if (override && !deviceOverrides.has(toId)) {
+    upsertRows(deviceOverrides, [{ ...override, id: toId }]);
+  }
+  if (deviceOverrides.has(fromId)) deviceOverrides.delete(fromId);
+  if (devices.has(fromId)) devices.delete(fromId);
+  if (hosts.has(fromId)) hosts.delete(fromId);
+
+  if (connection$.activeHostId.get() === fromId) connection$.activeHostId.set(toId);
+  cascadeCleanup();
+}
+
+/** Reconcile every store against the real paired-device list. A device whose
+ *  bridge predates stable ids still gets a URL-derived id, so re-pairing that
+ *  machine under a new address mints a new device id and orphans the threads
+ *  synced under the old one — with no device row left to delete them, they'd
+ *  haunt "Jump back in". Sweep anything whose
  *  host is no longer paired, then cascade. Connection state follows the paired
  *  set too, so every removal path (not just Settings) leaves the UI honest:
  *  clear a now-unpaired active host, and go disconnected when nothing's paired. */

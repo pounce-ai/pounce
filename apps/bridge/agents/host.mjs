@@ -17,6 +17,7 @@ import { CursorAdapter } from "./cursor.mjs";
 import { acpAvailable, startAcpTurn } from "./acp.mjs";
 import { threadCost } from "./ccusage.mjs";
 import { buildDoctorReport } from "./doctor.mjs";
+import { bridgeId } from "./identity.mjs";
 
 export function createHost({ version = () => null } = {}) {
   const turns = new TurnManager();
@@ -61,6 +62,10 @@ export function createHost({ version = () => null } = {}) {
         relay: null,
         uptimeSecs: Math.round((Date.now() - startedAt) / 1000),
         device: os.hostname().replace(/\.local$/, ""),
+        // Which MACHINE this is, as opposed to `device` (a display name two
+        // machines can share) or the address the client happened to reach it
+        // at. The apps key paired devices off this — see agents/identity.mjs.
+        bridgeId: bridgeId(),
       };
     },
 
