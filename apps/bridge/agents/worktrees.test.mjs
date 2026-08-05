@@ -174,6 +174,76 @@ describe("worktree owner resolution", () => {
     expect(threads[1].isWorktree).toBeUndefined();
   });
 
+  it("places a pruned worktree from its surviving siblings", async () => {
+    // Deleted AND pruned: git has forgotten it, so the repo-side sweep can't see
+    // it either. Its neighbours under the same workspace directory still testify.
+    const live = "/Users/x/.superset/worktrees/d0f7efc8/v2";
+    const pruned = "/Users/x/.superset/worktrees/d0f7efc8/salty-hibiscus";
+    const { git } = fakeGit({
+      worktrees: { [REPO]: [live] },
+      roots: { [REPO]: REPO },
+    });
+    const idx = createWorktreeIndex({ git, exists: (p) => p === REPO, store: fakeStore() });
+
+    const threads = [
+      { cwd: REPO, repo: "pounce-mono" },
+      { cwd: live, repo: "v2" },
+      { cwd: pruned, repo: "salty-hibiscus" },
+    ];
+    await idx.resolve(threads);
+
+    expect(threads[2].repo).toBe("pounce-mono");
+    expect(threads[2].isWorktree).toBe(true);
+    expect(threads[2].worktree).toBe("salty-hibiscus");
+  });
+
+  it("abstains when a parent holds worktrees of two different repos", async () => {
+    const shared = "/Users/x/worktrees";
+    const a = `${shared}/from-a`;
+    const b = `${shared}/from-b`;
+    const orphan = `${shared}/unknown`;
+    const repoB = "/Users/x/Projects/other";
+    const { git } = fakeGit({
+      worktrees: { [REPO]: [a], [repoB]: [b] },
+      roots: { [REPO]: REPO, [repoB]: repoB },
+    });
+    const idx = createWorktreeIndex({
+      git,
+      exists: (p) => p === REPO || p === repoB,
+      store: fakeStore(),
+    });
+
+    const threads = [
+      { cwd: REPO, repo: "pounce-mono" },
+      { cwd: repoB, repo: "other" },
+      { cwd: orphan, repo: "unknown" },
+    ];
+    await idx.resolve(threads);
+
+    // Two candidate projects, no way to choose — stay honest.
+    expect(threads[2].repo).toBe("unknown");
+  });
+
+  it("never folds a real checkout into a neighbour's project", async () => {
+    // A worktree parked directly beside real repos must not swallow them.
+    const wt = "/Users/x/Projects/stray-wt";
+    const neighbour = "/Users/x/Projects/unrelated";
+    const { git } = fakeGit({
+      worktrees: { [REPO]: [wt], [neighbour]: [] },
+      roots: { [REPO]: REPO, [neighbour]: neighbour },
+    });
+    const idx = createWorktreeIndex({ git, exists: () => true, store: fakeStore() });
+
+    const threads = [
+      { cwd: REPO, repo: "pounce-mono" },
+      { cwd: neighbour, repo: "unrelated" },
+    ];
+    await idx.resolve(threads);
+
+    expect(threads[1].repo).toBe("unrelated");
+    expect(threads[1].isWorktree).toBeUndefined();
+  });
+
   it("reuses the persisted map instead of shelling out again", async () => {
     const store = fakeStore({ [SUPERSET]: "pounce-mono" });
     const { git, calls } = fakeGit({ roots: {}, worktrees: {} });

@@ -86,9 +86,33 @@ export function createWorktreeIndex({ git, exists = existsSync, store } = {}) {
   }
 
   /**
+   * The project a *sibling* directory belongs to, when git has no record left.
+   *
+   * Tools that batch worktrees put them side by side under one parent — superset
+   * gives a workspace its own directory, Claude Code uses `.claude/worktrees/`,
+   * and both hold worktrees of a single project. So a directory whose siblings
+   * are known worktrees of one repo is a worktree of that repo too.
+   *
+   * This is what covers a worktree deleted AND pruned: git has forgotten it
+   * entirely, but its neighbours still testify to where it came from. Only fires
+   * on positive evidence — at least one resolved sibling — and only when every
+   * resolved sibling agrees, so a parent that happened to collect worktrees of
+   * two different repos abstains rather than guessing.
+   */
+  function siblingOwner(cwd) {
+    const parent = cwd.slice(0, cwd.lastIndexOf("/"));
+    if (!parent) return null;
+    const names = new Set();
+    for (const p of known) {
+      if (p.slice(0, p.lastIndexOf("/")) === parent) names.add(owners.get(p));
+    }
+    return names.size === 1 ? [...names][0] : null;
+  }
+
+  /**
    * Rewrite worktree threads' `repo` to the project they were cut from, in
-   * place. Best-effort: a directory git can't account for keeps the repo name it
-   * arrived with, so it still reads as its own folder rather than joining an
+   * place. Best-effort: a directory nothing can account for keeps the repo name
+   * it arrived with, so it still reads as its own folder rather than joining an
    * anonymous shared bucket.
    */
   async function resolve(threads) {
@@ -98,9 +122,13 @@ export function createWorktreeIndex({ git, exists = existsSync, store } = {}) {
     const unplaced = [...new Set(threads.map((t) => normPath(t.cwd)).filter(Boolean))].filter(
       (cwd) => !ownerPathFor(cwd) && exists(cwd),
     );
-    const roots = new Set(
-      (await Promise.all(unplaced.map((cwd) => repoRootOf(cwd).catch(() => null)))).filter(Boolean),
-    );
+    const found = await Promise.all(unplaced.map((cwd) => repoRootOf(cwd).catch(() => null)));
+    // Directories git answered for. If one of these still doesn't match a
+    // registered worktree it is a checkout in its own right, so it must never
+    // inherit a neighbour's project — that would fold a real repo into whatever
+    // happened to sit beside it.
+    const gitKnows = new Set(unplaced.filter((_, i) => found[i]));
+    const roots = new Set(found.filter(Boolean));
     const swept = await Promise.all([...roots].map((r) => worktreesOf(r).catch(() => [])));
 
     let learned = false;
@@ -115,10 +143,13 @@ export function createWorktreeIndex({ git, exists = existsSync, store } = {}) {
       const cwd = normPath(t.cwd);
       if (!cwd) continue;
       const hit = ownerPathFor(cwd);
-      if (!hit) continue;
-      t.repo = owners.get(hit);
+      // A pruned worktree has no record of its own; fall back to what its
+      // neighbours prove. Never override git — only stand in for it.
+      const repo = hit ? owners.get(hit) : gitKnows.has(cwd) ? null : siblingOwner(cwd);
+      if (!repo) continue;
+      t.repo = repo;
       t.isWorktree = true;
-      t.worktree = baseName(hit);
+      t.worktree = baseName(hit ?? cwd);
     }
     return threads;
   }
