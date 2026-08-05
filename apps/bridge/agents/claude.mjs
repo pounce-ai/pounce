@@ -27,6 +27,7 @@ import {
   readTailLines,
   patchFromStructured,
   contentText,
+  clampMarkdown,
 } from "./events.mjs";
 import { agentEnv, binVersion, binPath, liveAgentCwds } from "./env.mjs";
 import { recordTurn, threadTotals } from "./cost-ledger.mjs";
@@ -151,16 +152,6 @@ function isTranscriptOnly(o) {
  * as markdown, so a mid-token slice leaves a dangling `**` or an unclosed fence
  * and the tail renders as literal punctuation. Closes an odd code fence too.
  */
-function clampMarkdown(text, max) {
-  if (text.length <= max) return text;
-  const cut = text.slice(0, max);
-  const nl = cut.lastIndexOf("\n");
-  // Only honour the line break if it isn't pathologically early (one giant line).
-  let out = (nl > max * 0.5 ? cut.slice(0, nl) : cut).trimEnd();
-  if ((out.match(/^```/gm) || []).length % 2) out += "\n```";
-  return `${out}\n\n_(summary truncated)_`;
-}
-
 /** Is this user record an actual human message (not meta, not a tool result)? */
 function isRealUserLine(o) {
   if (o.type !== "user" || o.isMeta || o.isSidechain || isTranscriptOnly(o)) return false;
