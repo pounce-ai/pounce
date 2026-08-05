@@ -330,5 +330,9 @@ const s = StyleSheet.create({
   modalClosePressed: { backgroundColor: T.surfaceHover },
   // Inherits the card's surface: a second fill here made the body a grey slab
   // sitting inside a white card.
-  filtersBody: { flex: 1, paddingHorizontal: 16, paddingTop: 12 },
+  // paddingTop clears the close button this shell floats over every modal
+  // (top:10, 24pt tall → occupies down to 34pt). The filters sheet is the one
+  // whose own header carries a right-aligned control ("Clear all"), so without
+  // the reserved band the × lands on top of that label.
+  filtersBody: { flex: 1, paddingHorizontal: 16, paddingTop: 40 },
 });
