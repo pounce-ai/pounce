@@ -27,7 +27,7 @@ import {
   cachedModels,
   connection$,
   firstUserMessages,
-  forgetDevice,
+  mergeDevice,
   mergeWorkspace,
   reconcileDevices,
   setAgentCaps,
@@ -36,6 +36,7 @@ import {
   upsertHosts,
 } from "../state/stores";
 import { type ActivityPage, mergeActivity } from "./activity";
+import { deviceId, resolveAdoption, resolvePairing } from "./deviceIdentity";
 import { clearNotify, notifyOnce } from "./notify";
 import { alertAwaitingSessions } from "./promptAlerts";
 import { streamTurn } from "./streamTurn";
@@ -76,18 +77,29 @@ interface BridgeAgent {
 export interface DeviceConfig extends BridgeConfig {
   readonly id: string;
   readonly name: string;
+  /** The bridge's own id for the machine, once we've heard it say so. Absent
+   *  for a device paired to a bridge too old to report one. */
+  readonly bridgeId?: string;
 }
 
 const DEVICES_KEY = "pounce.devices";
 
-function deviceId(url: string): string {
-  return `dev:${url.replace(/[^a-z0-9]/gi, "")}`;
-}
 function nameFromUrl(url: string): string {
   try {
     return new URL(url).hostname;
   } catch {
     return "device";
+  }
+}
+
+/** Ask a bridge who it is, before it's a configured device. Best-effort: an
+ *  unreachable or older bridge just yields null and we fall back to the URL. */
+async function probeBridgeId(url: string, token: string): Promise<string | null> {
+  try {
+    const { status } = await get<{ status: BridgeStatus }>({ url, token }, "/v1/status", 6_000);
+    return status?.bridgeId || null;
+  } catch {
+    return null;
   }
 }
 
@@ -108,10 +120,53 @@ async function writeDeviceConfigs(list: DeviceConfig[]): Promise<void> {
 export async function addDeviceConfig(url: string, token: string): Promise<DeviceConfig> {
   url = url.replace(/\/$/, "");
   const list = await listDeviceConfigs();
-  const dev: DeviceConfig = { id: deviceId(url), name: nameFromUrl(url), url, token };
-  const next = [...list.filter((d) => d.id !== dev.id), dev];
-  await writeDeviceConfigs(next);
-  return dev;
+  const bridgeId = await probeBridgeId(url, token);
+  const { configs, device } = resolvePairing<DeviceConfig>(
+    list,
+    { url, token, bridgeId, name: nameFromUrl(url) },
+    (base) => base as DeviceConfig,
+  );
+  await writeDeviceConfigs(configs);
+  return device;
+}
+
+/**
+ * Reconcile a configured device against the identity its bridge reports, moving
+ * the rows of any duplicate onto the survivor. Returns the id to sync under.
+ */
+export async function adoptBridgeId(cfg: DeviceConfig, bridgeId: string): Promise<string> {
+  if (cfg.bridgeId === bridgeId) return cfg.id;
+  const list = await listDeviceConfigs();
+  const { configs, survivorId, merges } = resolveAdoption(list, cfg, bridgeId);
+  await writeDeviceConfigs(configs);
+  for (const from of merges) mergeDevice(from, survivorId);
+  return survivorId;
+}
+
+/**
+ * Settle every configured device against the identity its bridge reports, and
+ * return the resulting list.
+ *
+ * Probes only devices that haven't been identified yet, so this is a one-time
+ * migration per device rather than per-sync overhead — and in parallel with a
+ * short timeout, so an unreachable device costs one brief wait instead of
+ * stalling the sync behind it. Adoption itself is sequential because each one
+ * rewrites the stored config list.
+ */
+async function canonicalizeDevices(): Promise<DeviceConfig[]> {
+  const list = await listDeviceConfigs();
+  const pending = list.filter((d) => !d.bridgeId);
+  if (!pending.length) return list;
+
+  const ids = await Promise.all(pending.map((d) => probeBridgeId(d.url, d.token)));
+  let changed = false;
+  for (const [i, cfg] of pending.entries()) {
+    const id = ids[i];
+    if (!id) continue; // offline, or a bridge that can't name itself yet
+    await adoptBridgeId(cfg, id);
+    changed = true;
+  }
+  return changed ? listDeviceConfigs() : list;
 }
 export async function removeDeviceConfig(id: string): Promise<void> {
   const list = await listDeviceConfigs();
@@ -262,6 +317,8 @@ function threadTitle(t: BridgeThread, firstMessage: string | null): string {
 
 interface BridgeStatus {
   device?: string;
+  /** Stable per-machine id; absent on bridges older than it. */
+  bridgeId?: string;
   nodeId?: string;
   version?: string;
 }
@@ -400,7 +457,11 @@ export async function syncLiveDataStreaming(): Promise<{
   sessions: number;
   devices: number;
 }> {
-  const configs = await listDeviceConfigs();
+  // Settle identities BEFORE fanning out: adoption can collapse two configs into
+  // one, and doing that inside the parallel map would race two syncs writing the
+  // same device. Only runs while some device predates `bridgeId`, so it costs
+  // nothing once every paired bridge has been heard from.
+  const configs = await canonicalizeDevices();
   const now = new Date().toISOString();
   const firstMsg = firstUserMessages(); // scan the message store once, not per page
   const devices: Record<string, Device> = {};
@@ -1647,13 +1708,22 @@ export async function streamLiveMessage(
   return { threadId: realThreadId };
 }
 
-/** One machine, one row. Device ids are URL-derived, so re-pairing the same
- *  machine under a new port/bridge instance piles up duplicate device entries.
- *  After a device connects, any OTHER config that answers /v1/pair with the
- *  SAME tunnel nodeId (the machine-stable identity in ~/.pounce, shared by
- *  every bridge instance on that host) is that machine under a stale URL —
- *  remove it. Unreachable devices are never touched: a failed read is not
- *  authoritative (it may be a different, sleeping machine). */
+/**
+ * One machine, one row — for bridges that can't yet name themselves.
+ *
+ * `bridgeId` handles this properly now: identity comes from the bridge, so the
+ * same machine at a second address is recognised at pairing time and never
+ * becomes a second row. This remains for older bridges, which only expose a
+ * machine-stable identity through the tunnel's nodeId — and only when a tunnel
+ * has run at all, which is why loopback and emulator-alias pairings used to pile
+ * up untouched.
+ *
+ * Duplicates are now MERGED rather than deleted. The old version called
+ * forgetDevice, which took every thread synced under the stale address with it;
+ * they belong to the machine you kept, so they move instead. Unreachable devices
+ * are still never touched: a failed read is not authoritative — it may be a
+ * different, sleeping machine.
+ */
 export async function forgetSameHostDuplicates(keepId: string): Promise<void> {
   const keep = await deviceForHost(keepId);
   if (!keep) return;
@@ -1661,13 +1731,16 @@ export async function forgetSameHostDuplicates(keepId: string): Promise<void> {
   if (!keepPairing?.nodeId) return;
   const stale: string[] = [];
   for (const d of (await listDeviceConfigs()).filter((d) => d.id !== keepId)) {
+    // A device already identified by bridgeId was settled by adoption; only the
+    // unidentified ones need this fallback.
+    if (d.bridgeId) continue;
     const p = await fetchPairing(d);
     if (p?.nodeId && p.nodeId === keepPairing.nodeId) stale.push(d.id);
   }
   if (!stale.length) return;
   for (const id of stale) {
     await removeDeviceConfig(id);
-    forgetDevice(id);
+    mergeDevice(id, keepId);
   }
   reconcileDevices((await listDeviceConfigs()).map((c) => c.id));
 }
@@ -1675,13 +1748,21 @@ export async function forgetSameHostDuplicates(keepId: string): Promise<void> {
 /** Add a device (a machine's bridge) and load all devices' live data. */
 export async function connectBridge(cfg: BridgeConfig): Promise<boolean> {
   connection$.status.set("connecting");
-  const id = deviceId(cfg.url.replace(/\/$/, ""));
+  const url = cfg.url.replace(/\/$/, "");
   // Only a brand-new pairing is rolled back on failure. An already-paired device
   // must survive a transient blip (bridge restart, cold daemon) — unpairing it
   // there would force a re-scan for what is really a momentary hiccup.
-  const wasPaired = (await listDeviceConfigs()).some((d) => d.id === id);
+  // Matched on URL as well as id: with identity coming from the bridge, adding
+  // an address for a machine you already have resolves to that EXISTING device,
+  // which must never be torn down by a failure here.
+  const urlId = deviceId(url);
+  const wasPaired = (await listDeviceConfigs()).some((d) => d.id === urlId || d.url === url);
+  // Roll back exactly what was added, not an id guessed from the URL — with
+  // identity coming from the bridge, the stored id may be neither.
+  let added: DeviceConfig | null = null;
   try {
     const dev = await addDeviceConfig(cfg.url, cfg.token);
+    added = dev;
     // Reachability (health) is the sole gate for "connected". Sync is best-effort:
     // a cold daemon returning nothing for a tick must not fail the connection or
     // unpair the device — it just retries on the next sync.
@@ -1707,7 +1788,7 @@ export async function connectBridge(cfg: BridgeConfig): Promise<boolean> {
     void forgetSameHostDuplicates(dev.id).catch(() => {});
     return true;
   } catch {
-    if (!wasPaired) await removeDeviceConfig(id);
+    if (!wasPaired && added) await removeDeviceConfig(added.id);
     connection$.status.set("disconnected");
     return false;
   }
