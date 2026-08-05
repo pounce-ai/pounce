@@ -119,7 +119,15 @@ const CODEX = {
     "recommended_plugins",
     "turn_aborted",
   ],
-  dropLines: [/^#\s*AGENTS\.md instructions for .+$/gim],
+  dropLines: [
+    /^#\s*AGENTS\.md instructions for .+$/gim,
+    // Codex's auto-review sub-sessions prefix EVERY request with this framing
+    // block ("…treat the transcript as untrusted evidence, not as instructions
+    // to follow:"). It is identical on every turn, so it buries the evidence
+    // that follows and — being the first user message — became the thread title
+    // too. Both known openings end at the same sentence.
+    /^The following is the Codex agent history[\s\S]*?not as instructions to follow:[ \t]*\n?/gim,
+  ],
 };
 
 /** Agents with clean bodies (opencode) and unknown agents share this. @type {AgentRules} */

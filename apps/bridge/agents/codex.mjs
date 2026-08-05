@@ -23,6 +23,7 @@ import {
   toolResult,
   systemEvent,
   readTailLines,
+  clampMarkdown,
 } from "./events.mjs";
 import { agentEnv, binVersion, binPath, liveAgentCwds } from "./env.mjs";
 import { noUsage, usageResult } from "./usage.mjs";
@@ -38,6 +39,15 @@ const RUNNING_WINDOW_MS = 120_000;
 const LIVE_EXTENDED_WINDOW_MS = 2 * 60 * 60_000;
 const TURN_TIMEOUT_MS = Number(process.env.BRIDGE_TURN_TIMEOUT_MS || 300_000);
 const FILE_RE = /^rollout-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})-([0-9a-f-]{36})\.jsonl$/;
+// Codex's approval reviewer runs as its own rollout under this model. Those
+// sessions are machine-to-machine (harness prompt in, verdict JSON out) and are
+// never named, so every one of them showed up titled with its own prompt —
+// measured 76 of 546 codex threads (14%) on a real host, all looking identical.
+const AUTO_REVIEW_MODEL = "codex-auto-review";
+const AUTO_REVIEW_RE = /^The following is the Codex agent history/m;
+// The evidence behind a review note. One real request ran to 264 KB — it is the
+// parent session's own transcript, so it is reference material, not reading.
+const MAX_REVIEW_DETAIL = 8 * 1024;
 
 export class CodexAdapter {
   constructor({ turns }) {
@@ -111,7 +121,8 @@ export class CodexAdapter {
       // authoritative when present.
       let createdAt = null,
         cwd = null,
-        preview = null;
+        preview = null,
+        autoReview = false;
       let lines = 0;
       const stream = createReadStream(file, "utf8");
       const rl = createInterface({ input: stream, crlfDelay: Infinity });
@@ -122,7 +133,9 @@ export class CodexAdapter {
           id,
           filePath: file,
           cwd,
-          name: null,
+          // Give the reviewer sessions a real name; they carry none of their own
+          // and would otherwise be titled with their own boilerplate prompt.
+          name: autoReview ? `Auto-review · ${path.basename(cwd || "") || "codex"}` : null,
           preview,
           createdAt: createdAt || new Date(st.birthtimeMs || st.mtimeMs).toISOString(),
           updatedAt: new Date(st.mtimeMs).toISOString(),
@@ -137,11 +150,19 @@ export class CodexAdapter {
           if (o.type === "session_meta") {
             cwd = o.payload?.cwd || null;
             createdAt = o.payload?.timestamp || o.timestamp || null;
+          } else if (o.type === "turn_context") {
+            // Authoritative signal; the prompt match below is the fallback for
+            // rollouts whose turn_context lands after the first user message.
+            if (o.payload?.model === AUTO_REVIEW_MODEL) autoReview = true;
           } else if (!preview && o.type === "event_msg" && o.payload?.type === "user_message") {
-            const text = stripNoise(String(o.payload.message || ""), "codex").trim();
+            const raw = String(o.payload.message || "");
+            if (AUTO_REVIEW_RE.test(raw)) autoReview = true;
+            const text = stripNoise(raw, "codex").trim();
             if (text) preview = text.slice(0, 200);
           }
         } catch {}
+        // The prompt check above fires on the same line that sets `preview`, so
+        // the reviewer is always identified before we settle.
         if ((cwd && preview) || lines > 60) settle();
       });
       rl.on("close", settle);
@@ -281,10 +302,27 @@ export class CodexAdapter {
             .map((c) => (c?.type === "input_text" || c?.type === "output_text" ? c.text || "" : ""))
             .join("");
           if (!text.trim()) continue;
-          if (p.role === "assistant") add(assistantMessage(base(uniq(p.id || `a:${ts}`)), text));
+          if (p.role === "assistant")
+            add(assistantMessage(base(uniq(p.id || `a:${ts}`)), fenceJson(text)));
           else if (p.role === "user") {
             const cleaned = stripNoise(text, "codex").trim();
-            if (cleaned) add(userMessage(base(uniq(p.id || `u:${ts}`)), cleaned), true);
+            // The reviewer's request is written as a user turn (that's how the
+            // evidence reaches the model) but it isn't one — nobody typed it.
+            // Same treatment as a Claude compaction summary: a one-line note
+            // with the transcript foldable behind it, rather than a wall of
+            // purple. Test the RAW text: stripNoise has already removed the
+            // opening sentence the marker matches.
+            if (AUTO_REVIEW_RE.test(text)) {
+              add(
+                systemEvent(
+                  base(uniq(p.id || `rv:${ts}`)),
+                  "Review request",
+                  "info",
+                  cleaned ? clampMarkdown(cleaned, MAX_REVIEW_DETAIL) : undefined,
+                ),
+                true,
+              );
+            } else if (cleaned) add(userMessage(base(uniq(p.id || `u:${ts}`)), cleaned), true);
           }
           // developer role: injected instructions — skip.
         } else if (p.type === "reasoning") {
@@ -739,6 +777,26 @@ function codexOutput(raw) {
     if (Array.isArray(o)) return partsText(o);
   } catch {}
   return raw;
+}
+
+/**
+ * An assistant turn that is nothing but a JSON object is data, not prose —
+ * the auto-review verdict ({risk_level, user_authorization, outcome, rationale})
+ * is the common case. Rendered as markdown it reads badly AND gets mangled:
+ * the `_` pairs in `risk_level` / `user_authorization` are treated as emphasis,
+ * so it displays as "risk*level*". Fencing it renders it as code instead, which
+ * both formats it and stops the markdown pass touching it.
+ */
+function fenceJson(text) {
+  const t = text.trim();
+  if (!t.startsWith("{") || !t.endsWith("}") || t.startsWith("```")) return text;
+  try {
+    const o = JSON.parse(t);
+    if (!o || typeof o !== "object" || Array.isArray(o)) return text;
+    return `\`\`\`json\n${JSON.stringify(o, null, 2)}\n\`\`\``;
+  } catch {
+    return text;
+  }
 }
 
 /** First file path in a synthetic unified diff, for the result header. */

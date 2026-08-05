@@ -104,6 +104,21 @@ export function patchFromStructured(structuredPatch, filePath = "") {
   }
 }
 
+/**
+ * Trim long-form markdown for a foldable `detail` without leaving it broken:
+ * cut on a line boundary when there is a sensible one, and close a code fence
+ * we happened to cut through (an unbalanced ``` swallows the rest of the view).
+ */
+export function clampMarkdown(text, max) {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  const nl = cut.lastIndexOf("\n");
+  // Only honour the line break if it isn't pathologically early (one giant line).
+  let out = (nl > max * 0.5 ? cut.slice(0, nl) : cut).trimEnd();
+  if ((out.match(/^```/gm) || []).length % 2) out += "\n```";
+  return `${out}\n\n_(summary truncated)_`;
+}
+
 /** Flatten a message-content field (string | block array) to its text. */
 export function contentText(content) {
   if (typeof content === "string") return content;
