@@ -17,6 +17,7 @@
     "@agentclientprotocol/sdk": "^1.2.1",
     "@pounce/transcript": "workspace:*",
     "@wterm/core": "^0.3.0",
+    "node-machine-id": "^1.1.12",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "zigpty": "^0.2.1"
