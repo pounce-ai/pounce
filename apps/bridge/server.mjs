@@ -40,7 +40,7 @@ import {
   replaceThreadMarkers,
   setMarker,
 } from "./agents/markers.mjs";
-import { Store } from "./agents/store.mjs";
+import { baseName, createWorktreeIndex, normPath } from "./agents/worktrees.mjs";
 import { toAtif } from "./agents/atif.mjs";
 import { resolvePermission } from "./agents/acp.mjs";
 import {
@@ -403,90 +403,39 @@ function listDirs(dir) {
 
 /**
  * Resolve a working directory into repo grouping + worktree info.
- * - Worktrees (`…/worktrees/<workspace>/<name>`) group under ONE repo (the
- *   workspace), with the worktree name as the session label.
- * - `isLive` = the directory still exists (you can resume/steer it); otherwise
- *   it's an archived session (worktree was merged + cleaned up).
+ *
+ * PROVISIONAL: the repo here is just the directory's own basename, because no
+ * amount of path parsing reliably identifies the repo a directory belongs to.
+ * Worktree layouts are per-tool conventions — superset writes
+ * `~/.superset/worktrees/<workspace>/<name>`, Claude Code writes
+ * `<repo>/.claude/worktrees/<name>`, a hand-run `git worktree add` writes
+ * wherever it was pointed — so a regex for one of them was always going to
+ * mislabel the others. resolveWorktreeOwners() rewrites `repo` from git's own
+ * records; this only has to be sane for what git can't account for.
+ *
+ * `isLive` = the directory still exists (you can resume/steer it); otherwise
+ * it's an archived session (worktree was merged + cleaned up).
  */
 function repoInfo(cwd) {
-  // Normalize Windows separators so the worktree/basename parsing below only
-  // ever sees forward slashes; drive roots (C:\) count as root too.
-  const norm = (cwd || "").replace(/\\/g, "/");
-  const isRoot = norm === "/" || /^[A-Za-z]:\/?$/.test(norm);
-  if (!norm || isRoot || cwd === os.homedir()) {
-    // Scratch sessions (homedir/root) are resumable like any other as long as
-    // the directory exists — hardcoding isLive:false made every scratch thread
-    // read-only ("archived") the moment it finished, forcing a NEW session per
-    // follow-up instead of reusing the one thread.
-    return {
-      repo: "Scratch",
-      isWorktree: false,
-      isLive: !!norm && existsSync(cwd),
-      worktree: null,
-    };
+  const p = normPath(cwd);
+  // Drive roots (C:\) count as root too; normPath has already dropped the slash.
+  const isRoot = !p || /^[A-Za-z]:$/.test(p);
+  // Scratch sessions (homedir/root) are resumable like any other as long as the
+  // directory exists — hardcoding isLive:false made every scratch thread
+  // read-only ("archived") the moment it finished, forcing a NEW session per
+  // follow-up instead of reusing the one thread.
+  const live = !!cwd && existsSync(cwd);
+  if (!cwd || isRoot || cwd === os.homedir()) {
+    return { repo: "Scratch", isWorktree: false, isLive: live, worktree: null };
   }
-  const live = existsSync(cwd);
-  const m = norm.match(/\/worktrees\/([^/]+)\/(.+)$/);
-  if (m) {
-    const ws = m[1];
-    return { repo: `ws:${ws.slice(0, 8)}`, isWorktree: true, isLive: live, worktree: m[2] };
-  }
-  const base = norm.replace(/\/+$/, "").split("/").pop() || norm;
-  return { repo: base, isWorktree: false, isLive: live, worktree: null };
+  return { repo: baseName(p), isWorktree: false, isLive: live, worktree: null };
 }
 
-// Worktree sessions live under `…/worktrees/<workspace>/<name>`, so repoInfo can
-// only see the opaque workspace id (`ws:<id>`) — the daemon never reports which
-// real repo the worktree was cut from. But every git worktree's .git points back
-// to its origin, so we resolve the true repo name here (bridge runs on the same
-// machine) and fold worktree sessions into that project's folder instead of a
-// generic, collision-prone "Workspace". All worktrees under one workspace share
-// an origin, so resolve once per workspace id and cache the hit permanently.
-//
-// Persisted: a resolved workspace→repo mapping is a fact about a directory that
-// doesn't change, and rediscovering it costs a `git rev-parse` per workspace on
-// every boot. Only successes are stored — an unresolved workspace stays absent
-// so it retries (a worktree can be archived before it's ever resolved).
-const wsRepoCache = new Store("worktree-repos");
-
-/** Origin repo name for a worktree cwd, via its git common dir (…/<repo>/.git). */
-async function realRepoForWorktree(cwd) {
-  const { out } = await git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
-  const commonDir = out.trim().split(/\r?\n/)[0]?.replace(/\\/g, "/");
-  if (!commonDir) return null;
-  const repoDir = commonDir.replace(/\/\.git\/?$/, "").replace(/\/+$/, "");
-  const name = repoDir.split("/").pop();
-  return name && name !== ".git" ? name : null;
-}
-
-/** Rewrite worktree threads' `repo` from `ws:<id>` to their real origin repo,
- *  so they group with that project. Best-effort: unresolved workspaces keep the
- *  `ws:` label. Mutates threads in place. */
-async function resolveWorktreeRepos(threads) {
-  const byWs = new Map();
-  for (const t of threads) {
-    if (!t.isWorktree || !t.cwd) continue;
-    const m = t.cwd.replace(/\\/g, "/").match(/\/worktrees\/([^/]+)\//);
-    if (!m) continue;
-    const group = byWs.get(m[1]) || byWs.set(m[1], []).get(m[1]);
-    group.push(t);
-  }
-  await Promise.all(
-    [...byWs.entries()].map(async ([ws, group]) => {
-      let name = wsRepoCache.get(ws);
-      if (!name) {
-        // Only a live worktree dir can run git; skip archived (merged/cleaned) ones.
-        for (const t of group) {
-          if (!t.isLive) continue;
-          name = await realRepoForWorktree(t.cwd).catch(() => null);
-          if (name) break;
-        }
-        if (name) wsRepoCache.set(ws, name); // leave unset on failure so we retry next sync
-      }
-      if (name) for (const t of group) t.repo = name;
-    }),
-  );
-}
+// Worktree sessions must group under the project they were cut from, and that
+// question outlives the directory — see agents/worktrees.mjs for why it is asked
+// repo-side rather than by parsing paths.
+const worktreeIndex = createWorktreeIndex({ git });
+const resolveWorktreeOwners = (threads) => worktreeIndex.resolve(threads);
 
 async function listThreads(agent, onPage) {
   // Adapter metas carry preview already cleaned; shape + repo-fold here so the
@@ -535,7 +484,7 @@ async function streamThreads(sink) {
         t.lastActivityAt = t.createdAt;
         flagAwaitingPrompt(t);
       }
-      await resolveWorktreeRepos(page);
+      await resolveWorktreeOwners(page);
       await sink(page);
     });
   }
@@ -560,7 +509,7 @@ async function getThreads(fresh = false) {
 
     // Fold worktree sessions into their real origin repo before clients see the
     // list (cheap: one git call per unresolved workspace, then cached).
-    await resolveWorktreeRepos(threads);
+    await resolveWorktreeOwners(threads);
 
     // Provisional activity so the list returns fast — real activity is filled in
     // asynchronously below.

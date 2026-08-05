@@ -216,10 +216,20 @@ async function get<T>(cfg: BridgeConfig, path: string, timeoutMs = 90_000): Prom
   }
 }
 
-/** Friendly repo display name from the bridge's repo key. */
+/**
+ * Friendly repo display name from the bridge's repo key.
+ *
+ * The key is a real folder name now. `ws:<id>` keys used to arrive here for any
+ * worktree the bridge couldn't trace back to its project, and every one of them
+ * rendered as "Workspace" — so N unrelated worktrees showed up as N identical,
+ * duplicate-looking Spaces. The bridge resolves worktrees against git's own
+ * records instead (see resolveWorktreeOwners), and names whatever it can't place
+ * after its directory, so there is no anonymous bucket left to translate. Old
+ * `ws:` keys can still arrive from a bridge that hasn't been updated yet; show
+ * the id rather than collapsing them all onto one name.
+ */
 function repoName(key: string): string {
-  if (key.startsWith("ws:")) return "Workspace"; // superset workspace (worktrees)
-  return key;
+  return key.startsWith("ws:") ? `Workspace ${key.slice(3)}` : key;
 }
 
 /**
