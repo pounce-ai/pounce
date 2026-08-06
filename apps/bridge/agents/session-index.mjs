@@ -28,7 +28,13 @@ const CACHE_DIR = path.join(os.homedir(), ".pounce", "index");
 /** BUMP THIS whenever an adapter's `scanFile` changes the shape of a meta.
  *  Snapshots are keyed on file mtime+size, so without a version an upgraded
  *  bridge would happily serve metas built by the previous one forever. */
-const SNAPSHOT_VERSION = 1;
+/*  2 — codex auto-review naming + its `autoReview` flag. Rollouts never change
+ *      after they are written, so every session indexed before that scanner
+ *      landed kept `name: null` and showed its own boilerplate prompt as its
+ *      title, forever — and without the flag would never be filtered out.
+ *      Also covers claude's `custom-title` (a /rename), which the scanner did
+ *      not read before and which no re-scan would otherwise pick up. */
+const SNAPSHOT_VERSION = 2;
 
 export class SessionIndex {
   /**

@@ -53,9 +53,9 @@ describe("parseUserMessage — claude", () => {
   });
 
   it("keeps real stdout that merely starts with a similar word", () => {
-    expect(p("<local-command-stdout>Compacting the archive…</local-command-stdout>").output).toEqual(
-      { text: "Compacting the archive…", isError: false },
-    );
+    expect(
+      p("<local-command-stdout>Compacting the archive…</local-command-stdout>").output,
+    ).toEqual({ text: "Compacting the archive…", isError: false });
   });
 
   it("treats a lone caveat/system-reminder envelope as empty", () => {
@@ -137,6 +137,20 @@ describe("stripNoise (server-side ingest)", () => {
 
   it("kills Codex's injected AGENTS.md block at ingest", () => {
     const raw = "# AGENTS.md instructions for /x\n\n<INSTRUCTIONS>\n\nrules\n\n</INSTRUCTIONS>";
+    expect(stripNoise(raw, "codex")).toBe("");
+  });
+
+  it("keeps only the request from a Codex Desktop attachment manifest", () => {
+    // Real shape: the framing and the temp path are Codex's, not the user's.
+    const raw =
+      "\n# Files mentioned by the user:\n\n## Shot.png: /var/folders/zh/T/Shot.png\n" +
+      "\n## My request for Codex:\nThe rendering is still fucked up.\n" +
+      '<image name=[Image #1] path="/var/folders/zh/T/Shot.png"></image>';
+    expect(stripNoise(raw, "codex")).toBe("The rendering is still fucked up.");
+  });
+
+  it("reduces an attachment with no request to nothing at all", () => {
+    const raw = "\n# Files mentioned by the user:\n\n## Shot.png: /var/folders/zh/T/Shot.png\n";
     expect(stripNoise(raw, "codex")).toBe("");
   });
 
