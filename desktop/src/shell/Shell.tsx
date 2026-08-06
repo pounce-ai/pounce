@@ -295,6 +295,10 @@ const s = StyleSheet.create({
     bottom: 0,
     alignItems: "center",
     justifyContent: "center",
+    // Above the sidebar splitter, which is an absolutely-positioned SIBLING
+    // with its own zIndex — without one here the modal defaults to 0 and the
+    // grab strip draws a bar straight down the scrim and over the sheet.
+    zIndex: 10,
   },
   modalScrim: {
     position: "absolute",

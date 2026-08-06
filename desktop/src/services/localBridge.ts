@@ -7,7 +7,7 @@
  * scan, no manual token entry. Other machines' bridges are still added the
  * mobile way (Settings → add device).
  */
-import { addDeviceConfig, listDeviceConfigs } from "@pounce/app/services/bridge";
+import { addDeviceConfig, adoptBridgeToken, listDeviceConfigs } from "@pounce/app/services/bridge";
 
 export const LOCAL_URL = `http://127.0.0.1:${process.env.EXPO_PUBLIC_BRIDGE_PORT ?? "8099"}`;
 
@@ -53,16 +53,31 @@ async function fetchWithTimeout(url: string, ms: number): Promise<Response> {
   }
 }
 
-/** Add the local bridge as a device if it's running and not yet configured. */
+/**
+ * Add the local bridge as a device — and keep its token honest.
+ *
+ * `/ui` is loopback-only and unauthenticated, so it is the one place a client
+ * can learn a bridge's CURRENT token without already holding a working one.
+ * This used to return early once a device existed, which meant the stored copy
+ * was never checked against it again. Anything that gives the bridge a new
+ * token behind the app's back — reinstalling, clearing ~/.pounce, or rolling
+ * back to a bridge from before tokens were minted — then locked the app out of
+ * its own machine permanently: every call 401s, `/v1/token` needs the
+ * credential that's wrong, and the app reports "0 devices online" while the
+ * bridge is running perfectly well two inches away.
+ */
 export async function ensureLocalBridge(): Promise<boolean> {
   try {
     const devices = await listDeviceConfigs();
-    if (devices.some((d) => d.url === LOCAL_URL)) return true;
+    const configured = devices.some((d) => d.url === LOCAL_URL);
     const res = await fetchWithTimeout(`${LOCAL_URL}/ui`, 2500);
-    if (!res.ok) return false;
+    // Bridge not answering: keep whatever is configured rather than treating
+    // silence as evidence the pairing is wrong.
+    if (!res.ok) return configured;
     const { token } = (await res.json()) as { token?: string };
-    if (!token) return false;
-    await addDeviceConfig(LOCAL_URL, token);
+    if (!token) return configured;
+    if (configured) await adoptBridgeToken(LOCAL_URL, token);
+    else await addDeviceConfig(LOCAL_URL, token);
     return true;
   } catch {
     // Bridge not up yet — bootstrap continues with whatever is configured;

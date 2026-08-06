@@ -36,7 +36,7 @@ import {
   upsertHosts,
 } from "../state/stores";
 import { type ActivityPage, mergeActivity } from "./activity";
-import { deviceId, resolveAdoption, resolvePairing } from "./deviceIdentity";
+import { applyBridgeToken, deviceId, resolveAdoption, resolvePairing } from "./deviceIdentity";
 import { clearNotify, notifyOnce } from "./notify";
 import { alertAwaitingSessions } from "./promptAlerts";
 import { streamTurn } from "./streamTurn";
@@ -158,6 +158,28 @@ export async function rotateLegacyToken(cfg: DeviceConfig): Promise<DeviceConfig
   const next = { ...cfg, token: fresh };
   await writeDeviceConfigs(list.map((d) => (d.id === cfg.id ? next : d)));
   return next;
+}
+
+/**
+ * Adopt the token a bridge at `url` says it is using now, for every device
+ * pointing there. Returns true if anything changed.
+ *
+ * Only a caller that learned the token from an UNAUTHENTICATED source may use
+ * this — in practice the desktop app reading its own loopback `/ui`. That's the
+ * one case where a stale credential is recoverable without re-pairing, because
+ * the app and the bridge are the same machine.
+ *
+ * It exists because token rotation is otherwise one-way: `/v1/token` needs the
+ * very credential that's wrong, and the legacy grace window closes. Anything
+ * that changes a bridge's token behind a paired client's back — a reinstall, a
+ * deleted ~/.pounce, a downgrade to a bridge that predates minting — would
+ * otherwise lock the app out of its own machine for good, with a device list
+ * that just says nothing is online.
+ */
+export async function adoptBridgeToken(url: string, token: string): Promise<boolean> {
+  const { configs, changed } = applyBridgeToken(await listDeviceConfigs(), url, token);
+  if (changed) await writeDeviceConfigs(configs);
+  return changed;
 }
 
 /**

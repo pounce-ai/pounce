@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { type DeviceIdentity, deviceId, resolveAdoption, resolvePairing } from "./deviceIdentity";
+import {
+  type DeviceIdentity,
+  applyBridgeToken,
+  deviceId,
+  resolveAdoption,
+  resolvePairing,
+} from "./deviceIdentity";
 
 interface Cfg extends DeviceIdentity {
   name: string;
@@ -148,5 +154,60 @@ describe("resolveAdoption", () => {
     // everything synced under the old URL-derived key would be stranded.
     expect(r.merges).toEqual([deviceId(other)]);
     expect(r.merges).not.toContain(`dev:${MAC}`);
+  });
+});
+
+describe("applyBridgeToken", () => {
+  const LOCAL = "http://127.0.0.1:8099";
+
+  it("recovers a device whose stored token the bridge no longer accepts", () => {
+    // The lockout this exists to undo: the bridge minted a new token (reinstall,
+    // cleared ~/.pounce, or a rollback to one that predates minting) and the
+    // stored copy now 401s on every call, including the one that would fetch a
+    // fresh token.
+    const list: Cfg[] = [
+      { id: `dev:${MAC}`, url: LOCAL, token: "stale", bridgeId: MAC, name: "m" },
+    ];
+    const r = applyBridgeToken(list, LOCAL, "fresh");
+    expect(r.changed).toBe(true);
+    expect(r.configs[0].token).toBe("fresh");
+    // Identity and everything hung off it survive — this is a credential
+    // change, not a re-pairing.
+    expect(r.configs[0].id).toBe(`dev:${MAC}`);
+  });
+
+  it("also heals the URL-keyed duplicate an old pairing left behind", () => {
+    const list: Cfg[] = [
+      { id: `dev:${MAC}`, url: LOCAL, token: "stale", bridgeId: MAC, name: "m" },
+      { id: deviceId(LOCAL), url: LOCAL, token: "stale", name: "m" },
+    ];
+    // Left on a dead token it can never authenticate, so it can never be probed,
+    // so resolveAdoption can never fold it away.
+    expect(applyBridgeToken(list, LOCAL, "fresh").configs.map((c) => c.token)).toEqual([
+      "fresh",
+      "fresh",
+    ]);
+  });
+
+  it("leaves other machines' credentials alone", () => {
+    const list: Cfg[] = [
+      { id: `dev:${MAC}`, url: LOCAL, token: "stale", bridgeId: MAC, name: "m" },
+      { id: deviceId(LAN), url: LAN, token: "other", name: "lan" },
+    ];
+    expect(applyBridgeToken(list, LOCAL, "fresh").configs[1].token).toBe("other");
+  });
+
+  it("reports no change when the stored token is already right", () => {
+    const list: Cfg[] = [
+      { id: `dev:${MAC}`, url: LOCAL, token: "fresh", bridgeId: MAC, name: "m" },
+    ];
+    // Every heartbeat tick calls this; a needless write each time would churn
+    // the secure store for nothing.
+    expect(applyBridgeToken(list, LOCAL, "fresh").changed).toBe(false);
+  });
+
+  it("matches addresses that differ only by a trailing slash", () => {
+    const list: Cfg[] = [{ id: "d", url: `${LOCAL}/`, token: "stale", name: "m" }];
+    expect(applyBridgeToken(list, LOCAL, "fresh").changed).toBe(true);
   });
 });
