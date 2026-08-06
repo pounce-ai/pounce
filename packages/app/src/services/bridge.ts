@@ -130,6 +130,36 @@ export async function addDeviceConfig(url: string, token: string): Promise<Devic
   return device;
 }
 
+/** The published default every bridge used before it minted its own token. */
+const LEGACY_TOKEN = "pounce-bridge-local";
+
+/**
+ * Swap a legacy pairing's token for the one its bridge actually uses now.
+ *
+ * Bridges used to authenticate with a constant compiled into the source, which
+ * meant anyone on the same network held the credential. New bridges mint a
+ * random token and keep honouring the old one only briefly, and only for reads —
+ * so a device still carrying it must upgrade on its next sync or start failing.
+ * Done here rather than by re-pairing: the user should never see a second QR
+ * code for something the two ends can settle between themselves.
+ */
+export async function rotateLegacyToken(cfg: DeviceConfig): Promise<DeviceConfig> {
+  if (cfg.token !== LEGACY_TOKEN) return cfg;
+  let fresh: string | null = null;
+  try {
+    const { token } = await get<{ token: string }>(cfg, "/v1/token", 10_000);
+    fresh = typeof token === "string" && token && token !== LEGACY_TOKEN ? token : null;
+  } catch {
+    // An older bridge has no /v1/token, and an unreachable one gets another go
+    // next sync. Either way the existing pairing is left exactly as it was.
+  }
+  if (!fresh) return cfg;
+  const list = await listDeviceConfigs();
+  const next = { ...cfg, token: fresh };
+  await writeDeviceConfigs(list.map((d) => (d.id === cfg.id ? next : d)));
+  return next;
+}
+
 /**
  * Reconcile a configured device against the identity its bridge reports, moving
  * the rows of any duplicate onto the survivor. Returns the id to sync under.
@@ -482,7 +512,10 @@ export async function syncLiveDataStreaming(): Promise<{
   };
 
   await Promise.all(
-    configs.map(async (cfg) => {
+    configs.map(async (rawCfg) => {
+      // Before anything else this sync: retire a token that used to be public.
+      // No-op for every pairing made since bridges started minting their own.
+      const cfg = await rotateLegacyToken(rawCfg);
       threadsByDevice[cfg.id] = { name: cfg.name, threads: [] };
       let online = true;
       let deviceName = cfg.name;
