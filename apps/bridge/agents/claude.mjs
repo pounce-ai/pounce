@@ -1035,7 +1035,18 @@ function scanTranscript(file, st) {
       // recovers each. `permission-mode` records and every `user` record carry
       // `permissionMode` (normal/auto/plan/bypassPermissions); the newest wins.
       let permissionMode = null;
+      // A `/rename` beats any generated title — that is the SDK's own precedence
+      // (customTitle || aiTitle) and it is what the user asked to see. Kept
+      // separate from `name` so a late ai-title cannot displace it.
+      let customTitle = null;
       for (const line of readTailLines(file).reverse()) {
+        if (!customTitle && line.includes('"custom-title"')) {
+          try {
+            const o = JSON.parse(line);
+            if (o.type === "custom-title" && o.customTitle)
+              customTitle = String(o.customTitle).slice(0, 200);
+          } catch {}
+        }
         if (!name && line.includes('"ai-title"')) {
           try {
             const o = JSON.parse(line);
@@ -1049,13 +1060,13 @@ function scanTranscript(file, st) {
               permissionMode = CLAUDE_MODE[o.permissionMode] || null;
           } catch {}
         }
-        if (name && permissionMode) break;
+        if (customTitle && name && permissionMode) break;
       }
       resolve({
         id,
         filePath: file,
         cwd,
-        name,
+        name: customTitle || name,
         preview: preview || previewFallback,
         createdAt,
         updatedAt: new Date(st.mtimeMs).toISOString(),

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { mkdtempSync, rmSync, utimesSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -360,5 +360,103 @@ describe("startTurn stream parsing", () => {
     const asst = events.filter((e) => e.type === "assistant_message").map((e) => e.text);
     expect(asst.at(-1)).toBe("Hello");
     expect(asst).not.toContain("HelloHello"); // the delta-vs-aggregate bug
+  });
+});
+
+// ── JSONL fallback store (no sqlite needed) ───────────────────────────────────
+describe("JSONL transcript fallback", () => {
+  // Verbatim shape from ~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl
+  // (cursor-agent 2026.07.16): AI-SDK-ish messages, reasoning replaced by the
+  // literal "[REDACTED]", tool calls with no results, and a turn_ended trailer.
+  const LINES = [
+    {
+      role: "user",
+      message: {
+        content: [
+          {
+            type: "text",
+            text: "<timestamp>Friday, Jul 17, 2026, 2:27 PM</timestamp>\n<user_query>\nRun 'cat note.txt' and summarise it.\n</user_query>",
+          },
+        ],
+      },
+    },
+    {
+      role: "assistant",
+      message: {
+        content: [
+          { type: "text", text: "[REDACTED]" },
+          {
+            type: "tool_use",
+            id: "call-1",
+            name: "Shell",
+            input: { command: "cat note.txt", working_directory: "/tmp/proj" },
+          },
+        ],
+      },
+    },
+    {
+      role: "assistant",
+      message: { content: [{ type: "text", text: 'It says "hello".\n\n[REDACTED]' }] },
+    },
+    { type: "turn_ended", status: "success" },
+  ];
+
+  /** Lay the file out exactly as cursor does, so path handling is under test too. */
+  function transcriptDir(chatId) {
+    const root = mkdtempSync(path.join(tmpdir(), "cursor-tx-"));
+    const dir = path.join(root, "slug", "agent-transcripts", chatId);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, `${chatId}.jsonl`),
+      LINES.map((l) => JSON.stringify(l)).join("\n"),
+    );
+    return { root, file: path.join(dir, `${chatId}.jsonl`) };
+  }
+
+  it("renders a transcript with no sqlite at all", () => {
+    const { root, file } = transcriptDir("chat-tx");
+    try {
+      const a = new CursorAdapter({ turns: { isRunning: () => false } });
+      const { events, cwd, preview } = a._readTranscript(file, "chat-tx");
+      expect(events.map((e) => e.type)).toEqual(["user_message", "tool_call", "assistant_message"]);
+      // The <user_query> envelope is unwrapped and the timestamp header dropped.
+      expect(events[0].text).toBe("Run 'cat note.txt' and summarise it.");
+      expect(preview).toBe("Run 'cat note.txt' and summarise it.");
+      expect(events[1].call).toMatchObject({ name: "Shell", input: { command: "cat note.txt" } });
+      // "[REDACTED]" marks removed reasoning — never shown as assistant prose.
+      expect(events[2].text).toBe('It says "hello".');
+      expect(events.some((e) => e.text?.includes("REDACTED"))).toBe(false);
+      // The only place a cwd appears in this store.
+      expect(cwd).toBe("/tmp/proj");
+      expect(events.map((e) => e.seq)).toEqual([1, 2, 3]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("serves getEvents from the transcript when the db can't be opened", async () => {
+    const { root, file } = transcriptDir("chat-tx");
+    try {
+      const a = new CursorAdapter({ turns: { isRunning: () => false } });
+      a._sqlite = null; // a host with neither node:sqlite nor bun:sqlite
+      a._txLoc.set("chat-tx", file);
+      const events = await a.getEvents("chat-tx");
+      expect(events.map((e) => e.type)).toEqual(["user_message", "tool_call", "assistant_message"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("drops a transcript with no user turn rather than listing an empty thread", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "cursor-tx-"));
+    try {
+      const dir = path.join(root, "slug", "agent-transcripts", "empty");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, "empty.jsonl"), JSON.stringify(LINES[3]));
+      const a = new CursorAdapter({ turns: { isRunning: () => false } });
+      expect(a._readTranscript(path.join(dir, "empty.jsonl"), "empty").preview).toBe(null);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
