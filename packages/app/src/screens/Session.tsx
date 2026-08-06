@@ -20,7 +20,7 @@ import {
   ChatKeyboardSticky,
   COMPOSER_OVERLAYS_LIST,
   useChatKeyboard,
-} from "../components/chatList";
+} from "../components/ChatList";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import { useQuery } from "@tanstack/react-query";

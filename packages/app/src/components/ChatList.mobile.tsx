@@ -1,5 +1,5 @@
 /**
- * Chat-list seam — mobile implementation (resolved via chatList.ios/.android).
+ * Chat-list seam — mobile implementation (resolved via ChatList.ios/.android).
  *
  * Replaces the KeyboardAvoidingView + flex-layout arrangement with the pattern
  * LegendList and react-native-keyboard-controller are built for:

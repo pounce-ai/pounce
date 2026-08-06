@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Image, Platform, Pressable, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import type { LegendListRef } from "@legendapp/list/react-native";
-import { ChatList, COMPOSER_OVERLAYS_LIST } from "./chatList";
+import { ChatList, COMPOSER_OVERLAYS_LIST } from "./ChatList";
 import { SCRIM_HEIGHT } from "./ComposerScrim";
 import type { ChatKeyboardProps } from "./chatListTypes";
 import Animated, { Easing, SlideInDown } from "./animation";

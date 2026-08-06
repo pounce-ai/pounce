@@ -1,9 +1,9 @@
 /**
- * Shared contract for the chat-list seam (chatList.ts / chatList.mobile.tsx).
+ * Shared contract for the chat-list seam (ChatList.tsx / ChatList.mobile.tsx).
  *
  * Both implementations import these types so the two stay in step even though
- * only one is ever bundled: mobile resolves chatList.ios/.android → the
- * keyboard-aware list, macOS/Windows fall back to the plain chatList.ts.
+ * only one is ever bundled: mobile resolves ChatList.ios/.android → the
+ * keyboard-aware list, macOS/Windows fall back to the plain ChatList.tsx.
  */
 import type { LayoutChangeEvent } from "react-native";
 import type { LegendListProps, LegendListRef } from "@legendapp/list/react-native";

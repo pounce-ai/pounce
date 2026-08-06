@@ -7,7 +7,7 @@
  * send space still works here — it's a LegendList feature, not a keyboard one —
  * so desktop gets the same "your message jumps to the top" behaviour.
  *
- * iOS/Android resolve chatList.ios/.android → chatList.mobile.
+ * iOS/Android resolve ChatList.ios/.android → ChatList.mobile.
  */
 import { useCallback, useRef, useState } from "react";
 import {
