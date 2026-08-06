@@ -76,6 +76,32 @@ export function resolvePairing<T extends DeviceIdentity>(
   };
 }
 
+/**
+ * Point every device at `url` at the token that bridge is actually using, and
+ * report whether that changed anything — the heartbeat calls this on every
+ * tick, so `changed` is what keeps it from rewriting the secure store forever.
+ *
+ * Every row for the address, not just the canonical one: a machine paired
+ * before bridges could name themselves leaves a URL-keyed duplicate behind, and
+ * leaving that on a dead token keeps it unreachable forever — which also blocks
+ * the `resolveAdoption` merge that would have collapsed it, since adoption
+ * needs a probe that authenticates first.
+ */
+export function applyBridgeToken<T extends DeviceIdentity>(
+  list: readonly T[],
+  url: string,
+  token: string,
+): { configs: T[]; changed: boolean } {
+  const want = url.replace(/\/$/, "");
+  let changed = false;
+  const configs = list.map((d) => {
+    if (d.url.replace(/\/$/, "") !== want || d.token === token) return d;
+    changed = true;
+    return { ...d, token } as T;
+  });
+  return { configs: changed ? configs : [...list], changed };
+}
+
 export interface AdoptResolution<T extends DeviceIdentity> {
   readonly configs: T[];
   /** The id everything about this machine should live under. */
