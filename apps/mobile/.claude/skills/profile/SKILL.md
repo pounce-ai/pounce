@@ -15,12 +15,12 @@ Everything below assumes the dev client is installed on the sim and Metro is up
 
 ## The targets
 
-| what | value |
-|---|---|
-| bundle id | `com.pounce.app` |
-| sim | iPhone 17 — get the UDID from `list-devices`, never hardcode |
-| Metro port | 8081 (mobile; desktop is 8083 — see the metro-port-collision memory) |
-| project root for `react-profiler-analyze` | `apps/mobile` |
+| what                                      | value                                                                |
+| ----------------------------------------- | -------------------------------------------------------------------- |
+| bundle id                                 | `com.pounce.app`                                                     |
+| sim                                       | iPhone 17 — get the UDID from `list-devices`, never hardcode         |
+| Metro port                                | 8081 (mobile; desktop is 8083 — see the metro-port-collision memory) |
+| project root for `react-profiler-analyze` | `apps/mobile`                                                        |
 
 `native-profiler-start` needs `app_process: "Pounce"` whenever the agent-device
 runner is also on the sim, otherwise it refuses to guess between them.
@@ -47,7 +47,7 @@ closely enough that trials are comparable.
 ## Prove the fix, don't assert it
 
 Single-run ms deltas are worthless here — dev-mode timings swing with GC, Metro,
-SVG warm-up, and scroll depth. Two runs of *different lengths* cannot be compared
+SVG warm-up, and scroll depth. Two runs of _different lengths_ cannot be compared
 at all.
 
 Run **3 trials per side over identical windows**, toggling the code with

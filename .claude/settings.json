@@ -1,8 +1,5 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(git push origin bridge-v*)",
-      "mcp__argent"
-    ]
+    "allow": ["Bash(git push origin bridge-v*)", "mcp__argent"]
   }
 }
