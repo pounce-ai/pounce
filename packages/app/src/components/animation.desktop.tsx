@@ -41,7 +41,17 @@ const Animated = {
   View: AnimatedView,
   Text: AnimatedText,
   ScrollView: AnimatedScrollView,
-  createAnimatedComponent: <T,>(component: T): T => component,
+  /** Reanimated feeds values through `animatedProps`; there is no animation
+   *  here, so fold them in as ordinary props and strip the channel itself —
+   *  otherwise it leaks to the native view as an unknown prop. */
+  createAnimatedComponent: <T,>(component: T): T => {
+    const Inner = component as unknown as React.ComponentType<AnyProps>;
+    const Wrapped = (props: AnyProps) => {
+      const { animatedProps, ...rest } = clean(props);
+      return <Inner {...rest} {...((animatedProps as AnyProps) ?? {})} />;
+    };
+    return Wrapped as unknown as T;
+  },
 };
 export default Animated;
 export { Animated };
@@ -56,6 +66,12 @@ export function useSharedValue<T>(initial: T): SharedValue<T> {
 
 /** Evaluate once per render — values are static on this platform. */
 export function useAnimatedStyle<T extends object>(factory: () => T): T {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(factory, []);
+}
+
+/** Same deal for animated props: one static evaluation, spread as plain props. */
+export function useAnimatedProps<T extends object>(factory: () => T): T {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   return useMemo(factory, []);
 }
@@ -96,3 +112,17 @@ function noopAnimation(): NoopAnimation {
 export const FadeIn = noopAnimation();
 export const FadeOut = noopAnimation();
 export const LinearTransition = noopAnimation();
+export const SlideInDown = noopAnimation();
+export const ZoomIn = noopAnimation();
+export const ZoomOut = noopAnimation();
+
+/** Easing stand-in: the chainable builders above ignore whatever it returns,
+ *  so these only have to exist and be callable. */
+export const Easing = {
+  exp: (t: number) => t,
+  linear: (t: number) => t,
+  ease: (t: number) => t,
+  out: (fn: unknown) => fn,
+  in: (fn: unknown) => fn,
+  inOut: (fn: unknown) => fn,
+};

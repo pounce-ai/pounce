@@ -147,6 +147,7 @@ export function Composer({
   tasks,
   markers,
   usage,
+  readOnly,
   ref,
 }: {
   agent: string;
@@ -179,6 +180,11 @@ export function Composer({
   /** Thread usage — drives the context-fill ring (hidden unless the agent
    *  reports both a window and a recent request size). */
   usage?: ThreadUsage | null;
+  /** Archived thread: render the pill row (markers are still worth reaching)
+   *  but no text field. `disabled` used to cover this, which left a dead input
+   *  box and a model selector on a thread whose worktree is gone — controls
+   *  that look actionable and aren't, taking a third of the screen with them. */
+  readOnly?: boolean;
   ref?: Ref<ComposerHandle>;
 }) {
   const { theme } = useUnistyles();
@@ -608,74 +614,80 @@ export function Composer({
 
       {/* Floating liquid-glass pill: the text sits above one row of controls —
           attach … mic · send — like iOS 26 Messages. */}
-      <GlassCard radius={24} shadow style={s.card}>
-        <EnrichedMarkdownTextInput
-          ref={inputRef}
-          onChangeText={setDraft}
-          onChangeMarkdown={(md) => {
-            markdownRef.current = md;
-          }}
-          editable={!disabled}
-          placeholder={
-            disabled ? "Read-only" : running ? "Queue a follow-up or steer…" : placeholder
-          }
-          placeholderTextColor="#62626D"
-          multiline
-          markdownStyle={inputMdStyle}
-          style={{
-            minHeight: 38,
-            maxHeight: 120,
-            backgroundColor: "transparent",
-            paddingHorizontal: 6,
-            paddingTop: 6,
-            paddingBottom: 4,
-            fontSize: 15,
-            color: hex.fg,
-            opacity: disabled ? 0.5 : 1,
-          }}
-        />
+      {!readOnly ? (
+        <GlassCard radius={24} shadow style={s.card}>
+          <EnrichedMarkdownTextInput
+            ref={inputRef}
+            onChangeText={setDraft}
+            onChangeMarkdown={(md) => {
+              markdownRef.current = md;
+            }}
+            editable={!disabled}
+            placeholder={
+              disabled ? "Read-only" : running ? "Queue a follow-up or steer…" : placeholder
+            }
+            placeholderTextColor="#62626D"
+            multiline
+            markdownStyle={inputMdStyle}
+            style={{
+              minHeight: 38,
+              maxHeight: 120,
+              backgroundColor: "transparent",
+              paddingHorizontal: 6,
+              paddingTop: 6,
+              paddingBottom: 4,
+              fontSize: 15,
+              color: hex.fg,
+              opacity: disabled ? 0.5 : 1,
+            }}
+          />
 
-        <View style={s.controlRow}>
-          {!disabled ? <RoundButton icon="add" onPress={openAttach} /> : null}
-          {onViewChanges ? (
-            <Pressable
-              onPress={onViewChanges}
-              style={({ pressed }) => [s.diffBtn, pressed && s.pressed70]}
-            >
-              <PounceIcon name="git-compare-outline" size={19} color={theme.colors.fgMuted} />
-              {diffStat && (diffStat.add > 0 || diffStat.del > 0) ? (
-                <Text style={s.diffStatText}>
-                  <Text style={s.diffAdd}>+{diffStat.add}</Text>{" "}
-                  <Text style={s.diffDel}>-{diffStat.del}</Text>
-                </Text>
-              ) : null}
-            </Pressable>
-          ) : null}
+          <View style={s.controlRow}>
+            {!disabled ? <RoundButton icon="add" onPress={openAttach} /> : null}
+            {onViewChanges ? (
+              <Pressable
+                onPress={onViewChanges}
+                style={({ pressed }) => [s.diffBtn, pressed && s.pressed70]}
+              >
+                <PounceIcon name="git-compare-outline" size={19} color={theme.colors.fgMuted} />
+                {diffStat && (diffStat.add > 0 || diffStat.del > 0) ? (
+                  <Text style={s.diffStatText}>
+                    <Text style={s.diffAdd}>+{diffStat.add}</Text>{" "}
+                    <Text style={s.diffDel}>-{diffStat.del}</Text>
+                  </Text>
+                ) : null}
+              </Pressable>
+            ) : null}
 
-          <View style={s.flex1} />
+            <View style={s.flex1} />
 
-          <ContextRing usage={usage ?? null} />
-          {!disabled && voiceAvailable ? (
-            <MicButton listening={listening} onPress={toggleVoice} />
-          ) : null}
-          {showStop ? (
-            <Pressable
-              onPress={onStop}
-              style={({ pressed }) => [s.stopBtn, pressed && s.pressed80]}
-            >
-              <PounceIcon name="stop" size={15} color="#fff" />
-            </Pressable>
-          ) : (
-            <Pressable
-              onPress={submit}
-              disabled={!canSend}
-              style={({ pressed }) => [s.sendBtn, !canSend && s.opacity40, pressed && s.pressed80]}
-            >
-              <PounceIcon name="arrow-up" size={18} color="#fff" />
-            </Pressable>
-          )}
-        </View>
-      </GlassCard>
+            <ContextRing usage={usage ?? null} />
+            {!disabled && voiceAvailable ? (
+              <MicButton listening={listening} onPress={toggleVoice} />
+            ) : null}
+            {showStop ? (
+              <Pressable
+                onPress={onStop}
+                style={({ pressed }) => [s.stopBtn, pressed && s.pressed80]}
+              >
+                <PounceIcon name="stop" size={15} color="#fff" />
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={submit}
+                disabled={!canSend}
+                style={({ pressed }) => [
+                  s.sendBtn,
+                  !canSend && s.opacity40,
+                  pressed && s.pressed80,
+                ]}
+              >
+                <PounceIcon name="arrow-up" size={18} color="#fff" />
+              </Pressable>
+            )}
+          </View>
+        </GlassCard>
+      ) : null}
     </View>
   );
 }
