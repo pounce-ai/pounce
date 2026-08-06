@@ -66,6 +66,14 @@ node apps/bridge/server.mjs
 cd desktop && bun install && bunx expo start --port 8082
 ```
 
+### Driving and profiling the app
+
+[Argent](https://argent.swmansion.com/) ships as a devDependency, so `bun install`
+is all a teammate needs — its MCP server (`.mcp.json`) lets a coding agent launch
+the app, tap through it, read the React tree, and record React + Instruments
+profiles on the simulator. `apps/mobile/.claude/skills/profile` has the
+Pounce-specific recipe, including how to run a before/after that actually holds up.
+
 ### Releasing the Bridge
 
 Tag `bridge-v*` (e.g. `git tag bridge-v1.0.8 && git push --tags`) and CI builds all
