@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActionSheetIOS,
   Animated as RNAnimated,
@@ -51,6 +51,21 @@ import { refreshLive } from "../services/runtime";
 /** Collapse key for the Favourites pseudo-group (shares the collapsed$ map). */
 const FAV_KEY = "__fav__";
 
+/** List props that never depend on render state — hoisted so the list doesn't
+ *  see a new reference (and re-render every realised cell) on each commit. */
+/** Plain object, NOT a unistyles entry: reanimated's AnimatedComponent resolves
+ *  a `StyleSheet.create` proxy to `{}` here and throws "empty object is not a
+ *  valid style value". */
+const FILL = { flex: 1 } as const;
+const LIST_HEADER = <LiveStrip />;
+const rowKey = (r: Row) =>
+  r.type === "favHeader"
+    ? "favh"
+    : r.type === "header"
+      ? `h:${r.repoId}`
+      : `${r.fav ? "fav:" : ""}${r.session.id}`;
+const rowType = (r: Row) => r.type;
+
 /** A pinned favourites header, a directory header, or one session beneath either.
  *  When every session in a directory lives on one device, the header carries that
  *  device's name/emoji so it can show the device glyph instead of a generic folder. */
@@ -85,7 +100,10 @@ export default function HomeScreen() {
   // returns a NEW reference — otherwise `useSelector` below sees the same object
   // and the grouped `useMemo` (dep: collapsedMap) never rebuilds, so the accordion
   // won't collapse. See legend-state object-selector gotcha.
-  const toggleGroup = (repoId: string) => collapsed$.set((m) => ({ ...m, [repoId]: !m[repoId] }));
+  const toggleGroup = useCallback(
+    (repoId: string) => collapsed$.set((m) => ({ ...m, [repoId]: !m[repoId] })),
+    [collapsed$],
+  );
 
   const status = useSelector(() => connection$.status.get());
   const filterCount = useSelector(() => activeFilterCount());
@@ -194,19 +212,19 @@ export default function HomeScreen() {
     return { rows, attention };
   }, [rawThreads, projectList, deviceMap, favT, favR, ignored, f, collapsedMap]);
 
-  const onRefresh = async () => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
       await refreshLive(true);
     } finally {
       setRefreshing(false);
     }
-  };
+  }, []);
 
   // Long-press a thread to favourite it. New threads carry a temporary id that's
   // swapped for the real one after the first turn, so block favouriting until
   // then — a favourite keyed on the temp id would orphan.
-  const onLongPressSession = (s: Session) => {
+  const onLongPressSession = useCallback((s: Session) => {
     if (s.id.startsWith("new_")) return;
     const fav = isFavThread(s.id);
     ActionSheetIOS.showActionSheetWithOptions(
@@ -219,32 +237,87 @@ export default function HomeScreen() {
         if (i === 0) toggleFavThread(s.id);
       },
     );
-  };
+  }, []);
 
   /** A folder's insights — its spend, its cadence, its agent instructions.
    *  Reached from the chart button on the header row; also offered here, since
    *  the long-press sheet is where people look for what a row can do. */
-  const openSpace = (spaceKey: string) =>
-    router.push({ pathname: "/space", params: { key: spaceKey } });
+  const openSpace = useCallback(
+    (spaceKey: string) => router.push({ pathname: "/space", params: { key: spaceKey } }),
+    [router],
+  );
 
-  const onLongPressRepo = (repoId: string, name: string, spaceKey: string) => {
-    const fav = isFavRepo(repoId);
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        title: name,
-        // One word for this thing everywhere: a Space is a repo on a machine,
-        // and the phone used to call the same object a folder or a project.
-        options: [fav ? "Unfavourite space" : "Favourite space", "Open space", "Cancel"],
-        cancelButtonIndex: 2,
-      },
-      (i) => {
-        if (i === 0) toggleFavRepo(repoId);
-        else if (i === 1) openSpace(spaceKey);
-      },
-    );
-  };
+  const onLongPressRepo = useCallback(
+    (repoId: string, name: string, spaceKey: string) => {
+      const fav = isFavRepo(repoId);
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          title: name,
+          // One word for this thing everywhere: a Space is a repo on a machine,
+          // and the phone used to call the same object a folder or a project.
+          options: [fav ? "Unfavourite space" : "Favourite space", "Open space", "Cancel"],
+          cancelButtonIndex: 2,
+        },
+        (i) => {
+          if (i === 0) toggleFavRepo(repoId);
+          else if (i === 1) openSpace(spaceKey);
+        },
+      );
+    },
+    [openSpace],
+  );
 
-  const newInRepo = (repoId: string) => router.push({ pathname: "/new", params: { repoId } });
+  const newInRepo = useCallback(
+    (repoId: string) => router.push({ pathname: "/new", params: { repoId } }),
+    [router],
+  );
+
+  // Every prop the list reads has to keep its reference across an unrelated
+  // re-render (a sync tick, a connection blip) — a fresh `renderItem` alone
+  // re-renders every realised cell. Profiled with argent 2026-08-06.
+  const renderItem = useCallback(
+    ({ item }: { item: Row }) =>
+      item.type === "favHeader" ? (
+        <FavHeader
+          count={item.count}
+          collapsed={item.collapsed}
+          onPress={() => toggleGroup(FAV_KEY)}
+        />
+      ) : item.type === "header" ? (
+        <DirHeader
+          name={item.name}
+          count={item.count}
+          attention={item.attention}
+          collapsed={item.collapsed}
+          fav={item.fav}
+          deviceName={item.deviceName}
+          deviceEmoji={item.deviceEmoji}
+          onPress={() => toggleGroup(item.repoId)}
+          onAdd={() => newInRepo(item.repoId)}
+          onOpen={() => openSpace(item.spaceKey)}
+          onLongPress={() => onLongPressRepo(item.repoId, item.name, item.spaceKey)}
+        />
+      ) : (
+        <View style={s.sessionRow}>
+          <SessionCard session={item.session} onLongPress={onLongPressSession} />
+        </View>
+      ),
+    [toggleGroup, newInRepo, openSpace, onLongPressRepo, onLongPressSession],
+  );
+  const refreshControl = useMemo(
+    () => (
+      <RefreshControl
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        tintColor={theme.colors.accent}
+      />
+    ),
+    [refreshing, onRefresh, theme.colors.accent],
+  );
+  const listContentStyle = useMemo(
+    () => ({ paddingTop: 6, paddingBottom: insets.bottom + 16 }),
+    [insets.bottom],
+  );
 
   // Header subtitle, one branch per state; syncing lives in the wordmark
   // badge (spinner → green tick), so null here = nothing worth a row.
@@ -315,62 +388,29 @@ export default function HomeScreen() {
         // Let UIKit inset the scroll under the translucent system tab bar —
         // without this the last rows hide beneath the bar.
         contentInsetAdjustmentBehavior="automatic"
-        style={{ flex: 1 }}
+        style={FILL}
         data={rows}
         // Subtle reorder: when a sync bumps a thread/folder's updatedAt and the
         // order changes, items ease to their new position instead of snapping.
         // NOTE: recycleItems must stay OFF with itemLayoutAnimation — a recycled
         // view animates from the previous item's position and can be left
         // mispositioned, which shows up as overlapping cards.
+        // Built fresh per render ON PURPOSE: sharing one hoisted
+        // LinearTransition instance across every animated row leaves a
+        // just-reordered card mispositioned (it rides up into its group
+        // header). The builder is cheap; the rest of the list's props are
+        // the ones that had to be stabilised.
         itemLayoutAnimation={LinearTransition.duration(260)}
-        keyExtractor={(r) =>
-          r.type === "favHeader"
-            ? "favh"
-            : r.type === "header"
-              ? `h:${r.repoId}`
-              : `${r.fav ? "fav:" : ""}${r.session.id}`
-        }
-        renderItem={({ item }) =>
-          item.type === "favHeader" ? (
-            <FavHeader
-              count={item.count}
-              collapsed={item.collapsed}
-              onPress={() => toggleGroup(FAV_KEY)}
-            />
-          ) : item.type === "header" ? (
-            <DirHeader
-              name={item.name}
-              count={item.count}
-              attention={item.attention}
-              collapsed={item.collapsed}
-              fav={item.fav}
-              deviceName={item.deviceName}
-              deviceEmoji={item.deviceEmoji}
-              onPress={() => toggleGroup(item.repoId)}
-              onAdd={() => newInRepo(item.repoId)}
-              onOpen={() => openSpace(item.spaceKey)}
-              onLongPress={() => onLongPressRepo(item.repoId, item.name, item.spaceKey)}
-            />
-          ) : (
-            <View style={s.sessionRow}>
-              <SessionCard session={item.session} onLongPress={onLongPressSession} />
-            </View>
-          )
-        }
+        keyExtractor={rowKey}
+        renderItem={renderItem}
         estimatedItemSize={104}
-        getItemType={(r) => r.type}
+        getItemType={rowType}
         keyboardDismissMode="on-drag"
         // Always render: recents come from persisted local state, so they must
         // survive being offline/mid-reconnect — the strip hides itself when
         // empty. Gating on `connected` made it vanish on every blip.
-        ListHeaderComponent={<LiveStrip />}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={theme.colors.accent}
-          />
-        }
+        ListHeaderComponent={LIST_HEADER}
+        refreshControl={refreshControl}
         ListEmptyComponent={
           loading ? (
             <SessionListSkeleton />
@@ -398,7 +438,7 @@ export default function HomeScreen() {
         }
         // Bottom pad clears the system tab bar (the old floating dock needed
         // +120; the native bar insets the scroll view itself).
-        contentContainerStyle={{ paddingTop: 6, paddingBottom: insets.bottom + 16 }}
+        contentContainerStyle={listContentStyle}
       />
     </View>
   );

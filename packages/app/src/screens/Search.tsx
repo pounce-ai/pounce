@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -26,6 +26,9 @@ import { searchQuery$ } from "../state/search";
  *  everything (useless results) and every keystroke below it would churn the
  *  list for nothing. Below the minimum the screen just shows all threads. */
 const MIN_QUERY_LENGTH = 5;
+
+/** Hoisted so the list's `style` keeps one reference across re-renders. */
+const FILL = { flex: 1 } as const;
 
 /** Full-screen thread search — matches title, branch, host, agent, repo. */
 export default function SearchScreen() {
@@ -138,6 +141,28 @@ export default function SearchScreen() {
     });
   }, [rawHits, allowedIds]);
 
+  // The tab bar keeps this screen MOUNTED behind Home, so every one of these
+  // props is read by the FlatList on every unrelated store tick. Inline
+  // literals gave each of the ~100 CellRenderers a fresh `renderItem` and
+  // re-rendered the whole offscreen list — profiled at 40–110ms per sync
+  // (argent, 2026-08-06). Keep them referentially stable.
+  const keyExtractor = useCallback((item: Session) => item.id, []);
+  const renderItem = useCallback(
+    ({ item }: { item: Session }) => (
+      <View style={s.resultRow}>
+        <SessionCard session={item} />
+      </View>
+    ),
+    [],
+  );
+  const listContentStyle = useMemo(
+    () => ({
+      paddingTop: Platform.OS === "android" ? 16 : 4,
+      paddingBottom: insets.bottom + 16,
+    }),
+    [insets.bottom],
+  );
+
   return (
     <View style={[s.root, IS_DESKTOP ? { paddingTop: insets.top } : undefined]}>
       {/* Mobile's filter button lives in the navigation bar (search/_layout
@@ -181,15 +206,18 @@ export default function SearchScreen() {
           on and off, even with zero data changes. A search results list is
           small enough that FlatList virtualization is plenty. */}
       <FlatList
-        style={{ flex: 1 }}
+        style={FILL}
         contentInsetAdjustmentBehavior="automatic"
         data={results}
-        keyExtractor={(s) => s.id}
-        renderItem={({ item }) => (
-          <View style={s.resultRow}>
-            <SessionCard session={item} />
-          </View>
-        )}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        // Offscreen (behind another tab) this list gets no scroll metrics, so
+        // VirtualizedList happily realises every row — 98 of them on a real
+        // workspace. Cap the window so an unfocused Search costs a screenful.
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={5}
+        removeClippedSubviews
         keyboardDismissMode="on-drag"
         // First tap must PRESS the result, not just dismiss the keyboard —
         // without this, tapping a hit right after typing silently no-ops.
@@ -235,10 +263,7 @@ export default function SearchScreen() {
         }
         // Android ignores contentInsetAdjustmentBehavior (iOS-only), so the
         // list needs real top padding below the in-flow toolbar + search bar.
-        contentContainerStyle={{
-          paddingTop: Platform.OS === "android" ? 16 : 4,
-          paddingBottom: insets.bottom + 16,
-        }}
+        contentContainerStyle={listContentStyle}
       />
 
       {IS_DESKTOP ? (
