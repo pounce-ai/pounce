@@ -1,7 +1,11 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Image, Pressable, Text, View } from "react-native";
+import { Image, Platform, Pressable, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
+import type { LegendListRef } from "@legendapp/list/react-native";
+import { ChatList, COMPOSER_OVERLAYS_LIST } from "./ChatList";
+import { SCRIM_HEIGHT } from "./ComposerScrim";
+import type { ChatKeyboardProps } from "./chatListTypes";
+import Animated, { Easing, SlideInDown } from "./animation";
 import { PounceIcon } from "../ui/native/Icon";
 import { VideoPlayer } from "../ui/native/VideoPlayer";
 import {
@@ -28,6 +32,16 @@ import { HIGHLIGHT } from "../ui/tokens";
 import { TodoCard } from "./TodoCard";
 
 export { collapseToolResults };
+
+/** How much space the send anchor reserves under the just-sent message, capped
+ *  at roughly two lines of bubble text plus its padding — matching the cap in
+ *  legend-list's own AI-chat example. Uncapped for image messages, which are
+ *  taller than this by design. */
+const ANCHOR_MAX_SIZE = 2 * 21 + 32;
+/** Where the anchored message lands, measured from the top of the list. The
+ *  list already starts below the screen header, so this is just the transcript's
+ *  own top padding — enough that the message doesn't touch the edge. */
+const ANCHOR_OFFSET = 12;
 
 /** Claude Code / Codex write an interruption as a user-role text marker. */
 function isInterrupt(text: string): boolean {
@@ -113,6 +127,9 @@ export const Timeline = memo(function Timeline({
   anchorToId,
   tasks,
   onRetrySend,
+  keyboard,
+  onReady,
+  onScrollDirection,
 }: {
   events: TimelineEvent[];
   /** Which agent produced these events — selects the body-cleaning rules. */
@@ -140,11 +157,20 @@ export const Timeline = memo(function Timeline({
   /** Search deep-link: mark this event's row so the user sees WHY they landed
    *  here — yellow accent + the matched term. */
   highlight?: { id: string; term: string };
-  /** The just-sent user message's id. Triggers ONE scroll to the end so the
-   *  turn starts pinned there; from that point `maintainScrollAtEnd` follows
-   *  the streaming reply natively (LegendList's chat pattern) and a user
-   *  scroll-up detaches it. Cleared by the parent when the turn completes. */
+  /** The just-sent user message's id. While set, that message is anchored near
+   *  the TOP of the viewport and the reply streams into the reserved space
+   *  below it (see ANCHOR_* below); once the reply outgrows that space the list
+   *  starts following the tail. Cleared by the parent when the turn completes,
+   *  which restores the plain pinned-to-end behaviour. */
   anchorToId?: string | null;
+  /** Opaque keyboard-driven list props from `useChatKeyboard` — pass-through. */
+  keyboard?: ChatKeyboardProps;
+  /** The list has finished its initial render and is now painting rows. */
+  onReady?: (elapsedMs: number) => void;
+  /** Which way the user is currently dragging. Reported so the parent can tell
+   *  "deliberately going back through history" from "heading for the newest
+   *  message" — the two want opposite things from the Latest affordance. */
+  onScrollDirection?: (direction: "up" | "down") => void;
   /**
    * The thread's folded task state, derived by the parent.
    *
@@ -176,46 +202,94 @@ export const Timeline = memo(function Timeline({
   // marked state as a prop (a per-row live query would be far too heavy).
   const markerMap = useThreadMarkers(sessionId);
 
-  // --- Send scroll ----------------------------------------------------------
-  // Timeline needs its own imperative handle for the send scroll, but the
-  // parent also holds one (marker jumps / the Latest pill) — feed both.
-  const innerRef = useRef<LegendListRef | null>(null);
-  const setRefs = useCallback(
-    (r: LegendListRef | null) => {
-      innerRef.current = r;
-      if (typeof listRef === "function") listRef(r);
-      else if (listRef) (listRef as { current: LegendListRef | null }).current = r;
-    },
-    [listRef],
-  );
-  // One-shot per send: land at the end even if the user was reading history.
-  // From there LegendList's own chat behavior (maintainScrollAtEnd + threshold)
-  // follows the streaming reply automatically and detaches when the user
-  // scrolls up — no manual tail-following.
-  const consumedAnchor = useRef<string | null>(null);
+  // --- Send anchor ----------------------------------------------------------
+  // Resolve the anchored message's row index in the COLLAPSED array — the one
+  // the list actually renders. Mid-turn the optimistic `opt:` echo is replaced
+  // by the host's own event under a different id, which would drop the anchor
+  // and snap the viewport; falling back to the newest user message keeps it
+  // pointing at the same row across that swap.
+  const anchorIndex = useMemo(() => {
+    if (!anchorToId) return undefined;
+    const exact = data.findIndex((e) => e.id === anchorToId);
+    if (exact !== -1) return exact;
+    for (let i = data.length - 1; i >= 0; i--) if (data[i].type === "user_message") return i;
+    return undefined;
+  }, [anchorToId, data]);
+
+  // An image message is far taller than the two-line text cap, so leaving it
+  // capped would clip its top above the anchor offset. Reserve its full height.
+  const anchorHasImage =
+    anchorIndex != null &&
+    data[anchorIndex]?.type === "user_message" &&
+    ((data[anchorIndex] as { images?: MessageImage[] }).images?.length ?? 0) > 0;
+
+  // --- Tail follow ----------------------------------------------------------
+  // Three states, in order, per turn:
+  //   1. anchored     — the reply is still filling the reserved space; the
+  //                     viewport must NOT move, so following is off.
+  //   2. following    — the reply outgrew the space (onSizeChanged hits 0), so
+  //                     pin to the tail and ride the stream down.
+  //   3. detached     — the user dragged up mid-stream (to re-read a table, a
+  //                     diff); stop yanking them back. Scrolling to the bottom
+  //                     re-arms following.
+  // With no anchor (reading history, opening a thread) following is simply on,
+  // which is exactly the behaviour Timeline had before.
+  const [following, setFollowing] = useState(true);
+  const hasOverflowed = useRef(false);
   useEffect(() => {
-    if (!anchorToId || consumedAnchor.current === anchorToId) return;
-    consumedAnchor.current = anchorToId;
-    requestAnimationFrame(() => {
-      // Not animated: while an animated scroll is in flight the first reply
-      // chunks land, the pin's near-end check samples mid-animation, and
-      // following never engages — an atomic jump closes that race.
-      innerRef.current?.scrollToEnd({ animated: false });
-      onAtBottomChange?.(true);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // New turn: hold the anchor. Turn over: back to plain pinned-to-end.
+    hasOverflowed.current = false;
+    setFollowing(!anchorToId);
   }, [anchorToId]);
+
+  const onAnchorSizeChanged = useCallback((size: number) => {
+    if (size > 0 || hasOverflowed.current) return;
+    hasOverflowed.current = true;
+    setFollowing(true);
+  }, []);
+
+  const onEndVisible = useCallback(
+    (visible: boolean) => {
+      onAtBottomChange?.(visible);
+      // Rode back down to the bottom after a manual scroll-up — re-arm.
+      if (visible && hasOverflowed.current) setFollowing(true);
+    },
+    [onAtBottomChange],
+  );
+
+  // A deliberate drag while the reply streams pauses the follow. Only once the
+  // anchored space is spent: before that the list isn't following anyway, and
+  // treating the anchor's own settling as a user drag would break the anchor.
+  const onScrollBeginDrag = useCallback(() => {
+    if (hasOverflowed.current) setFollowing(false);
+  }, []);
+
+  // Scroll direction, reported on a threshold so a couple of stray pixels (or
+  // the bounce at the end of a fling) don't read as a deliberate change of mind.
+  const lastY = useRef(0);
+  const onScroll = useCallback(
+    (e: { nativeEvent: { contentOffset: { y: number } } }) => {
+      const y = e.nativeEvent.contentOffset.y;
+      const dy = y - lastY.current;
+      if (Math.abs(dy) < 4) return;
+      lastY.current = y;
+      onScrollDirection?.(dy > 0 ? "down" : "up");
+    },
+    [onScrollDirection],
+  );
 
   return (
     <View style={s.flex1}>
-      <LegendList
-        ref={setRefs}
+      <ChatList
+        ref={listRef}
+        keyboard={keyboard}
         data={data}
         keyExtractor={(e) => e.id}
         renderItem={({ item }) => (
           <Row
             event={item}
             agent={agent}
+            justSent={!!anchorToId && item.id === anchorToId}
             marked={markerMap.get(item.id) ?? defaultMarked(item, agent)}
             onLongPressEvent={onLongPressEvent}
             onRunCommand={onRunCommand}
@@ -250,30 +324,60 @@ export const Timeline = memo(function Timeline({
         //     { data: true, size: true }) each token re-anchored some visible row
         //     and fought maintainScrollAtEnd's pin-to-tail — the jitter the user
         //     saw. Tail-following is maintainScrollAtEnd's job alone.
-        maintainVisibleContentPosition={{ data: false, size: true }}
+        //
+        // Android needs the extra data-anchoring while the send anchor holds the
+        // viewport still — without it the reserved space grows under a viewport
+        // that doesn't compensate and the anchored message drifts. Once the reply
+        // overflows and we start following, it goes back to size-only, because
+        // then it would fight the pin exactly as it used to.
+        maintainVisibleContentPosition={
+          Platform.OS === "android" && anchorIndex != null && !following
+            ? { data: true, size: true }
+            : { data: false, size: true }
+        }
         alignItemsAtEnd
-        // Open on the newest message (bottom), not the top of the history, and
-        // stay pinned to the end as live turns stream in (dataChange + itemLayout
-        // triggers follow the growing last bubble); only while near the end so a
-        // scrolled-up user isn't yanked down.
+        // Open on the newest message (bottom), not the top of the history.
         initialScrollAtEnd
-        // The chat pattern from LegendList's own guide: stay pinned to the end
-        // as the streaming reply grows (data + item-layout triggers), but only
-        // while the viewport is within the threshold of the bottom — scrolling
-        // up detaches automatically, riding back down re-attaches.
-        maintainScrollAtEnd
+        // ChatGPT-style send: reserve space under the just-sent message so it
+        // rises to the top of the viewport and the reply fills in beneath it,
+        // rather than the whole thread creeping upward token by token. The cap
+        // keeps a long pasted message from reserving a screenful.
+        anchoredEndSpace={
+          anchorIndex != null
+            ? {
+                anchorIndex,
+                anchorMaxSize: anchorHasImage ? undefined : ANCHOR_MAX_SIZE,
+                anchorOffset: ANCHOR_OFFSET,
+                onSizeChanged: onAnchorSizeChanged,
+              }
+            : undefined
+        }
+        // Pin to the end as the reply grows — but only in the `following` state
+        // (see the machine above). While the anchor holds, pinning would undo it.
+        maintainScrollAtEnd={following ? { on: { dataChange: true, itemLayout: true } } : undefined}
         // 0.25 viewport: forgiving enough that a chunky growth step (a pasted
         // paragraph, the settled-row swap at turn end) doesn't spuriously
         // detach the pin, while a deliberate scroll-up still does.
         maintainScrollAtEndThreshold={0.25}
-        onScroll={(e) => {
-          const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
-          const fromEnd = contentSize.height - (contentOffset.y + layoutMeasurement.height);
-          onAtBottomChange?.(fromEnd < 80);
-        }}
-        scrollEventThrottle={64}
+        onEndVisible={onEndVisible}
+        onScrollBeginDrag={onScrollBeginDrag}
+        onScroll={onScroll}
+        scrollEventThrottle={32}
+        // Fires once the list's initial render work is done. On a long thread
+        // that lands SECONDS after the data does, and until then the list paints
+        // nothing — which is the black screen people read as "still loading".
+        // The parent keeps a covering label up until this arrives.
+        onLoad={(info: { elapsedTimeInMs: number }) => onReady?.(info.elapsedTimeInMs)}
         ListFooterComponent={footer}
-        contentContainerStyle={{ padding: 12, gap: 8 }}
+        // The composer's content inset clears the BAR, but the scrim sits above
+        // it and the inset does not appear to account for that band — content
+        // was still running into it. Pad the content by the scrim's height so
+        // the last row always ends above the fade rather than inside it.
+        contentContainerStyle={{
+          padding: 12,
+          gap: 8,
+          paddingBottom: 12 + (COMPOSER_OVERLAYS_LIST ? SCRIM_HEIGHT : 0),
+        }}
       />
     </View>
   );
@@ -295,6 +399,7 @@ const Row = memo(function Row({
   onSendInput,
   highlightTerm,
   onRetrySend,
+  justSent,
 }: {
   event: TimelineEvent;
   agent?: string;
@@ -322,14 +427,16 @@ const Row = memo(function Row({
   highlightTerm?: string;
   /** Resend a stranded optimistic message. */
   onRetrySend?: (ev: TimelineEvent) => void;
+  /** This is the message the user just sent — slide it up into place. */
+  justSent?: boolean;
 }) {
   const onLongPress = onLongPressEvent ? () => onLongPressEvent(event) : undefined;
   switch (event.type) {
-    case "user_message":
+    case "user_message": {
       // An interruption isn't a message — Claude Code records it as user text
       // but shows it as a system note. Mirror that instead of a prose bubble.
       if (isInterrupt(event.text)) return <Meta text="⎿ Interrupted by user" level="warning" />;
-      return (
+      const row = (
         <Pressable onLongPress={onLongPress} delayLongPress={350}>
           <SearchHighlight term={highlightTerm}>
             <UserRow
@@ -345,6 +452,25 @@ const Row = memo(function Row({
           </SearchHighlight>
         </Pressable>
       );
+      // The just-sent message slides up from the bottom as it's posted. Two
+      // details make that reliable under `recycleItems`, where "did this row
+      // mount?" is not the same question as "is this a new message?":
+      //   • the wrapper is ALWAYS present, so finishing a turn (justSent going
+      //     false) only changes a prop, never the element type — no remount of
+      //     a settled bubble;
+      //   • keying it on the event id remounts the wrapper when the list
+      //     recycles this row onto a different message, which is what makes
+      //     `entering` fire for a genuinely new one and stay silent for the
+      //     history rows scrolling past.
+      return (
+        <Animated.View
+          key={event.id}
+          entering={justSent ? SlideInDown.easing(Easing.out(Easing.exp)).duration(700) : undefined}
+        >
+          {row}
+        </Animated.View>
+      );
+    }
     case "assistant_message":
       return (
         <Pressable onLongPress={onLongPress} delayLongPress={350}>
@@ -1167,7 +1293,14 @@ const s = StyleSheet.create((theme) => ({
   userBubble: {
     maxWidth: "86%",
     borderRadius: 16,
-    backgroundColor: theme.colors.accent,
+    // A neutral raised surface, not the brand accent. You already know what you
+    // typed; the reply is what you came to read, and it renders as plain body
+    // text. Painting your own message in the loudest colour on screen inverted
+    // that. This is the same fill our code cards use — the weight margelo's
+    // demo gives it too (its user bubble and code background are one token).
+    backgroundColor: theme.colors.bgElevated,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
     paddingHorizontal: 12,
     paddingVertical: 6,
   },

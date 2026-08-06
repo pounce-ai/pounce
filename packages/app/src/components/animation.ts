@@ -7,10 +7,15 @@
 export { default } from "react-native-reanimated";
 export {
   default as Animated,
+  Easing,
   FadeIn,
   FadeOut,
   LinearTransition,
+  SlideInDown,
+  ZoomIn,
+  ZoomOut,
   cancelAnimation,
+  useAnimatedProps,
   useAnimatedStyle,
   useSharedValue,
   withDelay,

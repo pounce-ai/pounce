@@ -152,30 +152,33 @@ function buildAssistantStyle(scheme: string | null | undefined): MarkdownStyle {
   };
 }
 
-/** Same, but on the accent (user) bubble — white-on-purple in both schemes. */
+/**
+ * Same, on the user bubble.
+ *
+ * The bubble used to be painted in the brand accent, so every token in here was
+ * forced to white to survive it. It is now a neutral elevated surface — the
+ * same weight as a code card — which means the user's own words no longer need
+ * to shout over a saturated background, and the accent is free for things that
+ * are actually actionable. So this is the assistant palette with only the two
+ * things that genuinely differ on a raised surface: inset fills need to read
+ * against `bgElevated` rather than the page, so they step DOWN to the page
+ * colour instead of up.
+ */
 function buildUserStyle(scheme: string | null | undefined): MarkdownStyle {
   const assistant = buildAssistantStyle(scheme);
+  const hex = hexFor(scheme);
+  const light = scheme === "light";
   return {
     ...assistant,
-    paragraph: { fontSize: 15, lineHeight: 21, color: "#ffffff", marginTop: 0, marginBottom: 4 },
-    strong: { fontWeight: "bold", color: "#ffffff" },
-    em: { fontStyle: "italic", color: "#ffffff" },
-    h1: { ...assistant.h1, color: "#ffffff" },
-    h2: { ...assistant.h2, color: "#ffffff" },
-    h3: { ...assistant.h3, color: "#ffffff" },
-    link: { color: "#ffffff", underline: true },
+    paragraph: { fontSize: 15, lineHeight: 21, color: hex.fg, marginTop: 0, marginBottom: 4 },
+    // Inline code sits ON the bubble, so it takes the page colour to read as an
+    // inset; against the assistant's own code fill it would disappear.
     code: {
       fontFamily: MONO,
       fontSize: 13.5,
-      color: "#f4f2ff",
-      backgroundColor: "rgba(255,255,255,0.20)",
-      borderColor: "rgba(255,255,255,0.20)",
-    },
-    list: {
-      color: "#ffffff",
-      bulletColor: "rgba(255,255,255,0.7)",
-      markerColor: "rgba(255,255,255,0.7)",
-      gapWidth: 8,
+      color: light ? "#1f2328" : "#cdd0d6",
+      backgroundColor: hex.bg,
+      borderColor: hex.border,
     },
   };
 }

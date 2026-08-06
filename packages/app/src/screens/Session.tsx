@@ -9,13 +9,18 @@ import {
   Pressable,
   Text,
   TextInput,
+  useColorScheme,
   View,
 } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Platform } from "react-native";
-import { KeyboardAvoidingView } from "../components/kav";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Animated, { FadeIn, FadeOut } from "../components/animation";
+import Animated, { FadeIn, FadeOut, ZoomIn, ZoomOut } from "../components/animation";
+import {
+  ChatKeyboardSticky,
+  COMPOSER_OVERLAYS_LIST,
+  useChatKeyboard,
+} from "../components/ChatList";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import { useQuery } from "@tanstack/react-query";
@@ -25,7 +30,9 @@ import { collapseToolResults, Timeline } from "../components/Timeline";
 import { deriveTaskTimeline } from "../components/taskEvents";
 import { TaskProgressBar } from "../components/TaskProgress";
 import { WorkingIndicator } from "../components/WorkingIndicator";
-import { TimelineSkeleton } from "../components/Skeleton";
+import { ShimmerLabel } from "../components/ShimmerLabel";
+import { hexFor } from "../ui/theme-hex";
+import { ComposerScrim, SCRIM_HEIGHT } from "../components/ComposerScrim";
 import { useSessionChrome, usePublishTasks, usePublishUsage } from "../state/sessionChrome";
 import { Composer, type ComposerHandle, type ComposerSubmit } from "../components/Composer";
 import { DropZone, type DroppedFile } from "../components/DropZone";
@@ -197,6 +204,7 @@ export default function SessionScreen() {
   const rekeyedId = useSelector(() => rekeyedThreadIds$[routeId!].get());
   const id = rekeyedId ?? routeId;
   const insets = useSafeAreaInsets();
+  const scheme = useColorScheme();
   const router = useRouter();
   const { theme } = useUnistyles();
   const [sending, setSending] = useState(false);
@@ -239,6 +247,29 @@ export default function SessionScreen() {
   // Whether the timeline is pinned to the newest message — drives the floating
   // "jump to latest" pill that shows when the user has scrolled up.
   const [atBottom, setAtBottom] = useState(true);
+  // False until the transcript list reports its initial render is done. Drives
+  // the covering loading label — see the overlay in the Timeline branch.
+  const [listReady, setListReady] = useState(false);
+  /**
+   * Whether the floating "Latest" affordance is welcome right now.
+   *
+   * Being away from the bottom is not, by itself, a reason to offer a way back:
+   * scrolling UP is the user deliberately going to read history, and a pill
+   * appearing over the text they just went to find is an interruption. So it
+   * stays hidden while they head backwards, and returns when they either turn
+   * around (scrolling down = heading for the newest message) or when something
+   * NEW arrives while they are away — which is the one case worth surfacing
+   * unprompted, since the agent is live and they would otherwise miss it.
+   */
+  const [scrollDir, setScrollDir] = useState<"up" | "down" | null>(null);
+  const [newWhileAway, setNewWhileAway] = useState(false);
+  const countWhenLeftRef = useRef(0);
+  // Opening a different thread is a clean slate for all of the above.
+  useEffect(() => {
+    setListReady(false);
+    setScrollDir(null);
+    setNewWhileAway(false);
+  }, [id]);
   // ChatGPT-style send anchor: the id of the just-sent (optimistic) user
   // message. While set, Timeline scrolls it to the TOP of the viewport, shows
   // a footer spacer for the reply to stream into, and suspends pin-to-tail.
@@ -402,6 +433,33 @@ export default function SessionScreen() {
   // Timeline collapses paired tool results into their call's accordion, so
   // marker indices must be computed over the same collapsed array it renders.
   const events = useMemo(() => collapseToolResults(rawEvents), [rawEvents]);
+  // `loading` goes false the moment the QUERY resolves, but the events it
+  // returned are copied into liveEvents by an effect — so for a render or two
+  // the fetch is "done" while there is still nothing to draw. Without this the
+  // loading state cut out into a blank frame (or a flash of "No messages yet")
+  // and the transcript appeared a beat later. Keep waiting while the fetched
+  // data says there ARE events but none have landed yet; a genuinely empty
+  // thread reports length 0 and falls through to the empty state as before.
+  const seeding = canFetch && (freshest?.length ?? 0) > 0 && events.length === 0;
+  // Read at send time to decide whether the scroll-to-end animates (the very
+  // first message has nothing to scroll past). A ref, not a dep: threading the
+  // event array into runTurn would rebuild it on every streamed token.
+  const eventCountRef = useRef(0);
+  useEffect(() => {
+    eventCountRef.current = events.length;
+  }, [events.length]);
+
+  useEffect(() => {
+    if (atBottom) {
+      // Back at the newest message: nothing is unseen any more.
+      setNewWhileAway(false);
+      countWhenLeftRef.current = events.length;
+      setScrollDir(null);
+      return;
+    }
+    if (events.length > countWhenLeftRef.current) setNewWhileAway(true);
+  }, [events.length, atBottom]);
+
   // The agent's checklist, folded from the newest task call in the thread.
   // Derived ONCE here and shared: the pinned bar below shows `state`, and
   // Timeline needs the same fold to render each task card. Folding it in both
@@ -415,6 +473,16 @@ export default function SessionScreen() {
   // --- markers: user messages by default, overrides for adds/removals ---
   const listRef = useRef<LegendListRef>(null);
   const composerRef = useRef<ComposerHandle>(null);
+  // The composer BAR (a plain View wrapping the composer and everything stacked
+  // above it — queued sends, the task bar). The keyboard seam measures it so the
+  // transcript can inset for exactly its height; `useChatKeyboard` needs a view
+  // it can `measure()`, which the Composer's imperative handle isn't.
+  const composerBarRef = useRef<View>(null);
+  const { keyboard, onComposerLayout, scrollMessageToEnd, composerHeight } = useChatKeyboard(
+    listRef,
+    composerBarRef,
+  );
+
   // Tapping "Run" on a shell code block queues !command into the composer for
   // review. Stable so it doesn't churn Timeline's memoized rows.
   const onRunCommand = useCallback(
@@ -652,9 +720,13 @@ export default function SessionScreen() {
           type: "user_message",
           text: s.text || (s.images.length ? "🖼️ Image" : ""),
         };
-        // Anchor the timeline to this message: it scrolls to the viewport top
-        // and the reply streams into the spacer below (see Timeline.anchorToId).
+        // Anchor the timeline to this message: it rises to the top of the
+        // viewport and the reply streams into the space reserved below it (see
+        // Timeline.anchorToId). The scroll that puts it there is coordinated
+        // with the keyboard closing, so the two don't fight; on the very first
+        // message there is nothing to scroll past, so it isn't animated.
         setAnchorId(optimistic.id);
+        scrollMessageToEnd({ animated: eventCountRef.current > 0, closeKeyboard: true });
         // Interactive thread: drive the hosted PTY (the bridge reuses its live PTY
         // or `--resume`s the SAME session) so prompts stay answerable and no new
         // session is spawned. PTY turns don't stream over SSE, so echo the message
@@ -769,7 +841,7 @@ export default function SessionScreen() {
         });
       }
     },
-    [session, live, refreshUsage, mode, effort, recentQ, fullQ],
+    [session, live, refreshUsage, mode, effort, recentQ, fullQ, scrollMessageToEnd],
   );
 
   // Follow-ups typed while a turn runs are queued and drained in order — the
@@ -955,11 +1027,12 @@ export default function SessionScreen() {
   // Session actions now live in the Environment sheet — the "…" button opens it.
 
   return (
-    <KeyboardAvoidingView
-      style={s.root}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={0}
-    >
+    // No KeyboardAvoidingView any more. On mobile the transcript is a
+    // keyboard-aware list and the composer rides the keyboard in its own sticky
+    // view — both on the UI thread, so the two move in the same frame instead of
+    // JS re-laying-out this whole screen per keyboard event. Desktop has no
+    // software keyboard, so it never needed one.
+    <View style={s.root}>
       <Stack.Screen options={{ headerShown: false }} />
       {/* Desktop: the whole pane is a drop target — dragging files/folders from
           Finder adds them as sources. No-op wrapper on mobile. */}
@@ -1106,8 +1179,37 @@ export default function SessionScreen() {
             proportional (92% of the pane, capped) so the chat adapts to the
             window; mobile: full width, unchanged. */}
           <View style={[s.flex1, DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }]}>
-            {loading && events.length === 0 ? (
-              <TimelineSkeleton />
+            {(loading || seeding) && events.length === 0 ? (
+              // One quiet line, centered. The bubble skeleton that used to sit
+              // here promised a shape the Timeline doesn't actually render —
+              // threads are mostly tool accordions, code cards and diffs, not
+              // alternating chat bubbles — so it read as a layout that never
+              // arrived. A label makes no claim about the content.
+              // Sits at the BOTTOM, where the transcript actually opens
+              // (alignItemsAtEnd + initialScrollAtEnd), so the line is already
+              // standing where the first messages will appear instead of
+              // hovering mid-screen and then vanishing somewhere else.
+              // Fades OUT as the transcript fades in (which enters on the same
+              // 260ms) — the two overlap into a cross-fade instead of the label
+              // being yanked off screen a beat before the messages arrive.
+              <Animated.View
+                entering={FadeIn.duration(200)}
+                exiting={FadeOut.duration(240)}
+                style={[
+                  ANIM.loadingWrap,
+                  // The transcript area runs the full height of the screen with
+                  // the composer floating over it, so bottom-aligned content
+                  // has to clear the composer by hand — this is the same inset
+                  // the list gets from contentInsetEndAdjustment. Desktop keeps
+                  // the composer in flow, so there it's nothing to clear.
+                  {
+                    paddingBottom:
+                      (COMPOSER_OVERLAYS_LIST ? composerHeight - SCRIM_HEIGHT : 0) + 12,
+                  },
+                ]}
+              >
+                <ShimmerLabel text="Loading conversation…" />
+              </Animated.View>
             ) : live && failed && events.length === 0 ? (
               <View style={s.emptyWrap}>
                 <PounceIcon name="cloud-offline-outline" size={34} color={theme.colors.fgFaint} />
@@ -1132,6 +1234,32 @@ export default function SessionScreen() {
             ) : (
               // Fade the history in so it doesn't snap in after the skeleton.
               <Animated.View style={ANIM.flex1} entering={FadeIn.duration(260)}>
+                {/* The list is mounted from the first frame, but on a long
+                    thread its initial render lands SECONDS later and it paints
+                    nothing until then — a black screen people reasonably read
+                    as a hang. Cover it with the same loading line until the
+                    list says it is ready. Note this is NOT the empty-thread
+                    branch above: events are already present here, which is why
+                    that branch never showed for a real thread. */}
+                {!listReady ? (
+                  <Animated.View
+                    exiting={FadeOut.duration(240)}
+                    pointerEvents="none"
+                    style={[
+                      ANIM.loadingOverlay,
+                      {
+                        backgroundColor: hexFor(scheme).bg,
+                        // Just above the visible bar. composerHeight includes
+                        // the scrim band, which is transparent at its top — sitting
+                        // above THAT left the label floating in open space.
+                        paddingBottom:
+                          (COMPOSER_OVERLAYS_LIST ? composerHeight - SCRIM_HEIGHT : 0) + 12,
+                      },
+                    ]}
+                  >
+                    <ShimmerLabel text="Loading conversation…" />
+                  </Animated.View>
+                ) : null}
                 <Timeline
                   events={rawEvents}
                   tasks={tasks}
@@ -1139,6 +1267,16 @@ export default function SessionScreen() {
                   cwd={session.cwd}
                   sessionId={id!}
                   listRef={listRef}
+                  keyboard={keyboard}
+                  onReady={() => {
+                    setListReady(true);
+                    // Opening a thread lands at the newest message. The list can
+                    // momentarily report the end as out of view while it settles,
+                    // which is not the user having scrolled away — don't let it
+                    // raise the Latest pill over the last message.
+                    setAtBottom(true);
+                  }}
+                  onScrollDirection={setScrollDir}
                   highlight={searchHighlight}
                   anchorToId={anchorId}
                   onLongPressEvent={onLongPressEvent}
@@ -1157,37 +1295,19 @@ export default function SessionScreen() {
                   }}
                   footer={
                     running ? (
-                      <WorkingIndicator
-                        agent={session.agent}
-                        since={turnStartTs}
-                        tokens={turnTokens}
-                      />
+                      // Held back so it doesn't pop in while the just-sent
+                      // message is still sliding up — it eases in once that has
+                      // settled.
+                      <Animated.View entering={FadeIn.delay(450).duration(300)}>
+                        <WorkingIndicator
+                          agent={session.agent}
+                          since={turnStartTs}
+                          tokens={turnTokens}
+                        />
+                      </Animated.View>
                     ) : undefined
                   }
                 />
-                {/* Floating "jump to latest" — appears when scrolled up off the bottom. */}
-                {!atBottom ? (
-                  <Animated.View
-                    entering={FadeIn.duration(150)}
-                    exiting={FadeOut.duration(120)}
-                    pointerEvents="box-none"
-                    style={ANIM.jumpWrap}
-                  >
-                    <Pressable
-                      onPress={() => {
-                        // Tapping = give up the send anchor: the spacer drops and
-                        // pin-to-tail resumes for the rest of the turn.
-                        setAnchorId(null);
-                        listRef.current?.scrollToEnd({ animated: true });
-                        setAtBottom(true);
-                      }}
-                      style={({ pressed }) => [s.jumpPill, pressed && s.pressed80]}
-                    >
-                      <PounceIcon name="arrow-down" size={15} color={theme.colors.accent} />
-                      <Text style={s.jumpLabel}>Latest</Text>
-                    </Pressable>
-                  </Animated.View>
-                ) : null}
               </Animated.View>
             )}
           </View>
@@ -1270,87 +1390,134 @@ export default function SessionScreen() {
           onClose={() => setModelSheet(false)}
         />
 
+        {/* Floating "jump to latest" — appears when the bottom of the
+          conversation scrolls out of view. It sits above the composer and, on
+          mobile, rides up with it when the keyboard opens. */}
+        {!atBottom && listReady && events.length > 0 && (scrollDir !== "up" || newWhileAway) ? (
+          <ChatKeyboardSticky
+            style={[ANIM.jumpWrap, { bottom: composerHeight + 10 }]}
+            pointerEvents="box-none"
+          >
+            <Animated.View entering={ZoomIn.duration(160)} exiting={ZoomOut.duration(140)}>
+              <Pressable
+                onPress={() => {
+                  // Tapping = give up the send anchor: the reserved space drops
+                  // and pin-to-tail resumes for the rest of the turn.
+                  setAnchorId(null);
+                  scrollMessageToEnd({ animated: true });
+                  setAtBottom(true);
+                }}
+                style={({ pressed }) => [s.jumpPill, pressed && s.pressed80]}
+              >
+                <PounceIcon name="arrow-down" size={15} color={theme.colors.accent} />
+                <Text style={s.jumpLabel}>Latest</Text>
+              </Pressable>
+            </Animated.View>
+          </ChatKeyboardSticky>
+        ) : null}
+
         {/* Composer (model·effort, mode, mic and send now live inside its card) —
-          same adaptive column as the transcript so they stay aligned. */}
-        <View style={[s.composerBar, { paddingBottom: insets.bottom + 8 }]}>
-          <View style={DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }}>
-            {!canSteer ? (
-              <Text style={s.archivedNote}>
-                Archived session — worktree was removed. Read-only.
-              </Text>
-            ) : null}
-            {/* Live task progress.
+          same adaptive column as the transcript so they stay aligned.
+          Mobile: floats over the transcript inside a keyboard-sticky view; the
+          list insets for its measured height so the last message still clears
+          it. Desktop: stays in normal flow, exactly as before. */}
+        <ChatKeyboardSticky
+          style={COMPOSER_OVERLAYS_LIST ? ANIM.composerFloat : undefined}
+          pointerEvents="box-none"
+        >
+          {/* The MEASURED wrapper: scrim + bar. Everything that visually covers
+              the transcript has to live in here, because this is the box whose
+              height becomes the list's content inset (and the loading label's
+              bottom padding). Anything drawn outside it covers content the
+              inset thinks is safe. */}
+          <View ref={composerBarRef} onLayout={onComposerLayout} pointerEvents="box-none">
+            {/* Fades the transcript out as it slides under the composer,
+                instead of it being cut off against the opaque bar. */}
+            {COMPOSER_OVERLAYS_LIST ? <ComposerScrim /> : null}
+            <View style={[s.composerBar, { paddingBottom: insets.bottom + 8 }]}>
+              <View style={DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }}>
+                {!canSteer ? (
+                  <Text style={s.archivedNote}>
+                    Archived session — worktree was removed. Read-only.
+                  </Text>
+                ) : null}
+                {/* Live task progress.
                 Mobile: shown for the whole turn, and afterwards only while work
                 remains — a finished checklist stays in the transcript rather
                 than lingering above the composer.
                 Desktop: never opens itself. A banner appearing over the composer
                 on every single message is noise; the status line carries the
                 count and you open the list when you want it. */}
-            {taskState && tasksOpen ? (
-              <TaskProgressBar state={taskState} running={running} />
-            ) : null}
-            {queued.length > 0 ? (
-              <View style={s.queuedWrap}>
-                {queued.map((q, i) => (
-                  <View key={i} style={s.queuedRow}>
-                    <PounceIcon name="time-outline" size={13} color={theme.colors.fgFaint} />
-                    <Text numberOfLines={1} style={s.queuedText}>
-                      {q.text || (q.images.length ? "🖼️ Image" : "")}
-                    </Text>
-                    <Pressable onPress={() => cancelQueued(i)} hitSlop={8}>
-                      <PounceIcon name="close" size={14} color={theme.colors.fgMuted} />
-                    </Pressable>
+                {taskState && tasksOpen ? (
+                  <TaskProgressBar state={taskState} running={running} />
+                ) : null}
+                {queued.length > 0 ? (
+                  <View style={s.queuedWrap}>
+                    {queued.map((q, i) => (
+                      <View key={i} style={s.queuedRow}>
+                        <PounceIcon name="time-outline" size={13} color={theme.colors.fgFaint} />
+                        <Text numberOfLines={1} style={s.queuedText}>
+                          {q.text || (q.images.length ? "🖼️ Image" : "")}
+                        </Text>
+                        <Pressable onPress={() => cancelQueued(i)} hitSlop={8}>
+                          <PounceIcon name="close" size={14} color={theme.colors.fgMuted} />
+                        </Pressable>
+                      </View>
+                    ))}
+                    <Text style={s.queuedHint}>Queued — sends after the current reply</Text>
                   </View>
-                ))}
-                <Text style={s.queuedHint}>Queued — sends after the current reply</Text>
+                ) : null}
+                <Composer
+                  ref={composerRef}
+                  agent={session.agent}
+                  caps={caps}
+                  disabled={!canSteer}
+                  sending={sending}
+                  running={running}
+                  hostId={session.hostId}
+                  cwd={session.cwd}
+                  onSubmit={onSubmit}
+                  onStop={stop}
+                  onViewChanges={() => router.push(`/changes?id=${session.id}`)}
+                  diffStat={diffStat}
+                  readOnly={!canSteer}
+                  // No model selector on an archived thread — the worktree is
+                  // gone, so there is no next turn for a model to apply to.
+                  model={
+                    canSteer && live && !!session.cwd
+                      ? { label: modelPillLabel, onPress: () => setModelSheet(true) }
+                      : null
+                  }
+                  // Mode lives in the Model sheet now; the pill only appears as a
+                  // fallback when there's no model pill to reach that sheet through.
+                  mode={
+                    canSteer && showMode && !(live && !!session.cwd)
+                      ? { label: modeLabel, active: activeMode !== "default", onPress: openMode }
+                      : null
+                  }
+                  tasks={
+                    taskState?.items.length
+                      ? {
+                          done: taskState.items.filter((i) => i.status === "completed").length,
+                          total: taskState.items.length,
+                          open: tasksOpen,
+                          onPress: () => setTasksOpen(!tasksOpen),
+                        }
+                      : null
+                  }
+                  markers={
+                    markers.length
+                      ? { count: markers.length, onPress: () => setMarkerSheet(true) }
+                      : null
+                  }
+                  usage={usage}
+                />
               </View>
-            ) : null}
-            <Composer
-              ref={composerRef}
-              agent={session.agent}
-              caps={caps}
-              disabled={!canSteer}
-              sending={sending}
-              running={running}
-              hostId={session.hostId}
-              cwd={session.cwd}
-              onSubmit={onSubmit}
-              onStop={stop}
-              onViewChanges={() => router.push(`/changes?id=${session.id}`)}
-              diffStat={diffStat}
-              model={
-                live && !!session.cwd
-                  ? { label: modelPillLabel, onPress: () => setModelSheet(true) }
-                  : null
-              }
-              // Mode lives in the Model sheet now; the pill only appears as a
-              // fallback when there's no model pill to reach that sheet through.
-              mode={
-                canSteer && showMode && !(live && !!session.cwd)
-                  ? { label: modeLabel, active: activeMode !== "default", onPress: openMode }
-                  : null
-              }
-              tasks={
-                taskState?.items.length
-                  ? {
-                      done: taskState.items.filter((i) => i.status === "completed").length,
-                      total: taskState.items.length,
-                      open: tasksOpen,
-                      onPress: () => setTasksOpen(!tasksOpen),
-                    }
-                  : null
-              }
-              markers={
-                markers.length
-                  ? { count: markers.length, onPress: () => setMarkerSheet(true) }
-                  : null
-              }
-              usage={usage}
-            />
+            </View>
           </View>
-        </View>
+        </ChatKeyboardSticky>
       </DropZone>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -1359,7 +1526,34 @@ export default function SessionScreen() {
  *  value"). Layout-only, so nothing here needs theme reactivity. */
 const ANIM = {
   flex1: { flex: 1 },
-  jumpWrap: { position: "absolute", bottom: 12, left: 0, right: 0, alignItems: "center" },
+  /** `bottom` is supplied per-render — the pill sits just above the composer,
+   *  whose height changes as the draft grows and attachments are added. */
+  jumpWrap: { position: "absolute", left: 0, right: 0, alignItems: "center" },
+  /** Mobile only: the composer floats over the transcript rather than sharing
+   *  the column in flex flow, so the list can extend beneath its glass pill and
+   *  inset for its exact height. */
+  composerFloat: { position: "absolute", left: 0, right: 0, bottom: 0 },
+  /** Bottom-left, on the transcript's own padding, so the loading line sits
+   *  exactly where the first row of the loaded thread will be. Lives here
+   *  rather than in the sheet: Animated.View rejects unistyles entries. */
+  loadingWrap: {
+    flex: 1,
+    justifyContent: "flex-end",
+    alignItems: "flex-start",
+    paddingHorizontal: 12,
+  },
+  /** Same placement, but laid OVER the mounted-but-blank list. */
+  loadingOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 2,
+    justifyContent: "flex-end",
+    alignItems: "flex-start",
+    paddingHorizontal: 12,
+  },
 } as const;
 
 const s = StyleSheet.create((theme) => ({
@@ -1475,9 +1669,12 @@ const s = StyleSheet.create((theme) => ({
     elevation: 4,
   },
   jumpLabel: { fontSize: 13, fontWeight: "600", color: theme.colors.accent },
-  // Transparent, borderless bar — the Composer's floating glass pill carries
-  // its own margins and chrome now.
-  composerBar: { alignItems: "center", paddingTop: 8 },
+  // Borderless bar — the Composer's floating glass pill carries its own margins
+  // and chrome. It IS filled with the page background though, and has to be:
+  // the transcript now runs the full height of the screen underneath it (that's
+  // what lets the list own the keyboard inset), so a transparent bar would show
+  // the conversation scrolling through the pill and out past the home indicator.
+  composerBar: { alignItems: "center", paddingTop: 8, backgroundColor: theme.colors.bg },
   archivedNote: {
     paddingHorizontal: 16,
     paddingBottom: 8,

@@ -194,8 +194,12 @@ function renderInline(
           key={`${keyBase}:c${si++}`}
           style={[
             s.inlineCode,
+            // The user bubble is a neutral raised surface now, not the accent,
+            // so inline code no longer has to be white-on-purple to survive it.
+            // Same treatment as the assistant's, just sunk against the bubble
+            // instead of the page.
             onUser
-              ? { color: "#f4f2ff", backgroundColor: "rgba(255,255,255,0.20)" }
+              ? { color: "#a99cf5", backgroundColor: "rgba(0,0,0,0.30)" }
               : { color: "#a99cf5", backgroundColor: "rgba(124,111,240,0.16)" },
           ]}
         >
