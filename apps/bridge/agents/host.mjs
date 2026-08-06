@@ -14,6 +14,7 @@ import { ClaudeAdapter } from "./claude.mjs";
 import { CodexAdapter } from "./codex.mjs";
 import { OpencodeAdapter } from "./opencode.mjs";
 import { CursorAdapter } from "./cursor.mjs";
+import { canonicalAdapters } from "./canonical.mjs";
 import { acpAvailable, startAcpTurn } from "./acp.mjs";
 import { threadCost } from "./ccusage.mjs";
 import { buildDoctorReport } from "./doctor.mjs";
@@ -29,6 +30,13 @@ export function createHost({ version = () => null } = {}) {
     const a = new A({ turns });
     adapters.set(a.id, a);
     a.onDirty?.((threadId) => history.invalidatePrefix(`${a.id}:${threadId}:`));
+  }
+  // Read-only history for the long tail (gemini, qwen, goose, cline, copilot,
+  // pi, droid, vibe, kilo), parsed by `agent-canonical`. Registered ONLY for
+  // dialects with sessions on this machine, so nobody grows an agent list full
+  // of CLIs they don't run — and each is best-effort: see canonical.mjs.
+  for (const a of canonicalAdapters()) {
+    if (!adapters.has(a.id)) adapters.set(a.id, a);
   }
 
   const adapter = (agent) => {
