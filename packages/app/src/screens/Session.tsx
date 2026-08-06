@@ -9,7 +9,6 @@ import {
   Pressable,
   Text,
   TextInput,
-  useColorScheme,
   View,
 } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -31,7 +30,6 @@ import { deriveTaskTimeline } from "../components/taskEvents";
 import { TaskProgressBar } from "../components/TaskProgress";
 import { WorkingIndicator } from "../components/WorkingIndicator";
 import { ShimmerLabel } from "../components/ShimmerLabel";
-import { hexFor } from "../ui/theme-hex";
 import { ComposerScrim, SCRIM_HEIGHT } from "../components/ComposerScrim";
 import { useSessionChrome, usePublishTasks, usePublishUsage } from "../state/sessionChrome";
 import { Composer, type ComposerHandle, type ComposerSubmit } from "../components/Composer";
@@ -92,7 +90,7 @@ import {
   type ThreadUsage,
 } from "../services/bridge";
 import { PounceIcon } from "../ui/native/Icon";
-import { ACTIVITY_LABEL, AgentStatusIcon, BranchChip, INPUT_TWEAKS, pickSheet } from "../ui";
+import { ACTIVITY_LABEL, AgentStatusIcon, BranchChip, COLOR, INPUT_TWEAKS, pickSheet } from "../ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "../ui/agent-meta";
 
 /** Desktop renders this screen in a wide pane: pickers use Alert instead of
@@ -204,7 +202,6 @@ export default function SessionScreen() {
   const rekeyedId = useSelector(() => rekeyedThreadIds$[routeId!].get());
   const id = rekeyedId ?? routeId;
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
   const router = useRouter();
   const { theme } = useUnistyles();
   const [sending, setSending] = useState(false);
@@ -1248,7 +1245,12 @@ export default function SessionScreen() {
                     style={[
                       ANIM.loadingOverlay,
                       {
-                        backgroundColor: hexFor(scheme).bg,
+                        // The platform-adaptive token, NOT a hex derived from
+                        // useColorScheme(): the in-app appearance override moves
+                        // the JS scheme without moving the native trait, and a
+                        // full-bleed overlay that disagrees paints a white panel
+                        // into a dark app.
+                        backgroundColor: COLOR.bg,
                         // Just above the visible bar. composerHeight includes
                         // the scrim band, which is transparent at its top — sitting
                         // above THAT left the label floating in open space.
