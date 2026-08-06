@@ -8,6 +8,11 @@ import { T } from "./theme";
 /** Semantic color tokens (platform-adaptive — see theme.ts). Kept under the
  *  COLOR name so existing call sites keep working. */
 export const COLOR = {
+  /** The page fill. Needed by the few Reanimated-managed views that have to
+   *  cover content: those can't take a unistyles sheet entry, and deriving a
+   *  hex from `useColorScheme()` instead desyncs from this palette the moment
+   *  the in-app appearance override disagrees with the system trait. */
+  bg: T.bg,
   accent: T.accent,
   fg: T.fg,
   fgMuted: T.fgMuted,
