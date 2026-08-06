@@ -45,6 +45,20 @@ import { openSqliteReadOnly } from "./sqlite.mjs";
 
 const BIN = "cursor-agent";
 const CHATS_DIR = path.join(os.homedir(), ".cursor", "chats");
+/**
+ * Fallback store. cursor-agent ALSO writes a plain JSONL transcript per chat at
+ * ~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl, under the same
+ * chat id as the sqlite store (verified: one chat present in both, written the
+ * same minute), so a thread keeps its identity either way.
+ *
+ * It is strictly lossier — reasoning is literally "[REDACTED]" and tool RESULTS
+ * are absent — so store.db stays the primary. What it buys is history on a host
+ * with no sqlite at all: `npx use-pounce` under Node < 22.5 has neither
+ * node:sqlite nor bun:sqlite, and Cursor history switched off entirely there.
+ * It also covers chats whose store.db is gone but whose transcript remains.
+ */
+const PROJECTS_DIR = path.join(os.homedir(), ".cursor", "projects");
+const REDACTED_RE = /\[REDACTED\]/g;
 /** Last known `cursor-agent status` verdict — see authStatus for why. */
 const AUTH_FILE = path.join(os.homedir(), ".pounce", "cursor-auth.json");
 
@@ -90,9 +104,11 @@ export class CursorAdapter {
     this._sqlite = undefined; // undefined = not tried, null = unavailable
     this._dirty = new Set();
     this._watcher = null;
+    this._txWatcher = null;
     this._watchTimer = null;
     this._watchDirty = new Set(); // chatIds touched within the current debounce window
     this._loc = new Map(); // chatId -> store.db path (populated by listThreads/locate)
+    this._txLoc = new Map(); // chatId -> JSONL transcript path (fallback store)
     this._auth = null; // { at, promise } — cached auth probe (see authStatus)
   }
 
@@ -195,6 +211,7 @@ export class CursorAdapter {
   }
 
   _watch() {
+    this._watchTranscripts();
     if (this._watcher || !existsSync(CHATS_DIR)) return;
     try {
       // A chat's store.db (+ -wal) sits at <hash>/<chatId>/store.db, so the
@@ -205,6 +222,31 @@ export class CursorAdapter {
         // that closed over one chatId would drop earlier chats when two write
         // concurrently (the second's clearTimeout cancels the first's flush).
         this._watchDirty.add(path.basename(path.dirname(rel)));
+        clearTimeout(this._watchTimer);
+        this._watchTimer = setTimeout(() => {
+          const ids = [...this._watchDirty];
+          this._watchDirty.clear();
+          for (const chatId of ids) {
+            for (const cb of this._dirty) {
+              try {
+                cb(chatId);
+              } catch {}
+            }
+          }
+        }, 800);
+      });
+    } catch {}
+  }
+
+  /** Same debounced invalidation for the JSONL store, so a host with no sqlite
+   *  still sees threads refresh as cursor-agent writes. The file is named for
+   *  its chat (<id>/<id>.jsonl), so the changed path names the thread. */
+  _watchTranscripts() {
+    if (this._txWatcher || !existsSync(PROJECTS_DIR)) return;
+    try {
+      this._txWatcher = watch(PROJECTS_DIR, { recursive: true }, (_e, rel) => {
+        if (!rel || !rel.endsWith(".jsonl")) return;
+        this._watchDirty.add(path.basename(rel, ".jsonl"));
         clearTimeout(this._watchTimer);
         this._watchTimer = setTimeout(() => {
           const ids = [...this._watchDirty];
@@ -259,6 +301,123 @@ export class CursorAdapter {
     return this._loc.get(chatId) || null;
   }
 
+  /** Every JSONL transcript, newest first, as { chatId, filePath, mtimeMs, createdMs }. */
+  _transcripts() {
+    const out = [];
+    let slugs;
+    try {
+      slugs = readdirSync(PROJECTS_DIR);
+    } catch {
+      return out;
+    }
+    for (const slug of slugs) {
+      const dir = path.join(PROJECTS_DIR, slug, "agent-transcripts");
+      let chats;
+      try {
+        chats = readdirSync(dir);
+      } catch {
+        continue;
+      }
+      for (const chatId of chats) {
+        const filePath = path.join(dir, chatId, `${chatId}.jsonl`);
+        let st;
+        try {
+          st = statSync(filePath);
+        } catch {
+          continue;
+        }
+        this._txLoc.set(chatId, filePath);
+        out.push({
+          chatId,
+          filePath,
+          mtimeMs: st.mtimeMs,
+          createdMs: st.birthtimeMs || st.mtimeMs,
+        });
+      }
+    }
+    return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  }
+
+  _txPath(chatId) {
+    const cached = this._txLoc.get(chatId);
+    if (cached && existsSync(cached)) return cached;
+    this._transcripts(); // refresh the map
+    return this._txLoc.get(chatId) || null;
+  }
+
+  /** Parse a JSONL transcript into { events, cwd, preview }. One pass, since the
+   *  cwd only shows up inside a tool call's `working_directory` (the file has no
+   *  session header of its own, and the <slug> dir name is a lossy path encode).
+   *
+   *  `metaOnly` stops as soon as both are known: listing hundreds of chats must
+   *  not build (and throw away) every event in every transcript. */
+  _readTranscript(filePath, threadId, { limit, metaOnly = false } = {}) {
+    let lines;
+    try {
+      lines = readFileSync(filePath, "utf8").split("\n");
+    } catch {
+      return { events: [], cwd: null, preview: null };
+    }
+    const turns = [];
+    let cur = null;
+    const add = (ev, startsTurn = false) => {
+      if (startsTurn || !cur) {
+        cur = [];
+        turns.push(cur);
+      }
+      cur.push(ev);
+      if (limit && turns.length > limit) turns.shift();
+    };
+    let cwd = null;
+    let preview = null;
+    let n = 0;
+    for (const line of lines) {
+      if (!line) continue;
+      let o;
+      try {
+        o = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const base = (id) => ({ id, conversationId: threadId, seq: 0, ts: null });
+      const parts = asArr(o.message?.content);
+      if (o.role === "user") {
+        const text = userQueryText(
+          parts.map((p) => (p?.type === "text" ? p.text || "" : "")).join(""),
+        );
+        if (!text) continue;
+        if (!preview) preview = text.slice(0, 200);
+        add(userMessage(base(`u:${n++}`), text), true);
+      } else if (o.role === "assistant") {
+        for (const [i, p] of parts.entries()) {
+          if (p?.type === "text") {
+            // "[REDACTED]" is where reasoning was: an opaque marker, not prose.
+            const text = (p.text || "").replace(REDACTED_RE, "").trim();
+            if (text) add(assistantMessage(base(`a:${n}:${i}`), text));
+          } else if (p?.type === "tool_use") {
+            if (!cwd && typeof p.input?.working_directory === "string")
+              cwd = p.input.working_directory;
+            // No tool RESULT exists in this store — the card renders as a call
+            // with no output rather than inventing one.
+            add(
+              toolCall(base(p.id || `c:${n}:${i}`), {
+                name: p.name || "tool",
+                input: p.input ?? {},
+              }),
+            );
+          }
+        }
+        n++;
+      }
+      if (metaOnly && preview && cwd) break;
+    }
+    const events = turns.flat();
+    events.forEach((ev, i) => {
+      ev.seq = i + 1;
+    });
+    return { events, cwd, preview };
+  }
+
   async _open(dbPath) {
     const open = await this._sqliteMod();
     if (!open || !dbPath || !existsSync(dbPath)) return null;
@@ -271,7 +430,6 @@ export class CursorAdapter {
 
   async listThreads() {
     const stores = this._stores();
-    if (!stores.length) return [];
     const out = [];
     for (const { chatId, dbPath, mtimeMs, createdMs } of stores.slice(0, 1000)) {
       const db = await this._open(dbPath);
@@ -300,12 +458,36 @@ export class CursorAdapter {
         } catch {}
       }
     }
+    // Fill in from the JSONL store: every chat sqlite couldn't give us, either
+    // because this host has no sqlite at all or because that chat's store.db is
+    // gone. A chat read from the db wins — it carries the name, real timestamps
+    // and tool results the transcript lacks.
+    const seen = new Set(out.map((t) => t.id));
+    for (const { chatId, filePath, mtimeMs, createdMs } of this._transcripts().slice(0, 1000)) {
+      if (seen.has(chatId)) continue;
+      const { cwd, preview } = this._readTranscript(filePath, chatId, { metaOnly: true });
+      if (!preview) continue; // no user turn on disk yet — nothing to show
+      out.push({
+        id: chatId,
+        filePath,
+        cwd: cwd || null,
+        name: null, // the transcript carries no chat name; preview titles it
+        preview,
+        createdAt: new Date(createdMs).toISOString(),
+        updatedAt: new Date(mtimeMs).toISOString(),
+        gitBranch: null,
+        sizeBytes: 0,
+      });
+    }
     return out;
   }
 
   async getEvents(threadId, { limit } = {}) {
     const db = await this._open(this._dbPath(threadId));
-    if (!db) return [];
+    if (!db) {
+      const tx = this._txPath(threadId);
+      return tx ? this._readTranscript(tx, threadId, { limit }).events : [];
+    }
     try {
       const meta = readMeta(db);
       const root = meta?.latestRootBlobId ? getBlob(db, meta.latestRootBlobId) : null;
@@ -387,7 +569,9 @@ export class CursorAdapter {
     if (this.turns.isRunning("cursor", threadId)) {
       return { activity: "running", lastActivityAt: new Date().toISOString() };
     }
-    const dbPath = this._dbPath(threadId);
+    // Whichever store this thread came from: the transcript's mtime tracks the
+    // same writes the db's does, so liveness works with no sqlite at all.
+    const dbPath = this._dbPath(threadId) || this._txPath(threadId);
     if (!dbPath) return { activity: "idle", lastActivityAt: null };
     let mtimeMs;
     try {
@@ -399,7 +583,10 @@ export class CursorAdapter {
     // A live cursor-agent in the thread's cwd keeps a quiet mid-turn "running";
     // its absence demotes immediately; unknown falls back to the mtime window.
     let cwd = null;
-    const db = await this._open(dbPath);
+    if (dbPath.endsWith(".jsonl")) {
+      cwd = this._readTranscript(dbPath, threadId).cwd;
+    }
+    const db = cwd ? null : await this._open(dbPath);
     if (db) {
       try {
         const meta = readMeta(db);

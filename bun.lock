@@ -23,10 +23,12 @@
         "@agentclientprotocol/sdk": "^1.2.1",
         "@pounce/transcript": "workspace:*",
         "@wterm/core": "^0.3.0",
+        "agent-canonical": "0.3.0",
         "node-machine-id": "^1.1.12",
         "qrcode": "^1.5.4",
         "qrcode-terminal": "^0.12.0",
         "zigpty": "^0.2.1",
+        "zod": "4.4.3",
       },
       "devDependencies": {
         "vitest": "^2.1.0",
@@ -1392,6 +1394,8 @@
     "acorn-walk": ["acorn-walk@8.3.5", "", { "dependencies": { "acorn": "^8.11.0" } }, "sha512-HEHNfbars9v4pgpW6SO1KSPkfoS0xVOM/9UzkJltjlsHZmJasxg8aXkuZa7SMf8vKGIBhpUsPluQSqhJFCqebw=="],
 
     "agent-base": ["agent-base@6.0.2", "", { "dependencies": { "debug": "4" } }, "sha512-RZNwNclF7+MS/8bDg70amg32dyeZGZxiDuQmZxKLAlQjr3jGyLx+4Kkk58UO7D2QdgFIQCovuSuZESne6RG6XQ=="],
+
+    "agent-canonical": ["agent-canonical@0.3.0", "", { "peerDependencies": { "zod": "^4.4.3" } }, "sha512-Y/hpWiNYPewCpXdqweUhkx3fyG3PKluTVB/4dycAxlzTpNrlfuinhI7AfDUbVcrc2Odaw2jItjSGFUZKMFTUxg=="],
 
     "ajv": ["ajv@8.20.0", "", { "dependencies": { "fast-deep-equal": "^3.1.3", "fast-uri": "^3.0.1", "json-schema-traverse": "^1.0.0", "require-from-string": "^2.0.2" } }, "sha512-Thbli+OlOj+iMPYFBVBfJ3OmCAnaSyNn4M1vz9T6Gka5Jt9ba/HIR56joy65tY6kx/FCF5VXNB819Y7/GUrBGA=="],
 

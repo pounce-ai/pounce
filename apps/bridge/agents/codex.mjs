@@ -8,7 +8,14 @@
  * {type:"event_msg"} (task_started / task_complete / user_message / …).
  * ~/.codex/session_index.jsonl maps id -> thread_name (a free title index).
  */
-import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
+import {
+  createReadStream,
+  existsSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import os from "node:os";
@@ -44,10 +51,63 @@ const FILE_RE = /^rollout-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})-([0-9a-f-]{36})\
 // never named, so every one of them showed up titled with its own prompt —
 // measured 76 of 546 codex threads (14%) on a real host, all looking identical.
 const AUTO_REVIEW_MODEL = "codex-auto-review";
-const AUTO_REVIEW_RE = /^The following is the Codex agent history/m;
+// Unanchored on purpose: codex sometimes emits the preamble behind an
+// <environment_context>/<user_instructions> envelope on the same line, which a
+// `^`-anchored test misses — and that is also the case stripNoise's own
+// line-anchored rule leaves in place, so the boilerplate reaches the title.
+const AUTO_REVIEW_RE = /The following is the Codex agent history/;
+// How far into a rollout the meta scan reads while still looking for the first
+// user message. Only paid on rollouts that have none in their opening lines.
+const SCAN_MAX_LINES = 400;
 // The evidence behind a review note. One real request ran to 264 KB — it is the
 // parent session's own transcript, so it is reference material, not reading.
 const MAX_REVIEW_DETAIL = 8 * 1024;
+// Only base64 payloads: a percent-encoded data URL would decode to garbage.
+const DATA_URL_RE = /^data:([^;,]+)?;base64,/;
+
+/** Lightweight refs for a user record's inline `input_image` parts. Codex
+ *  inlines each attachment as a base64 data URL (~0.5 MB), far too heavy for the
+ *  events list, so — exactly as the claude adapter does — the client gets a ref
+ *  and fetches the bytes lazily from /v1/image. The key is the record's own id
+ *  (or its timestamp, for older rollouts that carry none). */
+function imageRefs(content, key) {
+  const out = [];
+  if (!Array.isArray(content)) return out;
+  content.forEach((c, i) => {
+    const url = c?.type === "input_image" ? c.image_url || c.imageUrl : null;
+    const m = typeof url === "string" ? DATA_URL_RE.exec(url) : null;
+    if (m) out.push({ mediaType: m[1] || "image/png", ref: `${key}:${i}` });
+  });
+  return out;
+}
+
+const IMAGE_EXT = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/heic": "heic",
+};
+
+/**
+ * Spill the app's base64 attachments to temp files, returning their paths.
+ * Never throws: an image that can't be written is dropped so the turn still
+ * runs with its text rather than failing outright.
+ */
+export function writeTempImages(images, dir = os.tmpdir()) {
+  const out = [];
+  for (const [i, img] of (images || []).entries()) {
+    if (!img?.data) continue;
+    const ext = IMAGE_EXT[img.mediaType] || "png";
+    const file = path.join(dir, `pounce-codex-${process.pid}-${Date.now()}-${i}.${ext}`);
+    try {
+      writeFileSync(file, Buffer.from(img.data, "base64"));
+      out.push(file);
+    } catch {}
+  }
+  return out;
+}
 
 export class CodexAdapter {
   constructor({ turns }) {
@@ -57,7 +117,7 @@ export class CodexAdapter {
     this.capabilities = {
       streaming: true,
       tools: true,
-      images: false,
+      images: true, // `codex exec -i <FILE>` — see writeTempImages
       thinking: true,
       terminal: true,
       git: true,
@@ -102,8 +162,14 @@ export class CodexAdapter {
   async listThreads() {
     const metas = await this.index.list();
     const titles = this.titles();
-    for (const m of metas) m.name = titles.get(m.id) || m.name || null;
-    return metas;
+    // Reviewer sub-sessions are not threads anyone started, and naming them after
+    // their parent doesn't help: on a real host 246 child rollouts descended from
+    // 8 parents (188 from one), so the list filled with near-identical rows. They
+    // stay reachable by id — getHistory still renders one — just not as peers of
+    // the sessions you actually opened.
+    const out = metas.filter((m) => !m.autoReview);
+    for (const m of out) m.name = titles.get(m.id) || m.name || null;
+    return out;
   }
 
   async findFile(threadId) {
@@ -133,8 +199,10 @@ export class CodexAdapter {
           id,
           filePath: file,
           cwd,
-          // Give the reviewer sessions a real name; they carry none of their own
-          // and would otherwise be titled with their own boilerplate prompt.
+          // Kept off the thread list (see listThreads); named for the case where
+          // one is opened by id, since it carries no name of its own and would
+          // otherwise be titled with its own boilerplate prompt.
+          autoReview,
           name: autoReview ? `Auto-review · ${path.basename(cwd || "") || "codex"}` : null,
           preview,
           createdAt: createdAt || new Date(st.birthtimeMs || st.mtimeMs).toISOString(),
@@ -156,14 +224,18 @@ export class CodexAdapter {
             if (o.payload?.model === AUTO_REVIEW_MODEL) autoReview = true;
           } else if (!preview && o.type === "event_msg" && o.payload?.type === "user_message") {
             const raw = String(o.payload.message || "");
+            // Test the RAW text: stripNoise drops the preamble this matches.
             if (AUTO_REVIEW_RE.test(raw)) autoReview = true;
             const text = stripNoise(raw, "codex").trim();
             if (text) preview = text.slice(0, 200);
           }
         } catch {}
         // The prompt check above fires on the same line that sets `preview`, so
-        // the reviewer is always identified before we settle.
-        if ((cwd && preview) || lines > 60) settle();
+        // the reviewer is always identified before we settle. Review rollouts
+        // carry a large base_instructions blob, which pushed their first
+        // user_message past a 60-line cap — so keep reading until we have one,
+        // up to a bound that still keeps a cold scan of thousands of files cheap.
+        if ((cwd && preview) || lines > (preview ? 60 : SCAN_MAX_LINES)) settle();
       });
       rl.on("close", settle);
       stream.on("error", settle);
@@ -301,7 +373,10 @@ export class CodexAdapter {
           const text = (p.content || [])
             .map((c) => (c?.type === "input_text" || c?.type === "output_text" ? c.text || "" : ""))
             .join("");
-          if (!text.trim()) continue;
+          // An attachment-only turn is all manifest text that strips to nothing —
+          // its whole payload is the image, so it must survive the empty check.
+          const imgs = p.role === "user" ? imageRefs(p.content, p.id || ts) : [];
+          if (!text.trim() && !imgs.length) continue;
           if (p.role === "assistant")
             add(assistantMessage(base(uniq(p.id || `a:${ts}`)), fenceJson(text)));
           else if (p.role === "user") {
@@ -322,7 +397,8 @@ export class CodexAdapter {
                 ),
                 true,
               );
-            } else if (cleaned) add(userMessage(base(uniq(p.id || `u:${ts}`)), cleaned), true);
+            } else if (cleaned || imgs.length)
+              add(userMessage(base(uniq(p.id || `u:${ts}`)), cleaned, imgs), true);
           }
           // developer role: injected instructions — skip.
         } else if (p.type === "reasoning") {
@@ -383,6 +459,49 @@ export class CodexAdapter {
       ev.seq = i + 1;
     });
     return events;
+  }
+
+  /** Decode one attachment on demand. The ref (`<recordId|timestamp>:<index>`)
+   *  points at an `input_image` data URL getEvents chose not to inline; a cheap
+   *  substring prefilter skips JSON.parse on unrelated lines of a huge rollout. */
+  async getImage(threadId, ref) {
+    const s = String(ref);
+    const sep = s.lastIndexOf(":");
+    if (sep < 0) return null;
+    const key = s.slice(0, sep);
+    const idx = Number(s.slice(sep + 1));
+    const file = await this.findFile(threadId);
+    if (!file || !Number.isInteger(idx)) return null;
+    let rl;
+    try {
+      rl = createInterface({ input: createReadStream(file, "utf8"), crlfDelay: Infinity });
+    } catch {
+      return null;
+    }
+    try {
+      for await (const line of rl) {
+        if (!line || !line.includes(key)) continue;
+        let o;
+        try {
+          o = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        const p = o.payload || {};
+        if ((p.id || o.timestamp) !== key || p.type !== "message") continue;
+        const c = Array.isArray(p.content) ? p.content[idx] : null;
+        const url = c?.type === "input_image" ? c.image_url || c.imageUrl : null;
+        const m = typeof url === "string" ? DATA_URL_RE.exec(url) : null;
+        if (!m) return null;
+        return {
+          mediaType: m[1] || "image/png",
+          buffer: Buffer.from(url.slice(m[0].length), "base64"),
+        };
+      }
+    } finally {
+      rl.close();
+    }
+    return null;
   }
 
   async getActivity(threadId) {
@@ -480,13 +599,18 @@ export class CodexAdapter {
    *     supplied, so there is no patch to render from the stream alone.
    * Keep parsing defensive; history refetch backstops any remaining gaps.
    */
-  startTurn({ threadId, text, cwd, permissionMode, model }, onEvent) {
+  startTurn({ threadId, text, cwd, images, permissionMode, model }, onEvent) {
     this.turns.assertCapacity();
     const resume = threadId && /^[0-9a-f-]{36}$/i.test(threadId);
     const args = ["exec", "--json"];
     if (resume) args.push("resume", threadId);
     if (cwd && existsSync(cwd)) args.push("-C", cwd);
     if (model) args.push("-m", model);
+    // `codex exec` takes attachments as FILES (-i), not inline base64 the way
+    // claude's stdin JSON does, so the app's blobs are spilled to temp files for
+    // the life of the turn and removed when it settles.
+    const tempImages = writeTempImages(images);
+    for (const file of tempImages) args.push("-i", file);
     args.push(
       permissionMode === "bypassPermissions"
         ? "--dangerously-bypass-approvals-and-sandbox"
@@ -532,6 +656,11 @@ export class CodexAdapter {
     const finish = () => {
       if (settled) return;
       settled = true;
+      for (const file of tempImages) {
+        try {
+          rmSync(file, { force: true });
+        } catch {}
+      }
       this.turns.release(entry);
       resolveDone(realThreadId || threadId || null);
     };

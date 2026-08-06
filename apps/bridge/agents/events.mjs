@@ -59,6 +59,60 @@ export const permissionRequest = (base, { requestId, toolName, toolTitle, option
   options,
 });
 
+// --- ACP vocabulary ----------------------------------------------------------
+
+/**
+ * Our timeline vocabulary next to the Agent Client Protocol's `session/update`
+ * kinds. Nearly one-to-one, which is the point: ACP is the only standard that
+ * describes a live agent turn, and we already speak it (see acp.mjs and the
+ * @agentclientprotocol deps), so every history adapter that invents an event is
+ * really re-deriving an ACP update from an on-disk transcript.
+ *
+ * The wire names below are deliberately NOT renamed to match ACP. Shipped iOS,
+ * Android and desktop builds parse these exact strings, and a bridge is expected
+ * to serve clients older than itself — renaming would break every installed app
+ * for the sake of spelling. The mapping is what has to exist and be checked; the
+ * spelling can stay ours.
+ *
+ * Kinds ACP has that never become timeline events (`available_commands_update`,
+ * `usage_update`, `current_mode_update`) map to null, so a new one shows up here
+ * as a decision rather than as a silently ignored switch case.
+ */
+export const ACP_TO_EVENT = {
+  user_message_chunk: "user_message",
+  agent_message_chunk: "assistant_message",
+  agent_thought_chunk: "thinking_finished",
+  tool_call: "tool_call",
+  tool_call_update: "tool_result",
+  // A plan is rendered as the `update_plan` tool card — the same shape the
+  // codex/claude adapters produce from disk. An updated plan replaces that card;
+  // a removed one has nothing to show.
+  plan: "tool_call",
+  plan_update: "tool_call",
+  plan_removed: null,
+  // Session/agent state, not turn content: the app learns these from /v1/status,
+  // /v1/usage and /v1/agents rather than from the timeline.
+  available_commands_update: null,
+  current_mode_update: null,
+  config_option_update: null,
+  session_info_update: null,
+  usage_update: null,
+};
+
+/** Inverse of ACP_TO_EVENT for the kinds that round-trip. Types we emit that ACP
+ *  has no word for (`system_event` — compaction, rollback, review notes; and
+ *  `permission_request`, which ACP models as a REQUEST rather than an update)
+ *  map to null: they are ours, and ATIF carries them on export. */
+export const EVENT_TO_ACP = {
+  user_message: "user_message_chunk",
+  assistant_message: "agent_message_chunk",
+  thinking_finished: "agent_thought_chunk",
+  tool_call: "tool_call",
+  tool_result: "tool_call_update",
+  system_event: null,
+  permission_request: null,
+};
+
 // --- bounded reads -----------------------------------------------------------
 
 /**

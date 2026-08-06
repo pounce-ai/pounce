@@ -25,6 +25,7 @@ import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { client, ndJsonStream, PROTOCOL_VERSION } from "@agentclientprotocol/sdk";
 import {
+  ACP_TO_EVENT,
   assistantMessage,
   permissionRequest,
   systemEvent,
@@ -228,6 +229,11 @@ export function startAcpTurn(
 
   const onUpdate = (u) => {
     if (!forwarding) return;
+    // ACP_TO_EVENT (events.mjs) is the single place that says which update kinds
+    // become timeline events. An unknown kind — a protocol addition — is dropped
+    // here on purpose, but it fails the vocabulary test rather than passing
+    // unnoticed, which is what a bare `default:` used to do.
+    if (!(u.sessionUpdate in ACP_TO_EVENT) || ACP_TO_EVENT[u.sessionUpdate] === null) return;
     switch (u.sessionUpdate) {
       case "agent_message_chunk": {
         const key = u.messageId || `a:${seq}`;

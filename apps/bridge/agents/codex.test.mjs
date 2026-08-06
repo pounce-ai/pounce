@@ -7,7 +7,7 @@
  * these shapes is one the doc-derived parser got wrong.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync as realReadFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -29,7 +29,7 @@ vi.mock("node:fs", async (importOriginal) => {
   return { ...real, readFileSync, default: { ...real, readFileSync } };
 });
 
-const { CodexAdapter } = await import("./codex.mjs");
+const { CodexAdapter, writeTempImages } = await import("./codex.mjs");
 
 const TS = "2026-08-04T10:00:00.000Z";
 
@@ -53,6 +53,62 @@ async function eventsFor(records) {
     cleanup();
   }
 }
+
+describe("codex history — attachments", () => {
+  // Shape taken from a real Codex Desktop rollout: attaching a screenshot writes
+  // a manifest + a placeholder tag as text parts, and the bytes as input_image.
+  const PNG = "iVBORw0KGgoAAAANSUhEUg==";
+  const PATH = "/var/folders/zh/T/Screenshot 2026-07-31 at 2.09.24 PM.png";
+  const attachment = (request) =>
+    item({
+      type: "message",
+      id: "msg_att",
+      role: "user",
+      content: [
+        {
+          type: "input_text",
+          text:
+            `\n# Files mentioned by the user:\n\n## Screenshot 2026-07-31 at 2.09.24 PM.png: ${PATH}\n` +
+            (request ? `\n## My request for Codex:\n${request}\n` : ""),
+        },
+        { type: "input_text", text: `<image name=[Image #1] path="${PATH}">` },
+        { type: "input_image", image_url: `data:image/png;base64,${PNG}` },
+        { type: "input_text", text: "</image>" },
+      ],
+    });
+
+  it("does not show the manifest as something the user typed", async () => {
+    const ev = await eventsFor([attachment()]);
+    const users = ev.filter((e) => e.type === "user_message");
+    expect(users).toHaveLength(1);
+    expect(users[0].text).toBe("");
+    expect(users[0].text).not.toContain("/var/folders");
+  });
+
+  it("keeps the prose when the user typed something alongside the file", async () => {
+    const ev = await eventsFor([attachment("look at this dropdown")]);
+    expect(ev.find((e) => e.type === "user_message").text).toBe("look at this dropdown");
+  });
+
+  it("attaches the image as a ref instead of inlining half a megabyte", async () => {
+    const ev = await eventsFor([attachment()]);
+    expect(ev.find((e) => e.type === "user_message").images).toEqual([
+      { mediaType: "image/png", ref: "msg_att:2" },
+    ]);
+  });
+
+  it("serves the attachment's bytes for that ref", async () => {
+    const { a, cleanup } = adapterFor([attachment()]);
+    try {
+      const img = await a.getImage("t1", "msg_att:2");
+      expect(img.mediaType).toBe("image/png");
+      expect(img.buffer.equals(Buffer.from(PNG, "base64"))).toBe(true);
+      expect(await a.getImage("t1", "msg_att:0")).toBe(null);
+    } finally {
+      cleanup();
+    }
+  });
+});
 
 describe("codex history — tool call payloads", () => {
   it("reads custom_tool_call.input, not just function_call.arguments", async () => {
@@ -348,6 +404,44 @@ describe("codex auto-review sub-sessions", () => {
     expect(m.name).toBe("Auto-review · pneucons");
   });
 
+  it("keeps reviewer sessions off the thread list", async () => {
+    // 246 child rollouts from 8 parents on a real host — as peers they filled the
+    // sidebar with rows nobody started. listThreads drops anything flagged.
+    const a = new CodexAdapter({ turns: { isRunning: () => false } });
+    a.index = {
+      list: async () => [
+        { id: "a", autoReview: true, name: "Auto-review · pneucons" },
+        { id: "b", autoReview: false, name: null, preview: "fix the dropdown" },
+      ],
+    };
+    const out = await a.listThreads();
+    expect(out.map((t) => t.id)).toEqual(["b"]);
+  });
+
+  it("sees the preamble behind an injected-context envelope", async () => {
+    // Real reviewer rollouts prefix the prompt with codex's own context blocks,
+    // which put the phrase off the start of its line — the `^`-anchored test on
+    // the raw string missed these, and the boilerplate became the title.
+    const m = await scan([
+      meta,
+      userEvent(
+        `<environment_context>cwd: /Users/x/Projects/pneucons</environment_context>${PREAMBLE_A}\n>> TRANSCRIPT START`,
+      ),
+    ]);
+    expect(m.name).toBe("Auto-review · pneucons");
+  });
+
+  it("finds a first user message that sits past the opening lines", async () => {
+    // base_instructions and friends can push the prompt well down the file.
+    const filler = Array.from({ length: 80 }, () => ({
+      type: "response_item",
+      timestamp: TS,
+      payload: { type: "message", role: "assistant", content: [] },
+    }));
+    const m = await scan([meta, ...filler, userEvent(`${PREAMBLE_A}\n>> TRANSCRIPT START`)]);
+    expect(m.name).toBe("Auto-review · pneucons");
+  });
+
   it("leaves ordinary sessions unnamed for the title index to fill", async () => {
     const m = await scan([
       meta,
@@ -457,5 +551,40 @@ describe("codex listModels — read from Codex, never hardcoded", () => {
     stub.files.set("models_cache.json", null);
     stub.files.set("config.toml", null);
     expect(adapter().listModels()).toEqual([]);
+  });
+});
+
+describe("codex attachments — sending", () => {
+  // `codex exec` takes files (-i), not inline base64 like claude's stdin JSON,
+  // so the app's blobs have to land on disk before the turn starts.
+  const PNG = "iVBORw0KGgoAAAANSUhEUg==";
+
+  it("writes each attachment and names it by media type", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "codex-img-"));
+    try {
+      const files = writeTempImages(
+        [
+          { mediaType: "image/png", data: PNG },
+          { mediaType: "image/jpeg", data: PNG },
+          { mediaType: "image/tiff", data: PNG }, // unknown → png, still sent
+        ],
+        dir,
+      );
+      expect(files).toHaveLength(3);
+      expect(files.map((f) => path.extname(f))).toEqual([".png", ".jpg", ".png"]);
+      expect(realReadFileSync(files[0]).equals(Buffer.from(PNG, "base64"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("drops an unusable attachment rather than failing the whole turn", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "codex-img-"));
+    try {
+      expect(writeTempImages([{ mediaType: "image/png" }, null], dir)).toEqual([]);
+      expect(writeTempImages(undefined, dir)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

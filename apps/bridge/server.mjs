@@ -52,6 +52,7 @@ import {
 } from "./agents/pty-turn.mjs";
 import { agentEnv, binPath, binVersion, primaryLanIp } from "./agents/env.mjs";
 import { publicConfig, readConfig, writeConfig } from "./agents/config.mjs";
+import { LEGACY_TOKEN, bridgeToken, legacyAllows, tokenMatches } from "./agents/token.mjs";
 import { readContextFiles, writeContextFile } from "./agents/context.mjs";
 import { createHistorySearch } from "./agents/search.mjs";
 import { createActivityIndex } from "./agents/activity-index.mjs";
@@ -74,7 +75,7 @@ const DEFAULT_PORT = 8099;
 const PORT = Number(process.env.BRIDGE_PORT || DEFAULT_PORT);
 // How often the background watcher polls for state transitions to push.
 const WATCH_MS = Number(process.env.PUSH_WATCH_MS || 25_000);
-const TOKEN = process.env.BRIDGE_TOKEN || "pounce-bridge-local";
+const { token: TOKEN, legacyUntil: LEGACY_UNTIL } = bridgeToken();
 // The Bridge desktop app version, shown in the pairing window's footer. The
 // desktop shell passes it to startBridge() from its package.json; env is the
 // fallback for standalone `node server.mjs` runs.
@@ -1267,6 +1268,15 @@ const server = http.createServer(async (req, res) => {
     ifNoneMatch: req.headers["if-none-match"] || null,
   };
   const url = new URL(req.url, "http://x");
+
+  // No route here is meant to be called from a web page. The apps are native and
+  // the DOM screens fetch same-origin, so an Origin header is always someone
+  // else's page — and every JSON reply carries `access-control-allow-origin: *`,
+  // which would otherwise let a site the user merely VISITS read /ui (the token
+  // is in that payload) or POST to /v1/exec without a preflight. Rejecting on
+  // sight also closes DNS rebinding, which loopback checks alone do not.
+  if (req.headers.origin) return send(res, 403, { error: "forbidden" });
+
   if (url.pathname === "/health") return send(res, 200, { ok: true });
 
   // Localhost-only UI surface for the desktop app: pairing QR + live status.
@@ -1308,8 +1318,16 @@ const server = http.createServer(async (req, res) => {
 
   const auth =
     req.headers.authorization?.replace(/^Bearer\s+/i, "") || url.searchParams.get("token");
-  if (auth !== TOKEN) return send(res, 401, { error: "unauthorized" });
+  const legacyOk =
+    Date.now() < LEGACY_UNTIL &&
+    tokenMatches(auth, LEGACY_TOKEN) &&
+    legacyAllows(req.method, url.pathname);
+  if (!tokenMatches(auth, TOKEN) && !legacyOk) return send(res, 401, { error: "unauthorized" });
   lastClientSeen = Date.now();
+
+  // The migration itself: a client still holding the published default swaps it
+  // for this install's real token, so the window closes on its next sync.
+  if (url.pathname === "/v1/token") return send(res, 200, { token: TOKEN });
   if (process.env.BRIDGE_DEBUG) console.log(`[req] ${req.method} ${url.pathname}${url.search}`);
 
   try {

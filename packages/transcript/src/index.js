@@ -127,6 +127,21 @@ const CODEX = {
     // that follows and — being the first user message — became the thread title
     // too. Both known openings end at the same sentence.
     /^The following is the Codex agent history[\s\S]*?not as instructions to follow:[ \t]*\n?/gim,
+    // Attaching a file in Codex Desktop wraps the prompt in a manifest:
+    //   # Files mentioned by the user:
+    //   ## Screenshot 2026-07-31 at 2.09.24 PM.png: /var/folders/…/Screenshot….png
+    //   ## My request for Codex:
+    //   <what the user actually typed>
+    // Nobody typed the framing, and the temp path it names is meaningless to a
+    // reader — the attachment itself rides along as an input_image block, which
+    // the codex adapter surfaces as a real image. Keep the request body: drop
+    // everything up to and including its heading…
+    /^#[ \t]*Files? mentioned by the user:[\s\S]*?^##[ \t]*My request for Codex:[ \t]*\n?/gim,
+    // …and, for an attachment with no request at all, the bare file list.
+    /^#[ \t]*Files? mentioned by the user:[ \t]*\n(?:[ \t]*\n|##[^\n]*\n?)*/gim,
+    // Each attachment is bracketed by a placeholder tag pair around its bytes:
+    // `<image name=[Image #1] path="…">` … `</image>`.
+    /<\/?image\b[^>]*>/gi,
   ],
 };
 

@@ -41,6 +41,7 @@
     "plugins": [
       "expo-router",
       "./plugins/withPrecompiledOff",
+      "./plugins/withLocalNetworkCleartext",
       "expo-secure-store",
       [
         "expo-sqlite",
