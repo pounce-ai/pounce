@@ -36,6 +36,18 @@ export const INPUT_TWEAKS: Record<string, unknown> =
 /** True on the desktop platforms (macOS/Windows) — for tiny layout forks. */
 export const IS_DESKTOP = Platform.OS === "macos" || Platform.OS === "windows";
 
+/**
+ * `selectable={SELECT_TEXT}` on a label a user will want to copy — a path, a
+ * branch, a project name. Desktop only: with a mouse, text you cannot drag a
+ * cursor through reads as broken, while on a phone the same prop turns an
+ * ordinary long-press into a selection handle nobody asked for.
+ *
+ * Only for text with NO Pressable ancestor. A selectable RCTText takes the
+ * mouse-down on macOS, so the row above it stops responding to clicks — the
+ * same swallow noted on Timeline's meta row and ContributionGraph's SVG.
+ */
+export const SELECT_TEXT = IS_DESKTOP;
+
 /** Compact duration bucket: 45s / 12m / 3h / 6d (floored). */
 export function fmtDuration(secs: number): string {
   const s = Math.max(0, Math.floor(secs));

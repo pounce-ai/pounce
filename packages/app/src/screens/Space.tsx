@@ -47,7 +47,7 @@ import { MiniBarChart } from "../components/MiniBarChart";
 import { ContextEditor } from "../components/ContextEditor";
 import { PounceIcon } from "../ui/native/Icon";
 import type { IoniconName } from "../ui/native/icon-map";
-import { AgentLogo, AgentStatusIcon, IS_DESKTOP, timeAgo } from "../ui";
+import { AgentLogo, AgentStatusIcon, IS_DESKTOP, SELECT_TEXT, timeAgo } from "../ui";
 import { agentLabel } from "../ui/tokens";
 import { fmtCost, fmtCount, fmtDayLabel, fmtTokens } from "../ui/format";
 
@@ -228,7 +228,7 @@ function SpaceDetail({ space, sessions }: { space: Space; sessions: Session[] })
     >
       <View style={s.header}>
         <View style={s.shrink}>
-          <Text numberOfLines={1} style={s.title}>
+          <Text selectable={SELECT_TEXT} numberOfLines={1} style={s.title}>
             {space.name}
           </Text>
           <Text numberOfLines={1} style={s.subtitle}>
@@ -254,7 +254,7 @@ function SpaceDetail({ space, sessions }: { space: Space; sessions: Session[] })
       </View>
 
       {cwd ? (
-        <Text numberOfLines={1} style={s.path}>
+        <Text selectable={SELECT_TEXT} numberOfLines={1} style={s.path}>
           {cwd.replace(/^\/Users\/[^/]+/, "~")}
         </Text>
       ) : null}

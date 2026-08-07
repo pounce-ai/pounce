@@ -113,7 +113,9 @@ function StatusBar({ threadId }: { threadId: string }) {
         size={11}
         color={COLOR.fgFaint}
       />
-      <Text numberOfLines={1} style={s.statusPath}>
+      {/* The one place desktop shows where a thread lives — so it has to be
+          copyable. No Pressable above it, so selection is safe here. */}
+      <Text selectable numberOfLines={1} style={s.statusPath}>
         {session.worktree ? "Worktree" : "Local checkout"}
         {session.cwd ? ` · ${session.cwd.replace(/^\/Users\/[^/]+/, "~")}` : ""}
       </Text>
@@ -126,7 +128,7 @@ function StatusBar({ threadId }: { threadId: string }) {
       {session.branch ? (
         <>
           <Ionicons name="git-branch-outline" size={11} color={COLOR.fgFaint} />
-          <Text numberOfLines={1} style={s.statusBranch}>
+          <Text selectable numberOfLines={1} style={s.statusBranch}>
             {session.branch}
           </Text>
         </>

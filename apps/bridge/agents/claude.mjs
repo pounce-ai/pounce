@@ -9,7 +9,7 @@
  * results arriving as user records holding tool_result blocks; plus noise
  * (mode, attachment, file-history-snapshot, summary, isMeta wrappers).
  */
-import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -33,7 +33,8 @@ import { agentEnv, binVersion, binPath, liveAgentCwds } from "./env.mjs";
 import { recordTurn, threadTotals } from "./cost-ledger.mjs";
 import { noUsage, usageResult } from "./usage.mjs";
 
-const ROOT = path.join(os.homedir(), ".claude", "projects");
+const CLAUDE_HOME = path.join(os.homedir(), ".claude");
+const ROOT = path.join(CLAUDE_HOME, "projects");
 // Claude Code's permission-mode names → the app's canonical PermissionMode.
 const CLAUDE_MODE = {
   normal: "default",
@@ -58,6 +59,103 @@ const MAX_HISTORY_BYTES = 8 * 1024 * 1024;
 const MAX_STREAM_ITEM_BYTES = 2 * 1024 * 1024;
 // Compaction summaries run long; keep the folded copy readable, not verbatim.
 const MAX_COMPACT_DETAIL = 8 * 1024;
+
+// Claude Code keeps its settings in ~/.claude/settings.json (the directory)
+// and the rest of its client state in ~/.claude.json (the file). Both are read.
+const CLAUDE_SETTINGS = path.join(CLAUDE_HOME, "settings.json");
+const CLAUDE_CLIENT_STATE = path.join(os.homedir(), ".claude.json");
+// Newest transcripts scanned for model ids, and how much of each tail is read.
+// The tail is where the model lands: it is on every assistant record, and the
+// last one is the model the thread most recently ran on.
+const MODEL_SCAN_FILES = 40;
+const MODEL_SCAN_TAIL_BYTES = 32 * 1024;
+
+/** Family aliases the CLI resolves to the CURRENT model in each family
+ *  ("Provide an alias for the latest model … or a model's full name").
+ *  These are the only ids named here, precisely because an alias cannot rot. */
+const MODEL_ALIASES = [
+  { id: "opus", name: "Opus (latest)", description: "Most capable" },
+  { id: "fable", name: "Fable (latest)", description: "Frontier model" },
+  { id: "sonnet", name: "Sonnet (latest)", description: "Fast and capable" },
+  { id: "haiku", name: "Haiku (latest)", description: "Fastest" },
+];
+
+/** Parsed JSON from a config file, or null — an absent or half-written file is
+ *  an ordinary state here, never an error. */
+function readJson(file) {
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/** "claude-opus-5" → "Opus 5"; "claude-haiku-4-5-20251001" → "Haiku 4.5";
+ *  "claude-fable-5[1m]" → "Fable 5 [1m]". Mirrors the app's shortModel(). */
+function prettyModel(id) {
+  return id
+    .replace(/^claude-/, "")
+    .replace(/-\d{8}(?=\[|$)/, "")
+    .replace(/-(\d+)-(\d+)(?=\[|$)/, " $1.$2")
+    .replace(/-(\d+)(?=\[|$)/, " $1")
+    .replace(/\b[a-z]/, (c) => c.toUpperCase());
+}
+
+/** The model Claude Code itself is configured to use, if any. */
+function configuredModel() {
+  for (const file of [CLAUDE_SETTINGS, CLAUDE_CLIENT_STATE]) {
+    const m = readJson(file)?.model;
+    if (typeof m === "string" && m.trim()) return m.trim();
+  }
+  return null;
+}
+
+/** Extra model options the CLI caches from the server — promos and long-context
+ *  variants that no alias names. Carries the server's own label/description. */
+function cachedModelOptions() {
+  const list = readJson(CLAUDE_CLIENT_STATE)?.additionalModelOptionsCache;
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((o) => o && typeof o.value === "string" && o.value)
+    .map((o) => ({
+      id: o.value,
+      name: typeof o.label === "string" && o.label ? o.label : prettyModel(o.value),
+      description: typeof o.description === "string" ? o.description : null,
+    }));
+}
+
+/** Versioned model ids this machine has actually run, most recent first.
+ *
+ *  Read from the tail of the newest transcripts: `message.model` on an
+ *  assistant record is what the API answered with, so every id here provably
+ *  exists and this account can reach it. `<synthetic>` marks Claude Code's own
+ *  locally-generated messages and is not a model. */
+async function observedModels(index) {
+  const seen = new Set();
+  let metas = [];
+  try {
+    metas = await index.list();
+  } catch {
+    return [];
+  }
+  for (const meta of metas.slice(0, MODEL_SCAN_FILES)) {
+    if (!meta?.filePath) continue;
+    for (const line of readTailLines(meta.filePath, MODEL_SCAN_TAIL_BYTES).reverse()) {
+      if (!line.includes('"model"')) continue;
+      let id;
+      try {
+        id = JSON.parse(line)?.message?.model;
+      } catch {
+        continue;
+      }
+      if (typeof id === "string" && id && id !== "<synthetic>") {
+        seen.add(id);
+        break; // one per transcript: its newest model, in newest-thread order
+      }
+    }
+  }
+  return [...seen];
+}
 
 /** Preview/title text for a raw first user message (mirrors server cleanPreview). */
 function cleanPreview(raw) {
@@ -565,39 +663,50 @@ export class ClaudeAdapter {
     }
   }
 
-  listModels() {
-    // The claude CLI resolves aliases/full ids itself; a static list keeps the
-    // picker useful without a daemon to ask. Default mirrors the CLI default.
-    return [
-      {
-        id: "claude-opus-4-8",
-        name: "Opus 4.8",
-        description: "Most capable, default",
-        isDefault: true,
-        deprecated: false,
-      },
-      {
-        id: "claude-fable-5",
-        name: "Fable 5",
-        description: "Claude 5 frontier model",
-        isDefault: false,
-        deprecated: false,
-      },
-      {
-        id: "claude-sonnet-5",
-        name: "Sonnet 5",
-        description: "Fast and capable",
-        isDefault: false,
-        deprecated: false,
-      },
-      {
-        id: "claude-haiku-4-5",
-        name: "Haiku 4.5",
-        description: "Fastest",
-        isDefault: false,
-        deprecated: false,
-      },
-    ];
+  /**
+   * Models come from what this machine can actually show for itself, never a
+   * pinned catalog. The CLI has no `models` subcommand and writes no full
+   * catalog to disk, so three real sources are merged, best first:
+   *
+   *   1. versioned ids observed in recent transcripts — every one of these is
+   *      an id the API itself returned for this account, so it exists and the
+   *      account has access;
+   *   2. `additionalModelOptionsCache` in ~/.claude.json — extra options the
+   *      CLI caches from the server (promos, `[1m]` long-context variants);
+   *   3. family aliases the CLI resolves itself (`opus`, `sonnet`, …), which
+   *      always point at the current model and so cannot go stale.
+   *
+   * The list this replaced was hardcoded, and a hardcoded list goes stale
+   * silently — the same failure codex.mjs documents. It still offered Opus 4.8
+   * as the default long after Opus 5 shipped, so a thread could not be moved
+   * onto a model the account had been using for weeks.
+   */
+  async listModels() {
+    const out = [];
+    const have = new Set();
+    const push = (id, name, description) => {
+      if (!id || have.has(id)) return;
+      have.add(id);
+      out.push({ id, name: name || id, description: description ?? null, isDefault: false });
+    };
+
+    const observed = await observedModels(this.index);
+    for (const id of observed) push(id, prettyModel(id), "Used on this machine");
+    for (const m of cachedModelOptions()) push(m.id, m.name, m.description);
+    for (const a of MODEL_ALIASES) push(a.id, a.name, a.description);
+
+    // Only a model Claude Code is actually configured with is marked default.
+    // With nothing configured the CLI picks for itself and no entry here is
+    // "the default" — saying otherwise is how the old list came to advertise a
+    // superseded model as the one you were getting. An id configured but never
+    // seen still gets offered, so the picker can show it as active.
+    const configured = configuredModel();
+    if (configured) push(configured, prettyModel(configured), "From your Claude Code settings");
+    for (const m of out) {
+      m.isDefault = configured != null && m.id === configured;
+      m.deprecated = false;
+    }
+    return out;
   }
 
   /**
