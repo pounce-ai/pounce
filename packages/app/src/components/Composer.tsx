@@ -33,7 +33,7 @@ import { SLASH_COMMANDS } from "../ui/agent-meta";
 import { fetchFiles, type RepoEntry, type ThreadUsage } from "../services/bridge";
 import { ContextRing } from "./ContextRing";
 import { isVoiceAvailable, startDictation, type Dictation } from "../services/voice";
-import { AgentLogo, COLOR } from "../ui";
+import { AgentLogo, COLOR, IS_DESKTOP } from "../ui";
 import { hexFor } from "../ui/theme-hex";
 
 const MENTION_RE = /((?:^|\s))@([^\s@]*)$/;
@@ -472,9 +472,13 @@ export function Composer({
     // Sending collapses the keyboard so the streaming reply is visible
     // (Claude/ChatGPT behavior). Keyboard.dismiss() alone is a no-op here: it
     // only blurs inputs registered with RN's TextInputState, which the native
-    // markdown editor isn't — blur the instance directly.
-    inputRef.current?.blur();
-    Keyboard.dismiss();
+    // markdown editor isn't — blur the instance directly. Desktop has no
+    // keyboard to collapse and sends from the keyboard, so it keeps focus:
+    // blurring there would cost a click before every follow-up.
+    if (!IS_DESKTOP) {
+      inputRef.current?.blur();
+      Keyboard.dismiss();
+    }
     try {
       await onSubmit({
         text: snapMarkdown.trim(),
@@ -491,6 +495,21 @@ export function Composer({
         detail || "Couldn't reach the host — your message was put back in the box.",
       );
     }
+  };
+
+  // Desktop's hardware Enter. An open autocomplete owns the key first — Enter
+  // accepts the top match, the way every coding harness behaves — so a
+  // half-typed "/co" or "@src/i" can't be fired off as a message by accident.
+  const onEnterKey = () => {
+    if (slashMatches.length) {
+      applySlash(slashMatches[0].cmd);
+      return;
+    }
+    if (mentionActive && files.length) {
+      applyMention(files[0].path);
+      return;
+    }
+    void submit();
   };
 
   return (
@@ -622,6 +641,7 @@ export function Composer({
             onChangeMarkdown={(md) => {
               markdownRef.current = md;
             }}
+            onSubmitKey={onEnterKey}
             editable={!disabled}
             placeholder={
               disabled ? "Read-only" : running ? "Queue a follow-up or steer…" : placeholder

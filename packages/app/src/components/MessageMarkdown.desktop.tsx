@@ -309,6 +309,17 @@ const HEADING_STYLE: Record<number, TextStyle> = {
   4: { fontSize: 15, fontWeight: "600" },
 };
 
+/**
+ * Every prose block is `selectable`: on a desktop app, text you can't drag a
+ * cursor through reads as broken. macOS swaps in a real NSTextView when the
+ * prop is set, so this is native selection with the usual Cmd-C.
+ *
+ * It goes on the outermost <Text> of each block rather than on the spans
+ * inside, so a drag runs across a paragraph's bold and code runs in one
+ * selection instead of stopping at each. Nothing here is inside a Pressable —
+ * a selectable RCTText eats the mouse-down its parent needs (see the
+ * pointerEvents note in Timeline's meta row).
+ */
 function Blocks({
   text,
   baseStyle,
@@ -334,7 +345,7 @@ function Blocks({
           case "heading": {
             const headingStyle: TextStyle = { ...HEADING_STYLE[b.level], color: T.fg };
             return (
-              <Text key={bi} style={headingStyle}>
+              <Text key={bi} selectable style={headingStyle}>
                 {renderInline(b.text, `h${bi}`, headingStyle, onUser)}
               </Text>
             );
@@ -343,7 +354,7 @@ function Blocks({
             const quoteStyle: TextStyle = { ...baseStyle, color: T.fgMuted };
             return (
               <View key={bi} style={s.quote}>
-                <Text style={quoteStyle}>
+                <Text selectable style={quoteStyle}>
                   {renderInline(b.lines.join("\n"), `q${bi}`, quoteStyle, onUser)}
                 </Text>
               </View>
@@ -357,7 +368,7 @@ function Blocks({
                     <Text style={[baseStyle, s.marker]}>{it.marker}</Text>
                     {/* flexShrink (not flex:1): flex-basis 0 contributes zero
                         intrinsic width, collapsing the bubble to a skinny column. */}
-                    <Text style={[{ flexShrink: 1 }, baseStyle]}>
+                    <Text selectable style={[{ flexShrink: 1 }, baseStyle]}>
                       {renderInline(it.text, `l${bi}:${ii}`, baseStyle, onUser)}
                     </Text>
                   </View>
@@ -366,7 +377,7 @@ function Blocks({
             );
           case "para":
             return (
-              <Text key={bi} style={baseStyle}>
+              <Text key={bi} selectable style={baseStyle}>
                 {b.lines.map((ln, li) => (
                   <Fragment key={li}>
                     {li > 0 ? "\n" : ""}
