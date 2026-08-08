@@ -343,6 +343,49 @@ describe("scope", () => {
   });
 });
 
+describe("telling a returning machine from a stranger", () => {
+  const asker = { bridgeId: "air", hostName: "Air", platform: "darwin" };
+
+  it("marks a request from a machine that already holds access", () => {
+    const api = createAccess({ store: memStore() });
+    // First-time ask: nothing held yet, so nothing to warn about.
+    const first = api.submit({
+      kind: "read",
+      requester: asker,
+      scope: { kind: "scoped", repoKeys: ["a"], threads: [] },
+      ip: "1",
+    });
+    expect(api.listPending()[0].existing).toBeNull();
+    api.approve(first.requestId, { scope: { kind: "scoped", repoKeys: ["a"], threads: [] } });
+
+    // Same machine comes back for more. The approver must be told.
+    api.submit({
+      kind: "read",
+      requester: asker,
+      scope: { kind: "scoped", repoKeys: ["a", "b"], threads: [] },
+      ip: "2",
+    });
+    expect(api.listPending()[0].existing).toEqual({ summary: "a", expiresAt: null });
+  });
+
+  it("does not count a stranger's own in-flight preview as already connected", () => {
+    const api = createAccess({ store: memStore() });
+    const p = api.submit({ kind: "preview", requester: asker, ip: "1" });
+    api.approve(p.requestId, {});
+    // Mid-handshake: the preview is scaffolding, not standing access. Calling
+    // this "wants more" would label every first-time asker a returning one.
+    // (Second ip: this api uses the real clock, so the rate limiter can't be
+    // wound forward the way the shared `access` fixture does it.)
+    api.submit({
+      kind: "read",
+      requester: asker,
+      scope: { kind: "scoped", repoKeys: ["a"], threads: [] },
+      ip: "2",
+    });
+    expect(api.listPending()[0].existing).toBeNull();
+  });
+});
+
 describe("route allowlist", () => {
   const read = { kind: "read", scope: { kind: "scoped", repoKeys: ["x"], threads: [] } };
   const full = { kind: "read", scope: { kind: "full" } };
@@ -352,6 +395,20 @@ describe("route allowlist", () => {
     for (const p of ["/v1/threads", "/v1/messages", "/v1/search", "/v1/git/changes", "/v1/usage"]) {
       expect(grantAllowsRoute(read, "GET", p)).toBe(true);
     }
+  });
+
+  it("lets a connected machine browse the catalog to ask for more", () => {
+    // A peer holding a live read grant can list names and dates, so "ask for
+    // more space" is a picker rather than a second stranger handshake. Scoped
+    // as well as full: the scoped case is the whole point, since a machine that
+    // already has everything has nothing left to ask for.
+    for (const g of [read, full, preview]) {
+      expect(grantAllowsRoute(g, "GET", "/v1/catalog/spaces")).toBe(true);
+      expect(grantAllowsRoute(g, "GET", "/v1/catalog/threads")).toBe(true);
+    }
+    // Still names only, and still read-only.
+    expect(grantAllowsRoute(preview, "GET", "/v1/messages")).toBe(false);
+    expect(grantAllowsRoute(read, "POST", "/v1/catalog/spaces")).toBe(false);
   });
 
   it("refuses everything that writes, executes, or hands over credentials", () => {

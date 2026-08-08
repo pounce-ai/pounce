@@ -2,8 +2,18 @@
  * "Which other Pounce machines are on this network?"
  *
  * Every bridge shouts a tiny beacon onto a multicast group and listens for
- * everyone else's, so the desktop app can offer "MacBook Air is nearby — ask it
- * for access" instead of making the user carry a token across machines by hand.
+ * everyone else's, so the desktop app can offer "MacBook Air is on this network
+ * — ask it for access" instead of making the user carry a token across machines
+ * by hand.
+ *
+ * LISTENING AND ANNOUNCING ARE SEPARATE, and that separation is the whole point
+ * of this module's shape. Announcing is opt-in because the beacon carries this
+ * machine's name; LISTENING gives nothing away, so it runs always. Conflating
+ * the two — one socket, opened only when visible — made "don't list me" also
+ * mean "and show me nobody", which is a trade nobody asked for: a person who
+ * wants to reach their other laptop had to first advertise themselves to the
+ * whole café, and the screen that was supposed to explain the setting was empty
+ * except for the setting.
  *
  * WHY A HAND-ROLLED BEACON AND NOT BONJOUR. The bridge ships as a single
  * `bun --compile` executable (bridge-main.mjs) with no Node on the host, so a
@@ -28,8 +38,15 @@
  *
  * A `query` is answered with a UNICAST hello straight back to the asker. That
  * makes a freshly launched app's list populate in milliseconds instead of
- * waiting out someone else's announce interval — the difference between
- * "Nearby machines" feeling instant and feeling broken.
+ * waiting out someone else's announce interval — the difference between the
+ * Connect screen feeling instant and feeling broken.
+ *
+ * An invisible machine asks ANONYMOUSLY: the query goes out with no bridgeId,
+ * hostname or port, so it prompts everyone to identify themselves without
+ * naming this one. It also never answers a query, since replying is exactly the
+ * thing it opted out of. What that costs is honest to state: the datagram still
+ * comes from this IP, so a peer running Pounce learns some machine here is
+ * looking. It does not learn which, or whose.
  */
 import dgram from "node:dgram";
 import os from "node:os";
@@ -52,12 +69,14 @@ const MAX_MSG = 512;
  * @param {string}  opts.bridgeId  this machine's stable id (identity.mjs)
  * @param {number}  opts.port      the bridge's HTTP port, so peers know where to knock
  * @param {() => (string|null)} [opts.version] app version, read late (it is set after boot)
+ * @param {boolean} [opts.announcing] whether to announce from the moment it starts
  */
-export function createDiscovery({ bridgeId, port, version = () => null }) {
+export function createDiscovery({ bridgeId, port, version = () => null, announcing = false }) {
   /** @type {Map<string, {bridgeId:string, hostName:string, platform:string, port:number, version:string|null, address:string, firstSeenAt:number, lastSeenAt:number}>} */
   const peers = new Map();
   let sock = null;
   let timer = null;
+  let announce = !!announcing;
 
   const self = () => ({
     v: 1,
@@ -112,16 +131,25 @@ export function createDiscovery({ bridgeId, port, version = () => null }) {
     } catch {
       return; // not ours — the group is shared with whatever else picked it
     }
-    if (msg?.v !== 1 || typeof msg.bridgeId !== "string" || !msg.bridgeId) return;
-    if (msg.bridgeId === bridgeId) return; // our own shout, looped back
+    if (msg?.v !== 1) return;
+    if (msg.bridgeId && msg.bridgeId === bridgeId) return; // our own shout, looped back
 
     if (msg.t === "query") {
+      // A query carries no identity when it comes from an invisible machine, so
+      // it is NOT required to have a bridgeId — the only thing we do with one is
+      // decide whether it is ours.
+      //
+      // Answering is announcing. A machine that has opted out stays quiet here
+      // even though it is listening, or the opt-out would leak on every query
+      // anyone sent.
+      if (!announce) return;
       // Answer privately rather than to the group: only the asker is waiting,
       // and N bridges replying to the group is N² packets for no reason.
       send({ ...self(), t: "hello" }, rinfo);
       return;
     }
     if (msg.t !== "hello") return;
+    if (typeof msg.bridgeId !== "string" || !msg.bridgeId) return;
 
     const now = Date.now();
     const prev = peers.get(msg.bridgeId);
@@ -139,12 +167,18 @@ export function createDiscovery({ bridgeId, port, version = () => null }) {
     });
   };
 
+  /** What to send when pulling everyone's identity. Anonymous while invisible —
+   *  a `query` needs nothing but its type to do its job, and the fields it would
+   *  otherwise carry are precisely the ones being withheld. */
+  const queryMsg = () => (announce ? { ...self(), t: "query" } : { v: 1, t: "query" });
+
   return {
     /**
-     * Start announcing. Idempotent, and — importantly — repeatable: this used
-     * to latch a `stopped` flag on the way down, which made announcing a
-     * one-way door. Now that a person can switch it on and off from the app,
-     * the page or the CLI, stopping must leave it startable again.
+     * Start LISTENING (and announcing too, if that is switched on). Idempotent,
+     * and — importantly — repeatable: this used to latch a `stopped` flag on the
+     * way down, which made it a one-way door. Now that a person can switch
+     * visibility on and off from the app, the page or the CLI, stopping must
+     * leave it startable again.
      */
     start() {
       if (sock) return;
@@ -178,16 +212,33 @@ export function createDiscovery({ bridgeId, port, version = () => null }) {
           sock.setMulticastTTL(1); // this link only — never routed off the LAN
         } catch {}
         joinAll();
-        send({ ...self(), t: "hello" });
-        send({ ...self(), t: "query" }); // pull everyone else's identity now
+        if (announce) send({ ...self(), t: "hello" });
+        send(queryMsg()); // pull everyone else's identity now
       });
       timer = setInterval(() => {
         // Re-join every tick: interfaces come and go (Wi-Fi reconnect, VPN up,
         // dock plugged in) and a membership does not survive its interface.
         joinAll();
-        send({ ...self(), t: "hello" });
+        if (announce) send({ ...self(), t: "hello" });
       }, ANNOUNCE_MS);
       timer.unref?.();
+    },
+
+    /**
+     * Turn announcing on or off without disturbing the listening half.
+     *
+     * Going visible shouts immediately rather than waiting out the interval, so
+     * the machine appears on other screens while the person who flipped the
+     * switch is still looking at it. Going invisible does NOT clear `peers`:
+     * those are other people's beacons, they are still arriving, and dropping
+     * them would blank the list the user is reading for no reason.
+     */
+    setAnnouncing(on) {
+      const next = !!on;
+      if (next === announce) return announce;
+      announce = next;
+      if (announce && sock) send({ ...self(), t: "hello" });
+      return announce;
     },
 
     stop() {
@@ -213,13 +264,19 @@ export function createDiscovery({ bridgeId, port, version = () => null }) {
     },
 
     /** Ask everyone to identify themselves now — the app calls this when the
-     *  user opens "Nearby machines" so the list is warm immediately. */
+     *  user opens Connect so the list is warm immediately. */
     refresh() {
-      send({ ...self(), t: "query" });
+      send(queryMsg());
     },
 
+    /** Listening: the socket is up, so `list()` means something. */
     get running() {
       return !!sock;
+    },
+
+    /** Announcing: this machine is in everyone else's list. */
+    get announcing() {
+      return !!sock && announce;
     },
   };
 }

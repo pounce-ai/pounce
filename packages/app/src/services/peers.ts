@@ -60,6 +60,14 @@ export interface AccessRequest {
   /** Shown on both machines, so the approver knows whose laptop this is. */
   readonly code: string;
   readonly state: string;
+  /**
+   * Access this machine ALREADY granted the asker, or null for a stranger.
+   *
+   * Set by the bridge (agents/access.mjs), because only that side can see its
+   * own grant list. It turns "someone wants in" into "someone you already
+   * trust wants more", which is a different decision.
+   */
+  readonly existing?: { summary: string; expiresAt: string | null } | null;
 }
 
 export interface Grant {

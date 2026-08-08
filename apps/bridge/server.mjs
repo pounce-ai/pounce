@@ -1188,7 +1188,7 @@ function pairDeepLink() {
 const access = createAccess();
 
 /**
- * Announcing this machine to the network is OPT-IN.
+ * Announcing this machine to the network is OPT-IN. LOOKING is not.
  *
  * The beacon carries the machine's NAME, and a name is usually a person's. Any
  * default that switched it on would put that on every café, office and
@@ -1196,12 +1196,19 @@ const access = createAccess();
  * cannot be un-shipped from installs already out there. So silence is the
  * default and the user turns it on, from /peers, the app, or the CLI.
  *
+ * None of that argument applies to LISTENING, which discloses nothing, so the
+ * beacon socket runs from boot regardless and only the announce half is gated
+ * here. Seeing who is out there and asking one of them for access are the two
+ * things a person on this screen came to do; requiring them to advertise
+ * themselves first was a toll, not a safeguard.
+ *
  * Precedence: POUNCE_DISCOVERY wins outright (scripted and fleet setups need to
  * be able to state it), then the persisted choice, then off.
  *
  * The port guard is separate and survives both: announcing is a claim to BE
  * this machine's bridge, and a dev bridge on 8100 must not invite peers to
- * knock on a door that closes when the dev server stops.
+ * knock on a door that closes when the dev server stops. It, too, is about
+ * announcing only — a dev bridge can still show you the network.
  */
 function discoveryWanted() {
   if (process.env.POUNCE_DISCOVERY === "0") return false;
@@ -1210,29 +1217,30 @@ function discoveryWanted() {
 }
 const discoveryEligible = () => PORT === DEFAULT_PORT || process.env.POUNCE_DISCOVERY === "1";
 
-// Built once and started/stopped on demand, so the toggle takes effect without
+// Announcing is flipped on demand, so the toggle takes effect without
 // restarting the bridge — a setting you have to reboot for is a setting people
 // leave alone.
-const discovery = discoveryEligible()
-  ? createDiscovery({ bridgeId: machineBridgeId(), port: PORT, version: () => APP_VERSION })
-  : null;
+const discovery = createDiscovery({
+  bridgeId: machineBridgeId(),
+  port: PORT,
+  version: () => APP_VERSION,
+  announcing: discoveryEligible() && discoveryWanted(),
+});
 
 /** Bring the beacon in line with the current setting. Safe to call repeatedly:
- *  start() and stop() are both no-ops when already in that state. */
+ *  start() and setAnnouncing() are both no-ops when already in that state. */
 function syncDiscovery() {
-  if (!discovery) return false;
-  const want = discoveryWanted();
-  if (want) discovery.start();
-  else discovery.stop();
-  return want;
+  discovery.start();
+  return discovery.setAnnouncing(discoveryEligible() && discoveryWanted());
 }
 
 /** How the toggle is presented: whether it's on, whether this bridge is even
- *  allowed to announce, and whether an env var has taken the decision away. */
+ *  allowed to announce, and whether an env var has taken the decision away.
+ *  `on` is about being FOUND — the list beside it is populated either way. */
 function discoveryState() {
   return {
-    on: !!discovery?.running,
-    eligible: !!discovery,
+    on: !!discovery.announcing,
+    eligible: discoveryEligible(),
     // A dev bridge on a non-default port, or POUNCE_DISCOVERY set explicitly —
     // either way the UI should show the state, not a control that won't stick.
     locked: process.env.POUNCE_DISCOVERY === "0" || process.env.POUNCE_DISCOVERY === "1",
@@ -1308,8 +1316,15 @@ function selfDescriptor() {
  *  The desktop app polls /v1/access; this is for when its window isn't open. */
 function notifyAccessRequest(reqRow) {
   if (!reqRow) return;
+  // A machine that already holds access is asking for MORE, and saying so is
+  // the whole value of the line: "wants read access" from a name you granted
+  // yesterday reads like a duplicate or a replay, and the safe-looking response
+  // to that is to ignore it.
+  const what = reqRow.existing
+    ? `wants MORE than the ${reqRow.existing.summary} it already reads`
+    : `wants ${reqRow.kind} access`;
   console.log(
-    `[access] ${reqRow.requester.hostName} wants ${reqRow.kind} access — code ${reqRow.code}. Approve in Pounce.`,
+    `[access] ${reqRow.requester.hostName} ${what} — code ${reqRow.code}. Approve in Pounce.`,
   );
 }
 
@@ -1709,12 +1724,14 @@ function render(){
     state.pending.forEach(function(r){ app.appendChild(renderRequest(r)); });
   }
 
-  app.appendChild(h('h2',{text:'Nearby machines'}));
+  // This machine first, then who else is out there — and the peer list is shown
+  // whether or not this one is visible, since looking and being looked at are
+  // separate settings now.
+  app.appendChild(h('h2',{text:'Connect'}));
   app.appendChild(renderDiscoveryToggle());
-  if(!state.discovery.on){
-    app.appendChild(h('p',{class:'empty',text:'You can already connect to a computer you know, and it can already ask you for access. This only decides whether you appear in its list without being added by hand.'}));
-  } else if(!state.peers.length){
-    app.appendChild(h('p',{class:'empty',text:'Nothing here yet. The other computer needs Pounce running and set to discoverable too, on the same network.'}));
+  app.appendChild(h('h2',{text:'Machines on this network'}));
+  if(!state.peers.length){
+    app.appendChild(h('p',{class:'empty',text:'No machines on this network yet. The other computer needs Pounce running and set to discoverable, on the same network as this one.'}));
   } else {
     state.peers.forEach(function(p){
       app.appendChild(h('div',{class:'card'},[h('div',{class:'row'},[
@@ -1767,7 +1784,7 @@ function renderDiscoveryToggle(){
     h('div',{class:'name',text: d.on ? 'Discoverable' : 'Not discoverable'}),
     h('div',{class:'meta',text: d.on
       ? 'They see its name, and can ask to read the projects you choose.'
-      : 'Turn this on to let another computer on your network find it.'})
+      : 'You can still see the machines below and ask them for access. This only decides whether this one appears in their list.'})
   ]));
   if(!d.eligible){
     row.appendChild(h('div',{class:'meta',text:'not available here'}));
@@ -2110,12 +2127,16 @@ const server = http.createServer(async (req, res) => {
     // either: approving access is a decision made at this keyboard.
     if (url.pathname === "/v1/peers") {
       if (!isOwner(req)) return send(res, 403, { error: "local only" });
-      if (discovery?.running) discovery.refresh();
+      // Listening runs from boot, so the list is real whether or not this
+      // machine announces itself. It used to be gated on `running`, which is
+      // how being invisible turned into being blind.
+      if (discovery.running) discovery.refresh();
       return send(res, 200, {
-        peers: discovery?.running ? discovery.list() : [],
+        peers: discovery.list(),
         discovery: discoveryState(),
-        // Kept for older clients that read this boolean.
-        discovering: !!discovery?.running,
+        // Kept for older clients that read this boolean. They take it to mean
+        // "am I visible", which is what it always described.
+        discovering: !!discovery.announcing,
       });
     }
     // The toggle itself. Persisted, so it survives a restart, and applied
@@ -2273,7 +2294,13 @@ const server = http.createServer(async (req, res) => {
     // sheet has to show when picking which spaces and threads to grant, and
     // sharing the projection means the two ends can't drift apart on what a
     // space is called or how many threads it holds.
-    const mayReadCatalog = (r) => r.grant?.kind === "preview" || isOwner(r);
+    // Any LIVE grant, not only a preview: a machine that already holds read
+    // access is not a stranger, and making it re-run the stranger handshake to
+    // ask for one more space is friction with no safety in it. See
+    // CATALOG_ROUTES in agents/access.mjs for the bound on what this exposes.
+    // (The grant is already proven live and route-checked by the time we get
+    // here — an expired or revoked one 401s far above this.)
+    const mayReadCatalog = (r) => !!r.grant || isOwner(r);
     if (url.pathname === "/v1/catalog/spaces") {
       if (!mayReadCatalog(req)) return send(res, 403, { error: "preview grant required" });
       return send(res, 200, { spaces: catalogSpaces(await getThreads()) });
@@ -2649,7 +2676,12 @@ const server = http.createServer(async (req, res) => {
       const { id, cwd, cols, rows } = await readBody(req);
       if (!id) return send(res, 400, { error: "id required" });
       const shell = openShell(id, { cwd, cols, rows });
-      return send(res, 200, { ok: true, cwd: shell.cwd, cols: shell.pty.cols, rows: shell.pty.rows });
+      return send(res, 200, {
+        ok: true,
+        cwd: shell.cwd,
+        cols: shell.pty.cols,
+        rows: shell.pty.rows,
+      });
     }
     // Live output. `format=cells` (default) streams the rendered screen; the
     // first frame is the WHOLE screen so a reconnecting client paints what's

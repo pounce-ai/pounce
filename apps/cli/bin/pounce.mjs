@@ -556,18 +556,26 @@ async function cmdPeers(opts) {
     }
   }
 
-  console.log(`\n${bold("Nearby machines")}`);
+  // This computer first, then the list — which is populated whether or not this
+  // one is visible, so visibility is reported as a fact about THIS machine
+  // rather than as a precondition for seeing anything.
+  console.log(`\n${bold("This computer")}`);
   if (!disc.eligible) {
-    console.log(dim("  this can't be turned on here"));
+    console.log(dim("  can't be made visible here"));
   } else if (!disc.on) {
-    console.log(dim("  this computer is hidden"));
+    console.log(dim("  hidden — it won't appear in anyone else's list"));
     console.log(
       disc.locked
         ? dim("  (set on this machine, in the bridge's environment)")
         : `  ${bold("pounce peers --visible on")}${dim("  to let computers here find it")}`,
     );
-  } else if (!peers.length) {
-    console.log(dim("  nothing yet — the other computer needs Pounce running and visible too"));
+  } else {
+    console.log(dim("  visible — computers here can see its name and ask for access"));
+  }
+
+  console.log(`\n${bold("Machines on this network")}`);
+  if (!peers.length) {
+    console.log(dim("  nothing yet — the other computer needs Pounce running and visible"));
   }
   for (const p of peers) {
     console.log(`  ${bold(p.hostName)}  ${dim(`${p.address}:${p.port}`)}`);
