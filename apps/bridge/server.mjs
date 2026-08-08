@@ -76,6 +76,8 @@ import {
   SUPPORTED as ccusageReads,
   resetCcusageCache,
 } from "./agents/ccusage.mjs";
+import { listEditors, openIn } from "./agents/editors.mjs";
+import { closeShell, getShell, killAllShells, openShell, reapShells } from "./agents/term.mjs";
 
 const IS_WIN = process.platform === "win32";
 
@@ -2640,6 +2642,96 @@ const server = http.createServer(async (req, res) => {
       const parent = dir === home || up === dir ? null : up;
       return send(res, 200, { path: dir, parent, home, entries });
     }
+    // --- Shell terminal (the app's terminal dock) -------------------------
+    // A real login shell per thread, in that thread's folder. See
+    // agents/term.mjs for why this is a separate registry from the agent PTYs.
+    if (url.pathname === "/v1/term/open" && req.method === "POST") {
+      const { id, cwd, cols, rows } = await readBody(req);
+      if (!id) return send(res, 400, { error: "id required" });
+      const shell = openShell(id, { cwd, cols, rows });
+      return send(res, 200, { ok: true, cwd: shell.cwd, cols: shell.pty.cols, rows: shell.pty.rows });
+    }
+    // Live output. `format=cells` (default) streams the rendered screen; the
+    // first frame is the WHOLE screen so a reconnecting client paints what's
+    // already there, and every frame after it carries only changed rows.
+    // `format=raw` streams the PTY's bytes for a client with its own emulator.
+    if (url.pathname === "/v1/term/stream") {
+      const id = url.searchParams.get("id");
+      const format = url.searchParams.get("format") === "raw" ? "raw" : "cells";
+      const shell = id ? getShell(id) : null;
+      if (!shell) return send(res, 404, { error: "no shell" });
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+        "access-control-allow-origin": "*",
+      });
+      let closed = false;
+      const write = (obj) => {
+        if (!closed) res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      };
+      const sink = { format, send: write };
+      // Raw clients get the scrollback so far; cell clients get the painted
+      // screen. Either way the first message is "here is the current state".
+      if (format === "raw") write({ raw: shell.pty.snapshot(), first: true });
+      else write({ ...shell.snapshot(), first: true });
+      const detach = shell.attach(sink);
+      // The shell outlives the stream, so a dead connection must let go of its
+      // sink or the fan-out grows one entry per reconnect.
+      const stop = () => {
+        if (closed) return;
+        closed = true;
+        detach();
+        clearInterval(beat);
+        res.end();
+      };
+      // Comment frames keep an idle connection from being reaped by a proxy or
+      // by the tunnel; a shell can sit silent for hours.
+      const beat = setInterval(() => {
+        if (!closed) res.write(": ping\n\n");
+      }, 25_000);
+      req.on("close", stop);
+      shell.exited.finally(() => {
+        write({ exited: true });
+        stop();
+      });
+      return;
+    }
+    // Keystrokes. Raw bytes, straight through — the client owns key encoding
+    // (it knows whether the app is in cursor-key application mode).
+    if (url.pathname === "/v1/term/input" && req.method === "POST") {
+      const { id, data } = await readBody(req);
+      const shell = id ? getShell(id) : null;
+      if (!shell) return send(res, 404, { error: "no shell" });
+      if (typeof data === "string" && data) shell.write(data);
+      return send(res, 200, { ok: true });
+    }
+    if (url.pathname === "/v1/term/resize" && req.method === "POST") {
+      const { id, cols, rows } = await readBody(req);
+      const shell = id ? getShell(id) : null;
+      if (!shell) return send(res, 404, { error: "no shell" });
+      if (cols > 0 && rows > 0) shell.resize(Math.min(500, cols), Math.min(200, rows));
+      return send(res, 200, { ok: true });
+    }
+    if (url.pathname === "/v1/term/close" && req.method === "POST") {
+      const { id } = await readBody(req);
+      return send(res, 200, { ok: id ? closeShell(id) : false });
+    }
+    // Editors installed on THIS machine, for the desktop app's "Open in" menu.
+    // A list rather than the client guessing: an entry that launches nothing is
+    // worse than an absent one.
+    if (url.pathname === "/v1/editors") {
+      return send(res, 200, { editors: listEditors() });
+    }
+    // Open a project folder in one of them. Purpose-built rather than an
+    // /v1/exec shell string so the path is passed as an argument and never
+    // interpolated — see agents/editors.mjs.
+    if (url.pathname === "/v1/open" && req.method === "POST") {
+      const { editor, cwd } = await readBody(req);
+      if (!editor) return send(res, 400, { error: "editor required" });
+      const r = openIn(editor, cwd);
+      return send(res, r.ok ? 200 : 400, r);
+    }
     if (url.pathname === "/v1/exec" && req.method === "POST") {
       const { cwd, command } = await readBody(req);
       if (!command) return send(res, 400, { error: "command required" });
@@ -2997,6 +3089,10 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
       syncDiscovery();
       sweepAccess();
       setInterval(sweepAccess, 60_000).unref?.();
+      // Shell terminals nobody is watching. A dock opened once on a thread you
+      // never went back to would otherwise hold a login shell for the life of
+      // the bridge.
+      setInterval(reapShells, 5 * 60_000).unref?.();
       restoreGrantTunnels();
       resolve({ server, token: TOKEN, ...PAIR });
     });
@@ -3223,6 +3319,9 @@ function killAllTunnels() {
 }
 
 process.on("exit", killAllTunnels);
+// Shells are children of this process; without this they survive as orphans
+// holding the thread's worktree open.
+process.on("exit", killAllShells);
 // Default signal deaths bypass the exit handler — reap the tunnel explicitly
 // so Ctrl-C'd bridges stop leaving identity-squatting orphans behind.
 for (const sig of ["SIGINT", "SIGTERM"]) {

@@ -17,6 +17,8 @@ import { AgentStatusIcon, COLOR } from "@pounce/app/ui";
 import { T } from "@pounce/app/ui/theme";
 import { DragRegion, TITLEBAR_INSET } from "@pounce/app/ui/native/DragRegion";
 import { useTrafficLightInset } from "./fullscreen";
+import { OpenInButton } from "./OpenIn";
+import { isTermOpen, toggleTerm } from "./TerminalDock";
 import { useFavThreadSet, useProjectNames, useThreads } from "@pounce/app/state/db/hooks";
 import { toggleFavThread } from "@pounce/app/state/stores";
 import type { MetricKey } from "@pounce/app/screens/Metric";
@@ -73,6 +75,9 @@ export function TabStrip() {
   const activeIsSession = !!tabs[active] && !PANE_ICON[tabs[active].path];
   const activeId = (activeIsSession ? tabs[active]?.params.id : null) ?? null;
   const isFav = !!activeId && favSet.has(activeId);
+  // Read through the observable so the icon lights up when the shortcut or the
+  // dock's own close button flips it, not just this button.
+  const termOpen = useSelector(() => isTermOpen(activeId));
   const trafficLightInset = useTrafficLightInset();
 
   return (
@@ -158,6 +163,10 @@ export function TabStrip() {
           the pane. Only meaningful with a session open. */}
       {activeIsSession ? (
         <>
+          {/* Leftmost of the thread controls, and the only one with a word on
+              it: opening the project in a real editor is a bigger action than
+              the toggles beside it, and it's the one people hunt for. */}
+          <OpenInButton />
           {/* Favourite is a toggle, not a menu item — it belongs where you can
               hit it in one click. Absent for new_* threads, which have no
               daemon id to favourite yet. */}
@@ -180,6 +189,20 @@ export function TabStrip() {
             style={({ pressed }) => [s.iconBtn, pressed && s.hover]}
           >
             <Ionicons name="search" size={14} color={searchOpen ? COLOR.accent : COLOR.fgMuted} />
+          </Pressable>
+          {/* A shell in this thread's folder. Sits with the other panel toggles
+              rather than in the Open menu: that menu launches other
+              applications, this one opens a panel in this window. */}
+          <Pressable
+            onPress={() => toggleTerm(activeId)}
+            accessibilityLabel={termOpen ? "Hide terminal" : "Show terminal"}
+            style={({ pressed }) => [s.iconBtn, pressed && s.hover]}
+          >
+            <Ionicons
+              name="terminal-outline"
+              size={14}
+              color={termOpen ? COLOR.accent : COLOR.fgMuted}
+            />
           </Pressable>
           <Pressable
             onPress={() => sessionChrome$.envOpen.set(true)}

@@ -308,7 +308,10 @@ async function dropLapsedGrants(configs: DeviceConfig[]): Promise<DeviceConfig[]
   for (const cfg of lapsed) await dropEndedGrant(cfg, "expired");
   return lapsed.length ? configs.filter((c) => !lapsed.includes(c)) : configs;
 }
-async function deviceForHost(hostId: string): Promise<DeviceConfig | null> {
+/** The saved config for a host, or null if it isn't paired. Exported for
+ *  ./terminal.ts, which owns its own transport but still has to reach the same
+ *  device list and token this module resolves. */
+export async function deviceForHost(hostId: string): Promise<DeviceConfig | null> {
   return (await listDeviceConfigs()).find((d) => d.id === hostId) ?? null;
 }
 
@@ -1318,6 +1321,57 @@ export async function fetchModels(hostId: string, agent: string): Promise<ModelI
     return models ?? [];
   } catch {
     return [];
+  }
+}
+
+/** One entry in the desktop app's "Open in" menu — an editor the host machine
+ *  actually has installed, or its file manager. */
+export interface EditorTarget {
+  id: string;
+  name: string;
+}
+
+/**
+ * Editors installed on a host, for the "Open in" menu.
+ *
+ * Empty on any failure, including an older bridge that has no /v1/editors: the
+ * caller hides the control rather than showing a menu of things that won't
+ * open. A menu is a promise, and one we can't keep shouldn't be made.
+ */
+export async function listEditors(hostId: string): Promise<EditorTarget[]> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return [];
+  try {
+    const { editors } = await get<{ editors: EditorTarget[] }>(cfg, "/v1/editors", 10_000);
+    return editors ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Open a thread's project folder in one of them, on the machine that holds it.
+ *
+ * Resolves to an error string rather than throwing: this is a menu click, and
+ * the worst outcome — a folder that no longer exists — deserves a line of text,
+ * not a crash.
+ */
+export async function openInEditor(
+  hostId: string,
+  editor: string,
+  cwd: string | null,
+): Promise<{ ok: boolean; error?: string }> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return { ok: false, error: "device not found" };
+  try {
+    const res = await fetch(`${await bridgeBase(cfg)}/v1/open`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ editor, cwd }),
+    });
+    return (await res.json()) as { ok: boolean; error?: string };
+  } catch (e) {
+    return { ok: false, error: String(e) };
   }
 }
 

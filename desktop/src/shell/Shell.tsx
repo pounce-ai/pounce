@@ -27,6 +27,8 @@ import { sessionChrome$ } from "@pounce/app/state/sessionChrome";
 import { ThreadUsageSummary } from "@pounce/app/components/ThreadStatusBar";
 import { Sidebar } from "./Sidebar";
 import { TabStrip } from "./TabStrip";
+import { OpenInMenu } from "./OpenIn";
+import { TerminalDock, isTermOpen, toggleTerm } from "./TerminalDock";
 import { DiffDock, DOCK_HIDE_BELOW } from "./DiffDock";
 import { Splitter, SPLITTER_WIDTH } from "./Splitter";
 import { reportWindowHeight } from "./fullscreen";
@@ -144,6 +146,12 @@ function StatusBar({ threadId }: { threadId: string }) {
   );
 }
 
+/** Modifiers spelled out in full — see enrichedInput.desktop.tsx for why an
+ *  omitted one means "don't care" under Fabric and would swallow ⌘` too. */
+const TERM_SHORTCUT = [
+  { key: "`", ctrlKey: true, shiftKey: false, altKey: false, metaKey: false },
+];
+
 export function Shell() {
   const detail = useSelector(nav$.detail);
   const modal = useSelector(nav$.modal);
@@ -155,6 +163,9 @@ export function Shell() {
   // describes the open thread (status bar, diff dock) must go quiet for it
   // rather than keep describing whatever was open before.
   const threadId = detail && !Pane ? (detail.params.id ?? null) : null;
+  // The dock needs the thread's machine and folder, which only the record has.
+  const termThread = useThread(threadId ?? undefined);
+  const termOpen = useSelector(() => isTermOpen(threadId));
   const [shellWidth, setShellWidth] = useState(0);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const sidebarStart = useRef(SIDEBAR_DEFAULT_WIDTH);
@@ -179,6 +190,16 @@ export function Shell() {
         // this platform, so the chrome can only learn this from here.
         reportWindowHeight(e.nativeEvent.layout.height);
       }}
+      // ⌃` toggles the terminal — the convention every editor uses. Handled on
+      // the window root rather than by a menu item so it works wherever focus
+      // is; a focused text field consumes its own keys first, which is why the
+      // dock's key sink deliberately does NOT claim this combination.
+      {...({
+        keyDownEvents: TERM_SHORTCUT,
+        onKeyDown: (e: { nativeEvent?: { key?: string; ctrlKey?: boolean } }) => {
+          if (e?.nativeEvent?.key === "`" && e.nativeEvent.ctrlKey) toggleTerm(threadId);
+        },
+      } as Record<string, unknown>)}
     >
       {sidebar ? (
         <>
@@ -239,7 +260,22 @@ export function Shell() {
             <DiffDock threadId={threadId} maxWidth={dockMax} />
           ) : null}
         </View>
+        {/* Full width under BOTH panes: a shell is about the checkout, not
+            about the transcript, so boxing it under one column would make it
+            look like part of the conversation. */}
+        {termOpen && threadId && termThread ? (
+          <TerminalDock
+            key={threadId}
+            threadId={threadId}
+            hostId={termThread.hostId}
+            cwd={termThread.worktree ?? termThread.cwd}
+          />
+        ) : null}
       </View>
+
+      {/* Above the panes, below the modal host: a menu has to escape the tab
+          strip it's anchored to, but must never cover a modal. */}
+      <OpenInMenu />
 
       {modal && entry ? (
         <View style={s.modalHost}>
