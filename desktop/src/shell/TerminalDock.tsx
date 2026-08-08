@@ -216,13 +216,16 @@ export function TerminalDock({
     [hostId, threadId],
   );
 
-  const onLayout = useCallback((e: { nativeEvent: { layout: { width: number; height: number } } }) => {
-    const { width, height: h } = e.nativeEvent.layout;
-    setSize({
-      cols: Math.max(20, Math.floor((width - 16) / CHAR_W)),
-      rows: Math.max(5, Math.floor((h - 8) / LINE_H)),
-    });
-  }, []);
+  const onLayout = useCallback(
+    (e: { nativeEvent: { layout: { width: number; height: number } } }) => {
+      const { width, height: h } = e.nativeEvent.layout;
+      setSize({
+        cols: Math.max(20, Math.floor((width - 16) / CHAR_W)),
+        rows: Math.max(5, Math.floor((h - 8) / LINE_H)),
+      });
+    },
+    [],
+  );
 
   const body = useMemo(
     () =>

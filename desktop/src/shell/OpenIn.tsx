@@ -20,11 +20,7 @@ import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import { COLOR } from "@pounce/app/ui";
 import { T } from "@pounce/app/ui/theme";
-import {
-  type EditorTarget,
-  listEditors,
-  openInEditor,
-} from "@pounce/app/services/bridge";
+import { type EditorTarget, listEditors, openInEditor } from "@pounce/app/services/bridge";
 import { useThreads } from "@pounce/app/state/db/hooks";
 import { nav$ } from "../shims/router";
 
@@ -76,9 +72,7 @@ export function OpenInButton() {
           if (open) return openIn$.anchor.set(null);
           // Measured at press time, not on layout: the strip reflows as tabs
           // open and close, and a position cached at mount would drift.
-          ref.current?.measureInWindow((x, y, w, h) =>
-            openIn$.anchor.set({ x, y: y + h + 4, w }),
-          );
+          ref.current?.measureInWindow((x, y, w, h) => openIn$.anchor.set({ x, y: y + h + 4, w }));
         }}
         accessibilityLabel="Open in"
         style={({ pressed }) => [s.btn, (pressed || open) && s.hover]}

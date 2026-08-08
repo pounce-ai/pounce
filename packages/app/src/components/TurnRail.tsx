@@ -32,7 +32,12 @@ const MAX_GAP = 14;
  *  carries, for the hover preview. */
 function previewOf(m: Marker, agent?: string): string {
   const text = m.type === "user_message" ? parseUserMessage(m.text, agent).text : m.text;
-  return text.trim().split("\n").find((l) => l.trim().length > 0) ?? "";
+  return (
+    text
+      .trim()
+      .split("\n")
+      .find((l) => l.trim().length > 0) ?? ""
+  );
 }
 
 export function TurnRail({
@@ -105,7 +110,10 @@ export function TurnRail({
       })}
 
       {hover != null && markers[hover] ? (
-        <View style={[s.preview, { top: Math.max(0, top + hover * gap - 12) }]} pointerEvents="none">
+        <View
+          style={[s.preview, { top: Math.max(0, top + hover * gap - 12) }]}
+          pointerEvents="none"
+        >
           <Text numberOfLines={3} style={s.previewText}>
             {previewOf(markers[hover], agent)}
           </Text>

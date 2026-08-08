@@ -105,7 +105,12 @@ export function sendTermInput(hostId: string, id: string, data: string): Promise
   return post(hostId, "/v1/term/input", { id, data });
 }
 
-export function resizeTerm(hostId: string, id: string, cols: number, rows: number): Promise<boolean> {
+export function resizeTerm(
+  hostId: string,
+  id: string,
+  cols: number,
+  rows: number,
+): Promise<boolean> {
   return post(hostId, "/v1/term/resize", { id, cols, rows });
 }
 
