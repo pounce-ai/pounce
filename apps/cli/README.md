@@ -20,6 +20,7 @@ pounce qr         same, but don't wait for the phone
 pounce status     bridge / tunnel / phone status
 pounce stop       stop the background bridge and its tunnel
 pounce logs [-f]  show (or follow) the bridge log
+pounce mcp        serve this machine's agent history over MCP (stdio)
 
 --port <n>        bridge port                 (default 8099)
 --token <t>       pairing token               (default: random, kept in ~/.pounce)
@@ -28,6 +29,40 @@ pounce logs [-f]  show (or follow) the bridge log
 ```
 
 Installed globally (`npm i -g use-pounce`), the command is just `pounce`.
+
+## Sharing threads with another machine
+
+Your laptop can read the threads running on your desktop, without either of them
+going through the cloud. Both machines need Pounce running on the same network.
+
+```
+pounce peers               who is nearby, who is asking, who has access
+pounce ask <machine>       ask a machine to share its threads with you
+pounce approve <code>      let a machine in
+pounce deny <code>         turn a request down
+pounce revoke <id|host>    take access away again
+
+--spaces a,b       limit to these projects           (ask + approve)
+--all              ask for everything they allow
+--hours <n>        how long the access lasts         (default 24; --forever for none)
+--note <text>      a line for the person approving
+--visible on|off   let other computers here find this one (hidden by default)
+```
+
+Nothing here happens behind your back:
+
+- **Being findable is opt-in.** A machine is invisible until you run
+  `pounce peers --visible on`.
+- **Someone has to say yes.** `ask` prints a short code and waits; the other
+  machine sees the same code and approves it there. Matching codes are how you
+  know you're answering the request you think you are.
+- **Access is read-only, scoped, and expires.** A grant covers the projects you
+  name and lapses after a day unless you say otherwise — `--forever` is a
+  choice, not the default. Revoke it early with `pounce revoke`.
+
+On a machine with a browser the same handshake lives at
+`http://127.0.0.1:8099/peers`; these commands are for the ones you only reach
+over SSH.
 
 ## What it does
 
