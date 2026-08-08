@@ -71,15 +71,34 @@ async function post(hostId: string, path: string, body: unknown): Promise<boolea
   }
 }
 
-/** Start (or re-attach to) the thread's shell. Idempotent — reopening returns
- *  the same session with its scrollback, which is what makes a tab switch
- *  feel like coming back rather than starting over. */
-export function openTerm(
+/**
+ * Start (or re-attach to) the thread's shell. Idempotent — reopening returns
+ * the same session with its scrollback, which is what makes a tab switch feel
+ * like coming back rather than starting over.
+ *
+ * Resolves with the cwd the shell ACTUALLY opened in, which is not always the
+ * one asked for: the bridge falls back to the home directory when the path
+ * doesn't exist. The dock shows this rather than the request, so a fallback is
+ * visible instead of being quietly mislabelled.
+ */
+export async function openTerm(
   hostId: string,
   id: string,
   opts: { cwd: string | null; cols: number; rows: number },
-): Promise<boolean> {
-  return post(hostId, "/v1/term/open", { id, ...opts });
+): Promise<{ ok: boolean; cwd?: string }> {
+  const cfg = await cfgFor(hostId);
+  if (!cfg) return { ok: false };
+  try {
+    const res = await fetch(`${await bridgeBase(cfg)}/v1/term/open`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ id, ...opts }),
+    });
+    if (!res.ok) return { ok: false };
+    return (await res.json()) as { ok: boolean; cwd?: string };
+  } catch {
+    return { ok: false };
+  }
 }
 
 export function sendTermInput(hostId: string, id: string, data: string): Promise<boolean> {

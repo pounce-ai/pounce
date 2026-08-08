@@ -268,7 +268,11 @@ export function Shell() {
             key={threadId}
             threadId={threadId}
             hostId={termThread.hostId}
-            cwd={termThread.worktree ?? termThread.cwd}
+            // `cwd` is the path; `worktree` is a NAME ("v2"), which the status
+            // bar uses only to choose between "Worktree" and "Local checkout".
+            // Passing it as a directory sent the shell a relative string that
+            // existed nowhere, so the bridge fell back to the home folder.
+            cwd={termThread.cwd}
           />
         ) : null}
       </View>

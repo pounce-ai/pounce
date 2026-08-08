@@ -155,6 +155,7 @@ export function TerminalDock({
   const height = useSelector(() => term$.height.get());
   const [lines, setLines] = useState<TermLine[]>([]);
   const [dead, setDead] = useState(false);
+  const [actualCwd, setActualCwd] = useState<string | null>(null);
   const [size, setSize] = useState({ cols: 0, rows: 0 });
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
@@ -171,12 +172,17 @@ export function TerminalDock({
     let live = true;
     setLines([]);
     setDead(false);
+    setActualCwd(null);
     void openTerm(hostId, threadId, {
       cwd,
       cols: sent.current.cols || 100,
       rows: sent.current.rows || 24,
-    }).then((ok) => {
-      if (!live || !ok) return;
+    }).then((res) => {
+      if (!live || !res.ok) return;
+      // What the shell actually opened in, which the bridge may have changed if
+      // the path was gone. Showing the request instead would let the header
+      // name a folder the shell isn't in.
+      if (res.cwd) setActualCwd(res.cwd);
       stop = streamTerm(hostId, threadId, (frame) => {
         if (frame.exited) {
           // `exit` closes the terminal, the way it closes a real one. This
@@ -253,7 +259,7 @@ export function TerminalDock({
       <View style={s.head}>
         <Ionicons name="terminal-outline" size={12} color={COLOR.fgMuted} />
         <Text numberOfLines={1} style={s.headLabel}>
-          {cwd ? cwd.replace(/^.*\//, "") : "shell"}
+          {(actualCwd ?? cwd)?.replace(/^.*\//, "") || "shell"}
           {dead ? " · exited" : ""}
         </Text>
         <Text style={s.headSize}>

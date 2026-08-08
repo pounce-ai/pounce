@@ -1327,7 +1327,6 @@ export default function SessionScreen() {
                       // settled.
                       <Animated.View entering={FadeIn.delay(450).duration(300)}>
                         <WorkingIndicator
-                          agent={session.agent}
                           since={turnStartTs}
                           tokens={turnTokens}
                         />
@@ -1371,15 +1370,6 @@ export default function SessionScreen() {
           onStop={() => void stop()}
           onViewChanges={() => router.push(`/changes?id=${session.id}`)}
           onTerminal={() => router.push(`/terminal?id=${session.id}`)}
-          onViewContext={
-            session.cwd
-              ? () =>
-                  router.push({
-                    pathname: "/context",
-                    params: { cwd: session.cwd!, hostId: session.hostId, repoId: session.repoId },
-                  })
-              : undefined
-          }
           onAddSource={canSteer ? () => composerRef.current?.startMention() : undefined}
           onRemoveSource={(p) => removeSource(session.id, p)}
           onFixConflicts={
