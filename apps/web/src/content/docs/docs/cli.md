@@ -24,6 +24,11 @@ Installed globally (`npm i -g use-pounce`), the command is just `pounce`.
 | `pounce status`    | Bridge / tunnel / phone status                             |
 | `pounce stop`      | Stop the background Bridge and its tunnel                  |
 | `pounce logs [-f]` | Show (or follow) the Bridge log                            |
+| `pounce peers`     | Machines nearby, who's asking, who has access              |
+| `pounce ask <machine>` | Ask another computer to share its threads with you     |
+| `pounce approve <code>` | Let a machine in                                      |
+| `pounce deny <code>` | Turn a request down                                      |
+| `pounce revoke <id>` | Take access away again                                   |
 
 ## Flags
 
@@ -33,6 +38,33 @@ Installed globally (`npm i -g use-pounce`), the command is just `pounce`.
 | `--token <t>`  | Pairing token (default: random, kept in `~/.pounce`) |
 | `--lan`        | Skip the tunnel — the QR pairs on this Wi-Fi only    |
 | `--foreground` | Run the Bridge attached to this terminal             |
+
+Sharing flags (see [Sharing with another machine](/docs/sharing)):
+
+| Flag             | Meaning                                                    |
+| ---------------- | ---------------------------------------------------------- |
+| `--spaces a,b`   | Limit to these projects — on `ask` and on `approve`         |
+| `--all`          | Ask for everything the other machine is willing to give     |
+| `--hours <n>`    | How long the access lasts (default `24`)                    |
+| `--forever`      | No expiry                                                   |
+| `--note "text"`  | A line for the person approving                             |
+
+## Sharing with another machine
+
+Machines running Pounce find each other on the network. One can ask another for
+**read-only** access to the projects its owner picks, with an expiry:
+
+```sh
+pounce peers                       # who's nearby, who's asking, who has access
+pounce ask work-laptop             # prints their catalog, then tells you what to run
+pounce ask work-laptop --spaces api --note "debugging the timeout"
+pounce approve 418207 --hours 8    # requests are addressed by their six-digit code
+pounce revoke e1f71ab0
+```
+
+Prefer buttons? The Bridge serves the same thing at
+`http://127.0.0.1:8099/peers`. Full details in
+[Sharing with another machine](/docs/sharing).
 
 ## Giving other agents your history
 

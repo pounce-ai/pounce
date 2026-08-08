@@ -14,6 +14,12 @@
  *   pounce status     bridge/tunnel/phone status
  *   pounce stop       stop the background bridge (and its tunnel)
  *   pounce logs [-f]  show the bridge log
+
+   pounce peers            machines nearby, who is asking, who has access
+   pounce ask <machine>    ask another computer to share its threads
+   pounce approve <code>   let a machine in (--spaces a,b --hours 8 --forever)
+   pounce deny <code>      turn a request down
+   pounce revoke <id>      take access away again
  *
  *   --port <n>     bridge port (default 8099)
  *   --token <t>    pairing token (default: random, persisted in ~/.pounce)
@@ -444,6 +450,260 @@ function cmdLogs(opts) {
 }
 
 // --- arg parsing --------------------------------------------------------------
+
+// --- sharing with other machines -------------------------------------------------
+// The same handshake the /peers page runs, for boxes with no browser: a server
+// you SSH into, or any machine where the desktop app (macOS-only) isn't an
+// option. Every call goes to the local bridge, which does the talking to peers.
+
+/** Authenticated call to OUR bridge. Fails with a clear line rather than a
+ *  stack when the bridge isn't up — that is the common case, not an error. */
+async function bridge(port, path, { method = "GET", body = null } = {}) {
+  let token;
+  try {
+    token = (await uiInfo(port)).token;
+  } catch {
+    throw new Error(`no bridge on port ${port} — run ${bold("pounce")} first`);
+  }
+  // Built rather than spread with an undefined body: a GET carrying a `body`
+  // key is invalid even when the value is undefined.
+  const init = {
+    method,
+    signal: AbortSignal.timeout(20_000),
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+      "user-agent": `use-pounce/${PKG.version}`,
+    },
+  };
+  if (body) init.body = JSON.stringify(body);
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, init);
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(out.error || `${path} -> ${res.status}`);
+  return out;
+}
+
+function fmtCode(c) {
+  return c ? `${c.slice(0, 3)}-${c.slice(3)}` : "";
+}
+function timeLeft(iso) {
+  if (!iso) return "no expiry";
+  const m = Math.round((Date.parse(iso) - Date.now()) / 60000);
+  if (m <= 0) return "expired";
+  if (m < 60) return `${m}m left`;
+  if (m < 2880) return `${Math.round(m / 60)}h left`;
+  return `${Math.round(m / 1440)}d left`;
+}
+function scopeText(sc) {
+  if (!sc || sc.kind === "full") return "everything";
+  const bits = [];
+  if (sc.repoKeys?.length) bits.push(sc.repoKeys.join(", "));
+  if (sc.threads?.length)
+    bits.push(`${sc.threads.length} thread${sc.threads.length === 1 ? "" : "s"}`);
+  return bits.join(" + ") || "nothing";
+}
+
+/** Resolve what the user typed — a hostname, an address, or a full URL — against
+ *  the machines we can actually see. Naming one that isn't there is a mistake
+ *  worth catching before we start a handshake with it. */
+async function resolvePeer(port, who) {
+  const { peers } = await bridge(port, "/v1/peers");
+  if (!who) return { peers, peer: null };
+  const hit = peers.find(
+    (p) =>
+      p.hostName === who ||
+      p.address === who ||
+      p.url === who ||
+      p.hostName.toLowerCase().startsWith(who.toLowerCase()),
+  );
+  if (hit) return { peers, peer: hit };
+  if (/^https?:\/\//.test(who)) return { peers, peer: { hostName: who, url: who } };
+  throw new Error(`no machine called "${who}" nearby — run ${bold("pounce peers")} to see them`);
+}
+
+async function cmdPeers(opts) {
+  const [{ peers }, access, granted] = await Promise.all([
+    bridge(opts.port, "/v1/peers"),
+    bridge(opts.port, "/v1/access"),
+    bridge(opts.port, "/v1/peers/granted"),
+  ]);
+
+  if (access.pending.length) {
+    console.log(`\n${bold("Waiting on you")}`);
+    for (const r of access.pending) {
+      const what =
+        r.kind === "preview" ? "a look at what's here" : `read access (${scopeText(r.scope)})`;
+      console.log(`  ${bold(r.requester.hostName)} wants ${what}   ${dim(fmtCode(r.code))}`);
+      if (r.note) console.log(`    ${dim(`"${r.note}"`)}`);
+      console.log(`    ${dim(`pounce approve ${r.code}`)}   ${dim(`pounce deny ${r.code}`)}`);
+    }
+  }
+
+  console.log(`\n${bold("Nearby machines")}`);
+  if (!peers.length)
+    console.log(dim("  none — Pounce must be running on the other computer, on this network"));
+  for (const p of peers) {
+    console.log(`  ${bold(p.hostName)}  ${dim(`${p.address}:${p.port}`)}`);
+    console.log(`    ${dim(`pounce ask ${p.hostName}`)}`);
+  }
+
+  console.log(`\n${bold("Access you hold")}`);
+  if (!granted.held.length) console.log(dim("  none"));
+  for (const g of granted.held) {
+    console.log(
+      `  ${bold(g.hostName || g.url)}  ${dim(`${scopeText(g.scope)} · ${timeLeft(g.expiresAt)}`)}`,
+    );
+  }
+
+  console.log(`\n${bold("Machines with access to this one")}`);
+  if (!access.grants.length) console.log(dim("  none"));
+  for (const g of access.grants) {
+    const what = g.kind === "preview" ? "browsing names" : g.summary;
+    console.log(`  ${bold(g.requester.hostName)}  ${dim(`${what} · ${timeLeft(g.expiresAt)}`)}`);
+    console.log(`    ${dim(`pounce revoke ${g.id.slice(0, 8)}`)}`);
+  }
+  console.log();
+}
+
+/** Poll one of our asks until the person at the other end answers. */
+async function waitForAnswer(port, ask, what) {
+  process.stdout.write(`\n${bold(`Asking ${ask.hostName} for ${what}`)}\n`);
+  console.log(`  Approve it on that machine. Check the code matches: ${bold(fmtCode(ask.code))}\n`);
+  const deadline = Date.now() + 5 * 60_000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const r = await bridge(port, `/v1/peers/ask/${ask.requestId}`).catch(() => null);
+    if (!r || r.state === "pending") continue;
+    if (r.state === "approved") return r;
+    throw new Error(`they did not grant access (${r.state})`);
+  }
+  throw new Error("nobody answered — the request timed out");
+}
+
+async function cmdAsk(opts, who) {
+  const { peer } = await resolvePeer(opts.port, who);
+  if (!peer) throw new Error(`which machine? run ${bold("pounce peers")} to see them`);
+
+  const wantSpaces = opts.spaces
+    ? opts.spaces
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+
+  // Reuse a preview we already hold on this machine rather than making its
+  // owner approve the same step twice.
+  const { held } = await bridge(opts.port, "/v1/peers/granted");
+  const have = held.find((h) => h.url === peer.url || h.hostName === peer.hostName);
+  let previewGrant = have && have.kind === "preview" ? have.grantId : null;
+
+  if (!previewGrant && !opts.all) {
+    const ask = await bridge(opts.port, "/v1/peers/ask", {
+      method: "POST",
+      body: { peerUrl: peer.url, kind: "preview", note: opts.note },
+    });
+    const got = await waitForAnswer(
+      opts.port,
+      { ...ask, hostName: peer.hostName },
+      "a look at what's there",
+    );
+    previewGrant = got.grantId;
+  }
+
+  // No spaces named yet: show the catalog and hand back the exact next command.
+  if (!wantSpaces.length && !opts.all) {
+    const cat = await bridge(opts.port, `/v1/peers/catalog?peer=${encodeURIComponent(peer.url)}`);
+    console.log(bold(`${peer.hostName} is showing names and dates only:\n`));
+    for (const s of cat.spaces || []) {
+      console.log(
+        `  ${s.repoKey.padEnd(28)} ${dim(`${s.threadCount} thread${s.threadCount === 1 ? "" : "s"}`)}`,
+      );
+    }
+    console.log(`\nAsk for the ones you want:`);
+    console.log(
+      `  ${dim(`pounce ask ${peer.hostName} --spaces ${(cat.spaces || [])[0]?.repoKey || "name"}`)}`,
+    );
+    console.log(
+      `  ${dim(`pounce ask ${peer.hostName} --all`)}  ${dim("(everything they'll allow)")}\n`,
+    );
+    return;
+  }
+
+  const ask = await bridge(opts.port, "/v1/peers/ask", {
+    method: "POST",
+    body: {
+      peerUrl: peer.url,
+      kind: "read",
+      previewGrant,
+      note: opts.note,
+      scope: opts.all ? { kind: "full" } : { repoKeys: wantSpaces, threads: [] },
+    },
+  });
+  const got = await waitForAnswer(opts.port, { ...ask, hostName: peer.hostName }, "read access");
+  console.log(
+    `${green("✓")} ${bold(peer.hostName)} granted ${bold(scopeText(got.scope))} · ${timeLeft(got.expiresAt)}\n`,
+  );
+  console.log(dim(`  Listed under "Access you hold" — see: pounce peers\n`));
+}
+
+/** Requests and grants are addressed by their SHORT code or id prefix, because
+ *  nobody is going to retype a 32-hex id from a terminal. */
+async function findRequest(port, key) {
+  const { pending } = await bridge(port, "/v1/access");
+  const k = String(key || "").replace(/-/g, "");
+  const hit = pending.find((r) => r.code === k || r.id === k || r.id.startsWith(k));
+  if (!hit) throw new Error(`no request matching "${key}" — run ${bold("pounce peers")}`);
+  return hit;
+}
+
+async function cmdApprove(opts, key) {
+  const r = await findRequest(opts.port, key);
+  const spaces = opts.spaces
+    ? opts.spaces
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : null;
+  // The owner's choice beats what was asked for; with nothing said, honour the
+  // request as it stands.
+  const scope =
+    r.kind === "preview"
+      ? undefined
+      : spaces
+        ? { repoKeys: spaces, threads: [] }
+        : (r.scope ?? { kind: "full" });
+  const hours = opts.forever ? null : (opts.hours ?? 24);
+  const out = await bridge(opts.port, "/v1/access/approve", {
+    method: "POST",
+    body: {
+      requestId: r.id,
+      scope,
+      expiresAt:
+        r.kind === "preview" || hours === null
+          ? null
+          : new Date(Date.now() + hours * 3600_000).toISOString(),
+    },
+  });
+  console.log(
+    `${green("✓")} ${r.requester.hostName} can read ${bold(out.grant.summary)} · ${timeLeft(out.grant.expiresAt)}`,
+  );
+}
+
+async function cmdDeny(opts, key) {
+  const r = await findRequest(opts.port, key);
+  await bridge(opts.port, "/v1/access/deny", { method: "POST", body: { requestId: r.id } });
+  console.log(`${green("✓")} denied ${r.requester.hostName}`);
+}
+
+async function cmdRevoke(opts, key) {
+  const { grants } = await bridge(opts.port, "/v1/access");
+  const k = String(key || "");
+  const hit = grants.find((g) => g.id === k || g.id.startsWith(k) || g.requester.hostName === k);
+  if (!hit) throw new Error(`no grant matching "${key}" — run ${bold("pounce peers")}`);
+  await bridge(opts.port, "/v1/access/revoke", { method: "POST", body: { grantId: hit.id } });
+  console.log(`${green("✓")} revoked ${hit.requester.hostName}`);
+}
+
 function parseArgs(argv) {
   const opts = {
     port: Number(process.env.BRIDGE_PORT || 8099),
@@ -451,6 +711,12 @@ function parseArgs(argv) {
     lan: false,
     foreground: false,
     follow: false,
+    // Sharing with other machines (see cmdPeers and friends).
+    spaces: null,
+    hours: null,
+    forever: false,
+    all: false,
+    note: null,
   };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
@@ -460,11 +726,17 @@ function parseArgs(argv) {
     else if (a === "--lan") opts.lan = true;
     else if (a === "--foreground") opts.foreground = true;
     else if (a === "--follow" || a === "-f") opts.follow = true;
+    else if (a === "--spaces") opts.spaces = argv[++i];
+    else if (a === "--hours") opts.hours = Number(argv[++i]);
+    else if (a === "--forever") opts.forever = true;
+    else if (a === "--all") opts.all = true;
+    else if (a === "--note") opts.note = argv[++i];
     else if (a === "--help" || a === "-h") rest.unshift("help");
     else if (a === "--version" || a === "-V") rest.unshift("version");
     else rest.push(a);
   }
-  return { opts, cmd: rest[0] || "up" };
+  // Positionals past the command: the machine to ask, the request to answer.
+  return { opts, cmd: rest[0] || "up", args: rest.slice(1) };
 }
 
 const HELP = `
@@ -476,6 +748,21 @@ ${bold("pounce")} — pair your phone with this machine ${dim(`(use-pounce v${PK
   ${bold("pounce stop")}       stop the background bridge and its tunnel
   ${bold("pounce logs")} [-f]  show (or follow) the bridge log
   ${bold("pounce mcp")}        serve your agent history to other AI tools over MCP ${dim("(stdio)")}
+
+${bold("Sharing with another computer")} ${dim("— read-only, scoped, and it expires")}
+
+  ${bold("pounce peers")}              who is nearby, who is asking, who has access
+  ${bold("pounce ask")} <machine>      ask a machine to share its threads with you
+  ${bold("pounce approve")} <code>     let a machine in
+  ${bold("pounce deny")} <code>        turn a request down
+  ${bold("pounce revoke")} <id|host>   take access away again
+
+  --spaces a,b    limit to these projects          ${dim("(ask + approve)")}
+  --all           ask for everything they allow
+  --hours <n>     how long the access lasts        ${dim("(default 24; --forever for none)")}
+  --note <text>   a line for the person approving
+
+  Or open ${bold("http://127.0.0.1:8099/peers")} in a browser for the same thing with buttons.
 
   --port <n>      bridge port                      ${dim("(default 8099)")}
   --token <t>     pairing token                    ${dim("(default: random, kept in ~/.pounce)")}
@@ -491,7 +778,7 @@ from anywhere — including a machine you're SSH'd into — and the phone
 connects. The bridge keeps running after you close the terminal.
 `;
 
-const { opts, cmd } = parseArgs(process.argv.slice(2));
+const { opts, cmd, args } = parseArgs(process.argv.slice(2));
 if (!Number.isInteger(opts.port) || opts.port <= 0 || opts.port > 65535) {
   console.error(red("invalid --port"));
   process.exit(2);
@@ -503,6 +790,11 @@ try {
   else if (cmd === "status") await cmdStatus(opts);
   else if (cmd === "stop") await cmdStop(opts);
   else if (cmd === "logs") cmdLogs(opts);
+  else if (cmd === "peers") await cmdPeers(opts);
+  else if (cmd === "ask") await cmdAsk(opts, args[0]);
+  else if (cmd === "approve") await cmdApprove(opts, args[0]);
+  else if (cmd === "deny") await cmdDeny(opts, args[0]);
+  else if (cmd === "revoke") await cmdRevoke(opts, args[0]);
   else if (cmd === "mcp") {
     // Import lazily: the MCP SDK is only needed for this one command, and
     // pairing (the hot path) shouldn't pay to load it.
