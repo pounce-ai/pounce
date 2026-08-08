@@ -143,6 +143,7 @@ export const Timeline = memo(function Timeline({
   footer,
   sessionId,
   listRef,
+  onVisibleIndex,
   onLongPressEvent,
   onRunCommand,
   onAtBottomChange,
@@ -197,6 +198,10 @@ export const Timeline = memo(function Timeline({
    *  "deliberately going back through history" from "heading for the newest
    *  message" — the two want opposite things from the Latest affordance. */
   onScrollDirection?: (direction: "up" | "down") => void;
+  /** The topmost visible row's index in the COLLAPSED list — what the turn rail
+   *  uses to show where you are. Fires on viewability, not on every scroll
+   *  frame, so it costs nothing while a turn streams. */
+  onVisibleIndex?: (index: number) => void;
   /**
    * The thread's folded task state, derived by the parent.
    *
@@ -430,6 +435,14 @@ export const Timeline = memo(function Timeline({
         // detach the pin, while a deliberate scroll-up still does.
         maintainScrollAtEndThreshold={0.25}
         onEndVisible={onEndVisible}
+        onViewableItemsChanged={
+          onVisibleIndex
+            ? ({ viewableItems }) => {
+                const first = viewableItems.find((v) => v.index != null);
+                if (first?.index != null) onVisibleIndex(first.index);
+              }
+            : undefined
+        }
         onScrollBeginDrag={onScrollBeginDrag}
         onScroll={onScroll}
         scrollEventThrottle={32}
@@ -564,7 +577,7 @@ const Row = memo(function Row({
     case "thinking_started":
       return <Meta text="Thinking…" />;
     case "thinking_finished":
-      return <Meta text={event.text ? `💭 ${event.text}` : "Thought"} />;
+      return <Meta text={event.text ? `💭 ${event.text}` : "Thought"} align="left" />;
     case "tool_call": {
       // Captured before the guards below: `isTaskCall` is a type predicate, and
       // once TS has narrowed past it `event` is `never` for the rest of the
@@ -1263,8 +1276,30 @@ function SearchHighlight({ term, children }: { term?: string; children: React.Re
   );
 }
 
-function Meta({ text, level }: { text: string; level?: "info" | "warning" | "error" }) {
-  return <Text style={[s.meta, level === "error" ? s.textDanger : s.textFaint]}>{text}</Text>;
+function Meta({
+  text,
+  level,
+  /** Centre is right for a status line — "Thinking…", "Task list cleared" —
+   *  which is a beat between turns rather than something you read. It is wrong
+   *  for prose: centred body copy has a ragged left edge, so the eye loses the
+   *  line start on every wrap. Anything carrying sentences passes "left". */
+  align = "center",
+}: {
+  text: string;
+  level?: "info" | "warning" | "error";
+  align?: "center" | "left";
+}) {
+  return (
+    <Text
+      style={[
+        s.meta,
+        align === "left" && s.metaLeft,
+        level === "error" ? s.textDanger : s.textFaint,
+      ]}
+    >
+      {text}
+    </Text>
+  );
 }
 
 /**
@@ -1495,6 +1530,9 @@ const s = StyleSheet.create((theme) => ({
   termBox: { borderRadius: 12, backgroundColor: "#000000", padding: 8 },
   termTextOut: { color: "#d6d6d6" },
   meta: { paddingVertical: 2, textAlign: "center", fontSize: 11 },
+  // Also loosens the leading: this is the one Meta that gets read rather than
+  // glanced at, and 11pt prose at default leading sets very tight.
+  metaLeft: { textAlign: "left", lineHeight: 16, paddingHorizontal: 2 },
   /** Unacknowledged send: dimmed so it reads as provisional at a glance. */
   pendingRow: { opacity: 0.55 },
   pendingNote: { flexDirection: "row", alignItems: "center", gap: 4, justifyContent: "flex-end" },

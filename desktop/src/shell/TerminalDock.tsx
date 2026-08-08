@@ -47,6 +47,13 @@ export const term$ = observable<{ open: Record<string, boolean>; height: number 
 
 export const isTermOpen = (id: string | null | undefined) => !!id && !!term$.open[id].get();
 
+/** Shut the panel for a thread. Distinct from `closeTerm`, which ends the SHELL
+ *  — this only hides the dock, and is what a finished shell triggers so the
+ *  panel doesn't linger over a prompt that will never come back. */
+export function closePanel(id: string | null | undefined) {
+  if (id) term$.open[id].set(false);
+}
+
 export function toggleTerm(id: string | null | undefined) {
   if (!id) return;
   term$.open[id].set(!term$.open[id].get());
@@ -171,7 +178,14 @@ export function TerminalDock({
     }).then((ok) => {
       if (!live || !ok) return;
       stop = streamTerm(hostId, threadId, (frame) => {
-        if (frame.exited) return setDead(true);
+        if (frame.exited) {
+          // `exit` closes the terminal, the way it closes a real one. This
+          // used to only set a flag, so the panel sat there unchanged and the
+          // command looked like it had done nothing at all.
+          setDead(true);
+          closePanel(threadId);
+          return;
+        }
         setLines((prev) => applyFrame(prev, frame));
       });
     });
@@ -251,6 +265,7 @@ export function TerminalDock({
             void closeTerm(hostId, threadId).then(() => {
               setLines([]);
               setDead(true);
+              closePanel(threadId);
             });
           }}
           accessibilityLabel="Kill terminal"

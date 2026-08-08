@@ -35,6 +35,18 @@ import { useSessionChrome, usePublishTasks, usePublishUsage } from "../state/ses
 import { Composer, type ComposerHandle, type ComposerSubmit } from "../components/Composer";
 import { DropZone, type DroppedFile } from "../components/DropZone";
 import { MarkerSheet, type Marker } from "../components/MarkerSheet";
+import { TurnRail } from "../components/TurnRail";
+
+/**
+ * The per-turn rail beside the transcript — parked, not deleted.
+ *
+ * The idea holds (it's the marker set drawn as a rail instead of hidden behind
+ * a button) but this drawing of it didn't earn its place, so it's off until it
+ * does. Everything it needs is still wired: the markers already exist, Timeline
+ * still offers `onVisibleIndex`, and the transcript already sits in a row that
+ * has room for it. Flipping this back to `true` is the whole revisit.
+ */
+const TURN_RAIL = false;
 import { shortModel, ThreadUsageSummary } from "../components/ThreadStatusBar";
 import { EnvironmentSheet } from "../components/EnvironmentSheet";
 import { ModelSheet } from "../components/ModelSheet";
@@ -90,7 +102,15 @@ import {
   type ThreadUsage,
 } from "../services/bridge";
 import { PounceIcon } from "../ui/native/Icon";
-import { ACTIVITY_LABEL, AgentStatusIcon, BranchChip, COLOR, INPUT_TWEAKS, pickSheet } from "../ui";
+import {
+  ACTIVITY_LABEL,
+  AgentStatusIcon,
+  BranchChip,
+  COLOR,
+  INPUT_TWEAKS,
+  IS_DESKTOP,
+  pickSheet,
+} from "../ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "../ui/agent-meta";
 
 /** Desktop renders this screen in a wide pane: pickers use Alert instead of
@@ -488,6 +508,9 @@ export default function SessionScreen() {
   );
 
   const [markerSheet, setMarkerSheet] = useState(false);
+  // Topmost visible row, for the turn rail's "you are here". Only the rail reads
+  // it, so it costs nothing on mobile where the rail never mounts.
+  const [visibleIndex, setVisibleIndex] = useState<number | undefined>(undefined);
   // Search + "…" are local state on mobile (the screen owns its header) and
   // shell-owned on desktop, where the tab strip renders those buttons instead.
   const {
@@ -1262,6 +1285,7 @@ export default function SessionScreen() {
                     <ShimmerLabel text="Loading conversation…" />
                   </Animated.View>
                 ) : null}
+                <View style={s.listRow}>
                 <Timeline
                   events={rawEvents}
                   tasks={tasks}
@@ -1279,6 +1303,7 @@ export default function SessionScreen() {
                     setAtBottom(true);
                   }}
                   onScrollDirection={setScrollDir}
+                  onVisibleIndex={TURN_RAIL && IS_DESKTOP ? setVisibleIndex : undefined}
                   highlight={searchHighlight}
                   anchorToId={anchorId}
                   onLongPressEvent={onLongPressEvent}
@@ -1310,6 +1335,18 @@ export default function SessionScreen() {
                     ) : undefined
                   }
                 />
+                {/* Beside the transcript, not over it: a rail that floats on top
+                    would sit on the text at narrow widths. Desktop only — the
+                    preview is a hover, and a phone has no pointer. */}
+                {TURN_RAIL && IS_DESKTOP ? (
+                  <TurnRail
+                    markers={markers}
+                    agent={session.agent}
+                    visibleIndex={visibleIndex}
+                    onJump={jumpTo}
+                  />
+                ) : null}
+                </View>
               </Animated.View>
             )}
           </View>
@@ -1559,6 +1596,11 @@ const ANIM = {
 } as const;
 
 const s = StyleSheet.create((theme) => ({
+  /** The transcript and the turn rail side by side. The wrapper above this is a
+   *  column (it also holds the absolutely-positioned loading overlay), so
+   *  without its own row the rail stacked under a flex-1 list and got no
+   *  height — present in the tree, zero pixels on screen. */
+  listRow: { flex: 1, flexDirection: "row" },
   root: { flex: 1, backgroundColor: theme.colors.bg },
   flex1: { flex: 1 },
   shrink: { flexShrink: 1 },

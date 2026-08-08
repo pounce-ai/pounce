@@ -151,18 +151,26 @@ function HighlightedCode({ code, lang }: { code: string; lang: string }) {
   const hlTheme = themeFor(light);
   const lines = useMemo(() => highlightLines(code, lang, light), [code, lang, light]);
   return (
-    <Text selectable style={s.codeCardBody}>
-      {lines.map((spans, i) => (
-        <Text key={i}>
-          {i > 0 ? "\n" : ""}
-          {spans.map((span, j) => (
-            <Text key={j} style={{ color: span.color ?? hlTheme.fg }}>
-              {span.text}
-            </Text>
-          ))}
-        </Text>
-      ))}
-    </Text>
+    // The padding lives on a View, not on the Text. rn-macos doesn't apply
+    // horizontal padding reliably to a multi-line Text with nested Texts inside
+    // it — the declared 12pt showed up as about 4, so code sat almost flush
+    // against the card's left border while the header above it (a View) indented
+    // correctly. Wrapping is the fix that holds for wrapped and scrolled lines
+    // alike.
+    <View style={s.codeCardPad}>
+      <Text selectable style={s.codeCardBody}>
+        {lines.map((spans, i) => (
+          <Text key={i}>
+            {i > 0 ? "\n" : ""}
+            {spans.map((span, j) => (
+              <Text key={j} style={{ color: span.color ?? hlTheme.fg }}>
+                {span.text}
+              </Text>
+            ))}
+          </Text>
+        ))}
+      </Text>
+    </View>
   );
 }
 
@@ -438,9 +446,8 @@ const s = StyleSheet.create({
     paddingVertical: 2,
   },
   runLabel: { fontSize: 11, fontWeight: "500", color: T.fg },
+  codeCardPad: { paddingHorizontal: 14, paddingBottom: 10 },
   codeCardBody: {
-    paddingHorizontal: 12,
-    paddingBottom: 8,
     fontFamily: "JetBrainsMono",
     fontSize: 12.5,
     lineHeight: 18,
@@ -451,7 +458,8 @@ const s = StyleSheet.create({
   semibold: { fontWeight: "600" },
   italic: { fontStyle: "italic" },
   link: { color: T.info, textDecorationLine: "underline" },
-  codeBlock: { borderRadius: 8, backgroundColor: T.bg, paddingHorizontal: 12, paddingVertical: 8 },
+  // Same inset as codeCardPad, so a fenced block and a lifted one indent alike.
+  codeBlock: { borderRadius: 8, backgroundColor: T.bg, paddingHorizontal: 14, paddingVertical: 10 },
   codeText: { fontFamily: "JetBrainsMono", fontSize: 12.5, lineHeight: 18, color: T.fgMuted },
   quote: { borderLeftWidth: 2, borderColor: T.borderStrong, paddingLeft: 12 },
   listItem: { flexDirection: "row", gap: 8, paddingLeft: 4 },
