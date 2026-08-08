@@ -15,11 +15,12 @@
  *   pounce stop       stop the background bridge (and its tunnel)
  *   pounce logs [-f]  show the bridge log
 
-   pounce peers            machines nearby, who is asking, who has access
-   pounce ask <machine>    ask another computer to share its threads
-   pounce approve <code>   let a machine in (--spaces a,b --hours 8 --forever)
-   pounce deny <code>      turn a request down
-   pounce revoke <id>      take access away again
+ *
+ *   pounce peers            machines nearby, who is asking, who has access
+ *   pounce ask <machine>    ask another computer to share its threads
+ *   pounce approve <code>   let a machine in (--spaces a,b --hours 8 --forever)
+ *   pounce deny <code>      turn a request down
+ *   pounce revoke <id>      take access away again
  *
  *   --port <n>     bridge port (default 8099)
  *   --token <t>    pairing token (default: random, persisted in ~/.pounce)
