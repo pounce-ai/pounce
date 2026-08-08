@@ -663,6 +663,16 @@ const s = StyleSheet.create({
     paddingVertical: 9,
   },
   primaryLabel: { fontSize: 13, fontWeight: "600", color: T.bg },
+  // Used by the announcing switch when it is already on, where the action is
+  // "stop" and should not read as the thing to do.
+  ghostBtn: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: T.border,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  ghostLabel: { fontSize: 13, color: T.fgMuted },
   disabled: { opacity: 0.4 },
   pressed: { opacity: 0.8 },
 });
