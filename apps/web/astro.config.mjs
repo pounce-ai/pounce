@@ -31,6 +31,7 @@ export default defineConfig({
             "docs/activity",
             "docs/context",
             "docs/agents",
+            "docs/sharing",
             "docs/remote-access",
             "docs/desktop",
             "docs/cli",

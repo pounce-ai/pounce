@@ -23,8 +23,10 @@ import { execFileSync, spawn } from "node:child_process";
 import {
   createReadStream,
   existsSync,
+  mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -53,6 +55,15 @@ import {
 import { agentEnv, binPath, binVersion, primaryLanIp } from "./agents/env.mjs";
 import { publicConfig, readConfig, writeConfig } from "./agents/config.mjs";
 import { LEGACY_TOKEN, bridgeToken, legacyAllows, tokenMatches } from "./agents/token.mjs";
+import { bridgeId as machineBridgeId } from "./agents/identity.mjs";
+import { createDiscovery } from "./agents/discovery.mjs";
+import {
+  createAccess,
+  grantAllowsRoute,
+  normalizeScope,
+  pathInScope,
+  resolveScope,
+} from "./agents/access.mjs";
 import { readContextFiles, writeContextFile } from "./agents/context.mjs";
 import { createHistorySearch } from "./agents/search.mjs";
 import { createActivityIndex } from "./agents/activity-index.mjs";
@@ -1167,10 +1178,202 @@ function pairDeepLink() {
   return link;
 }
 
+// --- peer access ---------------------------------------------------------------
+// Other machines finding this one, asking it for a scoped read-only look at its
+// threads, and losing that access when the grant lapses. See agents/access.mjs
+// for the handshake and agents/discovery.mjs for the beacon.
+
+const access = createAccess();
+
+/** Discovery announces "a bridge lives here" to the whole LAN, so the same
+ *  singleton reasoning as ensureTunnel applies: only the machine's real bridge
+ *  may claim the identity, or a dev bridge on port 8100 would invite peers to
+ *  knock on a door that closes when you stop the dev server. */
+const DISCOVERY_ON =
+  process.env.POUNCE_DISCOVERY !== "0" &&
+  (PORT === DEFAULT_PORT || process.env.POUNCE_DISCOVERY === "1");
+const discovery = DISCOVERY_ON
+  ? createDiscovery({ bridgeId: machineBridgeId(), port: PORT, version: () => APP_VERSION })
+  : null;
+
+/** Reap grants that have run out, and the guest tunnels holding their doors
+ *  open. Belt and braces alongside the per-request expiry check: a grant nobody
+ *  is using should still stop existing on time. */
+function sweepAccess() {
+  for (const g of access.sweep()) stopGrantTunnel(g.id);
+}
+
+/** The owner's own controls (approve, revoke, browse peers) are not something a
+ *  guest may reach, and not something the LAN may reach either — only this
+ *  machine's app, holding this machine's token. */
+function isOwner(req) {
+  return isLoopback(req) && !req.grant;
+}
+
+/** How a granted peer reaches this machine afterwards. The LAN address is what
+ *  it used to ask; the tunnel identity is what keeps working once it leaves. */
+function ownIdentity() {
+  return {
+    id: machineBridgeId(),
+    hostName: os.hostname().replace(/\.local$/, ""),
+    url: PAIR?.pairUrl ?? null,
+    nodeId: null,
+    relay: null,
+  };
+}
+
+// --- asking ANOTHER machine for access -------------------------------------------
+// The requester half, run by the bridge rather than by an app.
+//
+// It has to live here for two reasons. The desktop app is macOS-only, so on
+// Windows and Linux the bridge IS the client. And even on a Mac, the bridge's
+// own /peers page cannot call a peer directly: that is a cross-origin request,
+// and every bridge refuses anything carrying an Origin it did not serve. So the
+// page (and the CLI, and anything else local) asks us, and we do the talking.
+
+/** A short, plain HTTP call to a peer. Never sends an Origin — we are not a
+ *  browser — so the peer's own guard is satisfied. */
+async function peerFetch(url, opts = {}, timeoutMs = 10_000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, {
+      ...opts,
+      signal: ctrl.signal,
+      headers: { "content-type": "application/json", ...(opts.headers || {}) },
+    });
+    const body = await r.json().catch(() => ({}));
+    return { ok: r.ok, status: r.status, body };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** How we introduce ourselves to a peer — the same identity our beacon carries,
+ *  so the peer can match the request to the machine it can see on the network. */
+function selfDescriptor() {
+  return {
+    bridgeId: machineBridgeId(),
+    hostName: os.hostname().replace(/\.local$/, ""),
+    platform: process.platform,
+    appVersion: APP_VERSION,
+  };
+}
+
+/** Pending requests waiting on a human, surfaced where a human will see them.
+ *  The desktop app polls /v1/access; this is for when its window isn't open. */
+function notifyAccessRequest(reqRow) {
+  if (!reqRow) return;
+  console.log(
+    `[access] ${reqRow.requester.hostName} wants ${reqRow.kind} access — code ${reqRow.code}. Approve in Pounce.`,
+  );
+}
+
+/** A grant's scope resolved against the CURRENT thread list, so a thread started
+ *  today in a space granted yesterday is included — the owner agreed to the
+ *  space, not to a snapshot of what happened to be in it. */
+async function grantScope(req) {
+  return resolveScope(req.grant?.scope, await getThreads());
+}
+
+/**
+ * Refuse a guest request that names something outside its scope, BEFORE the
+ * route runs.
+ *
+ * Out-of-scope answers 404 and not 403 throughout: a guest must not be able to
+ * map which threads exist on the machine by watching which ids give a different
+ * error. "Not found" is also simply true from where it stands.
+ */
+async function guardScopedParams(req, url) {
+  const scope = await grantScope(req);
+  if (scope.full) return null;
+  const p = url.pathname;
+  const miss = { code: 404, body: { error: "not found" } };
+
+  // Routes addressed by (agent, thread).
+  if (["/v1/messages", "/v1/image", "/v1/trajectory", "/v1/usage"].includes(p)) {
+    const agent = url.searchParams.get("agent");
+    const thread = url.searchParams.get("thread");
+    if (!agent || !thread) return null; // the route's own 400 is the better answer
+    return scope.keys.has(`${agent}:${thread}`) ? null : miss;
+  }
+  // Markers can be asked for across every thread at once, which would enumerate
+  // the lot. A guest must name a thread it holds.
+  if (p === "/v1/markers") {
+    const thread = url.searchParams.get("thread");
+    return thread && scope.ids.has(thread) ? null : miss;
+  }
+  // Routes addressed by a directory: allowed only inside a granted thread's
+  // checkout or worktree.
+  if (["/v1/context", "/v1/git/changes", "/v1/git/checks"].includes(p)) {
+    return pathInScope(scope, url.searchParams.get("cwd")) ? null : miss;
+  }
+  if (p === "/v1/file") {
+    return pathInScope(scope, url.searchParams.get("path")) ? null : miss;
+  }
+  return null;
+}
+
+/** Narrow a thread list to what a grant may see. */
+function filterThreads(scope, threads) {
+  if (scope.full) return threads;
+  return threads.filter((t) => scope.keys.has(`${t.agent}:${t.id}`));
+}
+
+/**
+ * The catalog a PREVIEW grant reads: enough to choose what to ask for, and
+ * nothing more.
+ *
+ * Projected by hand rather than by deleting fields from a thread, so a field
+ * added to the thread shape later cannot leak here by default. Notably absent:
+ * `preview` (the first user message), `cwd`, `gitBranch`, `modelProvider`.
+ */
+function catalogThread(t) {
+  return {
+    id: t.id,
+    agent: t.agent,
+    name: t.name,
+    repoKey: t.repo,
+    createdAt: t.createdAt,
+    lastActivityAt: t.lastActivityAt || t.createdAt,
+  };
+}
+
+function catalogSpaces(threads) {
+  const byRepo = new Map();
+  for (const t of threads) {
+    // The repo key is already a real folder name (see resolveWorktreeOwners),
+    // so there is nothing to translate — the app names spaces from this.
+    const row = byRepo.get(t.repo) ?? {
+      repoKey: t.repo,
+      threadCount: 0,
+      firstActivityAt: null,
+      lastActivityAt: null,
+    };
+    row.threadCount++;
+    const first = t.createdAt;
+    const last = t.lastActivityAt || t.createdAt;
+    if (first && (!row.firstActivityAt || first < row.firstActivityAt)) row.firstActivityAt = first;
+    if (last && (!row.lastActivityAt || last > row.lastActivityAt)) row.lastActivityAt = last;
+    byRepo.set(t.repo, row);
+  }
+  return [...byRepo.values()].sort((a, b) =>
+    (b.lastActivityAt || "").localeCompare(a.lastActivityAt || ""),
+  );
+}
+
 /** Only the machine running the bridge may read the UI surface (it leaks the token). */
 function isLoopback(req) {
   const a = req.socket.remoteAddress || "";
   return a === "127.0.0.1" || a === "::1" || a === "::ffff:127.0.0.1";
+}
+
+/** Is this request from a page THIS bridge served? Loopback socket AND an Origin
+ *  naming our own address and port — both, so neither can be claimed alone. */
+function isOwnOrigin(req) {
+  if (!isLoopback(req)) return false;
+  const o = req.headers.origin;
+  return o === `http://127.0.0.1:${PORT}` || o === `http://localhost:${PORT}`;
 }
 
 // Self-contained pairing page served at GET / (loopback only). The desktop app
@@ -1210,6 +1413,10 @@ const UI_HTML = `<!DOCTYPE html>
 .foot .ver{font-weight:600;color:var(--muted)}
 .foot .os b{font-weight:600}
 .foot .url{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;user-select:text}
+/* Quiet by default; turns into a call to action the moment a machine asks. */
+.peerlink{font-size:12px;color:var(--muted);text-decoration:none;border-bottom:1px solid transparent}
+.peerlink:hover{color:var(--accent);border-color:var(--accent)}
+.peerlink.due{font-weight:700;color:var(--accent)}
 </style></head>
 <body><main class="card">
 <header class="brand"><span class="paw">🐾</span><h1>Pounce&nbsp;Bridge</h1></header>
@@ -1219,6 +1426,7 @@ const UI_HTML = `<!DOCTYPE html>
 <div class="status"><span class="dot idle" id="dot"></span><span id="statusText">Starting…</span></div>
 <div class="syncbar" id="syncbar"><i></i></div>
 <p class="hint" id="hint">Open Pounce on your phone, go to Sync, and scan this code.</p>
+<a class="peerlink" id="peerlink" href="/peers">Share with another computer &rarr;</a>
 <footer class="foot">
 <div class="ver" id="ver">Pounce&nbsp;Bridge</div>
 <div class="os">Agents run natively · off-LAN sync via <b>iroh</b> p2p</div>
@@ -1254,10 +1462,419 @@ function tick(){
       dot.className='dot idle'; bar.className='syncbar'; set('statusText','Ready to pair');
       set('hint','Open Pounce on your phone, go to Sync, and scan this code.');
     }
+    // A machine asking for access must be visible from the page people
+    // actually leave open, not only from /peers.
+    if(d.token) fetch('/v1/access',{cache:'no-store',headers:{authorization:'Bearer '+d.token}})
+      .then(function(r){return r.json();}).then(function(a){
+        var n = (a.pending||[]).length, el = document.getElementById('peerlink');
+        el.textContent = n ? (n===1?'1 machine is asking for access →':n+' machines are asking for access →')
+                           : 'Share with another computer →';
+        el.className = n ? 'peerlink due' : 'peerlink';
+      }).catch(function(){});
   }).catch(function(){ set('statusText','Starting...'); });
 }
 tick(); setInterval(tick, 1200);
 </script></body></html>`;
+
+/**
+ * The bridge’s own peer-sharing page, at GET /peers (loopback only).
+ *
+ * This exists because the desktop app is macOS-only. On Windows and Linux — and
+ * on any headless box someone has SSH’d into — the bridge IS the product, so the
+ * whole handshake has to work from a browser pointed at localhost: find machines,
+ * ask one for access, answer the ones asking you, and take access away again.
+ *
+ * Every peer call goes through /v1/peers/* rather than straight at the peer. This
+ * page’s fetches would be cross-origin, and a bridge refuses anything carrying an
+ * Origin it did not serve — so the bridge does the talking on the page’s behalf.
+ *
+ * Same dependency-free rules as UI_HTML: inline CSS, vanilla JS, no backticks.
+ */
+const PEERS_HTML = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Pounce · Machines</title>
+<style>
+:root{--bg:#faf7fb;--fg:#1a1320;--muted:#6b6472;--faint:#9a93a1;--accent:#7c3aed;--ok:#16a34a;--border:#ece7f0;--card:#fff}
+@media(prefers-color-scheme:dark){:root{--bg:#141118;--fg:#f3f0f5;--muted:#a79fb0;--faint:#7c7486;--border:#2a2431;--card:#1c1822}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:640px;margin:0 auto;padding:24px 20px 60px}
+h1{font-size:19px;margin:2px 0;letter-spacing:-.02em}
+.lede{margin:0 0 6px;font-size:13px;color:var(--muted)}
+h2{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);margin:24px 0 8px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:13px 15px;margin-bottom:8px}
+.row{display:flex;align-items:center;gap:12px}
+.grow{flex:1;min-width:0}
+.name{font-size:14px;font-weight:600}
+.meta{font-size:11.5px;color:var(--faint)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+button{font:inherit;font-size:13px;font-weight:600;border-radius:9px;padding:7px 13px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer}
+button:hover{border-color:var(--faint)}
+button.p{background:var(--accent);border-color:var(--accent);color:#fff}
+button:disabled{opacity:.45;cursor:default}
+.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:17px;letter-spacing:2px;color:var(--muted)}
+.empty{font-size:13px;color:var(--muted);line-height:1.55;margin:6px 0 0}
+.note{font-size:12px;font-style:italic;color:var(--muted);margin:6px 0 0}
+.field{font-size:11px;font-weight:700;color:var(--faint);margin:12px 0 5px;text-transform:uppercase;letter-spacing:.05em}
+label.opt{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 0;cursor:pointer}
+.box{border:1px solid var(--border);border-radius:9px;max-height:190px;overflow-y:auto;padding:8px;margin-top:6px}
+.box label{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:3px 2px;cursor:pointer}
+.box .sp{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.glabel{font-size:10px;font-weight:700;color:var(--faint);text-transform:uppercase;margin:8px 0 2px}
+input[type=search]{width:100%;font:inherit;font-size:13px;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--fg);margin-top:8px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border-radius:999px;padding:5px 11px;font-size:12px}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:14px}
+.spin{display:inline-block;width:13px;height:13px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px;margin-right:7px}
+@keyframes sp{to{transform:rotate(360deg)}}
+a.back{font-size:12px;color:var(--accent);text-decoration:none}
+</style></head>
+<body><div class="wrap">
+<a class="back" href="/">&larr; Pairing</a>
+<h1>Machines</h1>
+<p class="lede">Share this machine's threads with another computer, or ask one to share with you. Access is read-only and expires.</p>
+<div id="app"></div>
+</div>
+<script>
+var TOKEN = null, state = {peers:[], pending:[], grants:[], held:[], spaces:[]}, flow = null, busy = false;
+
+function h(tag, attrs, kids){
+  var e = document.createElement(tag);
+  attrs = attrs || {};
+  for(var k in attrs){
+    if(k === 'text') e.textContent = attrs[k];
+    else if(k.slice(0,2) === 'on') e[k] = attrs[k];
+    else if(attrs[k] !== null && attrs[k] !== undefined) e.setAttribute(k, attrs[k]);
+  }
+  (kids||[]).forEach(function(c){ if(c) e.appendChild(c); });
+  return e;
+}
+function api(path, opts){
+  opts = opts || {};
+  opts.headers = Object.assign({'content-type':'application/json'}, opts.headers||{}, {authorization:'Bearer '+TOKEN});
+  return fetch(path, opts).then(function(r){ return r.json().catch(function(){ return {}; }); });
+}
+function left(iso){
+  if(!iso) return 'no expiry';
+  var d = Math.round((Date.parse(iso) - Date.now())/60000);
+  if(d <= 0) return 'expired';
+  if(d < 1) return 'under a minute';
+  if(d < 60) return d + 'm left';
+  if(d < 2880) return Math.round(d/60) + 'h left';
+  return Math.round(d/1440) + 'd left';
+}
+function day(iso){
+  if(!iso) return '?';
+  var n = Math.floor((Date.now() - Date.parse(iso))/86400000);
+  if(n <= 0) return 'today';
+  if(n === 1) return 'yesterday';
+  return new Date(iso).toLocaleDateString(undefined,{month:'short',day:'numeric'});
+}
+function span(a,b){ var x = day(a), y = day(b); return x === y ? x : x + ' → ' + y; }
+function fmtCode(c){ return c ? c.slice(0,3) + '-' + c.slice(3) : ''; }
+function summarize(sc){
+  if(!sc || sc.kind === 'full') return 'Everything';
+  var bits = [];
+  if(sc.repoKeys && sc.repoKeys.length) bits.push(sc.repoKeys.length === 1 ? sc.repoKeys[0] : sc.repoKeys.length + ' spaces');
+  if(sc.threads && sc.threads.length) bits.push(sc.threads.length + ' thread' + (sc.threads.length === 1 ? '' : 's'));
+  return bits.join(' + ') || 'Nothing';
+}
+
+function refresh(){
+  if(flow) return Promise.resolve();
+  return Promise.all([api('/v1/peers'), api('/v1/access'), api('/v1/peers/granted')]).then(function(r){
+    state.peers = r[0].peers || [];
+    state.pending = r[1].pending || [];
+    state.grants = r[1].grants || [];
+    state.held = r[2].held || [];
+    render();
+  });
+}
+
+function startAsk(peer){
+  flow = {peer:peer, step:'waiting', what:'a look at what is there'};
+  render();
+  api('/v1/peers/ask', {method:'POST', body:JSON.stringify({peerUrl:peer.url, kind:'preview'})}).then(function(a){
+    if(a.error || !a.requestId){ flow = {peer:peer, step:'failed', why:a.error || 'Could not reach that machine.'}; return render(); }
+    flow.code = a.code; flow.askId = a.requestId; render(); pollAsk();
+  });
+}
+function pollAsk(){
+  if(!flow || flow.step !== 'waiting') return;
+  var id = flow.askId;
+  api('/v1/peers/ask/' + id).then(function(r){
+    if(!flow || flow.askId !== id) return;
+    if(r.state === 'approved' && r.token && r.kind === 'preview'){
+      flow = {peer:flow.peer, step:'catalog', token:r.token, grantId:r.grantId, spaces:[], hits:[], picked:{}, threads:{}, q:''};
+      render(); loadCatalog(); return;
+    }
+    if(r.state === 'approved'){
+      flow = {peer:flow.peer, step:'done', scope:r.scope, expiresAt:r.expiresAt};
+      render(); setTimeout(function(){ flow = null; refresh(); }, 6000); return;
+    }
+    if(r.state && r.state !== 'pending'){
+      flow = {peer:flow.peer, step:'failed', why:'They did not grant access (' + r.state + ').'};
+      return render();
+    }
+    setTimeout(pollAsk, 2000);
+  });
+}
+function loadCatalog(){
+  var f = flow;
+  api('/v1/peers/catalog?peer=' + encodeURIComponent(f.peer.url) + '&token=' + encodeURIComponent(f.token))
+    .then(function(r){ if(flow === f){ f.spaces = r.spaces || []; render(); } });
+}
+function searchCatalog(q){
+  var f = flow;
+  f.q = q;
+  if(f.timer) clearTimeout(f.timer);
+  if(!q.trim()){ f.hits = []; return render(); }
+  f.timer = setTimeout(function(){
+    api('/v1/peers/catalog?peer=' + encodeURIComponent(f.peer.url) + '&token=' + encodeURIComponent(f.token) + '&q=' + encodeURIComponent(q))
+      .then(function(r){ if(flow === f){ f.hits = r.threads || []; render(); } });
+  }, 250);
+}
+function askRead(){
+  var f = flow;
+  var repoKeys = Object.keys(f.picked).filter(function(k){ return f.picked[k]; });
+  var threads = Object.keys(f.threads).filter(function(k){ return f.threads[k]; }).map(function(k){ return f.threads[k]; });
+  flow = {peer:f.peer, step:'waiting', what:'read access'};
+  render();
+  api('/v1/peers/ask', {method:'POST', body:JSON.stringify({peerUrl:f.peer.url, kind:'read', previewGrant:f.grantId, scope:{repoKeys:repoKeys, threads:threads}})})
+    .then(function(a){
+      if(a.error || !a.requestId){ flow = {peer:f.peer, step:'failed', why:a.error || 'Could not reach that machine.'}; return render(); }
+      flow.code = a.code; flow.askId = a.requestId; render(); pollAsk();
+    });
+}
+
+function act(path, body){
+  if(busy) return;
+  busy = true;
+  api(path, {method:'POST', body:JSON.stringify(body)}).then(function(){ busy = false; refresh(); });
+}
+
+function render(){
+  var app = document.getElementById('app');
+  app.innerHTML = '';
+  if(flow){ app.appendChild(renderFlow()); return; }
+
+  if(state.pending.length){
+    app.appendChild(h('h2',{text:'Waiting on you'}));
+    state.pending.forEach(function(r){ app.appendChild(renderRequest(r)); });
+  }
+
+  app.appendChild(h('h2',{text:'Nearby machines'}));
+  if(!state.peers.length){
+    app.appendChild(h('p',{class:'empty',text:'No other machines yet. Pounce has to be running on the other computer, and both need to be on the same network.'}));
+  } else {
+    state.peers.forEach(function(p){
+      app.appendChild(h('div',{class:'card'},[h('div',{class:'row'},[
+        h('div',{class:'grow'},[h('div',{class:'name',text:p.hostName}), h('div',{class:'meta mono',text:p.address + ':' + p.port})]),
+        h('button',{class:'p', onclick:function(){ startAsk(p); }, text:'Ask for access'})
+      ])]));
+    });
+  }
+
+  app.appendChild(h('h2',{text:'Access you hold'}));
+  if(!state.held.length){
+    app.appendChild(h('p',{class:'empty',text:'None yet. Ask a machine above, and its owner decides what you can read.'}));
+  } else {
+    state.held.forEach(function(g){
+      app.appendChild(h('div',{class:'card'},[h('div',{class:'row'},[
+        h('div',{class:'grow'},[
+          h('div',{class:'name',text:g.hostName || g.url}),
+          h('div',{class:'meta',text:summarize(g.scope) + ' · ' + left(g.expiresAt)})
+        ]),
+        h('button',{onclick:function(){
+          if(busy) return;
+          busy = true;
+          api('/v1/peers/granted/' + encodeURIComponent(g.id), {method:'DELETE'}).then(function(){ busy = false; refresh(); });
+        }, text:'Forget'})
+      ])]));
+    });
+  }
+
+  app.appendChild(h('h2',{text: state.grants.length ? 'Machines with access to this one' : 'Nobody has access to this one'}));
+  if(!state.grants.length){
+    app.appendChild(h('p',{class:'empty',text:'When another computer asks to read this machine’s threads, the request appears at the top of this page.'}));
+  } else {
+    state.grants.forEach(function(g){
+      app.appendChild(h('div',{class:'card'},[h('div',{class:'row'},[
+        h('div',{class:'grow'},[
+          h('div',{class:'name',text:g.requester.hostName}),
+          h('div',{class:'meta',text:(g.kind === 'preview' ? 'Browsing names' : g.summary) + ' · ' + left(g.expiresAt) + (g.lastUsedAt ? '' : ' · not used yet')})
+        ]),
+        h('button',{onclick:function(){ act('/v1/access/revoke',{grantId:g.id}); }, text:'Revoke'})
+      ])]));
+    });
+  }
+}
+
+function renderRequest(r){
+  var isPreview = r.kind === 'preview';
+  var sel = {everything: !r.scope || r.scope.kind === 'full', picked:{}, hours:24, q:'', hits:[], timer:null};
+  if(r.scope && r.scope.repoKeys) r.scope.repoKeys.forEach(function(k){ sel.picked[k] = true; });
+  var loose = (r.scope && r.scope.threads) ? r.scope.threads.slice() : [];
+  var card = h('div',{class:'card'});
+
+  function scopeNow(){
+    if(sel.everything) return {kind:'full'};
+    return {repoKeys:Object.keys(sel.picked).filter(function(k){ return sel.picked[k]; }), threads:loose};
+  }
+  function draw(){
+    card.innerHTML = '';
+    card.appendChild(h('div',{class:'row'},[
+      h('div',{class:'grow'},[
+        h('div',{class:'name',text:r.requester.hostName + ' wants ' + (isPreview ? 'a look at what is here' : 'read access')}),
+        h('div',{class:'meta',text:isPreview ? 'Space and thread names only — no messages, for a few minutes.' : 'Asked for: ' + summarize(r.scope)})
+      ]),
+      h('div',{class:'code',text:fmtCode(r.code)})
+    ]));
+    if(r.note) card.appendChild(h('p',{class:'note',text:'“' + r.note + '”'}));
+
+    if(!isPreview){
+      card.appendChild(h('div',{class:'field',text:'They can read'}));
+      [['Everything on this machine', true], ['Only what I pick', false]].forEach(function(o){
+        var input = h('input',{type:'radio',name:'sc' + r.id});
+        input.checked = (sel.everything === o[1]);
+        input.onchange = function(){ sel.everything = o[1]; draw(); };
+        card.appendChild(h('label',{class:'opt'},[input, h('span',{text:o[0]})]));
+      });
+      if(!sel.everything){
+        var search = h('input',{type:'search',placeholder:'Filter spaces, or search thread names…',value:sel.q});
+        search.oninput = function(){
+          sel.q = search.value;
+          if(sel.timer) clearTimeout(sel.timer);
+          if(!sel.q.trim()){ sel.hits = []; return draw(); }
+          sel.timer = setTimeout(function(){
+            api('/v1/catalog/threads?q=' + encodeURIComponent(sel.q)).then(function(x){ sel.hits = x.threads || []; draw(); });
+          }, 250);
+        };
+        card.appendChild(search);
+        var box = h('div',{class:'box'});
+        var ql = sel.q.trim().toLowerCase();
+        var shown = ql ? state.spaces.filter(function(s){ return s.repoKey.toLowerCase().indexOf(ql) >= 0; }) : state.spaces;
+        shown.forEach(function(sp){
+          var cb = h('input',{type:'checkbox'});
+          cb.checked = !!sel.picked[sp.repoKey];
+          cb.onchange = function(){ sel.picked[sp.repoKey] = cb.checked; draw(); };
+          box.appendChild(h('label',{},[cb, h('span',{class:'sp',text:sp.repoKey}), h('span',{class:'meta',text:String(sp.threadCount)})]));
+        });
+        if(sel.hits.length) box.appendChild(h('div',{class:'glabel',text:'Threads'}));
+        sel.hits.forEach(function(t){
+          var cb = h('input',{type:'checkbox'});
+          cb.checked = loose.some(function(x){ return x.id === t.id; });
+          cb.onchange = function(){
+            if(cb.checked) loose.push({agent:t.agent, id:t.id});
+            else loose = loose.filter(function(x){ return x.id !== t.id; });
+            draw();
+          };
+          box.appendChild(h('label',{},[cb, h('span',{class:'sp',text:t.name || 'Untitled thread'}), h('span',{class:'meta',text:t.repoKey})]));
+        });
+        if(ql && !shown.length && !sel.hits.length) box.appendChild(h('div',{class:'meta',text:'Nothing matches.'}));
+        card.appendChild(box);
+        if(loose.length) card.appendChild(h('div',{class:'meta',text:loose.length + ' single thread' + (loose.length === 1 ? '' : 's') + ' selected'}));
+      }
+      card.appendChild(h('div',{class:'field',text:'Until'}));
+      var chips = h('div',{class:'chips'});
+      [['1 hour',1],['8 hours',8],['1 day',24],['7 days',168],['No expiry',null]].forEach(function(d){
+        chips.appendChild(h('button',{class:'chip' + (sel.hours === d[1] ? ' on' : ''), onclick:function(){ sel.hours = d[1]; draw(); }, text:d[0]}));
+      });
+      card.appendChild(chips);
+    }
+
+    var sc = scopeNow();
+    var approve = h('button',{class:'p', onclick:function(){
+      act('/v1/access/approve',{
+        requestId:r.id,
+        scope: isPreview ? undefined : sc,
+        expiresAt: (isPreview || sel.hours === null) ? null : new Date(Date.now() + sel.hours*3600000).toISOString()
+      });
+    }, text: isPreview ? 'Let them look' : 'Approve · ' + summarize(sc)});
+    if(!isPreview && !sel.everything && !sc.repoKeys.length && !loose.length) approve.disabled = true;
+    card.appendChild(h('div',{class:'actions'},[
+      h('button',{onclick:function(){ act('/v1/access/deny',{requestId:r.id}); }, text:'Deny'}),
+      approve
+    ]));
+  }
+  draw();
+  return card;
+}
+
+function renderFlow(){
+  var f = flow;
+  var card = h('div',{class:'card'});
+  var cancel = h('button',{onclick:function(){ flow = null; refresh(); }, text:'Start over'});
+
+  if(f.step === 'waiting'){
+    card.appendChild(h('div',{class:'name'},[h('span',{class:'spin'}), h('span',{text:'Waiting for ' + f.peer.hostName})]));
+    card.appendChild(h('p',{class:'empty',text:'Asking for ' + f.what + '. Approve it on that machine.'}));
+    if(f.code){
+      card.appendChild(h('div',{class:'field',text:'Check this code matches'}));
+      card.appendChild(h('div',{class:'code',text:fmtCode(f.code)}));
+    }
+    card.appendChild(h('div',{class:'actions'},[cancel]));
+    return card;
+  }
+  if(f.step === 'catalog'){
+    card.appendChild(h('div',{class:'name',text:f.peer.hostName + ' is showing names and dates only'}));
+    card.appendChild(h('p',{class:'empty',text:'Pick what you want to read.'}));
+    var search = h('input',{type:'search',placeholder:'Filter spaces, or search thread names…',value:f.q});
+    search.oninput = function(){ searchCatalog(search.value); };
+    card.appendChild(search);
+    var box = h('div',{class:'box'});
+    var ql = (f.q || '').trim().toLowerCase();
+    var shown = ql ? f.spaces.filter(function(s){ return s.repoKey.toLowerCase().indexOf(ql) >= 0; }) : f.spaces;
+    shown.forEach(function(sp){
+      var cb = h('input',{type:'checkbox'});
+      cb.checked = !!f.picked[sp.repoKey];
+      cb.onchange = function(){ f.picked[sp.repoKey] = cb.checked; render(); };
+      box.appendChild(h('label',{},[cb,
+        h('span',{class:'sp',text:sp.repoKey}),
+        h('span',{class:'meta',text:sp.threadCount + ' · ' + span(sp.firstActivityAt, sp.lastActivityAt)})]));
+    });
+    if(f.hits.length) box.appendChild(h('div',{class:'glabel',text:'Threads'}));
+    f.hits.forEach(function(t){
+      var cb = h('input',{type:'checkbox'});
+      cb.checked = !!f.threads[t.id];
+      cb.onchange = function(){ f.threads[t.id] = cb.checked ? {agent:t.agent, id:t.id} : null; render(); };
+      box.appendChild(h('label',{},[cb,
+        h('span',{class:'sp',text:t.name || 'Untitled thread'}),
+        h('span',{class:'meta',text:t.repoKey + ' · ' + span(t.createdAt, t.lastActivityAt)})]));
+    });
+    if(ql && !shown.length && !f.hits.length) box.appendChild(h('div',{class:'meta',text:'Nothing matches.'}));
+    card.appendChild(box);
+    var n = Object.keys(f.picked).filter(function(k){ return f.picked[k]; }).length
+          + Object.keys(f.threads).filter(function(k){ return f.threads[k]; }).length;
+    var go = h('button',{class:'p', onclick:askRead, text:'Request read access'});
+    if(!n) go.disabled = true;
+    card.appendChild(h('div',{class:'actions'},[
+      h('div',{class:'grow meta',text: n ? n + ' selected' : 'Nothing selected yet'}), cancel, go
+    ]));
+    return card;
+  }
+  if(f.step === 'done'){
+    card.appendChild(h('div',{class:'name',text:'Connected to ' + f.peer.hostName}));
+    card.appendChild(h('p',{class:'empty',text:'You can read ' + summarize(f.scope) + ' · ' + left(f.expiresAt) + '. It is listed under “Access you hold”.'}));
+    return card;
+  }
+  card.appendChild(h('div',{class:'name',text:f.peer.hostName + ' did not grant access'}));
+  card.appendChild(h('p',{class:'empty',text:f.why || ''}));
+  card.appendChild(h('div',{class:'actions'},[cancel]));
+  return card;
+}
+
+fetch('/ui',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(d){
+  TOKEN = d.token;
+  return api('/v1/catalog/spaces');
+}).then(function(r){
+  state.spaces = r.spaces || [];
+  refresh();
+  setInterval(refresh, 3000);
+});
+</script></body></html>
+`;
 
 const server = http.createServer(async (req, res) => {
   // Everything send() needs from the request, captured once so the response
@@ -1275,14 +1892,32 @@ const server = http.createServer(async (req, res) => {
   // which would otherwise let a site the user merely VISITS read /ui (the token
   // is in that payload) or POST to /v1/exec without a preflight. Rejecting on
   // sight also closes DNS rebinding, which loopback checks alone do not.
-  if (req.headers.origin) return send(res, 403, { error: "forbidden" });
+  // ...with ONE exception: the bridge's own loopback page. Browsers attach an
+  // Origin to same-origin POSTs, so the approve/deny buttons on /peers would
+  // otherwise 403 themselves. Matching our own origin exactly keeps every
+  // property above: a rogue site sends its own origin, and DNS rebinding sends
+  // the attacker's too — neither can forge this one, and non-loopback callers
+  // are refused regardless of what they claim.
+  if (req.headers.origin && !isOwnOrigin(req)) return send(res, 403, { error: "forbidden" });
 
   if (url.pathname === "/health") return send(res, 200, { ok: true });
 
   // Localhost-only UI surface for the desktop app: pairing QR + live status.
   // Gated to loopback because it exposes the pairing token.
-  if (url.pathname === "/" || url.pathname === "/ui" || url.pathname === "/qr.svg") {
+  if (
+    url.pathname === "/" ||
+    url.pathname === "/ui" ||
+    url.pathname === "/qr.svg" ||
+    url.pathname === "/peers"
+  ) {
     if (!isLoopback(req)) return send(res, 403, { error: "local only" });
+    if (url.pathname === "/peers") {
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+      });
+      return res.end(PEERS_HTML);
+    }
     if (url.pathname === "/") {
       res.writeHead(200, {
         "content-type": "text/html; charset=utf-8",
@@ -1316,25 +1951,255 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // A peer asking for access holds no credential yet — that is the whole point,
+  // and it is safe because the request is inert until a human on this machine
+  // approves it. Sits above the auth gate for that reason, and nowhere else does.
+  if (url.pathname === "/v1/access/request" && req.method === "POST") {
+    const body = await readBody(req).catch(() => null);
+    if (!body) return send(res, 400, { error: "bad request" });
+    const r = access.submit({
+      kind: body.kind,
+      requester: body.requester,
+      scope: body.scope,
+      note: body.note,
+      previewGrant: body.previewGrant,
+      requestedHours: body.requestedHours,
+      ip: req.socket.remoteAddress || "unknown",
+    });
+    if (!r.ok) return send(res, r.retryAfterMs ? 429 : 400, r);
+    // Tell whoever is at the keyboard, even if the app window is behind
+    // something. Nothing happens until they act on it.
+    notifyAccessRequest(access.listPending().find((p) => p.id === r.requestId));
+    return send(res, 200, r);
+  }
+  // The requester's poll for "have they said yes yet". Authenticated by the
+  // claim secret it was handed at request time, not by a bridge token.
+  if (url.pathname.startsWith("/v1/access/request/") && req.method === "GET") {
+    const id = url.pathname.slice("/v1/access/request/".length);
+    const r = access.poll(id, url.searchParams.get("claim"));
+    if (!r.ok) return send(res, 404, r);
+    // A grant that has just been approved needs somewhere to be reached: the
+    // LAN address it already knows, plus the tunnel identity for when it isn't
+    // on this network any more.
+    // Own identity first, then whatever the approval attached — the per-grant
+    // tunnel must win over the machine-wide one, which a guest can't dial.
+    if (r.state === "approved" && r.token) r.bridge = { ...ownIdentity(), ...r.bridge };
+    return send(res, 200, r);
+  }
+
   const auth =
     req.headers.authorization?.replace(/^Bearer\s+/i, "") || url.searchParams.get("token");
   const legacyOk =
     Date.now() < LEGACY_UNTIL &&
     tokenMatches(auth, LEGACY_TOKEN) &&
     legacyAllows(req.method, url.pathname);
-  if (!tokenMatches(auth, TOKEN) && !legacyOk) return send(res, 401, { error: "unauthorized" });
-  lastClientSeen = Date.now();
+  if (!tokenMatches(auth, TOKEN) && !legacyOk) {
+    // Not the owner's token. It may still be a grant issued to a peer — a
+    // read-only capability, narrowed to a scope and stamped with an expiry.
+    const hit = access.forToken(auth);
+    if (!hit) return send(res, 401, { error: "unauthorized" });
+    if (hit.ended) {
+      stopGrantTunnel(hit.grant.id);
+      // Named distinctly from a plain 401 so the guest can drop the device and
+      // its rows outright, instead of showing the machine as merely offline.
+      return send(res, 401, { error: hit.reason, expiresAt: hit.grant.expiresAt });
+    }
+    if (!grantAllowsRoute(hit.grant, req.method, url.pathname)) {
+      return send(res, 403, { error: "forbidden_for_grant" });
+    }
+    req.grant = hit.grant;
+    access.touch(hit.grant.id);
+    // Deliberately NOT counted as `lastClientSeen`: that drives "your phone is
+    // connected" in the pairing window, and a peer reading history is not that.
+  } else {
+    lastClientSeen = Date.now();
+  }
 
   // The migration itself: a client still holding the published default swaps it
   // for this install's real token, so the window closes on its next sync.
   if (url.pathname === "/v1/token") return send(res, 200, { token: TOKEN });
   if (process.env.BRIDGE_DEBUG) console.log(`[req] ${req.method} ${url.pathname}${url.search}`);
 
+  // Everything below is inside the grant's scope or not served at all. Done
+  // here rather than route by route so a route added later cannot forget it.
+  if (req.grant) {
+    const denial = await guardScopedParams(req, url).catch(() => ({
+      code: 503,
+      body: { error: "scope unavailable" },
+    }));
+    if (denial) return send(res, denial.code, denial.body);
+  }
+
   try {
+    // --- the owner's peer controls ---------------------------------------------
+    // Not reachable with a grant (the allowlist stops that) and not from the LAN
+    // either: approving access is a decision made at this keyboard.
+    if (url.pathname === "/v1/peers") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      discovery?.refresh();
+      return send(res, 200, { peers: discovery?.list() ?? [], discovering: !!discovery?.running });
+    }
+    // Send an ask to a peer and remember the claim it hands back.
+    if (url.pathname === "/v1/peers/ask" && req.method === "POST") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      const { peerUrl, kind, scope, previewGrant, note } = await readBody(req);
+      if (!peerUrl || !kind) return send(res, 400, { error: "peerUrl and kind required" });
+      const r = await peerFetch(`${peerUrl}/v1/access/request`, {
+        method: "POST",
+        body: JSON.stringify({ kind, requester: selfDescriptor(), scope, previewGrant, note }),
+      }).catch((e) => ({ ok: false, status: 0, body: { error: String(e?.message || e) } }));
+      if (!r.ok) return send(res, r.status || 502, r.body);
+      access.rememberAsk(peerUrl, { ...r.body, kind });
+      return send(res, 200, { ...r.body, peerUrl });
+    }
+
+    // Poll it. On approval the grant is SAVED here, because the token is handed
+    // over exactly once and a page that happens to be reloading must not be how
+    // it gets lost.
+    if (url.pathname.startsWith("/v1/peers/ask/") && req.method === "GET") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      const id = url.pathname.slice("/v1/peers/ask/".length);
+      const ask = access.getAsk(id);
+      if (!ask) return send(res, 404, { error: "unknown ask" });
+      const r = await peerFetch(
+        `${ask.peerUrl}/v1/access/request/${id}?claim=${encodeURIComponent(ask.claim)}`,
+      ).catch(() => ({ ok: false, status: 0, body: {} }));
+      if (!r.ok) return send(res, 200, { state: "pending", unreachable: true });
+      if (r.body.state === "approved" && r.body.token) {
+        access.saveHeld({
+          bridgeId: r.body.bridge?.id,
+          hostName: r.body.bridge?.hostName,
+          url: r.body.bridge?.url || ask.peerUrl,
+          token: r.body.token,
+          kind: r.body.kind,
+          scope: r.body.scope,
+          expiresAt: r.body.expiresAt,
+          nodeId: r.body.bridge?.nodeId ?? null,
+          relay: r.body.bridge?.relay ?? null,
+          tunnelToken: r.body.bridge?.tunnelToken ?? null,
+        });
+      }
+      if (r.body.state && r.body.state !== "pending") access.forgetAsk(id);
+      return send(res, 200, { ...r.body, peerUrl: ask.peerUrl, code: ask.code });
+    }
+
+    // Read a peer's catalog with the preview grant we hold for it.
+    if (url.pathname === "/v1/peers/catalog") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      const peerUrl = url.searchParams.get("peer");
+      // The token is optional: when we already hold a grant on this peer, use
+      // it. That is what lets the CLI say `pounce ask work-laptop` instead of
+      // making a person carry a 64-hex credential between commands.
+      const token = url.searchParams.get("token") || access.heldFor(peerUrl)?.token;
+      if (!peerUrl || !token) return send(res, 400, { error: "no grant held for that peer" });
+      const q = url.searchParams.get("q");
+      const path = q ? `/v1/catalog/threads?q=${encodeURIComponent(q)}` : "/v1/catalog/spaces";
+      const r = await peerFetch(`${peerUrl}${path}`, {
+        headers: { authorization: `Bearer ${token}` },
+      }).catch((e) => ({ ok: false, status: 502, body: { error: String(e?.message || e) } }));
+      return send(res, r.ok ? 200 : r.status || 502, r.body);
+    }
+
+    // Access this machine holds on others.
+    if (url.pathname === "/v1/peers/granted" && req.method === "GET") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      // Tokens stay here: the list is for showing who we can read, and the page
+      // has no use for the credential itself.
+      return send(res, 200, {
+        held: access.listHeld().map(({ token, tunnelToken, ...rest }) => rest),
+      });
+    }
+    if (url.pathname.startsWith("/v1/peers/granted/") && req.method === "DELETE") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      const id = decodeURIComponent(url.pathname.slice("/v1/peers/granted/".length));
+      return send(res, 200, { ok: access.forgetHeld(id) });
+    }
+
+    if (url.pathname === "/v1/peers/dial" && req.method === "POST") {
+      // Loopback only: this spawns an outbound tunnel on behalf of the app
+      // sharing this machine, and is nobody else's business.
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      const { nodeId, relay, token } = await readBody(req);
+      if (!nodeId || !token) return send(res, 400, { error: "nodeId and token required" });
+      try {
+        return send(res, 200, { port: await dialPeer(nodeId, relay ?? null, token) });
+      } catch (e) {
+        return send(res, 503, { error: String(e?.message || e) });
+      }
+    }
+    if (url.pathname === "/v1/access" && req.method === "GET") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      sweepAccess();
+      return send(res, 200, { pending: access.listPending(), grants: access.listGrants() });
+    }
+    if (url.pathname === "/v1/access/approve" && req.method === "POST") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      const { requestId, scope, expiresAt } = await readBody(req);
+      const r = access.approve(requestId, {
+        scope: scope === undefined ? undefined : (normalizeScope(scope) ?? { kind: "full" }),
+        expiresAt: expiresAt ?? null,
+        bridge: ownIdentity(),
+      });
+      if (!r.ok) return send(res, 400, r);
+      // Give the guest a way back in from another network. Best-effort: no
+      // tunnel binary just means the grant is LAN-only.
+      const tunnel = startGrantTunnel(r.grant.id);
+      if (tunnel) access.setTunnel(r.grant.id, tunnel);
+      return send(res, 200, { ok: true, grant: r.grant });
+    }
+    if (url.pathname === "/v1/access/deny" && req.method === "POST") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      const { requestId } = await readBody(req);
+      return send(res, 200, access.deny(requestId));
+    }
+    if (url.pathname === "/v1/access/revoke" && req.method === "POST") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      const { grantId } = await readBody(req);
+      const r = access.revoke(grantId);
+      if (r.ok) stopGrantTunnel(grantId);
+      return send(res, 200, r);
+    }
+
+    // --- the catalog a preview grant reads --------------------------------------
+    // Names, counts and dates. Enough to decide what to ask for, and nothing a
+    // thread's contents could be reconstructed from.
+    // The owner reads the same catalog: it is exactly the list the approval
+    // sheet has to show when picking which spaces and threads to grant, and
+    // sharing the projection means the two ends can't drift apart on what a
+    // space is called or how many threads it holds.
+    const mayReadCatalog = (r) => r.grant?.kind === "preview" || isOwner(r);
+    if (url.pathname === "/v1/catalog/spaces") {
+      if (!mayReadCatalog(req)) return send(res, 403, { error: "preview grant required" });
+      return send(res, 200, { spaces: catalogSpaces(await getThreads()) });
+    }
+    if (url.pathname === "/v1/catalog/threads") {
+      if (!mayReadCatalog(req)) return send(res, 403, { error: "preview grant required" });
+      // `q` is REQUIRED. A preview is a lookup, not a dump: without this the
+      // catalog would hand over every thread title on the machine in one call.
+      const q = (url.searchParams.get("q") || "").trim().toLowerCase();
+      if (!q) return send(res, 400, { error: "q required" });
+      const repoKey = url.searchParams.get("space");
+      const hits = (await getThreads())
+        .filter((t) => (!repoKey || t.repo === repoKey) && (t.name || "").toLowerCase().includes(q))
+        .sort((a, b) =>
+          (b.lastActivityAt || b.createdAt || "").localeCompare(
+            a.lastActivityAt || a.createdAt || "",
+          ),
+        )
+        .slice(0, 25)
+        .map(catalogThread);
+      return send(res, 200, { threads: hits });
+    }
+
     if (url.pathname === "/v1/agents")
       return send(res, 200, { agents: await getAgents(url.searchParams.get("fresh") === "1") });
-    if (url.pathname === "/v1/threads")
-      return send(res, 200, { threads: await getThreads(url.searchParams.get("fresh") === "1") });
+    if (url.pathname === "/v1/threads") {
+      const threads = await getThreads(url.searchParams.get("fresh") === "1");
+      // A guest sees its scope and no evidence of the rest.
+      return send(res, 200, {
+        threads: req.grant ? filterThreads(await grantScope(req), threads) : threads,
+      });
+    }
     // SSE variant: emit each page of threads as it arrives so the app's initial
     // connect renders progressively instead of blocking until every page is
     // built. `data: {threads:[...]}` per page, then `data: {done:true}`.
@@ -1350,9 +2215,13 @@ const server = http.createServer(async (req, res) => {
       req.on("close", () => {
         closed = true;
       });
+      // Resolved once for the whole stream rather than per page — the scope is
+      // a property of the grant, and re-deriving it mid-stream would only let
+      // pages disagree with each other.
+      const scope = req.grant ? await grantScope(req) : null;
       try {
         await streamThreads((page) => {
-          if (!closed) write({ threads: page });
+          if (!closed) write({ threads: scope ? filterThreads(scope, page) : page });
         });
         if (!closed) write({ done: true });
       } catch (e) {
@@ -1397,6 +2266,16 @@ const server = http.createServer(async (req, res) => {
       const results = await cached(key, 15_000, () =>
         historySearch.search({ q, agent, workspace, since, thread, limit, providers }),
       );
+      // Filtered AFTER the cache, never before: the cache key is the query, so
+      // narrowing the search itself would let one grant's results be served to
+      // another. Search reads message BODIES — the one route where leaking a
+      // row leaks content, not just a title.
+      if (req.grant) {
+        const scope = await grantScope(req);
+        if (!scope.full) {
+          return send(res, 200, { results: results.filter((r) => scope.ids.has(r.threadId)) });
+        }
+      }
       return send(res, 200, { results });
     }
     if (url.pathname === "/v1/messages") {
@@ -2008,6 +2887,13 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
       setTimeout(watchTick, WATCH_MS);
       startActivityPopulate();
       ensureTunnel();
+      // Tell the LAN this machine is here, and start the clock on any grants
+      // that outlived the last run — a bridge restart must not silently extend
+      // access someone gave until Tuesday.
+      discovery?.start();
+      sweepAccess();
+      setInterval(sweepAccess, 60_000).unref?.();
+      restoreGrantTunnels();
       resolve({ server, token: TOKEN, ...PAIR });
     });
   });
@@ -2026,8 +2912,149 @@ function tunnelBinary() {
   return candidates.find((p) => existsSync(p)) || null;
 }
 
+// --- per-grant tunnels ---------------------------------------------------------
+// A guest that leaves the network still needs a way in, and the machine-wide
+// tunnel won't do: its QUIC handshake is gated on the BRIDGE's token, which a
+// guest holding only a grant does not have. So each grant gets its own `serve`
+// process — own identity key, own handshake secret, own node id. Revoking the
+// grant kills the process, which closes the door at the transport layer and not
+// merely at HTTP. Grants are a handful, so a process each is cheap.
+
+const GRANT_DIR = path.join(os.homedir(), ".pounce", "grants");
+
+/** grantId -> ChildProcess */
+const grantTunnels = new Map();
+
+/** Read back the node id `serve` wrote for a grant. It writes asynchronously at
+ *  startup, so an immediate read misses — callers poll. */
+function grantTunnelInfo(grantId) {
+  try {
+    const info = JSON.parse(readFileSync(path.join(GRANT_DIR, `${grantId}.json`), "utf8"));
+    return info?.nodeId ? { nodeId: info.nodeId, relay: info.relay || null } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Start (or reuse) a grant's tunnel. Returns its identity once `serve` has
+ * published one, else null — a machine with no tunnel binary simply has
+ * LAN-only grants, which is a smaller feature rather than a broken one.
+ */
+function startGrantTunnel(grantId) {
+  if (grantTunnels.has(grantId)) return grantTunnelInfo(grantId);
+  const bin = tunnelBinary();
+  const secret = access.tunnelSecret(grantId);
+  if (!bin || !secret) return null;
+  try {
+    mkdirSync(GRANT_DIR, { recursive: true, mode: 0o700 });
+    const child = spawn(
+      bin,
+      [
+        "serve",
+        "--token",
+        secret,
+        "--target",
+        `127.0.0.1:${PORT}`,
+        "--key",
+        path.join(GRANT_DIR, `${grantId}.key`),
+        "--info",
+        path.join(GRANT_DIR, `${grantId}.json`),
+      ],
+      { stdio: ["ignore", "ignore", "ignore"], windowsHide: true },
+    );
+    grantTunnels.set(grantId, child);
+    child.on("close", () => {
+      // Only forget it if this is still the current child — a restart that
+      // already replaced it must not be unregistered by its predecessor.
+      if (grantTunnels.get(grantId) === child) grantTunnels.delete(grantId);
+    });
+    // The identity file appears a moment after spawn; publish it to the grant
+    // when it does, so the guest's next poll carries it.
+    let tries = 0;
+    const poll = setInterval(() => {
+      const info = grantTunnelInfo(grantId);
+      if (info || ++tries > 20) {
+        clearInterval(poll);
+        if (info) access.setTunnel(grantId, info);
+      }
+    }, 500);
+    poll.unref?.();
+  } catch {
+    grantTunnels.delete(grantId);
+  }
+  return grantTunnelInfo(grantId);
+}
+
+/** Tear a grant's tunnel down and delete its identity, so a later grant can
+ *  never be reached at a revoked one's node id. */
+function stopGrantTunnel(grantId) {
+  const child = grantTunnels.get(grantId);
+  grantTunnels.delete(grantId);
+  try {
+    child?.kill("SIGTERM");
+  } catch {}
+  for (const ext of ["key", "json"]) {
+    try {
+      rmSync(path.join(GRANT_DIR, `${grantId}.${ext}`), { force: true });
+    } catch {}
+  }
+}
+
+/** Bring back the tunnels of grants that survived a restart. Runs after the
+ *  expiry sweep, so a lapsed grant is never handed a fresh door. */
+function restoreGrantTunnels() {
+  for (const g of access.listGrants()) {
+    if (g.tunnel) startGrantTunnel(g.id);
+  }
+}
+
+// --- dialing OUT to a peer ------------------------------------------------------
+// The mobile app carries the tunnel client as a native module, so it dials peers
+// itself. The desktop app has no such module — but it does have this bridge
+// sitting on the same machine, which can run `pounce-tunnel client` on its
+// behalf and hand back a loopback port that speaks plain HTTP.
+
+/** `${nodeId}` -> { proc, port } */
+const peerDials = new Map();
+
+/** An OS-assigned free port, asked for and released before we hand it to the
+ *  tunnel. Racy in principle; in practice nothing else is grabbing ports in the
+ *  microseconds between, and `client` fails loudly if it loses. */
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+/** Start (or reuse) a loopback proxy to a peer's tunnel. */
+async function dialPeer(nodeId, relay, token) {
+  const hit = peerDials.get(nodeId);
+  if (hit) return hit.port;
+  const bin = tunnelBinary();
+  if (!bin) throw new Error("no tunnel binary on this machine");
+  const port = await freePort();
+  const args = ["client", "--token", token, "--node", nodeId, "--listen", `127.0.0.1:${port}`];
+  if (relay) args.push("--relay", relay);
+  const proc = spawn(bin, args, { stdio: ["ignore", "ignore", "ignore"], windowsHide: true });
+  peerDials.set(nodeId, { proc, port });
+  proc.on("close", () => {
+    if (peerDials.get(nodeId)?.proc === proc) peerDials.delete(nodeId);
+  });
+  return port;
+}
+
 let tunnelChild = null;
 let tunnelBackoffMs = 1000;
+/** The stale-instance sweep below is a boot-time measure, and must stay one:
+ *  it matches every `pounce-tunnel serve`, which after this bridge has been up
+ *  a while includes its own guests' tunnels. */
+let sweptStaleTunnels = false;
 function ensureTunnel() {
   if (tunnelChild) return;
   // The tunnel identity (~/.pounce/tunnel.key → one node id) is a SINGLETON:
@@ -2043,7 +3070,14 @@ function ensureTunnel() {
   // (b) Sweep stale instances before claiming the identity: crashed/killed
   // bridges orphan their tunnels (SIGKILL skips the exit handler), and dozens
   // of zombies fighting over one node id made off-LAN a lottery.
-  if (!IS_WIN) {
+  //
+  // ONCE, at boot. The pattern matches every `pounce-tunnel serve`, and each
+  // live grant now runs one of its own (see startGrantTunnel) — so re-sweeping
+  // from /v1/tunnel/ensure later would cut off every guest currently connected
+  // over the tunnel. At boot there are no guest tunnels yet; restoreGrantTunnels
+  // brings them up after this has run.
+  if (!IS_WIN && !sweptStaleTunnels) {
+    sweptStaleTunnels = true;
     try {
       execFileSync("pkill", ["-f", "pounce-tunnel serve"], { stdio: "ignore" });
     } catch {} // exit 1 = no matches
@@ -2066,18 +3100,30 @@ function ensureTunnel() {
     tunnelChild = null;
   }
 }
-process.on("exit", () => {
+/** Every tunnel this bridge is responsible for: the machine-wide one and each
+ *  live grant's. Left running they squat on identities the next boot re-claims. */
+function killAllTunnels() {
   try {
     tunnelChild?.kill("SIGTERM");
   } catch {}
-});
+  for (const child of grantTunnels.values()) {
+    try {
+      child.kill("SIGTERM");
+    } catch {}
+  }
+  for (const child of peerDials.values()) {
+    try {
+      child.proc.kill("SIGTERM");
+    } catch {}
+  }
+}
+
+process.on("exit", killAllTunnels);
 // Default signal deaths bypass the exit handler — reap the tunnel explicitly
 // so Ctrl-C'd bridges stop leaving identity-squatting orphans behind.
 for (const sig of ["SIGINT", "SIGTERM"]) {
   process.on(sig, () => {
-    try {
-      tunnelChild?.kill("SIGTERM");
-    } catch {}
+    killAllTunnels();
     process.exit(0);
   });
 }

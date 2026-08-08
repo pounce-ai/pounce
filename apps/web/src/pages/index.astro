@@ -194,6 +194,9 @@
     border:1px solid var(--line);border-radius:26px;padding:44px 42px;
     background:radial-gradient(120% 140% at 0% 0%,rgba(124,92,255,.10),transparent 55%),linear-gradient(180deg,var(--panel),var(--bg-2))}
   .cli-band .sec-lead{font-size:16.5px}
+  /* Terminal first, copy second — alternates the rhythm between stacked bands. */
+  .cli-band.flip .cli-copy{order:2}
+  .cli-band.flip .term{order:1}
   .cli-band .sec-lead b{color:var(--ink);font-weight:600}
   .term{border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,.12);background:#0a0a10;
     box-shadow:0 34px 80px -30px rgba(0,0,0,.85);font-family:var(--mono);font-size:13.5px}
@@ -479,6 +482,36 @@
   </div>
 </section>
 
+<!-- sharing -->
+<section id="sharing">
+  <div class="wrap">
+    <div class="cli-band flip reveal">
+      <div class="cli-copy">
+        <span class="kicker">one grant, every agent</span>
+        <h2 class="sec-title" style="font-size:clamp(26px,3.6vw,40px)">Lend someone your agent history</h2>
+        <p class="sec-lead">The person debugging beside you can't see what you already tried. Now they can. Machines running Pounce find each other, and one can ask another for access — you approve <b>which projects</b> and <b>for how long</b>. It's read-only: they browse threads, diffs and search, and can never send a turn or run a command.</p>
+        <p class="sec-lead" style="margin-top:14px">One grant covers <b>whatever ran there</b>. Share a project and the Codex session from their build box opens next to your Claude one — not a link to a copy somebody remembered to publish, but the machine itself, on your network.</p>
+        <p class="sec-lead" style="margin-top:14px">You can't tick a project you've never seen, so asking happens twice — a short preview showing <b>names and dates only</b>, then a request for what they picked. Both stop at a person, with a matching code on each screen. Revoke any time; it expires on its own anyway.</p>
+        <p class="sec-lead" style="margin-top:14px"><a href="/docs/sharing">How sharing works →</a></p>
+      </div>
+      <div class="term" aria-label="Terminal showing one machine asking another for scoped, expiring access">
+        <div class="term-bar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span><span class="term-t">app, browser, or terminal</span></div>
+        <div class="term-body">
+          <div class="tline"><span class="ps">$</span>pounce peers</div>
+          <div class="tline dim">Nearby machines</div>
+          <div class="tline">&nbsp;&nbsp;work-laptop &nbsp;<span class="dim">192.168.1.24</span></div>
+          <div class="tline dim">&nbsp;</div>
+          <div class="tline"><span class="ps">$</span>pounce ask work-laptop --spaces api</div>
+          <div class="tline dim">Check the code matches: 418-207</div>
+          <div class="tline ok">✓ work-laptop granted api · 8h left</div>
+          <div class="tline dim">&nbsp;</div>
+          <div class="tline dim">read-only · scoped · expires · revocable</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- mcp -->
 <section id="mcp">
   <div class="wrap">
@@ -560,7 +593,8 @@
       <div class="feat reveal"><div class="fn">03 · fleet</div><h3>Multi-device fleet</h3><p>Every machine you pair shows up in one list. Filter by device or agent; jump between them instantly.</p></div>
       <div class="feat reveal"><div class="fn">04 · triage</div><h3>“Needs you” first</h3><p>Threads waiting on your input float to the top, so you always know where to look — and nothing stalls.</p></div>
       <div class="feat reveal"><div class="fn">05 · anywhere</div><h3>Pair once, reach it anywhere</h3><p>Scan a QR once — even over SSH to a faraway server. Pounce's own secure tunnel finds your machine from any network, no VPN.</p></div>
-      <div class="feat reveal"><div class="fn">06 · ship</div><h3>Review &amp; ship</h3><p>See the diff, commit, push, open a PR — finish the job from your phone without breaking flow.</p></div>
+      <div class="feat reveal"><div class="fn">06 · share</div><h3>Share with another machine</h3><p>Let a colleague's computer read the threads you choose — scoped to a project, read-only, and it expires. Approve it with one click.</p></div>
+      <div class="feat reveal"><div class="fn">07 · ship</div><h3>Review &amp; ship</h3><p>See the diff, commit, push, open a PR — finish the job from your phone without breaking flow.</p></div>
     </div>
   </div>
 </section>

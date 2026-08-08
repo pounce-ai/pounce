@@ -68,6 +68,15 @@ function storedRandomId() {
 /** This machine's stable id, as reported to paired apps on /v1/status. */
 export function bridgeId() {
   if (cached) return cached;
+  // An explicit override, for the cases where "one machine, one bridge" is not
+  // true: two bridges on one Mac (how peer discovery gets tested, and what a
+  // second user account on a shared machine looks like), or a fleet of
+  // containers cloned from one image, where every instance would otherwise
+  // report the host's id and the apps would merge them into a single device.
+  if (process.env.POUNCE_BRIDGE_ID) {
+    cached = process.env.POUNCE_BRIDGE_ID;
+    return cached;
+  }
   const fingerprint = machineFingerprint();
   cached = fingerprint
     ? createHash("sha256").update(`pounce-bridge:${fingerprint}`).digest("hex").slice(0, 32)

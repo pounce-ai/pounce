@@ -73,6 +73,23 @@ interface BridgeAgent {
   capabilities?: AgentCapabilities | null;
 }
 
+/**
+ * Access this device holds because another machine's owner granted it, rather
+ * than because someone scanned a QR here. Read-only, narrowed to a scope, and
+ * with a clock on it — see apps/bridge/agents/access.mjs.
+ */
+export interface DeviceGrant {
+  readonly id: string;
+  /** `{kind:"full"}` or `{kind:"scoped", repoKeys, threads}`. */
+  readonly scope: unknown;
+  /** One line for the device row: "Everything", "pounce-mono", "3 spaces". */
+  readonly summary: string;
+  /** ISO, or null for a grant with no expiry. */
+  readonly expiresAt: string | null;
+  /** Who granted it — the peer's hostName, for the "expired" message. */
+  readonly issuedBy: string;
+}
+
 /** A configured device (one machine's bridge). */
 export interface DeviceConfig extends BridgeConfig {
   readonly id: string;
@@ -80,6 +97,20 @@ export interface DeviceConfig extends BridgeConfig {
   /** The bridge's own id for the machine, once we've heard it say so. Absent
    *  for a device paired to a bridge too old to report one. */
   readonly bridgeId?: string;
+  /**
+   * This machine's Iroh tunnel identity, when we learned one for THIS device.
+   *
+   * Distinct from the single global pairing that bridgeBase() has always fallen
+   * back to: that one can only ever describe one machine, which was fine when a
+   * phone had one Mac and is not fine now that peers are granted individually.
+   */
+  readonly nodeId?: string;
+  readonly relay?: string | null;
+  /** The QUIC handshake secret for this peer's per-grant tunnel. Not the bearer
+   *  token — that still authenticates every HTTP request over it. */
+  readonly tunnelToken?: string;
+  /** Present only on a device we reached by being granted access to it. */
+  readonly grant?: DeviceGrant;
 }
 
 const DEVICES_KEY = "pounce.devices";
@@ -117,7 +148,15 @@ export async function listDeviceConfigs(): Promise<DeviceConfig[]> {
 async function writeDeviceConfigs(list: DeviceConfig[]): Promise<void> {
   await SecureStore.setItemAsync(DEVICES_KEY, JSON.stringify(list));
 }
-export async function addDeviceConfig(url: string, token: string): Promise<DeviceConfig> {
+/** Extras a granted peer carries that a QR pairing does not: how to reach it
+ *  off-LAN, and the terms the access was given on. */
+type DeviceExtras = Pick<DeviceConfig, "nodeId" | "relay" | "tunnelToken" | "grant">;
+
+export async function addDeviceConfig(
+  url: string,
+  token: string,
+  extras: Partial<DeviceExtras> = {},
+): Promise<DeviceConfig> {
   url = url.replace(/\/$/, "");
   const list = await listDeviceConfigs();
   const bridgeId = await probeBridgeId(url, token);
@@ -126,8 +165,11 @@ export async function addDeviceConfig(url: string, token: string): Promise<Devic
     { url, token, bridgeId, name: nameFromUrl(url) },
     (base) => base as DeviceConfig,
   );
-  await writeDeviceConfigs(configs);
-  return device;
+  // Applied after resolvePairing so re-granting a machine we already hold
+  // updates its terms in place rather than leaving the old expiry on the row.
+  const withExtras = { ...device, ...extras };
+  await writeDeviceConfigs(configs.map((d) => (d.id === device.id ? withExtras : d)));
+  return withExtras;
 }
 
 /** The published default every bridge used before it minted its own token. */
@@ -224,6 +266,48 @@ export async function removeDeviceConfig(id: string): Promise<void> {
   const list = await listDeviceConfigs();
   await writeDeviceConfigs(list.filter((d) => d.id !== id));
 }
+
+/**
+ * Forget a device we no longer have access to, and everything synced under it.
+ *
+ * Only ever called on the bridge's own word (`GrantEndedError`) or on a
+ * `expiresAt` we were told at approval time — never on a failed read. That
+ * distinction is the sync-authority rule: silence means "couldn't reach it", and
+ * dropping a machine's threads because its lid was shut would be a data loss
+ * dressed up as a feature.
+ */
+async function dropEndedGrant(cfg: DeviceConfig, reason: "expired" | "revoked"): Promise<void> {
+  await removeDeviceConfig(cfg.id);
+  // Sweep the rows too: reconcileDevices takes the surviving ids as the truth,
+  // so the peer's threads, repos and host go with the config.
+  reconcileDevices((await listDeviceConfigs()).map((c) => c.id));
+  const who = cfg.grant?.issuedBy || cfg.name;
+  // Say it once. A device disappearing from the list with no explanation reads
+  // as a bug, and the user needs to know whether to ask for access again.
+  void notifyOnce(
+    `grant:${cfg.id}`,
+    reason === "revoked" ? "Access withdrawn" : "Access expired",
+    reason === "revoked"
+      ? `${who} withdrew your access to its threads.`
+      : `Your access to ${who} ran out. Ask again to keep reading its threads.`,
+  );
+}
+
+/** Has this device's grant run out by the clock? Checked before we call, so an
+ *  expiry is honoured even while the peer is unreachable — the access ended
+ *  whether or not the machine that granted it is around to say so. */
+function grantLapsed(cfg: DeviceConfig): boolean {
+  const at = cfg.grant?.expiresAt;
+  return !!at && Date.parse(at) <= Date.now();
+}
+
+/** Drop granted devices whose clock has run out, and return the rest — the set
+ *  a sync should actually talk to. */
+async function dropLapsedGrants(configs: DeviceConfig[]): Promise<DeviceConfig[]> {
+  const lapsed = configs.filter(grantLapsed);
+  for (const cfg of lapsed) await dropEndedGrant(cfg, "expired");
+  return lapsed.length ? configs.filter((c) => !lapsed.includes(c)) : configs;
+}
 async function deviceForHost(hostId: string): Promise<DeviceConfig | null> {
   return (await listDeviceConfigs()).find((d) => d.id === hostId) ?? null;
 }
@@ -266,20 +350,14 @@ export async function bridgeBase(cfg: BridgeConfig): Promise<string> {
     return cfg.url;
   }
   try {
-    const raw =
-      (await SecureStore.getItemAsync(PAIRING_KEY)) ??
-      (await SecureStore.getItemAsync(LEGACY_PAIRING_KEY));
-    const pairing = raw ? (JSON.parse(raw) as PairPayload) : null;
-    if (pairing?.nodeId) {
-      const { tunnelAvailable, startTunnel } = await import("./tunnel");
-      if (tunnelAvailable()) {
-        const port = await startTunnel(pairing.nodeId, pairing.relay ?? null, cfg.token);
-        const base = `http://127.0.0.1:${port}`;
-        // Confirm end-to-end (QUIC dial happens on this first request).
-        if (await probeHealth(base, 20_000)) {
-          effectiveBase.set(cfg.url, { base, until: Date.now() + 60_000 });
-          return base;
-        }
+    const reach = await tunnelReach(cfg);
+    if (reach) {
+      const port = await dialTunnel(reach.nodeId, reach.relay, reach.token);
+      const base = port ? `http://127.0.0.1:${port}` : null;
+      // Confirm end-to-end (QUIC dial happens on this first request).
+      if (base && (await probeHealth(base, 20_000))) {
+        effectiveBase.set(cfg.url, { base, until: Date.now() + 60_000 });
+        return base;
       }
     }
   } catch {
@@ -287,6 +365,73 @@ export async function bridgeBase(cfg: BridgeConfig): Promise<string> {
   }
   effectiveBase.set(cfg.url, { base: cfg.url, until: Date.now() + 10_000 });
   return cfg.url;
+}
+
+/**
+ * Which tunnel identity to dial for `cfg`, and with what handshake secret.
+ *
+ * A device's OWN identity wins. The global pairing below it can only ever
+ * describe one machine — fine when a phone had one paired Mac, wrong now that
+ * peers are granted individually, since every granted peer would otherwise be
+ * dialed at whichever machine happened to scan a QR last.
+ *
+ * The two carry different secrets, too: a QR pairing's tunnel is gated on the
+ * bridge's own token, while a grant's per-grant tunnel has a handshake secret of
+ * its own (the grant token is not accepted there — see access.mjs).
+ */
+async function tunnelReach(
+  cfg: BridgeConfig,
+): Promise<{ nodeId: string; relay: string | null; token: string } | null> {
+  const dev = cfg as DeviceConfig;
+  if (dev.nodeId) {
+    return { nodeId: dev.nodeId, relay: dev.relay ?? null, token: dev.tunnelToken ?? cfg.token };
+  }
+  const raw =
+    (await SecureStore.getItemAsync(PAIRING_KEY)) ??
+    (await SecureStore.getItemAsync(LEGACY_PAIRING_KEY));
+  const pairing = raw ? (JSON.parse(raw) as PairPayload) : null;
+  return pairing?.nodeId
+    ? { nodeId: pairing.nodeId, relay: pairing.relay ?? null, token: cfg.token }
+    : null;
+}
+
+/**
+ * Open a loopback proxy onto a peer's tunnel, whichever way this build can.
+ *
+ * Mobile carries the tunnel client as a native module. Desktop does not — but it
+ * ships the bridge, which is sitting on the same machine and can run
+ * `pounce-tunnel client` on our behalf and hand back a port.
+ */
+async function dialTunnel(
+  nodeId: string,
+  relay: string | null,
+  token: string,
+): Promise<number | null> {
+  const { tunnelAvailable, startTunnel } = await import("./tunnel");
+  if (tunnelAvailable()) return startTunnel(nodeId, relay, token);
+  return dialViaLocalBridge(nodeId, relay, token);
+}
+
+/** Ask the bridge on THIS machine to dial the peer for us. Loopback-only on its
+ *  side; null on any build or machine where that isn't available. */
+async function dialViaLocalBridge(
+  nodeId: string,
+  relay: string | null,
+  token: string,
+): Promise<number | null> {
+  const port = process.env.EXPO_PUBLIC_BRIDGE_PORT ?? "8099";
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/peers/dial`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ nodeId, relay, token }),
+    });
+    if (!res.ok) return null;
+    const { port: dialed } = (await res.json()) as { port?: number };
+    return dialed ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // Back-compat single-config helpers (used by older call sites / Settings).
@@ -303,6 +448,25 @@ export async function clearBridgeConfig(): Promise<void> {
   await SecureStore.deleteItemAsync(DEVICES_KEY);
 }
 
+/**
+ * The bridge told us this credential is finished — not that it couldn't be
+ * reached.
+ *
+ * The distinction is the whole point. Sync treats any failure as "offline" and
+ * keeps the last-known threads on screen, which is right for a closed laptop and
+ * wrong for a grant that ran out: those rows are no longer ours to show. Only an
+ * explicit answer from the bridge counts; a timeout never does.
+ */
+export class GrantEndedError extends Error {
+  constructor(
+    readonly reason: "grant_expired" | "grant_revoked",
+    readonly expiresAt: string | null,
+  ) {
+    super(reason);
+    this.name = "GrantEndedError";
+  }
+}
+
 async function get<T>(cfg: BridgeConfig, path: string, timeoutMs = 90_000): Promise<T> {
   // Bare fetch never times out, so an unreachable host (wrong IP, computer asleep)
   // hangs forever — the pairing/sync spinner then sticks with no error. Abort after
@@ -316,10 +480,27 @@ async function get<T>(cfg: BridgeConfig, path: string, timeoutMs = 90_000): Prom
       headers: { authorization: `Bearer ${cfg.token}` },
       signal: ctrl.signal,
     });
-    if (!res.ok) throw new Error(`bridge ${path} -> ${res.status}`);
+    if (!res.ok) {
+      if (res.status === 401) await throwIfGrantEnded(res);
+      throw new Error(`bridge ${path} -> ${res.status}`);
+    }
     return (await res.json()) as T;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/** Reads a 401 body for the bridge's specific "this grant is over" answer.
+ *  Body-reading failures fall through — an unparseable 401 is just a 401. */
+async function throwIfGrantEnded(res: Response): Promise<void> {
+  let body: { error?: string; expiresAt?: string } | null = null;
+  try {
+    body = (await res.clone().json()) as { error?: string; expiresAt?: string };
+  } catch {
+    return;
+  }
+  if (body?.error === "grant_expired" || body?.error === "grant_revoked") {
+    throw new GrantEndedError(body.error, body.expiresAt ?? null);
   }
 }
 
@@ -513,7 +694,7 @@ export async function syncLiveDataStreaming(): Promise<{
   // one, and doing that inside the parallel map would race two syncs writing the
   // same device. Only runs while some device predates `bridgeId`, so it costs
   // nothing once every paired bridge has been heard from.
-  const configs = await canonicalizeDevices();
+  const configs = await dropLapsedGrants(await canonicalizeDevices());
   const now = new Date().toISOString();
   const firstMsg = firstUserMessages(); // scan the message store once, not per page
   const devices: Record<string, Device> = {};
@@ -575,7 +756,16 @@ export async function syncLiveDataStreaming(): Promise<{
           merge();
         });
         syncedHostIds.push(cfg.id);
-      } catch {
+      } catch (e) {
+        // The bridge saying our grant is over is not the same as failing to
+        // reach it: forget the machine outright rather than parking it as
+        // offline with threads we may no longer show.
+        if (e instanceof GrantEndedError) {
+          await dropEndedGrant(cfg, e.reason === "grant_revoked" ? "revoked" : "expired");
+          delete threadsByDevice[cfg.id];
+          delete devices[cfg.id];
+          return;
+        }
         online = false;
         devices[cfg.id] = {
           id: cfg.id,
@@ -615,7 +805,7 @@ export async function syncLiveData(opts?: {
   // On an explicit pull-to-refresh we bypass the bridge's 20s cache so a
   // just-opened session shows up immediately.
   const q = opts?.fresh ? "?fresh=1" : "";
-  const configs = await listDeviceConfigs();
+  const configs = await dropLapsedGrants(await listDeviceConfigs());
   const repos: Record<string, Repository> = {};
   const sessions: Record<string, Session> = {};
   const devices: Record<string, Device> = {};
@@ -651,7 +841,12 @@ export async function syncLiveData(opts?: {
         }
         threads = t.threads;
         syncedHostIds.push(cfg.id);
-      } catch {
+      } catch (e) {
+        // Access ended (not merely unreachable) — forget the machine and its rows.
+        if (e instanceof GrantEndedError) {
+          await dropEndedGrant(cfg, e.reason === "grant_revoked" ? "revoked" : "expired");
+          return;
+        }
         online = false;
       }
       // Bridge reachable (status OK) but the daemon handed back zero agents.

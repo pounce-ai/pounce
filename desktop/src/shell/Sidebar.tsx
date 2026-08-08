@@ -25,6 +25,7 @@ import { T } from "@pounce/app/ui/theme";
 import { GlassSurface } from "@pounce/app/ui/native/GlassSurface";
 import { DragRegion, TITLEBAR_INSET, TRAFFIC_LIGHT_INSET } from "@pounce/app/ui/native/DragRegion";
 import { appearance$, setAppearance, type AppearanceMode } from "@pounce/app/state/appearance";
+import { listAccess } from "@pounce/app/services/peers";
 import { nav$, selectSpace } from "../shims/router";
 import { deriveSpaces, spaceKeyOf, type Space } from "./Spaces";
 
@@ -175,6 +176,11 @@ export function Sidebar() {
           onPress={() => nav$.sidebar.set(false)}
         />
         <View style={s.flex1} />
+        {/* Someone is asking to read this machine's threads. Only ever shown
+            when there IS something to answer: a permanently-present bell that
+            is empty 99% of the time teaches people to ignore it, and this is
+            the one notification here that a human must actually act on. */}
+        <AccessBell />
         {/* Appearance is a one-click cycle here, the way mobile's header button
             works — burying a light/dark switch two levels into Settings makes
             people hunt for the thing they flip most often. */}
@@ -364,6 +370,11 @@ export function Sidebar() {
         >
           <Ionicons name="qr-code-outline" size={15} color={COLOR.fgMuted} />
         </Pressable>
+        {/* Other Macs on this network — and, when one of them is asking for
+            access, the way in to answering. The dot is the only notice a person
+            gets while the app is in front of them, so it takes priority over
+            the plain "go browse peers" destination. */}
+        <PeersButton />
         {/* Explicit gear as well as the row itself: "click your name to reach
             Settings" is a convention people know from web apps, but it isn't
             discoverable, and appearance lives behind it. */}
@@ -552,6 +563,83 @@ function TitleBarIcon({
   );
 }
 
+/**
+ * How many machines are waiting on an answer from this one.
+ *
+ * Polled rather than pushed: the bridge already knows, and a 5s tick against
+ * loopback costs nothing next to being able to tell someone their colleague is
+ * standing at the door. Shared by the titlebar bell and the account-row badge
+ * so the two can never disagree about whether there is something to do.
+ */
+function usePendingAccess(): number {
+  const [waiting, setWaiting] = useState(0);
+  useEffect(() => {
+    let live = true;
+    const tick = () => void listAccess().then((a) => live && setWaiting(a.pending.length));
+    tick();
+    const t = setInterval(tick, 5_000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, []);
+  return waiting;
+}
+
+/** The notification: a bell that exists only while something needs answering,
+ *  with the count on it. Sits with Search and Filters because that row is where
+ *  the eye already goes for "state of this window". */
+function AccessBell() {
+  const router = useRouter();
+  const waiting = usePendingAccess();
+  if (!waiting) return null;
+  return (
+    <Pressable
+      onPress={() => router.push("/access")}
+      // Distinct from the account row's peers button, which also badges and
+      // also opens /access — two controls answering to one name makes them
+      // indistinguishable to VoiceOver and to anything driving the UI.
+      accessibilityLabel={`Notifications: ${waiting} access request${waiting === 1 ? "" : "s"} waiting`}
+      style={({ pressed }) => [s.titleBarIcon, pressed && s.rowHover]}
+    >
+      <Ionicons name="notifications" size={14} color={COLOR.accent} />
+      <View style={s.bellCount}>
+        <Text style={s.bellCountText}>{waiting > 9 ? "9+" : waiting}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+/**
+ * Nearby machines, and the badge for someone asking to reach this one.
+ *
+ * An access request is answered by a person, so it has to be VISIBLE to one —
+ * the bridge also fires a system notification, but that is for when the window
+ * is buried, and a badge is what works when it isn't. While a request is
+ * waiting the button changes destination: the thing to do is answer it, not go
+ * browsing.
+ */
+function PeersButton() {
+  const router = useRouter();
+  const waiting = usePendingAccess();
+
+  return (
+    <Pressable
+      onPress={() => router.push(waiting ? "/access" : "/peers")}
+      accessibilityLabel={waiting ? `${waiting} access request waiting` : "Nearby machines"}
+      hitSlop={4}
+      style={({ pressed }) => [s.accountAction, pressed && s.rowSelected]}
+    >
+      <Ionicons
+        name="git-network-outline"
+        size={15}
+        color={waiting ? COLOR.accent : COLOR.fgMuted}
+      />
+      {waiting ? <View style={s.peerBadge} /> : null}
+    </Pressable>
+  );
+}
+
 const s = StyleSheet.create({
   // No background: the GlassSurface backdrop paints (vibrancy or fallback).
   root: { flex: 1 },
@@ -696,6 +784,34 @@ const s = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 6,
   },
+  // Corner pip on the peers icon. Ringed in the sidebar's own background so it
+  // reads as a badge rather than as part of the glyph underneath.
+  peerBadge: {
+    position: "absolute",
+    top: 3,
+    right: 3,
+    height: 7,
+    width: 7,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: T.bg,
+    backgroundColor: T.accent,
+  },
+  // Count sits on the bell rather than beside it: the titlebar row is icons
+  // only, and a number in the flow would break that rhythm.
+  bellCount: {
+    position: "absolute",
+    top: 1,
+    right: 0,
+    minWidth: 12,
+    height: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+    paddingHorizontal: 2,
+    backgroundColor: T.accent,
+  },
+  bellCountText: { fontSize: 8, fontWeight: "700", color: T.onAccent },
   accountName: { fontSize: 12, fontWeight: "500", color: T.fg },
   accountSub: { fontSize: 10.5, color: T.fgFaint },
   statusDot: { height: 7, width: 7, borderRadius: 999 },
