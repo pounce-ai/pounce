@@ -25,6 +25,7 @@ Installed globally (`npm i -g use-pounce`), the command is just `pounce`.
 | `pounce stop`      | Stop the background Bridge and its tunnel                  |
 | `pounce logs [-f]` | Show (or follow) the Bridge log                            |
 | `pounce peers`     | Machines nearby, who's asking, who has access              |
+| `pounce peers --discoverable on` | Let other machines here find this one        |
 | `pounce ask <machine>` | Ask another computer to share its threads with you     |
 | `pounce approve <code>` | Let a machine in                                      |
 | `pounce deny <code>` | Turn a request down                                      |
@@ -48,6 +49,7 @@ Sharing flags (see [Sharing with another machine](/docs/sharing)):
 | `--hours <n>`    | How long the access lasts (default `24`)                    |
 | `--forever`      | No expiry                                                   |
 | `--note "text"`  | A line for the person approving                             |
+| `--discoverable on\|off` | Announce this machine to others here — **off by default** |
 
 ## Sharing with another machine
 
@@ -55,6 +57,7 @@ Machines running Pounce find each other on the network. One can ask another for
 **read-only** access to the projects its owner picks, with an expiry:
 
 ```sh
+pounce peers --discoverable on     # off by default — the beacon carries your machine name
 pounce peers                       # who's nearby, who's asking, who has access
 pounce ask work-laptop             # prints their catalog, then tells you what to run
 pounce ask work-laptop --spaces api --note "debugging the timeout"

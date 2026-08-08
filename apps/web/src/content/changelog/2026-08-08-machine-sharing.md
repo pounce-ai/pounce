@@ -33,6 +33,12 @@ or you revoke it, the other machine is told exactly that, so the threads leave
 its sidebar instead of lingering as "offline". Off-network access rides its own
 peer-to-peer tunnel per grant, which is closed at the same moment.
 
+**Announcing yourself is off until you ask for it.** The beacon carries your
+machine's name, and a machine name is usually a person's, so nothing is
+broadcast on the networks you join until you switch it on — from the app, the
+page, or `pounce peers --discoverable on`. Staying silent doesn't shut you out:
+a machine that knows your address can still ask, and you can still ask it.
+
 All of it lives in the Bridge, which means it works everywhere the Bridge does.
 The Mac app has it in the sidebar; on Windows, Linux, or a server you've SSH'd
 into, open `http://127.0.0.1:8099/peers` in a browser, or stay in the terminal:

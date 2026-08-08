@@ -540,8 +540,18 @@ async function cmdPeers(opts) {
   }
 
   console.log(`\n${bold("Nearby machines")}`);
-  if (!peers.length)
-    console.log(dim("  none — Pounce must be running on the other computer, on this network"));
+  if (!disc.eligible) {
+    console.log(dim("  announcing isn't available on this port"));
+  } else if (!disc.on) {
+    console.log(dim("  this machine is not announcing itself — nothing is broadcast"));
+    console.log(
+      disc.locked
+        ? dim("  (set by POUNCE_DISCOVERY in this bridge's environment)")
+        : `  ${bold("pounce peers --discoverable on")}${dim("  to let machines here find you")}`,
+    );
+  } else if (!peers.length) {
+    console.log(dim("  none yet — the other computer needs Pounce running and announcing too"));
+  }
   for (const p of peers) {
     console.log(`  ${bold(p.hostName)}  ${dim(`${p.address}:${p.port}`)}`);
     console.log(`    ${dim(`pounce ask ${p.hostName}`)}`);
@@ -717,6 +727,7 @@ function parseArgs(argv) {
     forever: false,
     all: false,
     note: null,
+    discoverable: null,
   };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
@@ -731,6 +742,7 @@ function parseArgs(argv) {
     else if (a === "--forever") opts.forever = true;
     else if (a === "--all") opts.all = true;
     else if (a === "--note") opts.note = argv[++i];
+    else if (a === "--discoverable") opts.discoverable = argv[++i];
     else if (a === "--help" || a === "-h") rest.unshift("help");
     else if (a === "--version" || a === "-V") rest.unshift("version");
     else rest.push(a);
@@ -761,6 +773,7 @@ ${bold("Sharing with another computer")} ${dim("— read-only, scoped, and it ex
   --all           ask for everything they allow
   --hours <n>     how long the access lasts        ${dim("(default 24; --forever for none)")}
   --note <text>   a line for the person approving
+  --discoverable on|off   announce this machine here ${dim("(off by default)")}
 
   Or open ${bold("http://127.0.0.1:8099/peers")} in a browser for the same thing with buttons.
 

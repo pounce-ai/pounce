@@ -27,13 +27,15 @@ import {
   grantDevice,
   catalogSpaces,
   catalogThreads,
-  listPeers,
+  peerState,
   pollAsk,
+  setDiscoverable,
   requestPreview,
   requestRead,
   type AskResult,
   type CatalogSpace,
   type CatalogThread,
+  type DiscoveryState,
   type PendingAsk,
   type Peer,
   type Scope,
@@ -57,6 +59,7 @@ const GIVE_UP_MS = 5 * 60_000;
 
 export default function PeersScreen() {
   const [peers, setPeers] = useState<Peer[] | null>(null);
+  const [discovery, setDiscovery] = useState<DiscoveryState | null>(null);
   const [step, setStep] = useState<Step>({ name: "browse-peers" });
   const [busy, setBusy] = useState(false);
 
@@ -65,7 +68,12 @@ export default function PeersScreen() {
   useEffect(() => {
     if (step.name !== "browse-peers") return;
     let live = true;
-    const tick = () => void listPeers().then((p) => live && setPeers(p));
+    const tick = () =>
+      void peerState().then((r) => {
+        if (!live) return;
+        setPeers(r.peers);
+        setDiscovery(r.discovery);
+      });
     tick();
     const t = setInterval(tick, 3_000);
     return () => {
@@ -97,7 +105,16 @@ export default function PeersScreen() {
       </View>
 
       {step.name === "browse-peers" ? (
-        <PeerList peers={peers} busy={busy} onAsk={ask} />
+        <PeerList
+          peers={peers}
+          discovery={discovery}
+          busy={busy}
+          onAsk={ask}
+          onToggle={async () => {
+            if (!discovery) return;
+            setDiscovery(await setDiscoverable(!discovery.on));
+          }}
+        />
       ) : step.name === "awaiting-preview" ? (
         <Waiting
           peer={step.peer}
@@ -197,28 +214,73 @@ function refusal(state: AskResult["state"]): string {
 
 function PeerList({
   peers,
+  discovery,
   busy,
   onAsk,
+  onToggle,
 }: {
   peers: Peer[] | null;
+  discovery: DiscoveryState | null;
   busy: boolean;
   onAsk: (p: Peer) => void;
+  onToggle: () => void;
 }) {
   if (peers === null) {
     return <Centered spinner title="Looking for machines on this network…" />;
   }
+  // Announcing is opt-in — the beacon carries this machine's name — so the
+  // switch leads, and an empty list below it means something different
+  // depending on which way it is set.
+  const toggle = discovery ? (
+    <View style={s.peerRow}>
+      <Ionicons
+        name={discovery.on ? "radio-outline" : "eye-off-outline"}
+        size={20}
+        color={COLOR.fgMuted}
+      />
+      <View style={s.grow}>
+        <Text style={s.peerName}>
+          {discovery.on ? "Other machines can find this one" : "This Mac isn't announcing itself"}
+        </Text>
+        <Text style={s.peerMeta}>
+          {discovery.on
+            ? "They can see its name and address, and ask for access."
+            : "Nothing is broadcast until you switch this on."}
+        </Text>
+      </View>
+      {!discovery.eligible ? (
+        <Text style={s.peerMeta}>unavailable</Text>
+      ) : discovery.locked ? (
+        <Text style={s.peerMeta}>set by env</Text>
+      ) : (
+        <Pressable
+          disabled={busy}
+          onPress={onToggle}
+          style={({ pressed }) => [discovery.on ? s.ghostBtn : s.primaryBtn, pressed && s.pressed]}
+        >
+          <Text style={discovery.on ? s.ghostLabel : s.primaryLabel}>
+            {discovery.on ? "Stop" : "Let them find me"}
+          </Text>
+        </Pressable>
+      )}
+    </View>
+  ) : null;
+
   if (!peers.length) {
     return (
-      <Centered
-        icon="wifi-outline"
-        tint={COLOR.fgFaint}
-        title="No other machines yet"
-        body="Pounce has to be running on the other Mac, and both need to be on the same Wi-Fi. It usually shows up within a few seconds."
-      />
+      <ScrollView contentContainerStyle={s.list}>
+        {toggle}
+        <Text style={s.sectionHint}>
+          {discovery && !discovery.on
+            ? "Machines you already know can still be asked, and they can still ask you. Announcing only decides whether you turn up in their list on your own."
+            : "No other machines yet. Pounce has to be running on the other Mac with announcing switched on too, and you both need to be on the same Wi-Fi."}
+        </Text>
+      </ScrollView>
     );
   }
   return (
     <ScrollView contentContainerStyle={s.list}>
+      {toggle}
       {peers.map((p) => (
         <View key={p.bridgeId} style={s.peerRow}>
           <Ionicons
@@ -601,6 +663,16 @@ const s = StyleSheet.create({
     paddingVertical: 9,
   },
   primaryLabel: { fontSize: 13, fontWeight: "600", color: T.bg },
+  // Used by the announcing switch when it is already on, where the action is
+  // "stop" and should not read as the thing to do.
+  ghostBtn: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: T.border,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  ghostLabel: { fontSize: 13, color: T.fgMuted },
   disabled: { opacity: 0.4 },
   pressed: { opacity: 0.8 },
 });

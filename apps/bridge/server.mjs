@@ -1185,16 +1185,58 @@ function pairDeepLink() {
 
 const access = createAccess();
 
-/** Discovery announces "a bridge lives here" to the whole LAN, so the same
- *  singleton reasoning as ensureTunnel applies: only the machine's real bridge
- *  may claim the identity, or a dev bridge on port 8100 would invite peers to
- *  knock on a door that closes when you stop the dev server. */
-const DISCOVERY_ON =
-  process.env.POUNCE_DISCOVERY !== "0" &&
-  (PORT === DEFAULT_PORT || process.env.POUNCE_DISCOVERY === "1");
-const discovery = DISCOVERY_ON
+/**
+ * Announcing this machine to the network is OPT-IN.
+ *
+ * The beacon carries the machine's NAME, and a name is usually a person's. Any
+ * default that switched it on would put that on every café, office and
+ * co-working wifi the laptop ever joins, chosen by nobody — and once shipped it
+ * cannot be un-shipped from installs already out there. So silence is the
+ * default and the user turns it on, from /peers, the app, or the CLI.
+ *
+ * Precedence: POUNCE_DISCOVERY wins outright (scripted and fleet setups need to
+ * be able to state it), then the persisted choice, then off.
+ *
+ * The port guard is separate and survives both: announcing is a claim to BE
+ * this machine's bridge, and a dev bridge on 8100 must not invite peers to
+ * knock on a door that closes when the dev server stops.
+ */
+function discoveryWanted() {
+  if (process.env.POUNCE_DISCOVERY === "0") return false;
+  if (process.env.POUNCE_DISCOVERY === "1") return true;
+  return readConfig().discoverable === true;
+}
+const discoveryEligible = () => PORT === DEFAULT_PORT || process.env.POUNCE_DISCOVERY === "1";
+
+// Built once and started/stopped on demand, so the toggle takes effect without
+// restarting the bridge — a setting you have to reboot for is a setting people
+// leave alone.
+const discovery = discoveryEligible()
   ? createDiscovery({ bridgeId: machineBridgeId(), port: PORT, version: () => APP_VERSION })
   : null;
+
+/** Bring the beacon in line with the current setting. Safe to call repeatedly:
+ *  start() and stop() are both no-ops when already in that state. */
+function syncDiscovery() {
+  if (!discovery) return false;
+  const want = discoveryWanted();
+  if (want) discovery.start();
+  else discovery.stop();
+  return want;
+}
+
+/** How the toggle is presented: whether it's on, whether this bridge is even
+ *  allowed to announce, and whether an env var has taken the decision away. */
+function discoveryState() {
+  return {
+    on: !!discovery?.running,
+    eligible: !!discovery,
+    // A dev bridge on a non-default port, or POUNCE_DISCOVERY set explicitly —
+    // either way the UI should show the state, not a control that won't stick.
+    locked: process.env.POUNCE_DISCOVERY === "0" || process.env.POUNCE_DISCOVERY === "1",
+    chosen: readConfig().discoverable,
+  };
+}
 
 /** Reap grants that have run out, and the guest tunnels holding their doors
  *  open. Belt and braces alongside the per-request expiry check: a grant nobody
@@ -1537,7 +1579,7 @@ a.back{font-size:12px;color:var(--accent);text-decoration:none}
 <div id="app"></div>
 </div>
 <script>
-var TOKEN = null, state = {peers:[], pending:[], grants:[], held:[], spaces:[]}, flow = null, busy = false;
+var TOKEN = null, state = {peers:[], pending:[], grants:[], held:[], spaces:[], discovery:{}}, flow = null, busy = false;
 
 function h(tag, attrs, kids){
   var e = document.createElement(tag);
@@ -1585,6 +1627,7 @@ function refresh(){
   if(flow) return Promise.resolve();
   return Promise.all([api('/v1/peers'), api('/v1/access'), api('/v1/peers/granted')]).then(function(r){
     state.peers = r[0].peers || [];
+    state.discovery = r[0].discovery || {};
     state.pending = r[1].pending || [];
     state.grants = r[1].grants || [];
     state.held = r[2].held || [];
@@ -1665,8 +1708,11 @@ function render(){
   }
 
   app.appendChild(h('h2',{text:'Nearby machines'}));
-  if(!state.peers.length){
-    app.appendChild(h('p',{class:'empty',text:'No other machines yet. Pounce has to be running on the other computer, and both need to be on the same network.'}));
+  app.appendChild(renderDiscoveryToggle());
+  if(!state.discovery.on){
+    app.appendChild(h('p',{class:'empty',text:'Other machines can still be asked if you know their address, and they can still ask you. Announcing only decides whether you appear in their list automatically.'}));
+  } else if(!state.peers.length){
+    app.appendChild(h('p',{class:'empty',text:'No other machines yet. Pounce has to be running on the other computer, it needs announcing switched on too, and you both need to be on the same network.'}));
   } else {
     state.peers.forEach(function(p){
       app.appendChild(h('div',{class:'card'},[h('div',{class:'row'},[
@@ -1709,6 +1755,32 @@ function render(){
       ])]));
     });
   }
+}
+
+function renderDiscoveryToggle(){
+  var d = state.discovery || {};
+  var card = h('div',{class:'card'});
+  var row = h('div',{class:'row'});
+  row.appendChild(h('div',{class:'grow'},[
+    h('div',{class:'name',text: d.on ? 'This machine is announcing itself' : 'This machine is not announcing itself'}),
+    h('div',{class:'meta',text: d.on
+      ? 'Other Pounce machines on this network can see its name and address, and ask it for access.'
+      : 'Nothing is broadcast. Switch this on when you want other machines here to find you.'})
+  ]));
+  if(!d.eligible){
+    row.appendChild(h('div',{class:'meta',text:'not available on this port'}));
+  } else if(d.locked){
+    row.appendChild(h('div',{class:'meta',text:'set by POUNCE_DISCOVERY'}));
+  } else {
+    row.appendChild(h('button',{class: d.on ? '' : 'p', onclick:function(){
+      if(busy) return;
+      busy = true;
+      api('/v1/peers/discovery',{method:'POST',body:JSON.stringify({enabled:!d.on})})
+        .then(function(){ busy = false; refresh(); });
+    }, text: d.on ? 'Stop announcing' : 'Let machines find me'}));
+  }
+  card.appendChild(row);
+  return card;
 }
 
 function renderRequest(r){
@@ -2036,8 +2108,31 @@ const server = http.createServer(async (req, res) => {
     // either: approving access is a decision made at this keyboard.
     if (url.pathname === "/v1/peers") {
       if (!isOwner(req)) return send(res, 403, { error: "local only" });
-      discovery?.refresh();
-      return send(res, 200, { peers: discovery?.list() ?? [], discovering: !!discovery?.running });
+      if (discovery?.running) discovery.refresh();
+      return send(res, 200, {
+        peers: discovery?.running ? discovery.list() : [],
+        discovery: discoveryState(),
+        // Kept for older clients that read this boolean.
+        discovering: !!discovery?.running,
+      });
+    }
+    // The toggle itself. Persisted, so it survives a restart, and applied
+    // immediately so nobody has to relaunch the bridge to be found.
+    if (url.pathname === "/v1/peers/discovery" && req.method === "POST") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      const { enabled } = await readBody(req);
+      if (typeof enabled !== "boolean")
+        return send(res, 400, { error: "enabled must be a boolean" });
+      if (discoveryState().locked) {
+        return send(res, 409, {
+          error:
+            "POUNCE_DISCOVERY is set in this bridge's environment — unset it to use this toggle",
+          discovery: discoveryState(),
+        });
+      }
+      writeConfig({ discoverable: enabled });
+      syncDiscovery();
+      return send(res, 200, { ok: true, discovery: discoveryState() });
     }
     // Send an ask to a peer and remember the claim it hands back.
     if (url.pathname === "/v1/peers/ask" && req.method === "POST") {
@@ -2890,7 +2985,7 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
       // Tell the LAN this machine is here, and start the clock on any grants
       // that outlived the last run — a bridge restart must not silently extend
       // access someone gave until Tuesday.
-      discovery?.start();
+      syncDiscovery();
       sweepAccess();
       setInterval(sweepAccess, 60_000).unref?.();
       restoreGrantTunnels();

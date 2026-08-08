@@ -58,7 +58,6 @@ export function createDiscovery({ bridgeId, port, version = () => null }) {
   const peers = new Map();
   let sock = null;
   let timer = null;
-  let stopped = false;
 
   const self = () => ({
     v: 1,
@@ -141,8 +140,14 @@ export function createDiscovery({ bridgeId, port, version = () => null }) {
   };
 
   return {
+    /**
+     * Start announcing. Idempotent, and — importantly — repeatable: this used
+     * to latch a `stopped` flag on the way down, which made announcing a
+     * one-way door. Now that a person can switch it on and off from the app,
+     * the page or the CLI, stopping must leave it startable again.
+     */
     start() {
-      if (sock || stopped) return;
+      if (sock) return;
       try {
         sock = dgram.createSocket({ type: "udp4", reuseAddr: true });
       } catch {
@@ -186,7 +191,6 @@ export function createDiscovery({ bridgeId, port, version = () => null }) {
     },
 
     stop() {
-      stopped = true;
       if (timer) clearInterval(timer);
       timer = null;
       try {
