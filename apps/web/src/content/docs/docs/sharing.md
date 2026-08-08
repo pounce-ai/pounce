@@ -106,17 +106,31 @@ screen and type it.
 
 ## Finding each other
 
-Machines announce themselves on the local network, so a computer running Pounce
-shows up under "Nearby machines" within a few seconds. The announcement carries
-a name, an address and nothing else — no token, no project names, nothing about
-what's on the machine.
+**Announcing is off until you switch it on.** The beacon carries your machine's
+name, and a machine name is usually a person's — so Pounce doesn't put that on
+every café, office and co-working network you join unless you've said it should.
+
+Turn it on wherever you are:
+
+- **App** — the switch at the top of *Nearby machines*
+- **Browser** — *Let machines find me* on `http://127.0.0.1:8099/peers`
+- **Terminal** — `pounce peers --discoverable on`
+
+It's remembered, applies immediately, and `--discoverable off` stops it again.
+`POUNCE_DISCOVERY=1` or `=0` in the Bridge's environment overrides the switch
+for scripted and fleet setups.
+
+Once it's on, a computer running Pounce shows up under "Nearby machines" within
+a few seconds. The announcement carries a name, an address and nothing else —
+no token, no project names, nothing about what's on the machine.
+
+Both machines need announcing on to see each other automatically. Being silent
+doesn't cut you off: someone who knows your address can still ask you for
+access, and you can still ask them.
 
 Once a grant exists it also works **off the network**: each grant gets its own
 peer-to-peer tunnel, so access survives the other machine leaving the Wi-Fi.
 Revoking closes that tunnel along with everything else.
-
-To keep a machine from announcing itself at all, start the Bridge with
-`POUNCE_DISCOVERY=0`.
 
 ## Reading what you've been granted
 

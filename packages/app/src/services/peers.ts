@@ -173,14 +173,42 @@ async function mine<T>(path: string, opts: RequestInit = {}, timeoutMs?: number)
 const minePost = <T>(path: string, body: unknown) =>
   mine<T>(path, { method: "POST", body: JSON.stringify(body) });
 
+/** Whether this machine announces itself, and whether that can be changed here.
+ *  Announcing is opt-in: the beacon carries the machine's name. */
+export interface DiscoveryState {
+  readonly on: boolean;
+  /** False on a bridge that may not announce at all (a non-default port). */
+  readonly eligible: boolean;
+  /** POUNCE_DISCOVERY decided it — show the state, not a control. */
+  readonly locked: boolean;
+  readonly chosen: boolean | null;
+}
+
 /** Machines announcing themselves on this network. Empty (rather than throwing)
  *  when the local bridge isn't up — "nobody nearby" is the honest render. */
 export async function listPeers(): Promise<Peer[]> {
+  return (await peerState()).peers;
+}
+
+/** The list AND the toggle, in one call — the screen needs both to say anything
+ *  useful about an empty list. */
+export async function peerState(): Promise<{ peers: Peer[]; discovery: DiscoveryState }> {
+  const off: DiscoveryState = { on: false, eligible: false, locked: false, chosen: null };
   try {
-    const { peers } = await mine<{ peers: Peer[] }>("/v1/peers", {}, 4_000);
-    return peers ?? [];
+    const r = await mine<{ peers: Peer[]; discovery: DiscoveryState }>("/v1/peers", {}, 4_000);
+    return { peers: r.peers ?? [], discovery: r.discovery ?? off };
   } catch {
-    return [];
+    return { peers: [], discovery: off };
+  }
+}
+
+/** Start or stop announcing. Persisted by the bridge and applied at once. */
+export async function setDiscoverable(enabled: boolean): Promise<DiscoveryState | null> {
+  try {
+    const r = await minePost<{ discovery: DiscoveryState }>("/v1/peers/discovery", { enabled });
+    return r.discovery;
+  } catch {
+    return null;
   }
 }
 

@@ -46,7 +46,14 @@ function normalize(raw) {
   // the app; the HTTP layer never reads it back out (see publicConfig).
   const adminApiKey =
     typeof r.adminApiKey === "string" && r.adminApiKey.trim() ? r.adminApiKey.trim() : "";
-  return { bins, extraPath, env, adminApiKey };
+  // Whether this machine announces itself to other Pounce machines on the
+  // network (agents/discovery.mjs). OFF unless the user has said otherwise:
+  // the beacon carries the machine's NAME, and a name is often a person's, so
+  // turning it on for everyone who happens to update would put that on every
+  // café and office wifi they join without anyone choosing it. `null` means
+  // "never chosen", which the UI shows differently from a deliberate no.
+  const discoverable = typeof r.discoverable === "boolean" ? r.discoverable : null;
+  return { bins, extraPath, env, adminApiKey, discoverable };
 }
 
 /** Current config (cached until the file's mtime changes). Never throws. */
@@ -88,7 +95,8 @@ export function writeConfig(patch = {}) {
   const extraPath = patch.extraPath !== undefined ? patch.extraPath : cur.extraPath;
   // "" clears the stored key, mirroring how bins/env overrides are cleared.
   const adminApiKey = patch.adminApiKey !== undefined ? patch.adminApiKey : cur.adminApiKey;
-  const next = normalize({ bins, env, extraPath, adminApiKey });
+  const discoverable = patch.discoverable !== undefined ? patch.discoverable : cur.discoverable;
+  const next = normalize({ bins, env, extraPath, adminApiKey, discoverable });
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(next, null, 2) + "\n");
   cache = next;
