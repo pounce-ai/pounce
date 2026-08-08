@@ -49,8 +49,13 @@ function parse(href: Href): Route {
  * come back to — a Space is a project's whole history and its instruction
  * files, which is reading and editing, not a dialog. They get a tab so they can
  * live beside the sessions you're switching between.
+ *
+ * Settings belongs here for the same reason: it is a list of machines you read
+ * down, rename, resync and share from, not a question with an answer. As a card
+ * it was a 620×660 box that clipped its own content and had to be dismissed
+ * before you could look at anything it referred to.
  */
-const PANES = new Set(["/space", "/metric"]);
+const PANES = new Set(["/space", "/metric", "/settings"]);
 
 /**
  * Identity of an open tab: what makes two hrefs "the same thing already open".

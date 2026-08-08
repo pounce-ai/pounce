@@ -237,6 +237,24 @@ function SpaceDetail({ space, sessions }: { space: Space; sessions: Session[] })
           </Text>
         </View>
         <View style={s.flex1} />
+        {/* Context is a property of the PROJECT, not of a thread — the same
+            AGENTS.md governs every session in this checkout. It used to hang off
+            a thread's environment menu, which put one project's setup behind
+            whichever thread you happened to have open. */}
+        {cwd ? (
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: "/context",
+                params: { cwd, hostId: space.hostId, repoId: space.repoId },
+              })
+            }
+            style={({ pressed }) => [s.headerBtn, pressed && s.pressed]}
+          >
+            <PounceIcon name="document-text-outline" size={14} color={theme.colors.fgMuted} />
+            <Text style={s.headerBtnLabel}>Project context</Text>
+          </Pressable>
+        ) : null}
         <Pressable
           onPress={() =>
             router.push({

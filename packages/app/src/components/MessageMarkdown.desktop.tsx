@@ -17,9 +17,23 @@ import { highlightLines, themeFor } from "./highlight";
 import { usePacedText } from "./pacedText";
 import { SECONDARY_SCALE } from "../ui/tokens";
 
+/**
+ * Body type for a transcript.
+ *
+ * The line height is the whole story. At 21/15 (a 1.4 ratio) the lines pack
+ * tightly enough that a paragraph reads as a block of texture rather than as
+ * sentences, which is what made this feel harsh next to editors doing the same
+ * job. 24/15 is 1.6 — the ratio long-form text has wanted since print — and it
+ * costs three points a line for prose people actually read.
+ *
+ * The colour is pulled off pure `labelColor` for the same reason. Full-strength
+ * white on near-black is maximum contrast, and maximum is not most readable:
+ * it glares, and every glyph edge fizzes. `fgProse` steps it down just enough
+ * to settle while staying far above any contrast floor (see ui/theme.ts).
+ */
 const BASE: Record<"user" | "assistant", TextStyle> = {
-  user: { fontSize: 15, lineHeight: 21, color: T.onAccent },
-  assistant: { fontSize: 15, lineHeight: 21, color: T.fg },
+  user: { fontSize: 15, lineHeight: 24, color: T.onAccent },
+  assistant: { fontSize: 15, lineHeight: 24, color: T.fgProse },
 };
 
 /** Mirrors the native `ContextMenuItem`, declared locally because the native
@@ -83,7 +97,7 @@ export function MessageMarkdown({
     );
   }
   return (
-    <View style={{ gap: 8 }}>
+    <View style={s.blocks}>
       {segments.map((seg, i) =>
         seg.type === "code" ? (
           <CodeCard
@@ -137,18 +151,26 @@ function HighlightedCode({ code, lang }: { code: string; lang: string }) {
   const hlTheme = themeFor(light);
   const lines = useMemo(() => highlightLines(code, lang, light), [code, lang, light]);
   return (
-    <Text selectable style={s.codeCardBody}>
-      {lines.map((spans, i) => (
-        <Text key={i}>
-          {i > 0 ? "\n" : ""}
-          {spans.map((span, j) => (
-            <Text key={j} style={{ color: span.color ?? hlTheme.fg }}>
-              {span.text}
-            </Text>
-          ))}
-        </Text>
-      ))}
-    </Text>
+    // The padding lives on a View, not on the Text. rn-macos doesn't apply
+    // horizontal padding reliably to a multi-line Text with nested Texts inside
+    // it — the declared 12pt showed up as about 4, so code sat almost flush
+    // against the card's left border while the header above it (a View) indented
+    // correctly. Wrapping is the fix that holds for wrapped and scrolled lines
+    // alike.
+    <View style={s.codeCardPad}>
+      <Text selectable style={s.codeCardBody}>
+        {lines.map((spans, i) => (
+          <Text key={i}>
+            {i > 0 ? "\n" : ""}
+            {spans.map((span, j) => (
+              <Text key={j} style={{ color: span.color ?? hlTheme.fg }}>
+                {span.text}
+              </Text>
+            ))}
+          </Text>
+        ))}
+      </Text>
+    </View>
   );
 }
 
@@ -395,6 +417,9 @@ function Blocks({
 const s = StyleSheet.create({
   gap1: { gap: 4 },
   gap2: { gap: 8 },
+  // Between blocks (paragraph → paragraph, paragraph → list). Tighter than the
+  // line height and the paragraphs stop being separate things.
+  blocks: { gap: 12 },
   cursor: { color: T.accent },
   codeCard: {
     overflow: "hidden",
@@ -421,9 +446,8 @@ const s = StyleSheet.create({
     paddingVertical: 2,
   },
   runLabel: { fontSize: 11, fontWeight: "500", color: T.fg },
+  codeCardPad: { paddingHorizontal: 14, paddingBottom: 10 },
   codeCardBody: {
-    paddingHorizontal: 12,
-    paddingBottom: 8,
     fontFamily: "JetBrainsMono",
     fontSize: 12.5,
     lineHeight: 18,
@@ -434,7 +458,8 @@ const s = StyleSheet.create({
   semibold: { fontWeight: "600" },
   italic: { fontStyle: "italic" },
   link: { color: T.info, textDecorationLine: "underline" },
-  codeBlock: { borderRadius: 8, backgroundColor: T.bg, paddingHorizontal: 12, paddingVertical: 8 },
+  // Same inset as codeCardPad, so a fenced block and a lifted one indent alike.
+  codeBlock: { borderRadius: 8, backgroundColor: T.bg, paddingHorizontal: 14, paddingVertical: 10 },
   codeText: { fontFamily: "JetBrainsMono", fontSize: 12.5, lineHeight: 18, color: T.fgMuted },
   quote: { borderLeftWidth: 2, borderColor: T.borderStrong, paddingLeft: 12 },
   listItem: { flexDirection: "row", gap: 8, paddingLeft: 4 },

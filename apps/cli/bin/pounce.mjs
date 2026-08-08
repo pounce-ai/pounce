@@ -522,11 +522,27 @@ async function resolvePeer(port, who) {
 }
 
 async function cmdPeers(opts) {
-  const [{ peers }, access, granted] = await Promise.all([
+  // `pounce peers --visible on|off` flips it and then shows the list, so the
+  // state and the way to change it live in one command.
+  if (opts.visible !== null) {
+    const enabled = /^(on|yes|true|1)$/i.test(opts.visible);
+    const r = await bridge(opts.port, "/v1/peers/discovery", { method: "POST", body: { enabled } });
+    console.log(
+      `${green("\u2713")} ${
+        r.discovery.on
+          ? "other computers here can now find this one"
+          : "this computer is hidden again"
+      }`,
+    );
+  }
+
+  const [peersRes, access, granted] = await Promise.all([
     bridge(opts.port, "/v1/peers"),
     bridge(opts.port, "/v1/access"),
     bridge(opts.port, "/v1/peers/granted"),
   ]);
+  const { peers } = peersRes;
+  const disc = peersRes.discovery || {};
 
   if (access.pending.length) {
     console.log(`\n${bold("Waiting on you")}`);
@@ -541,16 +557,16 @@ async function cmdPeers(opts) {
 
   console.log(`\n${bold("Nearby machines")}`);
   if (!disc.eligible) {
-    console.log(dim("  announcing isn't available on this port"));
+    console.log(dim("  this can't be turned on here"));
   } else if (!disc.on) {
-    console.log(dim("  this machine is not announcing itself — nothing is broadcast"));
+    console.log(dim("  this computer is hidden"));
     console.log(
       disc.locked
-        ? dim("  (set by POUNCE_DISCOVERY in this bridge's environment)")
-        : `  ${bold("pounce peers --discoverable on")}${dim("  to let machines here find you")}`,
+        ? dim("  (set on this machine, in the bridge's environment)")
+        : `  ${bold("pounce peers --visible on")}${dim("  to let computers here find it")}`,
     );
   } else if (!peers.length) {
-    console.log(dim("  none yet — the other computer needs Pounce running and announcing too"));
+    console.log(dim("  nothing yet — the other computer needs Pounce running and visible too"));
   }
   for (const p of peers) {
     console.log(`  ${bold(p.hostName)}  ${dim(`${p.address}:${p.port}`)}`);
@@ -727,7 +743,7 @@ function parseArgs(argv) {
     forever: false,
     all: false,
     note: null,
-    discoverable: null,
+    visible: null,
   };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
@@ -742,7 +758,7 @@ function parseArgs(argv) {
     else if (a === "--forever") opts.forever = true;
     else if (a === "--all") opts.all = true;
     else if (a === "--note") opts.note = argv[++i];
-    else if (a === "--discoverable") opts.discoverable = argv[++i];
+    else if (a === "--visible" || a === "--discoverable") opts.visible = argv[++i];
     else if (a === "--help" || a === "-h") rest.unshift("help");
     else if (a === "--version" || a === "-V") rest.unshift("version");
     else rest.push(a);
@@ -773,7 +789,7 @@ ${bold("Sharing with another computer")} ${dim("— read-only, scoped, and it ex
   --all           ask for everything they allow
   --hours <n>     how long the access lasts        ${dim("(default 24; --forever for none)")}
   --note <text>   a line for the person approving
-  --discoverable on|off   announce this machine here ${dim("(off by default)")}
+  --visible on|off   let other computers here find this one ${dim("(hidden by default)")}
 
   Or open ${bold("http://127.0.0.1:8099/peers")} in a browser for the same thing with buttons.
 

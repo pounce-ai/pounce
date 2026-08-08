@@ -23,11 +23,13 @@ import { Entrance } from "./Motion";
 import { AgentStatusIcon, COLOR, INPUT_TWEAKS, timeAgo } from "@pounce/app/ui";
 import { T } from "@pounce/app/ui/theme";
 import { GlassSurface } from "@pounce/app/ui/native/GlassSurface";
-import { DragRegion, TITLEBAR_INSET, TRAFFIC_LIGHT_INSET } from "@pounce/app/ui/native/DragRegion";
+import { DragRegion, TITLEBAR_INSET } from "@pounce/app/ui/native/DragRegion";
+import { useTrafficLightInset } from "./fullscreen";
 import { appearance$, setAppearance, type AppearanceMode } from "@pounce/app/state/appearance";
 import { listAccess } from "@pounce/app/services/peers";
 import { nav$, selectSpace } from "../shims/router";
 import { deriveSpaces, spaceKeyOf, type Space } from "./Spaces";
+import { SidebarGlyph } from "./icons";
 
 /** Tapping the appearance button cycles system → light → dark, and the glyph
  *  shows the mode you're in — same contract as mobile's header button. */
@@ -41,6 +43,16 @@ const APPEARANCE_ICON: Record<AppearanceMode, React.ComponentProps<typeof Ionico
   light: "sunny-outline",
   dark: "moon-outline",
 };
+
+/**
+ * Where the titlebar's first control starts in full screen.
+ *
+ * Sidebar content sits 14pt from the edge (see `sectionHeader`), and the 15pt
+ * glyph is centred in a 24pt button — so the BUTTON starts at 10 to put the
+ * glyph's own left edge on that 14pt line. Aligning the button box instead
+ * would leave the icon looking 4pt indented from everything under it.
+ */
+const TITLE_EDGE_INSET = 10;
 
 /** Spaces shown before the list collapses behind a "N more" toggle. */
 const SPACE_LIMIT = 6;
@@ -62,6 +74,7 @@ export function Sidebar() {
   const space = useSelector(() => nav$.space.get());
   const [allSpaces, setAllSpaces] = useState(false);
   const appearanceMode = useSelector(() => appearance$.get());
+  const trafficLightInset = useTrafficLightInset(TITLE_EDGE_INSET);
 
   const status = useSelector(() => connection$.status.get());
   const selectedId = useSelector(() => nav$.detail.get()?.params.id ?? null);
@@ -167,14 +180,18 @@ export function Sidebar() {
             child so every control below is painted above it and keeps its
             clicks. */}
         <DragRegion style={StyleSheet.absoluteFill} />
-        <View style={s.trafficLightSpacer} />
+        {/* Collapses in full screen, where macOS hides the traffic lights —
+            otherwise this button sits 78pt in from nothing. */}
+        <View style={{ width: trafficLightInset }} />
         {/* Always "hide": the shell only mounts the sidebar while it's open,
             and re-showing it is the tab strip's job. */}
-        <TitleBarIcon
-          name="chevron-back"
-          hint="Hide sidebar"
+        <Pressable
           onPress={() => nav$.sidebar.set(false)}
-        />
+          accessibilityLabel="Hide sidebar"
+          style={({ pressed }) => [s.titleBarIcon, pressed && s.rowHover]}
+        >
+          <SidebarGlyph color={COLOR.fgMuted} />
+        </Pressable>
         <View style={s.flex1} />
         {/* Someone is asking to read this machine's threads. Only ever shown
             when there IS something to answer: a permanently-present bell that
@@ -344,8 +361,17 @@ export function Sidebar() {
         onPress={() => router.push("/settings")}
         style={({ pressed }) => [s.account, pressed && s.accountHover]}
       >
-        <View style={s.avatar}>
-          <Ionicons name="paw" size={13} color={T.onAccent} />
+        {/* The mark IS the status light. A separate dot at the far end of the
+            row said the same thing a second time, at the edge of where anyone
+            looks — whereas the paw is the first thing in the row and already
+            carries the eye. Grey when there's nothing reachable, accent when
+            there is. */}
+        <View style={[s.avatar, connected ? s.avatarOnline : s.avatarOffline]}>
+          <Ionicons
+            name="paw"
+            size={13}
+            color={connected ? T.onAccent : COLOR.fgMuted}
+          />
         </View>
         <View style={s.flex1}>
           <Text numberOfLines={1} style={s.accountName}>
@@ -386,9 +412,6 @@ export function Sidebar() {
         >
           <Ionicons name="settings-outline" size={15} color={COLOR.fgMuted} />
         </Pressable>
-        <View
-          style={[s.statusDot, connected ? s.dotSuccess : loading ? s.dotWarning : s.dotFaint]}
-        />
       </Pressable>
     </View>
   );
@@ -625,8 +648,12 @@ function PeersButton() {
 
   return (
     <Pressable
-      onPress={() => router.push(waiting ? "/access" : "/peers")}
-      accessibilityLabel={waiting ? `${waiting} access request waiting` : "Nearby machines"}
+      // Always the hub, never conditional. Routing this to /access only while
+      // something was pending meant that with no request in flight there was NO
+      // way to reach the grants you had already given — you could not see them,
+      // and you could not take them back.
+      onPress={() => router.push("/peers")}
+      accessibilityLabel={waiting ? `Machines: ${waiting} access request waiting` : "Machines"}
       hitSlop={4}
       style={({ pressed }) => [s.accountAction, pressed && s.rowSelected]}
     >
@@ -650,8 +677,12 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 2,
     paddingRight: 6,
+    // AppKit centres the traffic lights at y=15.5 in this window, while a 38pt
+    // row centres its own children at 19 — so the icons sat 3pt low against the
+    // buttons beside them. Trimming the content box from the bottom lands both
+    // on the same line. (Measured off a capture; not a guess.)
+    paddingBottom: 7,
   },
-  trafficLightSpacer: { width: TRAFFIC_LIGHT_INSET },
   titleBarIcon: {
     height: 24,
     width: 24,
@@ -775,8 +806,12 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 999,
-    backgroundColor: T.accent,
   },
+  avatarOnline: { backgroundColor: T.accent },
+  // Connecting counts as offline here on purpose: this is a two-state light,
+  // and a third colour mid-handshake would flicker on every reconnect. The
+  // subtitle beneath already says "Connecting…" for anyone watching.
+  avatarOffline: { backgroundColor: T.surfaceHover },
   accountAction: {
     height: 24,
     width: 24,
@@ -814,10 +849,7 @@ const s = StyleSheet.create({
   bellCountText: { fontSize: 8, fontWeight: "700", color: T.onAccent },
   accountName: { fontSize: 12, fontWeight: "500", color: T.fg },
   accountSub: { fontSize: 10.5, color: T.fgFaint },
-  statusDot: { height: 7, width: 7, borderRadius: 999 },
-  dotSuccess: { backgroundColor: T.success },
   dotWarning: { backgroundColor: T.warning },
-  dotFaint: { backgroundColor: T.fgFaint },
 
   pressed60: { opacity: 0.6 },
   pressed70: { opacity: 0.7 },

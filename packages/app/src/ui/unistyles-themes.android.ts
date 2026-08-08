@@ -89,6 +89,8 @@ const colors = (scheme: Scheme): Record<ThemeColor, ColorValue> => ({
 
   /* Text */
   fg: role("onSurface", scheme),
+  /** Long-form body text, stepped off full-strength label — see ui/theme.ts. */
+  fgProse: scheme === "light" ? "#26262b" : "#c9c9d2",
   fgMuted: role("onSurfaceVariant", scheme),
   fgFaint: role("outline", scheme),
   onAccent: "#ffffff",

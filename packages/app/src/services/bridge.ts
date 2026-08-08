@@ -308,7 +308,10 @@ async function dropLapsedGrants(configs: DeviceConfig[]): Promise<DeviceConfig[]
   for (const cfg of lapsed) await dropEndedGrant(cfg, "expired");
   return lapsed.length ? configs.filter((c) => !lapsed.includes(c)) : configs;
 }
-async function deviceForHost(hostId: string): Promise<DeviceConfig | null> {
+/** The saved config for a host, or null if it isn't paired. Exported for
+ *  ./terminal.ts, which owns its own transport but still has to reach the same
+ *  device list and token this module resolves. */
+export async function deviceForHost(hostId: string): Promise<DeviceConfig | null> {
   return (await listDeviceConfigs()).find((d) => d.id === hostId) ?? null;
 }
 
@@ -439,9 +442,30 @@ export async function saveBridgeConfig(cfg: BridgeConfig): Promise<void> {
   await SecureStore.setItemAsync(BRIDGE_KEY, JSON.stringify(cfg));
   await addDeviceConfig(cfg.url, cfg.token);
 }
+/**
+ * The device to connect to — the first one that ANSWERS, not simply the first
+ * one stored.
+ *
+ * This used to be `devs[0]`, and that made one unreachable machine fatal to the
+ * whole app. `connectBridge` treats an unreachable device as a failed
+ * connection, so the status never leaves "disconnected" — and because thread
+ * sync only runs once connected, a laptop that happened to sort first and was
+ * closed for the weekend stopped a perfectly healthy local bridge from ever
+ * syncing. The symptom is the worst kind: Spaces and Sessions sit empty
+ * forever, while the machine you're sitting at is two inches away and fine.
+ *
+ * Order is still respected — the first reachable device wins, so a deliberate
+ * primary keeps its place. Probes run in parallel and only when there is more
+ * than one device, so the common single-bridge case costs nothing extra. If
+ * NOTHING answers we still return the first: the caller's own failure path
+ * ("disconnected", keep cached threads) is the right answer then, and returning
+ * null instead would read as "not paired" and prompt for a QR scan.
+ */
 export async function loadBridgeConfig(): Promise<BridgeConfig | null> {
   const devs = await listDeviceConfigs();
-  return devs[0] ?? null;
+  if (devs.length <= 1) return devs[0] ?? null;
+  const reachable = await Promise.all(devs.map((d) => probeHealth(d.url, 2500)));
+  return devs[reachable.findIndex(Boolean)] ?? devs[0];
 }
 export async function clearBridgeConfig(): Promise<void> {
   await SecureStore.deleteItemAsync(BRIDGE_KEY);
@@ -1297,6 +1321,57 @@ export async function fetchModels(hostId: string, agent: string): Promise<ModelI
     return models ?? [];
   } catch {
     return [];
+  }
+}
+
+/** One entry in the desktop app's "Open in" menu — an editor the host machine
+ *  actually has installed, or its file manager. */
+export interface EditorTarget {
+  id: string;
+  name: string;
+}
+
+/**
+ * Editors installed on a host, for the "Open in" menu.
+ *
+ * Empty on any failure, including an older bridge that has no /v1/editors: the
+ * caller hides the control rather than showing a menu of things that won't
+ * open. A menu is a promise, and one we can't keep shouldn't be made.
+ */
+export async function listEditors(hostId: string): Promise<EditorTarget[]> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return [];
+  try {
+    const { editors } = await get<{ editors: EditorTarget[] }>(cfg, "/v1/editors", 10_000);
+    return editors ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Open a thread's project folder in one of them, on the machine that holds it.
+ *
+ * Resolves to an error string rather than throwing: this is a menu click, and
+ * the worst outcome — a folder that no longer exists — deserves a line of text,
+ * not a crash.
+ */
+export async function openInEditor(
+  hostId: string,
+  editor: string,
+  cwd: string | null,
+): Promise<{ ok: boolean; error?: string }> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return { ok: false, error: "device not found" };
+  try {
+    const res = await fetch(`${await bridgeBase(cfg)}/v1/open`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ editor, cwd }),
+    });
+    return (await res.json()) as { ok: boolean; error?: string };
+  } catch (e) {
+    return { ok: false, error: String(e) };
   }
 }
 

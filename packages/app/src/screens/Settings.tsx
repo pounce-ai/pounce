@@ -587,7 +587,9 @@ const s = StyleSheet.create((theme) => ({
   statusRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   statusText: { fontSize: 13, color: theme.colors.fgMuted },
   dot: { height: 8, width: 8, borderRadius: 999 },
-  dotOn: { backgroundColor: theme.colors.success },
+  // Accent, not green: the sidebar's mark already uses accent-for-live, and two
+  // colours for one idea on one screen is how a palette stops meaning anything.
+  dotOn: { backgroundColor: theme.colors.accent },
   dotOff: { backgroundColor: theme.colors.fgFaint },
   // 14 matches the ScrollView's inter-card gap, so card-to-card spacing reads
   // as ONE rhythm across the whole screen (device cards were 8 while the

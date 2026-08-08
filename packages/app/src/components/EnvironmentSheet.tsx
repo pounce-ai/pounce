@@ -117,7 +117,6 @@ export function EnvironmentSheet({
   onStop,
   onViewChanges,
   onTerminal,
-  onViewContext,
   onAddSource,
   onRemoveSource,
   onFixConflicts,
@@ -133,7 +132,6 @@ export function EnvironmentSheet({
   onViewChanges: () => void;
   onTerminal: () => void;
   /** Open the project's CLAUDE.md/AGENTS.md — read, search, comment. */
-  onViewContext?: () => void;
   /** "+" on the Sources header — e.g. focus the composer's @-mention. */
   onAddSource?: () => void;
   onRemoveSource?: (path: string) => void;
@@ -193,6 +191,18 @@ export function EnvironmentSheet({
   };
   const checkRow = checks?.checks ? CHECK_ROW[checks.checks] : null;
 
+  /** Whether the Environment section has any row to show. Mirrors the
+   *  conditions below — desktop keeps only the states that are genuinely
+   *  exceptional (a failing check, a conflict), since everything routine lives
+   *  on screen already. */
+  const hasEnvironment =
+    !session.cwd ||
+    !!checkRow ||
+    conflicts > 0 ||
+    !IS_DESKTOP ||
+    (running && !IS_DESKTOP);
+
+
   const shownSources = allSources ? sources : sources.slice(0, SOURCES_COLLAPSED);
 
   return (
@@ -213,7 +223,12 @@ export function EnvironmentSheet({
             <View style={s.divider} />
           </>
         ) : null}
-        <SectionHeader title="Environment" />
+        {/* On desktop this section can now be empty: every row it used to hold
+            is standing UI there (the diff pane, the status bar, the terminal
+            dock) or has moved to the Space page. A header with nothing under it
+            reads as something failing to load, so it only appears when it has
+            something to say. */}
+        {hasEnvironment ? <SectionHeader title="Environment" /> : null}
 
         {/* Desktop's composer shows a stop button while a turn runs, right where
             you're already looking — reaching a menu to halt something is the
@@ -267,14 +282,17 @@ export function EnvironmentSheet({
                 right={onFixConflicts ? <Text style={s.fixLabel}>Fix</Text> : undefined}
               />
             ) : null}
-            {onViewContext ? (
-              <Row
-                icon="document-text-outline"
-                label="Project context"
-                onPress={act(onViewContext)}
-              />
+            {/* Project context moved to the Space page — it describes the
+                CHECKOUT, not this thread, and every session here shares it.
+                Reaching it through whichever thread you had open was the wrong
+                door. */}
+            {/* Terminal is a docked panel on desktop (⌃` or the tab-strip
+                button), so a menu item that opens a separate screen is a second
+                worse way to the same place. The phone has no dock, so it keeps
+                this row — it's the only route there. */}
+            {!IS_DESKTOP ? (
+              <Row icon="terminal-outline" label="Open terminal" onPress={act(onTerminal)} />
             ) : null}
-            <Row icon="terminal-outline" label="Open terminal" onPress={act(onTerminal)} />
           </>
         ) : (
           <Text style={s.emptyEnv}>
