@@ -26,7 +26,7 @@ import { GlassSurface } from "@pounce/app/ui/native/GlassSurface";
 import { DragRegion, TITLEBAR_INSET } from "@pounce/app/ui/native/DragRegion";
 import { useTrafficLightInset } from "./fullscreen";
 import { appearance$, setAppearance, type AppearanceMode } from "@pounce/app/state/appearance";
-import { listAccess } from "@pounce/app/services/peers";
+import { useAccessRequests } from "./accessRequests";
 import { nav$, selectSpace } from "../shims/router";
 import { deriveSpaces, spaceKeyOf, type Space } from "./Spaces";
 import { SidebarGlyph } from "./icons";
@@ -367,11 +367,7 @@ export function Sidebar() {
             carries the eye. Grey when there's nothing reachable, accent when
             there is. */}
         <View style={[s.avatar, connected ? s.avatarOnline : s.avatarOffline]}>
-          <Ionicons
-            name="paw"
-            size={13}
-            color={connected ? T.onAccent : COLOR.fgMuted}
-          />
+          <Ionicons name="paw" size={13} color={connected ? T.onAccent : COLOR.fgMuted} />
         </View>
         <View style={s.flex1}>
           <Text numberOfLines={1} style={s.accountName}>
@@ -589,24 +585,13 @@ function TitleBarIcon({
 /**
  * How many machines are waiting on an answer from this one.
  *
- * Polled rather than pushed: the bridge already knows, and a 5s tick against
- * loopback costs nothing next to being able to tell someone their colleague is
- * standing at the door. Shared by the titlebar bell and the account-row badge
- * so the two can never disagree about whether there is something to do.
+ * The list itself lives in ./accessRequests, on ONE poll shared with the alert
+ * that interrupts you — three components each running their own interval meant
+ * three answers that could disagree for a few seconds, so the bell could show a
+ * count the alert had not noticed yet.
  */
 function usePendingAccess(): number {
-  const [waiting, setWaiting] = useState(0);
-  useEffect(() => {
-    let live = true;
-    const tick = () => void listAccess().then((a) => live && setWaiting(a.pending.length));
-    tick();
-    const t = setInterval(tick, 5_000);
-    return () => {
-      live = false;
-      clearInterval(t);
-    };
-  }, []);
-  return waiting;
+  return useAccessRequests().length;
 }
 
 /** The notification: a bell that exists only while something needs answering,
@@ -634,7 +619,8 @@ function AccessBell() {
 }
 
 /**
- * Nearby machines, and the badge for someone asking to reach this one.
+ * Connect — machines on this network — and the badge for someone asking to
+ * reach this one.
  *
  * An access request is answered by a person, so it has to be VISIBLE to one —
  * the bridge also fires a system notification, but that is for when the window
@@ -653,7 +639,7 @@ function PeersButton() {
       // way to reach the grants you had already given — you could not see them,
       // and you could not take them back.
       onPress={() => router.push("/peers")}
-      accessibilityLabel={waiting ? `Machines: ${waiting} access request waiting` : "Machines"}
+      accessibilityLabel={waiting ? `Connect: ${waiting} access request waiting` : "Connect"}
       hitSlop={4}
       style={({ pressed }) => [s.accountAction, pressed && s.rowSelected]}
     >

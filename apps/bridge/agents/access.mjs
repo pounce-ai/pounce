@@ -162,9 +162,27 @@ export function pathInScope(resolved, p) {
  * environment, /v1/dirs and /v1/files browse the filesystem with no thread to
  * scope them to, /v1/peers and /v1/access are the owner's own controls.
  */
-const PREVIEW_ROUTES = new Set(["/v1/catalog/spaces", "/v1/catalog/threads", "/v1/status"]);
+/**
+ * Names and dates, nothing else. Reachable by a PREVIEW grant, which is what
+ * that kind of grant exists for — and now also by a live READ grant, so a
+ * machine you have already approved can see what else is here and ask for it.
+ *
+ * That second half is a deliberate widening and worth naming: a peer scoped to
+ * one space can list the NAMES of all of them. The alternative was making an
+ * already-connected machine re-run the whole stranger handshake — a second
+ * approval click for a machine you approved yesterday — to ask for one more
+ * space, which is the kind of friction that trains people to click yes without
+ * reading. What is bounded here is what a preview would have shown them anyway
+ * had they asked: names and dates, never a message, and `/v1/catalog/threads`
+ * still refuses to dump without a query. The owner approves the new scope, and
+ * revoking still ends it.
+ */
+const CATALOG_ROUTES = ["/v1/catalog/spaces", "/v1/catalog/threads"];
+
+const PREVIEW_ROUTES = new Set([...CATALOG_ROUTES, "/v1/status"]);
 
 const READ_ROUTES = new Set([
+  ...CATALOG_ROUTES,
   "/v1/status",
   "/v1/agents",
   "/v1/threads",
@@ -247,6 +265,27 @@ export function createAccess({ store = new Store("access"), now = () => Date.now
     requests().filter((r) => r.state === "pending" && now() - r.createdAt < REQUEST_TTL_MS);
 
   /** Public shape of a request — never the claim hash. */
+  /**
+   * Access this asker ALREADY holds, if any — the difference between "a machine
+   * you have never heard of wants in" and "a machine you already trust wants one
+   * more space". Those are different decisions and the approver cannot make the
+   * second one safely while being shown the first.
+   *
+   * A preview is excluded on purpose: it is the scaffolding of an in-flight
+   * first-time ask, so counting it as "already connected" would label every
+   * stranger a returning one halfway through their own handshake.
+   */
+  const existingAccess = (r) => {
+    const g = grants().find(
+      (x) => x.kind === "read" && x.requester?.bridgeId === r.requester?.bridgeId,
+    );
+    if (!g) return null;
+    return {
+      summary: scopeSummary(g.scope),
+      expiresAt: g.expiresAt ? new Date(g.expiresAt).toISOString() : null,
+    };
+  };
+
   const publicRequest = (r) => ({
     id: r.id,
     kind: r.kind,
@@ -259,6 +298,7 @@ export function createAccess({ store = new Store("access"), now = () => Date.now
     expiresAt: new Date(r.createdAt + REQUEST_TTL_MS).toISOString(),
     code: verificationCode(r.id),
     state: r.state,
+    existing: existingAccess(r),
   });
 
   /** Public shape of a grant — never the token hash. */

@@ -25,6 +25,7 @@ import { T } from "@pounce/app/ui/theme";
 import { useThread } from "@pounce/app/state/db/hooks";
 import { sessionChrome$ } from "@pounce/app/state/sessionChrome";
 import { ThreadUsageSummary } from "@pounce/app/components/ThreadStatusBar";
+import { AccessAlert } from "./AccessAlert";
 import { Sidebar } from "./Sidebar";
 import { TabStrip } from "./TabStrip";
 import { OpenInMenu } from "./OpenIn";
@@ -148,9 +149,7 @@ function StatusBar({ threadId }: { threadId: string }) {
 
 /** Modifiers spelled out in full — see enrichedInput.desktop.tsx for why an
  *  omitted one means "don't care" under Fabric and would swallow ⌘` too. */
-const TERM_SHORTCUT = [
-  { key: "`", ctrlKey: true, shiftKey: false, altKey: false, metaKey: false },
-];
+const TERM_SHORTCUT = [{ key: "`", ctrlKey: true, shiftKey: false, altKey: false, metaKey: false }];
 
 export function Shell() {
   const detail = useSelector(nav$.detail);
@@ -259,6 +258,15 @@ export function Shell() {
           {dock && threadId && shellWidth > 0 ? (
             <DiffDock threadId={threadId} maxWidth={dockMax} />
           ) : null}
+          {/* Someone at the door. Lives INSIDE the pane rather than at the
+              window root: the root's children are the sidebar and main column,
+              and an absolute sibling of those did not paint above them on
+              macOS Fabric — it also would have landed in the transparent
+              titlebar, on top of the traffic lights. Here it is unambiguously
+              over the content, still absolute (so nothing reflows) and still
+              box-none (so clicks fall through). Never a modal — see
+              AccessAlert for why taking the keyboard is the worse failure. */}
+          <AccessAlert />
         </View>
         {/* Full width under BOTH panes: a shell is about the checkout, not
             about the transcript, so boxing it under one column would make it

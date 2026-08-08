@@ -1,5 +1,14 @@
 /**
- * Nearby machines — asking another Mac for a look at its threads.
+ * Connect — asking another Mac for a look at its threads.
+ *
+ * Named for what you came here to do. It was "Nearby machines", which described
+ * the list rather than the errand and left the two standing sections (access you
+ * hold, access you gave) filed under a heading they have nothing to do with.
+ *
+ * This machine leads — one switch, one line — and the machines you can reach
+ * follow. Crucially the second list does NOT depend on the first switch: they
+ * are separate settings, and conflating them used to greet a person who just
+ * wanted to reach their other laptop with an empty page and a toggle.
  *
  * The whole screen is one handshake, walked one step at a time, because the
  * awkward truth of this feature is that you cannot pick a space you have never
@@ -50,14 +59,21 @@ import {
   removeDeviceConfig,
   syncLiveDataStreaming,
   type DeviceConfig,
+  type DeviceGrant,
 } from "@pounce/app/services/bridge";
+import { Toggle } from "@pounce/app/components/Toggle";
 import { COLOR } from "@pounce/app/ui";
 import { T } from "@pounce/app/ui/theme";
 
 type Step =
   | { name: "browse-peers" }
   | { name: "awaiting-preview"; peer: Peer; ask: PendingAsk }
-  | { name: "catalog"; peer: Peer; token: string; grantId: string }
+  // `grantId` is the PREVIEW that got us here, and is empty when we arrived
+  // holding a read grant instead — it only exists so approving the read can
+  // retire the preview. `have` is the scope already held, pre-ticked so asking
+  // for more is additive: approval replaces the old grant outright, so a
+  // request that forgot what you already had would quietly take it away.
+  | { name: "catalog"; peer: Peer; token: string; grantId: string; have: Scope | null }
   | { name: "awaiting-read"; peer: Peer; ask: PendingAsk; scope: Scope }
   | { name: "connected"; peer: Peer; summary: string }
   | { name: "refused"; peer: Peer; why: string };
@@ -75,6 +91,10 @@ export default function PeersScreen() {
   // visible while somebody happened to be asking.
   const [given, setGiven] = useState<Grant[]>([]);
   const [held, setHeld] = useState<DeviceConfig[]>([]);
+  // Every configured device, not just the granted ones — a machine on the
+  // network might already be paired outright (QR), and asking it for access
+  // again is nonsense we were happily offering.
+  const [devices, setDevices] = useState<DeviceConfig[]>([]);
   const [step, setStep] = useState<Step>({ name: "browse-peers" });
   const [busy, setBusy] = useState(false);
 
@@ -90,17 +110,17 @@ export default function PeersScreen() {
         setDiscovery(r.discovery);
       });
       void listAccess().then((a) => live && setGiven(a.grants));
-      void listDeviceConfigs().then(
-        (d) =>
-          live &&
-          // An expired grant is about to be swept by the next sync — don't list
-          // it as access you hold in the meantime.
-          setHeld(
-            d.filter(
-              (c) => c.grant && (!c.grant.expiresAt || Date.parse(c.grant.expiresAt) > Date.now()),
-            ),
+      void listDeviceConfigs().then((d) => {
+        if (!live) return;
+        setDevices(d);
+        // An expired grant is about to be swept by the next sync — don't list
+        // it as access you hold in the meantime.
+        setHeld(
+          d.filter(
+            (c) => c.grant && (!c.grant.expiresAt || Date.parse(c.grant.expiresAt) > Date.now()),
           ),
-      );
+        );
+      });
     };
     tick();
     const t = setInterval(tick, 3_000);
@@ -110,9 +130,40 @@ export default function PeersScreen() {
     };
   }, [step.name]);
 
-  const ask = useCallback(async (peer: Peer) => {
+  /**
+   * Start the ask.
+   *
+   * A machine we already hold a grant from skips the preview entirely and goes
+   * straight to its catalog, using the token it already gave us. Raising a
+   * fresh connection request there was the wrong shape: you are not asking to
+   * be let in, you are already in and want another space — so the thing to put
+   * on screen is the space list, not a second "may I?" waiting on a human.
+   */
+  const ask = useCallback(async (peer: Peer, dev?: DeviceConfig) => {
+    const grant = liveGrant(dev);
     setBusy(true);
     try {
+      if (dev && grant) {
+        // PROBE, don't assume. Whether a read grant may browse the catalog is
+        // enforced by the PEER, so the shortcut only exists if that machine is
+        // running a bridge new enough to allow it (older ones kept the catalog
+        // preview-only). A peer that says no is not an error to show the user —
+        // it just means this pair still has to do the long handshake, so fall
+        // through to it silently.
+        try {
+          await catalogSpaces(peer.url, dev.token);
+          setStep({
+            name: "catalog",
+            peer,
+            token: dev.token,
+            grantId: "",
+            have: (grant.scope as Scope | null) ?? null,
+          });
+          return;
+        } catch {
+          // older peer — the preview handshake below still works everywhere
+        }
+      }
       setStep({ name: "awaiting-preview", peer, ask: await requestPreview(peer) });
     } catch (e) {
       setStep({ name: "refused", peer, why: String((e as Error)?.message || e) });
@@ -124,7 +175,7 @@ export default function PeersScreen() {
   return (
     <View style={s.root}>
       <View style={s.header}>
-        <Text style={s.headerTitle}>Nearby machines</Text>
+        <Text style={s.headerTitle}>Connect</Text>
         {step.name !== "browse-peers" ? (
           <Pressable onPress={() => setStep({ name: "browse-peers" })} hitSlop={8}>
             <Text style={s.link}>Start over</Text>
@@ -138,6 +189,7 @@ export default function PeersScreen() {
           discovery={discovery}
           given={given}
           held={held}
+          devices={devices}
           busy={busy}
           onAsk={ask}
           onRevoke={async (id) => {
@@ -146,7 +198,9 @@ export default function PeersScreen() {
           }}
           onForget={async (id) => {
             await removeDeviceConfig(id);
-            setHeld((await listDeviceConfigs()).filter((c) => c.grant));
+            const next = await listDeviceConfigs();
+            setDevices(next);
+            setHeld(next.filter((c) => c.grant));
             void syncLiveDataStreaming();
           }}
           onToggle={async () => {
@@ -166,6 +220,7 @@ export default function PeersScreen() {
                   peer: step.peer,
                   token: r.token,
                   grantId: r.grantId ?? "",
+                  have: null,
                 })
               : setStep({ name: "refused", peer: step.peer, why: refusal(r.state) })
           }
@@ -174,10 +229,17 @@ export default function PeersScreen() {
         <Catalog
           peer={step.peer}
           token={step.token}
+          have={step.have}
           onRequest={async (scope) => {
             setBusy(true);
             try {
-              const a = await requestRead(step.peer.url, scope, { previewGrant: step.grantId });
+              // No preview grant when we came in already connected — it is only
+              // there to exempt the second half of a handshake from the rate
+              // limit and to be retired on approval, and there was no first
+              // half here.
+              const a = await requestRead(step.peer.url, scope, {
+                previewGrant: step.grantId || undefined,
+              });
               setStep({ name: "awaiting-read", peer: step.peer, ask: a, scope });
             } catch (e) {
               setStep({
@@ -251,7 +313,7 @@ function refusal(state: AskResult["state"]): string {
 
 // --- step 0: who is out there ------------------------------------------------
 
-/** The two standing lists, shown under Nearby whether or not anyone is nearby.
+/** The two standing lists, shown whether or not anyone is on the network.
  *  Reachable at all times — revoking access you gave should never depend on
  *  somebody happening to be asking for more. */
 function Standing({
@@ -271,14 +333,18 @@ function Standing({
   return (
     <>
       {held.length ? (
-        <>
-          <Text style={[s.sectionTitle, s.sectionGap]}>Access you hold</Text>
-          {held.map((d) => (
-            <View key={d.id} style={s.peerRow}>
-              <Ionicons name="link-outline" size={18} color={COLOR.fgMuted} />
+        // "Not on this network" and not simply "Access you hold": what is on
+        // the network is shown on its own row above, so this section is now
+        // specifically the machines you hold access to that aren't here.
+        <Section title="Access you hold · not on this network">
+          {held.map((d, i) => (
+            <View key={d.id} style={[s.row, i > 0 && s.rowDivided]}>
+              <View style={s.badgeQuiet}>
+                <Ionicons name="link" size={16} color={COLOR.fgMuted} />
+              </View>
               <View style={s.grow}>
-                <Text style={s.peerName}>{d.grant?.issuedBy || d.name}</Text>
-                <Text style={s.peerMeta}>
+                <Text style={s.rowName}>{d.grant?.issuedBy || d.name}</Text>
+                <Text style={s.rowMeta}>
                   {d.grant?.summary} · {timeLeft(d.grant?.expiresAt)}
                 </Text>
               </View>
@@ -291,17 +357,18 @@ function Standing({
               </Pressable>
             </View>
           ))}
-        </>
+        </Section>
       ) : null}
       {given.length ? (
-        <>
-          <Text style={[s.sectionTitle, s.sectionGap]}>Machines with access to this one</Text>
-          {given.map((g) => (
-            <View key={g.id} style={s.peerRow}>
-              <Ionicons name="laptop-outline" size={18} color={COLOR.fgMuted} />
+        <Section title="Machines with access to this one">
+          {given.map((g, i) => (
+            <View key={g.id} style={[s.row, i > 0 && s.rowDivided]}>
+              <View style={s.badgeQuiet}>
+                <Ionicons name="laptop-outline" size={16} color={COLOR.fgMuted} />
+              </View>
               <View style={s.grow}>
-                <Text style={s.peerName}>{g.requester.hostName}</Text>
-                <Text style={s.peerMeta}>
+                <Text style={s.rowName}>{g.requester.hostName}</Text>
+                <Text style={s.rowMeta}>
                   {g.summary} · {timeLeft(g.expiresAt)}
                   {g.lastUsedAt ? "" : " · not used yet"}
                 </Text>
@@ -315,10 +382,31 @@ function Standing({
               </Pressable>
             </View>
           ))}
-        </>
+        </Section>
       ) : null}
     </>
   );
+}
+
+/** A titled group of rows in one bordered card — the shape every section on this
+ *  screen takes, so they read as a settings page rather than as a pile of
+ *  floating tiles. */
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={s.section}>
+      <Text style={s.sectionTitle}>{title}</Text>
+      <View style={s.card}>{children}</View>
+    </View>
+  );
+}
+
+/** A grant with time left on it, or null. Expiry is checked here rather than
+ *  trusted from the list, so a row can't offer "you can read this" a minute
+ *  after it stopped being true. */
+function liveGrant(dev: DeviceConfig | undefined): DeviceGrant | null {
+  const g = dev?.grant;
+  if (!g) return null;
+  return !g.expiresAt || Date.parse(g.expiresAt) > Date.now() ? g : null;
 }
 
 function PeerList({
@@ -326,6 +414,7 @@ function PeerList({
   discovery,
   given,
   held,
+  devices,
   busy,
   onAsk,
   onToggle,
@@ -336,8 +425,11 @@ function PeerList({
   discovery: DiscoveryState | null;
   given: Grant[];
   held: DeviceConfig[];
+  devices: DeviceConfig[];
   busy: boolean;
-  onAsk: (p: Peer) => void;
+  /** The configured device is passed along so the ask can skip the preview for
+   *  a machine we already hold access to. */
+  onAsk: (p: Peer, dev?: DeviceConfig) => void;
   onToggle: () => void;
   onRevoke: (grantId: string) => void;
   onForget: (deviceId: string) => void;
@@ -345,92 +437,149 @@ function PeerList({
   if (peers === null) {
     return <Centered spinner title="Looking for machines on this network…" />;
   }
-  // Being findable is opt-in, so the switch leads.
-  //
-  // "Discoverable" on purpose. "Hidden" made the CURRENT state the safe-sounding
-  // one, so the control read as "give up safety" — and "let another computer
-  // find it" has a surveillance ring for what is really "appear in a list".
-  // Discoverable is the word Bluetooth taught everyone, it names a capability
-  // rather than an exposure, and unlike "on your Wi-Fi" it stays true over
-  // Ethernet.
-  //
-  // The sub-line leads with the LIMIT rather than with reassurance: discovery
-  // broadcasts the machine name and nothing else (see agents/discovery.mjs —
-  // "No token, no repo names, no thread titles"), and the smallness of that
-  // claim earns more trust than a promise does.
-  const toggle = discovery ? (
-    <View style={s.peerRow}>
-      <Ionicons
-        name={discovery.on ? "eye-outline" : "eye-off-outline"}
-        size={20}
-        color={COLOR.fgMuted}
-      />
-      <View style={s.grow}>
-        <Text style={s.peerName}>
-          {discovery.on ? "Discoverable" : "Not discoverable"}
-        </Text>
-        <Text style={s.peerMeta}>
-          {discovery.on
-            ? "Others on this network see this Mac's name and can ask. Reading anything still needs your approval."
-            : "Make this Mac discoverable so a computer on this network can ask to read the projects you pick. It shares the name — nothing else."}
-        </Text>
-      </View>
-      {!discovery.eligible ? (
-        <Text style={s.peerMeta}>not available here</Text>
-      ) : discovery.locked ? (
-        <Text style={s.peerMeta}>set on this machine</Text>
-      ) : (
-        <Pressable
-          disabled={busy}
-          onPress={onToggle}
-          style={({ pressed }) => [discovery.on ? s.ghostBtn : s.primaryBtn, pressed && s.pressed]}
-        >
-          <Text style={discovery.on ? s.ghostLabel : s.primaryLabel}>
-            {discovery.on ? "Turn off" : "Make discoverable"}
-          </Text>
-        </Pressable>
-      )}
-    </View>
-  ) : null;
-
-  if (!peers.length) {
-    return (
-      <ScrollView contentContainerStyle={s.list}>
-        {toggle}
-        <Text style={s.sectionHint}>
-          {discovery && !discovery.on
-            ? "You can already connect to a computer you know, and it can already ask you for access. This only decides whether you appear in its list without being added by hand."
-            : "Nothing here yet. The other computer needs Pounce running and set to discoverable too, on the same network."}
-        </Text>
-        <Standing given={given} held={held} busy={busy} onRevoke={onRevoke} onForget={onForget} />
-      </ScrollView>
-    );
-  }
+  // `bridgeId` is the machine's stable identity and the same value the beacon
+  // carries, which is exactly why discovery broadcasts it — a machine you have
+  // already got, discovered again, is the SAME row, not a new stranger.
+  const byBridgeId = new Map(devices.filter((d) => d.bridgeId).map((d) => [d.bridgeId!, d]));
+  // Access you hold from a machine that is right here belongs on that machine's
+  // row, not in a second list underneath repeating it.
+  const heldElsewhere = held.filter((d) => !peers.some((p) => p.bridgeId === d.bridgeId));
   return (
     <ScrollView contentContainerStyle={s.list}>
-      {toggle}
-      {peers.map((p) => (
-        <View key={p.bridgeId} style={s.peerRow}>
-          <Ionicons
-            name={p.platform === "darwin" ? "laptop-outline" : "desktop-outline"}
-            size={20}
-            color={COLOR.fgMuted}
-          />
-          <View style={s.grow}>
-            <Text style={s.peerName}>{p.hostName}</Text>
-            <Text style={s.peerMeta}>{p.address}</Text>
+      {/* This machine first: whether you are findable is the fact that colours
+          how you read everything under it, and it is the one row here that is
+          about you rather than about somebody else. */}
+      <View style={s.sectionFirst}>
+        <Text style={s.sectionTitle}>This machine</Text>
+        <Discoverable discovery={discovery} busy={busy} onToggle={onToggle} />
+      </View>
+
+      <Section title="Machines on this network">
+        {peers.length ? (
+          peers.map((p, i) => {
+            const dev = byBridgeId.get(p.bridgeId);
+            const grant = liveGrant(dev);
+            // Three different machines, as far as this row is concerned: one
+            // you are already paired with outright, one that has granted you a
+            // scoped read, and one you have never met. Offering "Ask for
+            // access" to all three was the bug — for the first two you already
+            // have access, and the only thing left to want is MORE of it.
+            return (
+              <View key={p.bridgeId} style={[s.row, i > 0 && s.rowDivided]}>
+                <View style={grant || dev ? s.badgeOn : s.badge}>
+                  <Ionicons
+                    name={p.platform === "darwin" ? "laptop-outline" : "desktop-outline"}
+                    size={17}
+                    color={grant || dev ? T.success : COLOR.accent}
+                  />
+                </View>
+                <View style={s.grow}>
+                  <Text style={s.rowName}>{p.hostName}</Text>
+                  <Text style={s.rowMeta} numberOfLines={1}>
+                    {grant
+                      ? `Connected · ${grant.summary} · ${timeLeft(grant.expiresAt)}`
+                      : dev
+                        ? "Connected"
+                        : p.address}
+                  </Text>
+                </View>
+                {/* Forget lives on the row for a granted machine that is here,
+                    because this row is now the only place it appears. */}
+                {grant && dev ? (
+                  <Pressable
+                    disabled={busy}
+                    onPress={() => onForget(dev.id)}
+                    style={({ pressed }) => [s.ghostBtn, pressed && s.pressed]}
+                  >
+                    <Text style={s.ghostLabel}>Forget</Text>
+                  </Pressable>
+                ) : null}
+                {/* Nothing left to ask for: a machine paired outright, or one
+                    whose grant is already the whole machine. */}
+                {(dev && !grant) || (grant?.scope as Scope | null)?.kind === "full" ? null : (
+                  <Pressable
+                    disabled={busy}
+                    onPress={() => onAsk(p, dev)}
+                    style={({ pressed }) => [s.primaryBtn, pressed && s.pressed]}
+                  >
+                    <Text style={s.primaryLabel}>{grant ? "Ask for more" : "Ask for access"}</Text>
+                  </Pressable>
+                )}
+              </View>
+            );
+          })
+        ) : (
+          // The empty state must not blame this machine's own setting — it can
+          // see the network either way, so what is missing is the OTHER computer.
+          <View style={s.empty}>
+            <Ionicons name="scan-outline" size={22} color={COLOR.fgFaint} />
+            <Text style={s.emptyText}>Nothing found yet</Text>
+            <Text style={s.emptyHint}>Other computers need Pounce running and discoverable.</Text>
           </View>
-          <Pressable
-            disabled={busy}
-            onPress={() => onAsk(p)}
-            style={({ pressed }) => [s.primaryBtn, pressed && s.pressed]}
-          >
-            <Text style={s.primaryLabel}>Ask for access</Text>
-          </Pressable>
-        </View>
-      ))}
-      <Standing given={given} held={held} busy={busy} onRevoke={onRevoke} onForget={onForget} />
+        )}
+      </Section>
+
+      <Standing
+        given={given}
+        held={heldElsewhere}
+        busy={busy}
+        onRevoke={onRevoke}
+        onForget={onForget}
+      />
     </ScrollView>
+  );
+}
+
+/**
+ * Whether other computers can find THIS one — the mirror of the list below, and
+ * deliberately not a gate on it.
+ *
+ * A SWITCH with a FIXED label. The label used to flip between "Discoverable"
+ * and "Not discoverable", which is the switch's job to say: a control that
+ * renames itself as you use it gives you two things to read where one would do,
+ * and for a moment you cannot tell whether the words describe the state or the
+ * action. "Discover Me" names the setting once and lets the switch carry the
+ * state — the same shape as the auto-update toggle in Settings.
+ *
+ * One line under it, and only the fact that matters: what other people get.
+ * Discovery broadcasts the machine name and nothing else (agents/discovery.mjs
+ * — "No token, no repo names, no thread titles"), and the argument for why that
+ * is safe belongs in the docs, not in a row you read every time.
+ */
+function Discoverable({
+  discovery,
+  busy,
+  onToggle,
+}: {
+  discovery: DiscoveryState | null;
+  busy: boolean;
+  onToggle: () => void;
+}) {
+  if (!discovery) return null;
+  return (
+    <View style={s.card}>
+      <View style={s.row}>
+        <View style={s.badge}>
+          <Ionicons name="wifi" size={17} color={COLOR.accent} />
+        </View>
+        <View style={s.grow}>
+          <Text style={s.rowName}>Discover Me</Text>
+          <Text style={s.rowMeta}>Computers here can see this Mac's name and ask for access.</Text>
+        </View>
+        {!discovery.eligible ? (
+          <Text style={s.rowNote}>not available here</Text>
+        ) : discovery.locked ? (
+          <Text style={s.rowNote}>set on this machine</Text>
+        ) : (
+          <Toggle
+            value={discovery.on}
+            onValueChange={onToggle}
+            disabled={busy}
+            accessibilityLabel="Discover me"
+          />
+        )}
+      </View>
+    </View>
   );
 }
 
@@ -499,25 +648,37 @@ function Waiting({
 function Catalog({
   peer,
   token,
+  have,
   busy,
   onRequest,
 }: {
   peer: Peer;
   token: string;
+  /** Scope already granted to us, or null when this is a first ask. */
+  have: Scope | null;
   busy: boolean;
   onRequest: (scope: Scope) => void;
 }) {
   const [spaces, setSpaces] = useState<CatalogSpace[] | null>(null);
-  const [pickedSpaces, setPickedSpaces] = useState<Set<string>>(new Set());
+  // Pre-ticked with what we already hold. Approval REPLACES the grant rather
+  // than adding to it, so an "ask for more" that started from blank would hand
+  // back the spaces you already had the moment it was approved.
+  const [pickedSpaces, setPickedSpaces] = useState<Set<string>>(
+    () => new Set(have?.kind === "scoped" ? have.repoKeys : []),
+  );
   const [pickedThreads, setPickedThreads] = useState<Map<string, CatalogThread>>(new Map());
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<CatalogThread[]>([]);
-  const [failed, setFailed] = useState(false);
+  // The REASON, not just the fact. This used to be a bare boolean and the
+  // screen guessed out loud ("the preview may have run out") — which is one
+  // possible cause among several, was stated as though it were known, and is
+  // simply wrong on the connected path where there is no preview at all.
+  const [failed, setFailed] = useState<string | null>(null);
 
   useEffect(() => {
     catalogSpaces(peer.url, token)
       .then(setSpaces)
-      .catch(() => setFailed(true));
+      .catch((e) => setFailed(String((e as Error)?.message || e)));
   }, [peer.url, token]);
 
   // Debounced: the peer's bridge searches its whole history per keystroke
@@ -556,8 +717,15 @@ function Catalog({
       <Centered
         icon="alert-circle-outline"
         tint={T.fgFaint}
-        title="Couldn't read the catalog"
-        body="The preview may have already run out — they're deliberately short. Start over to ask again."
+        title={`Couldn't read ${peer.hostName}'s catalog`}
+        body={
+          have
+            ? // Reached with a read grant, so nothing has "run out". Overwhelmingly
+              // the peer is on a bridge that keeps the catalog preview-only.
+              `${peer.hostName} wouldn't show its space list to the access you hold — it's probably running an older Pounce. Start over to ask it the long way.`
+            : "The preview may have already run out — they're deliberately short. Start over to ask again."
+        }
+        detail={failed}
       />
     );
   }
@@ -566,7 +734,9 @@ function Catalog({
   return (
     <View style={s.grow}>
       <Text style={s.sectionHint}>
-        {peer.hostName} is showing names and dates only. Pick what you want to read.
+        {have
+          ? `What you already read is ticked. Add anything else you want from ${peer.hostName}.`
+          : `${peer.hostName} is showing names and dates only. Pick what you want to read.`}
       </Text>
       <ScrollView contentContainerStyle={s.list}>
         <Text style={s.sectionTitle}>Spaces</Text>
@@ -654,6 +824,7 @@ function Centered({
   tint,
   title,
   body,
+  detail,
   spinner,
 }: {
   icon?: keyof typeof Ionicons.glyphMap;
@@ -661,6 +832,10 @@ function Centered({
   tint?: ColorValue;
   title: string;
   body?: string;
+  /** The underlying error, in small type. The sentence above it is a guess at
+   *  what it MEANS; this is what actually happened, and it is the difference
+   *  between a bug report and "it just says it didn't work". */
+  detail?: string | null;
   spinner?: boolean;
 }) {
   return (
@@ -669,6 +844,11 @@ function Centered({
       {icon ? <Ionicons name={icon} size={40} color={tint ?? COLOR.fgFaint} /> : null}
       <Text style={s.waitTitle}>{title}</Text>
       {body ? <Text style={s.waitBody}>{body}</Text> : null}
+      {detail ? (
+        <Text selectable style={s.waitDetail}>
+          {detail}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -699,12 +879,79 @@ const s = StyleSheet.create({
     justifyContent: "space-between",
     borderBottomWidth: 1,
     borderColor: T.border,
-    paddingHorizontal: 16,
+    paddingLeft: 16,
+    // The shell floats a close button over every modal at top:10/right:10,
+    // 24pt square — so it owns everything right of `width - 34`. "Start over"
+    // was laid out to `width - 16` and the two drew on top of each other.
+    // 42 = 34 for the button, plus 8 of air so they read as separate controls.
+    paddingRight: 42,
   },
   headerTitle: { fontSize: 15, fontWeight: "600", color: T.fg },
   link: { fontSize: 13, color: COLOR.accent },
 
-  list: { padding: 16, gap: 8 },
+  list: { padding: 20, paddingBottom: 28 },
+
+  // Sections carry their own spacing so the ScrollView doesn't need a `gap`
+  // that would also push apart the rows inside a card.
+  section: { marginTop: 22 },
+  sectionFirst: { marginTop: 0 },
+  card: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: T.border,
+    backgroundColor: T.surfaceAlt,
+    // Rows draw edge-to-edge dividers; without this they'd poke past the
+    // rounded corners.
+    overflow: "hidden",
+  },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  // Hairline BETWEEN rows only — a border on every row would double up against
+  // the card's own edge.
+  rowDivided: { borderTopWidth: 1, borderTopColor: T.border },
+  // A tinted square keeps the icon from floating loose against the label, and
+  // gives the accent somewhere to appear other than the button.
+  badge: {
+    height: 32,
+    width: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 9,
+    backgroundColor: T.accentSoft,
+  },
+  // Green rather than accent: this machine is already connected, which is a
+  // state, not the call to action the accent is reserved for.
+  badgeOn: {
+    height: 32,
+    width: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 9,
+    backgroundColor: T.successSoft,
+  },
+  badgeQuiet: {
+    height: 32,
+    width: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 9,
+    backgroundColor: T.surface,
+    borderWidth: 1,
+    borderColor: T.border,
+  },
+  rowName: { fontSize: 13.5, fontWeight: "600", color: T.fg },
+  rowMeta: { marginTop: 1, fontSize: 11.5, color: T.fgMuted },
+  rowNote: { fontSize: 11, color: T.fgFaint },
+
+  empty: { alignItems: "center", gap: 5, paddingVertical: 26, paddingHorizontal: 20 },
+  emptyText: { fontSize: 13, fontWeight: "500", color: T.fgMuted },
+  emptyHint: { textAlign: "center", fontSize: 11.5, color: T.fgFaint },
+
   center: {
     flex: 1,
     alignItems: "center",
@@ -713,20 +960,15 @@ const s = StyleSheet.create({
     paddingHorizontal: 40,
   },
 
-  peerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    borderRadius: 12,
-    backgroundColor: T.surface,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  peerName: { fontSize: 14, fontWeight: "500", color: T.fg },
-  peerMeta: { fontFamily: "JetBrainsMono", fontSize: 11, color: T.fgFaint },
-
   waitTitle: { textAlign: "center", fontSize: 15, fontWeight: "600", color: T.fg },
   waitBody: { textAlign: "center", fontSize: 13, lineHeight: 19, color: T.fgMuted },
+  waitDetail: {
+    fontFamily: "JetBrainsMono",
+    textAlign: "center",
+    fontSize: 10.5,
+    lineHeight: 15,
+    color: T.fgFaint,
+  },
 
   codeCard: {
     marginTop: 8,
@@ -741,7 +983,17 @@ const s = StyleSheet.create({
   code: { fontFamily: "JetBrainsMono", fontSize: 24, letterSpacing: 2, color: T.fg },
 
   sectionHint: { paddingHorizontal: 16, paddingTop: 12, fontSize: 12, color: T.fgMuted },
-  sectionTitle: { fontSize: 11, fontWeight: "600", textTransform: "uppercase", color: T.fgFaint },
+  sectionTitle: {
+    marginBottom: 8,
+    marginLeft: 2,
+    fontSize: 10.5,
+    fontWeight: "600",
+    letterSpacing: 0.7,
+    textTransform: "uppercase",
+    color: T.fgFaint,
+  },
+  // Still used by the catalog step, whose picker rows are a flat list rather
+  // than a card.
   sectionGap: { marginTop: 16 },
   search: {
     borderRadius: 10,
@@ -796,8 +1048,8 @@ const s = StyleSheet.create({
   // into black text on a vivid purple pill the moment the theme flipped.
   // onAccent exists for exactly this and is white in both.
   primaryLabel: { fontSize: 13, fontWeight: "600", color: T.onAccent },
-  // Used by the announcing switch when it is already on, where the action is
-  // "stop" and should not read as the thing to do.
+  // Revoke and Forget: destructive-ish actions that must not read as the thing
+  // to do on the screen.
   ghostBtn: {
     borderRadius: 10,
     borderWidth: 1,
