@@ -81,12 +81,12 @@ function FiltersModal() {
 const PANE_SCREENS: Record<string, ComponentType> = {
   "/space": SpaceScreen,
   "/metric": MetricScreen,
+  "/settings": SettingsScreen,
 };
 
 const MODALS: Record<string, { component: ComponentType; width: number; height: number }> = {
   "/search": { component: SearchScreen, width: 620, height: 560 },
   "/sessions": { component: SessionsScreen, width: 620, height: 660 },
-  "/settings": { component: SettingsScreen, width: 620, height: 660 },
   // Wider than the list modals: the heatmap is ~700px of grid at its cell size.
   "/activity": { component: DashboardScreen, width: 760, height: 700 },
   "/new": { component: NewTaskScreen, width: 640, height: 660 },

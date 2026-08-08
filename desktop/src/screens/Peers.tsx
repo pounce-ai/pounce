@@ -27,20 +27,30 @@ import {
   grantDevice,
   catalogSpaces,
   catalogThreads,
+  listAccess,
   peerState,
   pollAsk,
+  revokeGrant,
   setDiscoverable,
+  timeLeft,
   requestPreview,
   requestRead,
   type AskResult,
   type CatalogSpace,
   type CatalogThread,
   type DiscoveryState,
+  type Grant,
   type PendingAsk,
   type Peer,
   type Scope,
 } from "@pounce/app/services/peers";
-import { addDeviceConfig, syncLiveDataStreaming } from "@pounce/app/services/bridge";
+import {
+  addDeviceConfig,
+  listDeviceConfigs,
+  removeDeviceConfig,
+  syncLiveDataStreaming,
+  type DeviceConfig,
+} from "@pounce/app/services/bridge";
 import { COLOR } from "@pounce/app/ui";
 import { T } from "@pounce/app/ui/theme";
 
@@ -60,6 +70,11 @@ const GIVE_UP_MS = 5 * 60_000;
 export default function PeersScreen() {
   const [peers, setPeers] = useState<Peer[] | null>(null);
   const [discovery, setDiscovery] = useState<DiscoveryState | null>(null);
+  // The two standing lists: access this Mac has GIVEN, and access it HOLDS.
+  // Neither was reachable before — the grants you'd handed out were only
+  // visible while somebody happened to be asking.
+  const [given, setGiven] = useState<Grant[]>([]);
+  const [held, setHeld] = useState<DeviceConfig[]>([]);
   const [step, setStep] = useState<Step>({ name: "browse-peers" });
   const [busy, setBusy] = useState(false);
 
@@ -68,12 +83,25 @@ export default function PeersScreen() {
   useEffect(() => {
     if (step.name !== "browse-peers") return;
     let live = true;
-    const tick = () =>
+    const tick = () => {
       void peerState().then((r) => {
         if (!live) return;
         setPeers(r.peers);
         setDiscovery(r.discovery);
       });
+      void listAccess().then((a) => live && setGiven(a.grants));
+      void listDeviceConfigs().then(
+        (d) =>
+          live &&
+          // An expired grant is about to be swept by the next sync — don't list
+          // it as access you hold in the meantime.
+          setHeld(
+            d.filter(
+              (c) => c.grant && (!c.grant.expiresAt || Date.parse(c.grant.expiresAt) > Date.now()),
+            ),
+          ),
+      );
+    };
     tick();
     const t = setInterval(tick, 3_000);
     return () => {
@@ -108,8 +136,19 @@ export default function PeersScreen() {
         <PeerList
           peers={peers}
           discovery={discovery}
+          given={given}
+          held={held}
           busy={busy}
           onAsk={ask}
+          onRevoke={async (id) => {
+            await revokeGrant(id);
+            setGiven((await listAccess()).grants);
+          }}
+          onForget={async (id) => {
+            await removeDeviceConfig(id);
+            setHeld((await listDeviceConfigs()).filter((c) => c.grant));
+            void syncLiveDataStreaming();
+          }}
           onToggle={async () => {
             if (!discovery) return;
             setDiscovery(await setDiscoverable(!discovery.on));
@@ -212,46 +251,124 @@ function refusal(state: AskResult["state"]): string {
 
 // --- step 0: who is out there ------------------------------------------------
 
+/** The two standing lists, shown under Nearby whether or not anyone is nearby.
+ *  Reachable at all times — revoking access you gave should never depend on
+ *  somebody happening to be asking for more. */
+function Standing({
+  given,
+  held,
+  busy,
+  onRevoke,
+  onForget,
+}: {
+  given: Grant[];
+  held: DeviceConfig[];
+  busy: boolean;
+  onRevoke: (id: string) => void;
+  onForget: (id: string) => void;
+}) {
+  if (!given.length && !held.length) return null;
+  return (
+    <>
+      {held.length ? (
+        <>
+          <Text style={[s.sectionTitle, s.sectionGap]}>Access you hold</Text>
+          {held.map((d) => (
+            <View key={d.id} style={s.peerRow}>
+              <Ionicons name="link-outline" size={18} color={COLOR.fgMuted} />
+              <View style={s.grow}>
+                <Text style={s.peerName}>{d.grant?.issuedBy || d.name}</Text>
+                <Text style={s.peerMeta}>
+                  {d.grant?.summary} · {timeLeft(d.grant?.expiresAt)}
+                </Text>
+              </View>
+              <Pressable
+                disabled={busy}
+                onPress={() => onForget(d.id)}
+                style={({ pressed }) => [s.ghostBtn, pressed && s.pressed]}
+              >
+                <Text style={s.ghostLabel}>Forget</Text>
+              </Pressable>
+            </View>
+          ))}
+        </>
+      ) : null}
+      {given.length ? (
+        <>
+          <Text style={[s.sectionTitle, s.sectionGap]}>Machines with access to this one</Text>
+          {given.map((g) => (
+            <View key={g.id} style={s.peerRow}>
+              <Ionicons name="laptop-outline" size={18} color={COLOR.fgMuted} />
+              <View style={s.grow}>
+                <Text style={s.peerName}>{g.requester.hostName}</Text>
+                <Text style={s.peerMeta}>
+                  {g.summary} · {timeLeft(g.expiresAt)}
+                  {g.lastUsedAt ? "" : " · not used yet"}
+                </Text>
+              </View>
+              <Pressable
+                disabled={busy}
+                onPress={() => onRevoke(g.id)}
+                style={({ pressed }) => [s.ghostBtn, pressed && s.pressed]}
+              >
+                <Text style={s.ghostLabel}>Revoke</Text>
+              </Pressable>
+            </View>
+          ))}
+        </>
+      ) : null}
+    </>
+  );
+}
+
 function PeerList({
   peers,
   discovery,
+  given,
+  held,
   busy,
   onAsk,
   onToggle,
+  onRevoke,
+  onForget,
 }: {
   peers: Peer[] | null;
   discovery: DiscoveryState | null;
+  given: Grant[];
+  held: DeviceConfig[];
   busy: boolean;
   onAsk: (p: Peer) => void;
   onToggle: () => void;
+  onRevoke: (grantId: string) => void;
+  onForget: (deviceId: string) => void;
 }) {
   if (peers === null) {
     return <Centered spinner title="Looking for machines on this network…" />;
   }
-  // Announcing is opt-in — the beacon carries this machine's name — so the
-  // switch leads, and an empty list below it means something different
-  // depending on which way it is set.
+  // Being findable is opt-in, so the switch leads. Plain words on purpose:
+  // "visible" and "hidden" are things people already understand, where
+  // "announcing" and "broadcasting" sound like something is leaking.
   const toggle = discovery ? (
     <View style={s.peerRow}>
       <Ionicons
-        name={discovery.on ? "radio-outline" : "eye-off-outline"}
+        name={discovery.on ? "eye-outline" : "eye-off-outline"}
         size={20}
         color={COLOR.fgMuted}
       />
       <View style={s.grow}>
         <Text style={s.peerName}>
-          {discovery.on ? "Other machines can find this one" : "This Mac isn't announcing itself"}
+          {discovery.on ? "Other computers here can see this Mac" : "This Mac is hidden"}
         </Text>
         <Text style={s.peerMeta}>
           {discovery.on
-            ? "They can see its name and address, and ask for access."
-            : "Nothing is broadcast until you switch this on."}
+            ? "They see its name, and can ask to read the projects you choose."
+            : "Turn this on to let another computer on your network find it."}
         </Text>
       </View>
       {!discovery.eligible ? (
-        <Text style={s.peerMeta}>unavailable</Text>
+        <Text style={s.peerMeta}>not available here</Text>
       ) : discovery.locked ? (
-        <Text style={s.peerMeta}>set by env</Text>
+        <Text style={s.peerMeta}>set on this machine</Text>
       ) : (
         <Pressable
           disabled={busy}
@@ -259,7 +376,7 @@ function PeerList({
           style={({ pressed }) => [discovery.on ? s.ghostBtn : s.primaryBtn, pressed && s.pressed]}
         >
           <Text style={discovery.on ? s.ghostLabel : s.primaryLabel}>
-            {discovery.on ? "Stop" : "Let them find me"}
+            {discovery.on ? "Hide" : "Make visible"}
           </Text>
         </Pressable>
       )}
@@ -272,9 +389,10 @@ function PeerList({
         {toggle}
         <Text style={s.sectionHint}>
           {discovery && !discovery.on
-            ? "Machines you already know can still be asked, and they can still ask you. Announcing only decides whether you turn up in their list on your own."
-            : "No other machines yet. Pounce has to be running on the other Mac with announcing switched on too, and you both need to be on the same Wi-Fi."}
+            ? "You can still connect to a computer you already know, and it can still ask you. This only decides whether you show up in its list on your own."
+            : "Nothing here yet. The other computer needs Pounce running and set to visible too, on the same Wi-Fi."}
         </Text>
+        <Standing given={given} held={held} busy={busy} onRevoke={onRevoke} onForget={onForget} />
       </ScrollView>
     );
   }
@@ -301,6 +419,7 @@ function PeerList({
           </Pressable>
         </View>
       ))}
+      <Standing given={given} held={held} busy={busy} onRevoke={onRevoke} onForget={onForget} />
     </ScrollView>
   );
 }

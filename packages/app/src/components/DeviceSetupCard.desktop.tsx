@@ -173,12 +173,13 @@ export function DeviceSetupCard({
           {resyncing ? (
             <ActivityIndicator size="small" color={T.onAccent} />
           ) : (
-            <Ionicons name={resyncDone ? "checkmark" : "refresh"} size={16} color={T.onAccent} />
+            <Ionicons name={resyncDone ? "checkmark" : "refresh"} size={14} color={T.onAccent} />
           )}
           <Text style={s.resyncText}>
             {resyncing ? "Resyncing…" : resyncDone ? "Up to date" : "Resync now"}
           </Text>
         </Pressable>
+        <View style={s.grow} />
         <Pressable
           onPress={reset}
           disabled={busy || resyncing}
@@ -188,7 +189,7 @@ export function DeviceSetupCard({
             pressed && s.pressed90,
           ]}
         >
-          <Ionicons name="trash-outline" size={15} color={COLOR.danger} />
+          <Ionicons name="trash-outline" size={14} color={COLOR.danger} />
           <Text style={s.resetText}>Reset app data</Text>
         </Pressable>
       </View>
@@ -267,41 +268,45 @@ export function DeviceSetupCard({
 
 const s = StyleSheet.create({
   card: {
-    gap: 12,
-    borderRadius: 16,
+    gap: 10,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: T.border,
     backgroundColor: T.surface,
     padding: 16,
   },
-  cardTitle: { fontSize: 17, fontWeight: "600", color: T.fg },
-  cardBody: { fontSize: 13, lineHeight: 19, color: T.fgMuted },
-  actionsRow: { marginTop: 4, flexDirection: "row", gap: 8 },
+  cardTitle: { fontSize: 15, fontWeight: "600", color: T.fg },
+  cardBody: { fontSize: 12.5, lineHeight: 18, color: T.fgMuted },
+  // Desktop buttons, not phone buttons. These were two 44pt full-width slabs
+  // splitting the card in half, which gave "Reset app data" — a destructive
+  // action you use once, if ever — exactly the same weight as the routine one.
+  // Now: content-width, 30pt, and reset is a quiet outline that has to be
+  // aimed at.
+  actionsRow: { marginTop: 2, flexDirection: "row", alignItems: "center", gap: 8 },
   resyncBtn: {
-    height: 44,
-    flex: 1,
+    height: 30,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    borderRadius: 12,
+    gap: 6,
+    borderRadius: 8,
+    paddingHorizontal: 12,
     backgroundColor: T.accent,
   },
-  resyncText: { fontSize: 14, fontWeight: "600", color: T.onAccent },
+  resyncText: { fontSize: 13, fontWeight: "600", color: T.onAccent },
   resetBtn: {
-    height: 44,
-    flex: 1,
+    height: 30,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    borderRadius: 12,
+    gap: 6,
+    borderRadius: 8,
+    paddingHorizontal: 12,
     borderWidth: 1,
-    // danger at 40% / 10% — no matching soft tokens; literals from the danger hex.
-    borderColor: "rgba(248, 81, 73, 0.4)",
-    backgroundColor: "rgba(248, 81, 73, 0.1)",
+    borderColor: T.border,
   },
-  resetText: { fontSize: 14, fontWeight: "600", color: T.danger },
+  resetText: { fontSize: 13, fontWeight: "500", color: T.danger },
+  grow: { flex: 1 },
   section: { gap: 8, borderTopWidth: 1, borderColor: T.border, paddingTop: 12 },
   rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   updateCopy: { flex: 1, paddingRight: 12 },

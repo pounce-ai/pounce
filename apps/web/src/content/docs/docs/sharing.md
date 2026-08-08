@@ -106,27 +106,28 @@ screen and type it.
 
 ## Finding each other
 
-**Announcing is off until you switch it on.** The beacon carries your machine's
-name, and a machine name is usually a person's — so Pounce doesn't put that on
-every café, office and co-working network you join unless you've said it should.
+**Your computer stays hidden until you make it visible.** Other machines would
+otherwise see its name, and a computer's name is usually a person's — so Pounce
+doesn't put that on every café, office and co-working network you join unless
+you've asked it to.
 
-Turn it on wherever you are:
+Make it visible wherever you are:
 
 - **App** — the switch at the top of *Nearby machines*
-- **Browser** — *Let machines find me* on `http://127.0.0.1:8099/peers`
-- **Terminal** — `pounce peers --discoverable on`
+- **Browser** — *Make visible* on `http://127.0.0.1:8099/peers`
+- **Terminal** — `pounce peers --visible on`
 
-It's remembered, applies immediately, and `--discoverable off` stops it again.
-`POUNCE_DISCOVERY=1` or `=0` in the Bridge's environment overrides the switch
+It's remembered, takes effect straight away, and `--visible off` hides it again.
+`POUNCE_DISCOVERY=1` or `=0` in the Bridge's environment overrides the switch,
 for scripted and fleet setups.
 
-Once it's on, a computer running Pounce shows up under "Nearby machines" within
-a few seconds. The announcement carries a name, an address and nothing else —
-no token, no project names, nothing about what's on the machine.
+Once it's visible, it turns up under "Nearby machines" on the other computer
+within a few seconds. What that computer sees is a name and an address and
+nothing else — no token, no project names, nothing about what's on it.
 
-Both machines need announcing on to see each other automatically. Being silent
-doesn't cut you off: someone who knows your address can still ask you for
-access, and you can still ask them.
+Both computers need to be visible to find each other on their own. Staying
+hidden doesn't cut you off: someone who knows your address can still ask you,
+and you can still ask them.
 
 Once a grant exists it also works **off the network**: each grant gets its own
 peer-to-peer tunnel, so access survives the other machine leaving the Wi-Fi.

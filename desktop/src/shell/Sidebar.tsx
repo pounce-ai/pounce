@@ -625,8 +625,12 @@ function PeersButton() {
 
   return (
     <Pressable
-      onPress={() => router.push(waiting ? "/access" : "/peers")}
-      accessibilityLabel={waiting ? `${waiting} access request waiting` : "Nearby machines"}
+      // Always the hub, never conditional. Routing this to /access only while
+      // something was pending meant that with no request in flight there was NO
+      // way to reach the grants you had already given — you could not see them,
+      // and you could not take them back.
+      onPress={() => router.push("/peers")}
+      accessibilityLabel={waiting ? `Machines: ${waiting} access request waiting` : "Machines"}
       hitSlop={4}
       style={({ pressed }) => [s.accountAction, pressed && s.rowSelected]}
     >

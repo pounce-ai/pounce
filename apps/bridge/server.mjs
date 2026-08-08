@@ -1710,9 +1710,9 @@ function render(){
   app.appendChild(h('h2',{text:'Nearby machines'}));
   app.appendChild(renderDiscoveryToggle());
   if(!state.discovery.on){
-    app.appendChild(h('p',{class:'empty',text:'Other machines can still be asked if you know their address, and they can still ask you. Announcing only decides whether you appear in their list automatically.'}));
+    app.appendChild(h('p',{class:'empty',text:'You can still connect to a computer you already know, and it can still ask you. This only decides whether you show up in its list on your own.'}));
   } else if(!state.peers.length){
-    app.appendChild(h('p',{class:'empty',text:'No other machines yet. Pounce has to be running on the other computer, it needs announcing switched on too, and you both need to be on the same network.'}));
+    app.appendChild(h('p',{class:'empty',text:'Nothing here yet. The other computer needs Pounce running and set to visible too, on the same network.'}));
   } else {
     state.peers.forEach(function(p){
       app.appendChild(h('div',{class:'card'},[h('div',{class:'row'},[
@@ -1762,22 +1762,22 @@ function renderDiscoveryToggle(){
   var card = h('div',{class:'card'});
   var row = h('div',{class:'row'});
   row.appendChild(h('div',{class:'grow'},[
-    h('div',{class:'name',text: d.on ? 'This machine is announcing itself' : 'This machine is not announcing itself'}),
+    h('div',{class:'name',text: d.on ? 'Other computers here can see this one' : 'This computer is hidden'}),
     h('div',{class:'meta',text: d.on
-      ? 'Other Pounce machines on this network can see its name and address, and ask it for access.'
-      : 'Nothing is broadcast. Switch this on when you want other machines here to find you.'})
+      ? 'They see its name, and can ask to read the projects you choose.'
+      : 'Turn this on to let another computer on your network find it.'})
   ]));
   if(!d.eligible){
-    row.appendChild(h('div',{class:'meta',text:'not available on this port'}));
+    row.appendChild(h('div',{class:'meta',text:'not available here'}));
   } else if(d.locked){
-    row.appendChild(h('div',{class:'meta',text:'set by POUNCE_DISCOVERY'}));
+    row.appendChild(h('div',{class:'meta',text:'set on this machine'}));
   } else {
     row.appendChild(h('button',{class: d.on ? '' : 'p', onclick:function(){
       if(busy) return;
       busy = true;
       api('/v1/peers/discovery',{method:'POST',body:JSON.stringify({enabled:!d.on})})
         .then(function(){ busy = false; refresh(); });
-    }, text: d.on ? 'Stop announcing' : 'Let machines find me'}));
+    }, text: d.on ? 'Hide' : 'Make visible'}));
   }
   card.appendChild(row);
   return card;
@@ -2123,6 +2123,15 @@ const server = http.createServer(async (req, res) => {
       const { enabled } = await readBody(req);
       if (typeof enabled !== "boolean")
         return send(res, 400, { error: "enabled must be a boolean" });
+      // Saying yes on a bridge that may not announce at all would persist a
+      // setting that quietly does nothing, and report "hidden" right after the
+      // user asked to be visible. Refuse with the reason instead.
+      if (!discoveryState().eligible) {
+        return send(res, 409, {
+          error: "this bridge can't be made visible — it isn't the machine's main bridge",
+          discovery: discoveryState(),
+        });
+      }
       if (discoveryState().locked) {
         return send(res, 409, {
           error:
