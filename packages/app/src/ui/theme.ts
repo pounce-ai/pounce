@@ -67,6 +67,20 @@ export const T = {
   /* Text. The label hierarchy adapts per appearance; systemGrayColor is the
      same grey on both grounds and skips it. */
   fg: mac("labelColor", "#ececf1"),
+  /**
+   * Long-form body text — a transcript, a markdown paragraph.
+   *
+   * Deliberately NOT `labelColor`. That's the right colour for a label: a few
+   * words you glance at, where maximum contrast is maximum legibility. A
+   * paragraph is the opposite case — pure white on near-black glares, the glyph
+   * edges fizz, and a page of it reads as harsh next to editors that step it
+   * down. This is that step: ~83% toward the foreground on dark, a touch off
+   * black on light. Both sit far above the contrast floor; this is about
+   * comfort over a screenful, not about meeting a minimum.
+   *
+   * Labels, headings and figures keep `fg`. Only running prose uses this.
+   */
+  fgProse: dual("#26262b", "#c9c9d2"),
   fgMuted: mac("secondaryLabelColor", "#9a9aa5"),
   fgFaint: mac("tertiaryLabelColor", "#62626d"),
   onAccent: "#ffffff" as ColorValue,

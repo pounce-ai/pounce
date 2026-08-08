@@ -24,6 +24,12 @@ export const T = {
 
   /* Text */
   fg: d.onSurface,
+  /** Long-form body text. Aliased to the platform's own label colour on
+   *  purpose: iOS and Android already tune their semantic text colours for
+   *  running text, and overriding them would fight the OS. Desktop draws its
+   *  own chrome and has no such tuning, which is where this token earns its
+   *  keep — see ui/theme.ts. */
+  fgProse: d.onSurface,
   fgMuted: d.onSurfaceVariant,
   fgFaint: d.outline,
   onAccent: "#ffffff" as ColorValue,

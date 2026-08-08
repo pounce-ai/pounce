@@ -29,6 +29,7 @@ import { Sidebar } from "./Sidebar";
 import { TabStrip } from "./TabStrip";
 import { DiffDock, DOCK_HIDE_BELOW } from "./DiffDock";
 import { Splitter, SPLITTER_WIDTH } from "./Splitter";
+import { reportWindowHeight } from "./fullscreen";
 import { CrossFade } from "./Motion";
 import {
   MIN_TRANSCRIPT_WIDTH,
@@ -170,7 +171,15 @@ export function Shell() {
     // The dock sizes itself against the shell's real width — Dimensions reports
     // the screen, not this window, so anything derived from it is wrong the
     // moment the window isn't full-screen.
-    <View style={s.root} onLayout={(e) => setShellWidth(e.nativeEvent.layout.width)}>
+    <View
+      style={s.root}
+      onLayout={(e) => {
+        setShellWidth(e.nativeEvent.layout.width);
+        // The window's real content height — Dimensions reports the screen on
+        // this platform, so the chrome can only learn this from here.
+        reportWindowHeight(e.nativeEvent.layout.height);
+      }}
+    >
       {sidebar ? (
         <>
           <View style={[s.sidebar, { width: sidebarWidth }]}>

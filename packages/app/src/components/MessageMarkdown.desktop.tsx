@@ -17,9 +17,23 @@ import { highlightLines, themeFor } from "./highlight";
 import { usePacedText } from "./pacedText";
 import { SECONDARY_SCALE } from "../ui/tokens";
 
+/**
+ * Body type for a transcript.
+ *
+ * The line height is the whole story. At 21/15 (a 1.4 ratio) the lines pack
+ * tightly enough that a paragraph reads as a block of texture rather than as
+ * sentences, which is what made this feel harsh next to editors doing the same
+ * job. 24/15 is 1.6 — the ratio long-form text has wanted since print — and it
+ * costs three points a line for prose people actually read.
+ *
+ * The colour is pulled off pure `labelColor` for the same reason. Full-strength
+ * white on near-black is maximum contrast, and maximum is not most readable:
+ * it glares, and every glyph edge fizzes. `fgProse` steps it down just enough
+ * to settle while staying far above any contrast floor (see ui/theme.ts).
+ */
 const BASE: Record<"user" | "assistant", TextStyle> = {
-  user: { fontSize: 15, lineHeight: 21, color: T.onAccent },
-  assistant: { fontSize: 15, lineHeight: 21, color: T.fg },
+  user: { fontSize: 15, lineHeight: 24, color: T.onAccent },
+  assistant: { fontSize: 15, lineHeight: 24, color: T.fgProse },
 };
 
 /** Mirrors the native `ContextMenuItem`, declared locally because the native
@@ -83,7 +97,7 @@ export function MessageMarkdown({
     );
   }
   return (
-    <View style={{ gap: 8 }}>
+    <View style={s.blocks}>
       {segments.map((seg, i) =>
         seg.type === "code" ? (
           <CodeCard
@@ -395,6 +409,9 @@ function Blocks({
 const s = StyleSheet.create({
   gap1: { gap: 4 },
   gap2: { gap: 8 },
+  // Between blocks (paragraph → paragraph, paragraph → list). Tighter than the
+  // line height and the paragraphs stop being separate things.
+  blocks: { gap: 12 },
   cursor: { color: T.accent },
   codeCard: {
     overflow: "hidden",

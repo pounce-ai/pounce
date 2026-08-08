@@ -439,9 +439,30 @@ export async function saveBridgeConfig(cfg: BridgeConfig): Promise<void> {
   await SecureStore.setItemAsync(BRIDGE_KEY, JSON.stringify(cfg));
   await addDeviceConfig(cfg.url, cfg.token);
 }
+/**
+ * The device to connect to — the first one that ANSWERS, not simply the first
+ * one stored.
+ *
+ * This used to be `devs[0]`, and that made one unreachable machine fatal to the
+ * whole app. `connectBridge` treats an unreachable device as a failed
+ * connection, so the status never leaves "disconnected" — and because thread
+ * sync only runs once connected, a laptop that happened to sort first and was
+ * closed for the weekend stopped a perfectly healthy local bridge from ever
+ * syncing. The symptom is the worst kind: Spaces and Sessions sit empty
+ * forever, while the machine you're sitting at is two inches away and fine.
+ *
+ * Order is still respected — the first reachable device wins, so a deliberate
+ * primary keeps its place. Probes run in parallel and only when there is more
+ * than one device, so the common single-bridge case costs nothing extra. If
+ * NOTHING answers we still return the first: the caller's own failure path
+ * ("disconnected", keep cached threads) is the right answer then, and returning
+ * null instead would read as "not paired" and prompt for a QR scan.
+ */
 export async function loadBridgeConfig(): Promise<BridgeConfig | null> {
   const devs = await listDeviceConfigs();
-  return devs[0] ?? null;
+  if (devs.length <= 1) return devs[0] ?? null;
+  const reachable = await Promise.all(devs.map((d) => probeHealth(d.url, 2500)));
+  return devs[reachable.findIndex(Boolean)] ?? devs[0];
 }
 export async function clearBridgeConfig(): Promise<void> {
   await SecureStore.deleteItemAsync(BRIDGE_KEY);

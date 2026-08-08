@@ -13,7 +13,6 @@ import {
   Alert,
   Pressable,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -21,6 +20,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { addDeviceConfig, clearBridgeConfig, syncLiveData } from "../services/bridge";
 import { allCollections, clearCollection } from "../state/db/collections";
+import { Toggle } from "./Toggle";
 
 /** This Mac's own bridge (same convention as the desktop shell's localBridge). */
 const LOCAL_URL = `http://127.0.0.1:${process.env.EXPO_PUBLIC_BRIDGE_PORT ?? "8099"}`;
@@ -202,10 +202,10 @@ export function DeviceSetupCard({
                 Download and install new versions in the background (signature-verified).
               </Text>
             </View>
-            <Switch
+            <Toggle
               value={autoUpdate}
               onValueChange={toggleAutoUpdate}
-              trackColor={{ true: COLOR.accent, false: COLOR.fgFaint }}
+              accessibilityLabel="Automatic updates"
             />
           </View>
           <Pressable

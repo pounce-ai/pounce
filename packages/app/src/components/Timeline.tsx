@@ -30,6 +30,7 @@ import { collapseToolResults } from "./timelineEvents";
 import { isTaskCall, type TaskItem, type TaskTimeline } from "./taskEvents";
 import { HIGHLIGHT } from "../ui/tokens";
 import { TodoCard } from "./TodoCard";
+import { Chevron, Reveal } from "./Disclosure";
 
 export { collapseToolResults };
 
@@ -85,6 +86,29 @@ function batchPhrase(name: string, n: number): string {
  * never in the transcript, so mirror it here: map the FIRST tool_call of every
  * run of ≥2 consecutive calls to its summary.
  */
+/**
+ * Consecutive tool calls, as `[firstId, ids[]]`.
+ *
+ * A run of ONE counts. The noise this collapses isn't only long batches — a
+ * transcript that alternates prose, one command, prose, one command is just as
+ * busy, and a rule that only folded pairs would leave half the pills on screen.
+ */
+function toolRuns(data: TimelineEvent[]): { id: string; ids: string[] }[] {
+  const runs: { id: string; ids: string[] }[] = [];
+  let i = 0;
+  while (i < data.length) {
+    if (data[i].type !== "tool_call") {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < data.length && data[j].type === "tool_call") j++;
+    runs.push({ id: data[i].id, ids: data.slice(i, j).map((e) => e.id) });
+    i = j;
+  }
+  return runs;
+}
+
 function batchHeaders(data: TimelineEvent[]): Map<string, string> {
   const m = new Map<string, string>();
   let i = 0;
@@ -95,7 +119,9 @@ function batchHeaders(data: TimelineEvent[]): Map<string, string> {
     }
     let j = i;
     while (j < data.length && data[j].type === "tool_call") j++;
-    if (j - i >= 2) {
+    // Every run, including a run of one: the header is now the COLLAPSED row's
+    // label, so a lone call needs one too or it would have nothing to show.
+    {
       const counts = new Map<string, number>();
       for (let k = i; k < j; k++) {
         const name = (data[k] as ToolCallEvent).call.name;
@@ -196,8 +222,50 @@ export const Timeline = memo(function Timeline({
     }
     return m;
   }, [events]);
-  const data = useMemo(() => collapseToolResults(events), [events]);
-  const headers = useMemo(() => batchHeaders(data), [data]);
+  const all = useMemo(() => collapseToolResults(events), [events]);
+  const headers = useMemo(() => batchHeaders(all), [all]);
+  const runs = useMemo(() => toolRuns(all), [all]);
+
+  /**
+   * Which tool runs the reader has opened. Collapsed is the default, and that
+   * is the point: a transcript is prose with evidence attached, and a wall of
+   * command pills buries the prose. The summary line still says what ran, so
+   * nothing is hidden — it's one line instead of six.
+   *
+   * Keyed by the run's FIRST event id, which is stable as the thread grows: a
+   * streaming run only ever appends, so an open run stays open rather than
+   * snapping shut when its next call lands.
+   */
+  const [openRuns, setOpenRuns] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleRun = useCallback((id: string) => {
+    setOpenRuns((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }, []);
+
+  /** Every tool call inside a CLOSED run, so the list can skip it. The run's
+   *  first event survives and renders as the summary row. */
+  const hidden = useMemo(() => {
+    const set = new Set<string>();
+    for (const run of runs) {
+      if (openRuns.has(run.id)) continue;
+      for (const id of run.ids) if (id !== run.id) set.add(id);
+    }
+    return set;
+  }, [runs, openRuns]);
+
+  const collapsedRuns = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const run of runs) if (!openRuns.has(run.id)) m.set(run.id, run.ids.length);
+    return m;
+  }, [runs, openRuns]);
+
+  const data = useMemo(
+    () => (hidden.size ? all.filter((e) => !hidden.has(e.id)) : all),
+    [all, hidden],
+  );
   // Subscribe to this thread's marker overrides once; each row gets its resolved
   // marked state as a prop (a per-row live query would be far too heavy).
   const markerMap = useThreadMarkers(sessionId);
@@ -298,6 +366,8 @@ export const Timeline = memo(function Timeline({
               item.type === "tool_call" ? resultByCallId.get(item.call.id || item.id) : undefined
             }
             batchHeader={headers.get(item.id)}
+            collapsedCount={collapsedRuns.get(item.id)}
+            onToggleRun={toggleRun}
             taskList={item.id === tasks.latestEventId ? tasks.state?.items : undefined}
             taskLabel={tasks.labels.get(item.id)}
             onRespondPermission={onRespondPermission}
@@ -391,6 +461,8 @@ const Row = memo(function Row({
   onRunCommand,
   pairedResult,
   batchHeader,
+  collapsedCount,
+  onToggleRun,
   taskList,
   taskLabel,
   cwd,
@@ -411,6 +483,10 @@ const Row = memo(function Row({
   pairedResult?: ToolResultEvent;
   /** For the first call of a parallel batch: the synthesized summary line. */
   batchHeader?: string;
+  /** Set on the FIRST call of a closed run: how many calls it stands for. The
+   *  rest of the run isn't in the list at all while it's closed. */
+  collapsedCount?: number;
+  onToggleRun?: (id: string) => void;
   /** Set on the newest task event: the folded checklist to render as a card. */
   taskList?: readonly TaskItem[];
   /** Set on superseded task events: their one-line trace label. */
@@ -490,6 +566,10 @@ const Row = memo(function Row({
     case "thinking_finished":
       return <Meta text={event.text ? `💭 ${event.text}` : "Thought"} />;
     case "tool_call": {
+      // Captured before the guards below: `isTaskCall` is a type predicate, and
+      // once TS has narrowed past it `event` is `never` for the rest of the
+      // block — so reading `event.id` down there doesn't compile.
+      const runId = event.id;
       // Entering plan mode is a state change, not a tool worth a card — show the
       // same quiet banner Claude Code does.
       if (event.call.name === "EnterPlanMode")
@@ -509,20 +589,36 @@ const Row = memo(function Row({
         if (taskLabel) return <Meta text={taskLabel} />;
         return <Meta text="Task list cleared" />;
       }
-      if (!batchHeader)
+      // Closed run: one summary line stands in for the whole batch. The calls
+      // themselves aren't rendered — they aren't even in the list — so a long
+      // batch costs one row instead of N accordions.
+      if (collapsedCount != null)
         return (
-          <SearchHighlight term={highlightTerm}>
-            <ToolAccordion event={event} result={pairedResult} cwd={cwd} />
-          </SearchHighlight>
+          <RunSummary
+            label={batchHeader}
+            count={collapsedCount}
+            open={false}
+            onPress={() => onToggleRun?.(runId)}
+          />
         );
-      return (
-        <View style={s.gap8}>
-          <Text style={s.batchHeader}>{batchHeader}</Text>
-          <SearchHighlight term={highlightTerm}>
-            <ToolAccordion event={event} result={pairedResult} cwd={cwd} />
-          </SearchHighlight>
-        </View>
+      const accordion = (
+        <SearchHighlight term={highlightTerm}>
+          <ToolAccordion event={event} result={pairedResult} cwd={cwd} />
+        </SearchHighlight>
       );
+      // Open run: the summary stays as the way back to closed.
+      if (batchHeader)
+        return (
+          <View style={s.gap8}>
+            <RunSummary
+              label={batchHeader}
+              open
+              onPress={onToggleRun ? () => onToggleRun(runId) : undefined}
+            />
+            <Reveal>{accordion}</Reveal>
+          </View>
+        );
+      return accordion;
     }
     case "tool_result":
       return <ToolResult content={event.result.content} isError={event.result.isError} />;
@@ -1016,25 +1112,23 @@ function ToolAccordion({
             <Text style={s.runningLabel}>Running</Text>
           </View>
         ) : expandable ? (
-          <PounceIcon
-            name={open ? "chevron-up" : "chevron-down"}
-            size={13}
-            color={theme.colors.fgFaint}
-          />
+          <Chevron open={open} turn={180}>
+            <PounceIcon name="chevron-down" size={13} color={theme.colors.fgFaint} />
+          </Chevron>
         ) : null}
       </View>
       {open && event.call.previewUri ? (
         // A Read of an image → show the picture, not just the path, once the
         // card is expanded. Eager: a nested thumbnail's viewability doesn't
         // fire reliably inside a card.
-        <View style={s.mt8}>
+        <Reveal style={s.mt8}>
           <InlineImages images={[{ uri: event.call.previewUri, mediaType: "" }]} eager />
-        </View>
+        </Reveal>
       ) : null}
       {open && result ? (
-        <View style={s.mt8}>
+        <Reveal style={s.mt8}>
           <ResultBody content={result.result.content} isError={result.result.isError} nested />
-        </View>
+        </Reveal>
       ) : null}
       {tail ? (
         <View style={s.tailBox}>
@@ -1080,6 +1174,49 @@ function ResultBody({
         {text}
       </Text>
     </View>
+  );
+}
+
+/**
+ * The one line a run of tool calls collapses to.
+ *
+ * Quiet on purpose — muted text, a chevron, no card. It sits between paragraphs
+ * of the agent's prose, and anything with a border or a fill would go back to
+ * competing with the writing, which is the whole reason the pills were folded.
+ *
+ * The count only shows while closed: once open, the calls are right there to be
+ * counted, and a stale "3" beside three visible rows is noise.
+ */
+function RunSummary({
+  label,
+  count,
+  open,
+  onPress,
+}: {
+  label?: string;
+  count?: number;
+  open: boolean;
+  onPress?: () => void;
+}) {
+  const { theme } = useUnistyles();
+  const text = label ?? `${count ?? 1} tool call${(count ?? 1) === 1 ? "" : "s"}`;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={!onPress}
+      accessibilityRole="button"
+      accessibilityState={{ expanded: open }}
+      accessibilityLabel={open ? `Hide details: ${text}` : `Show details: ${text}`}
+      style={({ pressed }) => [s.runSummary, pressed && s.pressed80]}
+    >
+      {/* One glyph that turns, not two that swap — see Chevron. */}
+      <Chevron open={open}>
+        <PounceIcon name="chevron-forward" size={11} color={theme.colors.fgFaint} />
+      </Chevron>
+      <Text numberOfLines={1} style={s.batchHeader}>
+        {text}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -1207,7 +1344,15 @@ const s = StyleSheet.create((theme) => ({
   textMuted: { color: theme.colors.fgMuted },
   textFaint: { color: theme.colors.fgFaint },
   monoText12: { fontFamily: "JetBrainsMono", fontSize: 12 },
-  batchHeader: { paddingLeft: 4, fontSize: 12, color: theme.colors.fgMuted },
+  batchHeader: { flexShrink: 1, fontSize: 12, color: theme.colors.fgMuted },
+  runSummary: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    alignSelf: "flex-start",
+    paddingVertical: 2,
+    paddingRight: 6,
+  },
   permCard: {
     gap: 8,
     borderRadius: 12,

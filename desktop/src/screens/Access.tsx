@@ -480,7 +480,7 @@ const s = StyleSheet.create({
   },
   chipOn: { backgroundColor: COLOR.accent, borderColor: COLOR.accent },
   chipLabel: { fontSize: 12, color: T.fgMuted },
-  chipLabelOn: { color: T.bg, fontWeight: "600" },
+  chipLabelOn: { color: T.onAccent, fontWeight: "600" },
 
   actions: { marginTop: 4, flexDirection: "row", justifyContent: "flex-end", gap: 8 },
   grantRow: {
@@ -498,7 +498,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  primaryLabel: { fontSize: 13, fontWeight: "600", color: T.bg },
+  primaryLabel: { fontSize: 13, fontWeight: "600", color: T.onAccent },
   ghostBtn: {
     borderRadius: 10,
     borderWidth: 1,

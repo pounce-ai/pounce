@@ -15,17 +15,29 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { AgentStatusIcon, COLOR } from "@pounce/app/ui";
 import { T } from "@pounce/app/ui/theme";
-import { DragRegion, TITLEBAR_INSET, TRAFFIC_LIGHT_INSET } from "@pounce/app/ui/native/DragRegion";
+import { DragRegion, TITLEBAR_INSET } from "@pounce/app/ui/native/DragRegion";
+import { useTrafficLightInset } from "./fullscreen";
 import { useFavThreadSet, useProjectNames, useThreads } from "@pounce/app/state/db/hooks";
 import { toggleFavThread } from "@pounce/app/state/stores";
 import type { MetricKey } from "@pounce/app/screens/Metric";
 import { sessionChrome$ } from "@pounce/app/state/sessionChrome";
 import { closeTab, nav$, selectTab, tabKey, type Route } from "../shims/router";
+import { SidebarGlyph } from "./icons";
 
-/** Icon per non-session tab — a page rather than a thread. */
+/**
+ * Icon per non-session tab — a page rather than a thread.
+ *
+ * This map is also what DECIDES a tab is a page: `activeIsSession` and the
+ * label both key off it. Adding a pane to the shell's PANE_SCREENS without
+ * adding it here doesn't just cost an icon — the tab falls through to the
+ * thread branch, looks up a session id it doesn't have, and renders the
+ * fallback title. That is how Settings came to be labelled "Thread", complete
+ * with a thread's favourite and search controls beside it.
+ */
 const PANE_ICON: Record<string, React.ComponentProps<typeof Ionicons>["name"]> = {
   "/space": "folder-outline",
   "/metric": "stats-chart-outline",
+  "/settings": "settings-outline",
 };
 
 /** Display name for a `/metric` tab. Deliberately terser than the page's own
@@ -61,14 +73,16 @@ export function TabStrip() {
   const activeIsSession = !!tabs[active] && !PANE_ICON[tabs[active].path];
   const activeId = (activeIsSession ? tabs[active]?.params.id : null) ?? null;
   const isFav = !!activeId && favSet.has(activeId);
+  const trafficLightInset = useTrafficLightInset();
 
   return (
     <View
       style={[
         s.root,
         // With the sidebar hidden the traffic lights float over this strip
-        // instead, so the tabs have to start clear of them.
-        !sidebar && s.rootWithLights,
+        // instead, so the tabs have to start clear of them — except in full
+        // screen, where there are none (see useTrafficLightInset).
+        !sidebar && { paddingLeft: trafficLightInset },
       ]}
     >
       {/* Behind everything: bare strip = window drag. Must stay the FIRST child
@@ -80,7 +94,7 @@ export function TabStrip() {
           accessibilityLabel="Show sidebar"
           style={({ pressed }) => [s.iconBtn, pressed && s.hover]}
         >
-          <Ionicons name="chevron-forward" size={14} color={COLOR.fgMuted} />
+          <SidebarGlyph color={COLOR.fgMuted} filled={false} />
         </Pressable>
       ) : null}
 
@@ -95,7 +109,9 @@ export function TabStrip() {
           ? null
           : tab.path === "/metric"
             ? (METRIC_LABEL[tab.params.key as MetricKey] ?? "Metric")
-            : spaceLabel(tab.params.key, projectNames);
+            : tab.path === "/settings"
+              ? "Settings"
+              : spaceLabel(tab.params.key, projectNames);
         return (
           <Pressable
             key={tabKey(tab)}
@@ -200,7 +216,6 @@ const s = StyleSheet.create({
     gap: 3,
     paddingHorizontal: 6,
   },
-  rootWithLights: { paddingLeft: TRAFFIC_LIGHT_INSET },
   flex1: { flex: 1 },
   hover: { backgroundColor: T.surface },
   iconBtn: {

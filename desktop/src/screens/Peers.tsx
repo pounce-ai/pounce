@@ -345,9 +345,19 @@ function PeerList({
   if (peers === null) {
     return <Centered spinner title="Looking for machines on this network…" />;
   }
-  // Being findable is opt-in, so the switch leads. Plain words on purpose:
-  // "visible" and "hidden" are things people already understand, where
-  // "announcing" and "broadcasting" sound like something is leaking.
+  // Being findable is opt-in, so the switch leads.
+  //
+  // "Discoverable" on purpose. "Hidden" made the CURRENT state the safe-sounding
+  // one, so the control read as "give up safety" — and "let another computer
+  // find it" has a surveillance ring for what is really "appear in a list".
+  // Discoverable is the word Bluetooth taught everyone, it names a capability
+  // rather than an exposure, and unlike "on your Wi-Fi" it stays true over
+  // Ethernet.
+  //
+  // The sub-line leads with the LIMIT rather than with reassurance: discovery
+  // broadcasts the machine name and nothing else (see agents/discovery.mjs —
+  // "No token, no repo names, no thread titles"), and the smallness of that
+  // claim earns more trust than a promise does.
   const toggle = discovery ? (
     <View style={s.peerRow}>
       <Ionicons
@@ -357,12 +367,12 @@ function PeerList({
       />
       <View style={s.grow}>
         <Text style={s.peerName}>
-          {discovery.on ? "Other computers here can see this Mac" : "This Mac is hidden"}
+          {discovery.on ? "Discoverable" : "Not discoverable"}
         </Text>
         <Text style={s.peerMeta}>
           {discovery.on
-            ? "They see its name, and can ask to read the projects you choose."
-            : "Turn this on to let another computer on your network find it."}
+            ? "Others on this network see this Mac's name and can ask. Reading anything still needs your approval."
+            : "Make this Mac discoverable so a computer on this network can ask to read the projects you pick. It shares the name — nothing else."}
         </Text>
       </View>
       {!discovery.eligible ? (
@@ -376,7 +386,7 @@ function PeerList({
           style={({ pressed }) => [discovery.on ? s.ghostBtn : s.primaryBtn, pressed && s.pressed]}
         >
           <Text style={discovery.on ? s.ghostLabel : s.primaryLabel}>
-            {discovery.on ? "Hide" : "Make visible"}
+            {discovery.on ? "Turn off" : "Make discoverable"}
           </Text>
         </Pressable>
       )}
@@ -389,8 +399,8 @@ function PeerList({
         {toggle}
         <Text style={s.sectionHint}>
           {discovery && !discovery.on
-            ? "You can still connect to a computer you already know, and it can still ask you. This only decides whether you show up in its list on your own."
-            : "Nothing here yet. The other computer needs Pounce running and set to visible too, on the same Wi-Fi."}
+            ? "You can already connect to a computer you know, and it can already ask you for access. This only decides whether you appear in its list without being added by hand."
+            : "Nothing here yet. The other computer needs Pounce running and set to discoverable too, on the same network."}
         </Text>
         <Standing given={given} held={held} busy={busy} onRevoke={onRevoke} onForget={onForget} />
       </ScrollView>
@@ -781,7 +791,11 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 9,
   },
-  primaryLabel: { fontSize: 13, fontWeight: "600", color: T.bg },
+  // `onAccent`, never `bg`: bg is the PAGE colour, which happens to be white in
+  // light mode and near-black in dark — so a label written against it turned
+  // into black text on a vivid purple pill the moment the theme flipped.
+  // onAccent exists for exactly this and is white in both.
+  primaryLabel: { fontSize: 13, fontWeight: "600", color: T.onAccent },
   // Used by the announcing switch when it is already on, where the action is
   // "stop" and should not read as the thing to do.
   ghostBtn: {

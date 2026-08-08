@@ -1710,9 +1710,9 @@ function render(){
   app.appendChild(h('h2',{text:'Nearby machines'}));
   app.appendChild(renderDiscoveryToggle());
   if(!state.discovery.on){
-    app.appendChild(h('p',{class:'empty',text:'You can still connect to a computer you already know, and it can still ask you. This only decides whether you show up in its list on your own.'}));
+    app.appendChild(h('p',{class:'empty',text:'You can already connect to a computer you know, and it can already ask you for access. This only decides whether you appear in its list without being added by hand.'}));
   } else if(!state.peers.length){
-    app.appendChild(h('p',{class:'empty',text:'Nothing here yet. The other computer needs Pounce running and set to visible too, on the same network.'}));
+    app.appendChild(h('p',{class:'empty',text:'Nothing here yet. The other computer needs Pounce running and set to discoverable too, on the same network.'}));
   } else {
     state.peers.forEach(function(p){
       app.appendChild(h('div',{class:'card'},[h('div',{class:'row'},[
@@ -1762,7 +1762,7 @@ function renderDiscoveryToggle(){
   var card = h('div',{class:'card'});
   var row = h('div',{class:'row'});
   row.appendChild(h('div',{class:'grow'},[
-    h('div',{class:'name',text: d.on ? 'Other computers here can see this one' : 'This computer is hidden'}),
+    h('div',{class:'name',text: d.on ? 'Discoverable' : 'Not discoverable'}),
     h('div',{class:'meta',text: d.on
       ? 'They see its name, and can ask to read the projects you choose.'
       : 'Turn this on to let another computer on your network find it.'})
@@ -1777,7 +1777,7 @@ function renderDiscoveryToggle(){
       busy = true;
       api('/v1/peers/discovery',{method:'POST',body:JSON.stringify({enabled:!d.on})})
         .then(function(){ busy = false; refresh(); });
-    }, text: d.on ? 'Hide' : 'Make visible'}));
+    }, text: d.on ? 'Turn off' : 'Make discoverable'}));
   }
   card.appendChild(row);
   return card;

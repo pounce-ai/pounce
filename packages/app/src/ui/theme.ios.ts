@@ -26,6 +26,12 @@ export const T = {
 
   /* Text */
   fg: c.label,
+  /** Long-form body text. Aliased to the platform's own label colour on
+   *  purpose: iOS and Android already tune their semantic text colours for
+   *  running text, and overriding them would fight the OS. Desktop draws its
+   *  own chrome and has no such tuning, which is where this token earns its
+   *  keep — see ui/theme.ts. */
+  fgProse: c.label,
   fgMuted: c.secondaryLabel,
   // NOT tertiaryLabel: 12-13px metadata set in it is illegible on light
   // backgrounds; systemGray keeps AA-ish contrast in both schemes.
