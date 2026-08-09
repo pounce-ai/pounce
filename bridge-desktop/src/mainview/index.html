@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pounce</title>
+    <link rel="stylesheet" href="index.css" />
+  </head>
+  <body>
+    <main class="card">
+      <header class="brand">
+        <span class="paw">🐾</span>
+        <h1>Pounce</h1>
+      </header>
+
+      <p class="sub">Scan with your iPhone to connect</p>
+
+      <div class="qrwrap">
+        <img id="qr" class="qr" alt="Pairing QR code" />
+      </div>
+
+      <div class="addr" id="addr">—</div>
+
+      <div class="status" id="status">
+        <span class="dot idle" id="dot"></span>
+        <span id="statusText">Starting…</span>
+      </div>
+
+      <p class="hint" id="hint">Open Pounce on your phone → Sync → Scan this code.</p>
+    </main>
+    <script type="module" src="index.ts"></script>
+  </body>
+</html>
