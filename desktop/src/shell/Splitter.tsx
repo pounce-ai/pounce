@@ -7,8 +7,8 @@
  * invisible grab area either side of it.
  */
 import { useRef } from "react";
-import { PanResponder, StyleSheet, View, type ViewProps } from "react-native";
-import { T } from "@pounce/app/ui/theme";
+import { PanResponder, View, type ViewProps } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 
 export const SPLITTER_WIDTH = 14;
 
@@ -47,12 +47,12 @@ export function Splitter({
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   root: { width: SPLITTER_WIDTH, alignItems: "center", justifyContent: "center" },
   // Full-height hairline: the divider you actually see.
-  rule: { position: "absolute", top: 0, bottom: 0, width: 1, backgroundColor: T.border },
+  rule: { position: "absolute", top: 0, bottom: 0, width: 1, backgroundColor: theme.colors.border },
   // The affordance — a short raised bar saying "this edge moves". Uses a text
   // grey, not a border colour: `borderStrong` is AppKit's gridColor, which is
   // almost invisible against a light window.
-  handle: { height: 32, width: 4, borderRadius: 999, backgroundColor: T.fgFaint },
-});
+  handle: { height: 32, width: 4, borderRadius: 999, backgroundColor: theme.colors.fgFaint },
+}));

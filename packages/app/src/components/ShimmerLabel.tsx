@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useColorScheme, View } from "react-native";
+import { View } from "react-native";
 import Svg, { Defs, G, LinearGradient, Mask, Rect, Stop, Text as SvgText } from "react-native-svg";
 import Animated, {
   Easing,
@@ -8,7 +8,7 @@ import Animated, {
   withRepeat,
   withTiming,
 } from "./animation";
-import { hexFor } from "../ui/theme-hex";
+import { useThemeHex } from "../ui/useThemeHex";
 
 /**
  * A line of text with a highlight band sweeping across the glyphs — the
@@ -51,8 +51,7 @@ export function ShimmerLabel({
   periodMs?: number;
   align?: "left" | "center";
 }) {
-  const scheme = useColorScheme();
-  const hex = hexFor(scheme);
+  const hex = useThemeHex();
   const height = Math.ceil(fontSize * 1.6);
   // The band is a good fraction of the width so the highlight reads as a soft
   // sweep rather than a hard glint, and it starts and ends fully off-canvas so

@@ -9,15 +9,19 @@
  * bundle would get): both themes reuse the platform-default T tokens. The
  * desktop app never imports this — it shims react-native-unistyles entirely
  * (desktop/src/shims/unistyles.ts).
+ *
+ * `light`/`dark` are the platform semantic palette — no longer pickable, kept
+ * as the pre-hydration fallback. The pickable themes (ui/palettes.ts) are
+ * explicit hex and therefore identical on every platform, so they are shared
+ * from unistyles-named.ts rather than repeated here.
  */
-import type { ColorValue } from "react-native";
-import { T, type ThemeColor } from "./theme";
+import { T } from "./theme";
+import { NAMED_THEMES, type AppThemes } from "./unistyles-named";
 
-export type AppThemeColors = Record<ThemeColor, ColorValue>;
-export type AppTheme = { colors: AppThemeColors };
-export type AppThemes = { light: AppTheme; dark: AppTheme };
+export type { AppTheme, AppThemeColors, AppThemes } from "./unistyles-named";
 
 export const themes: AppThemes = {
   light: { colors: { ...T } },
   dark: { colors: { ...T } },
+  ...NAMED_THEMES,
 };

@@ -1,6 +1,5 @@
 import "@pounce/app/polyfills"; // crypto.getRandomValues for @tanstack/db — must load first
 import { useEffect } from "react";
-import { useColorScheme } from "react-native";
 import { router, withLayoutContext } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import type { ParamListBase } from "@react-navigation/native";
@@ -10,7 +9,7 @@ import {
   type TrueSheetNavigationOptions,
   type TrueSheetNavigationState,
 } from "@lodev09/react-native-true-sheet/navigation";
-import { hexFor } from "@pounce/app/ui/theme-hex";
+import { useThemeHex } from "@pounce/app/ui/useThemeHex";
 import { applyAppearance } from "@pounce/app/state/appearance";
 import { Providers } from "@pounce/app/components/Providers";
 import { UpdateBanner } from "@pounce/app/components/UpdateBanner";
@@ -36,7 +35,7 @@ export default function RootLayout() {
   // Sheet backgrounds get LITERAL scheme-picked hexes, not PlatformColors:
   // the sheet's background resolves against the presented VC's traits, which
   // ignore the forced light/dark toggle (see NativeSheetTrue for the same trap).
-  const hex = hexFor(useColorScheme());
+  const hex = useThemeHex();
   useEffect(() => {
     applyAppearance(); // restore the persisted light/dark override before anything renders twice
     void bootstrap();

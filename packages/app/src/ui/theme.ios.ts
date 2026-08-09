@@ -42,6 +42,9 @@ export const T = {
   /* Brand + status */
   accent: "#7c6ff0" as ColorValue,
   accentSoft: "rgba(124, 111, 240, 0.15)" as ColorValue,
+  /** See ui/theme.ts — accent hairline and whisper-tint for accent-owned cards. */
+  accentLine: "rgba(124, 111, 240, 0.4)" as ColorValue,
+  accentTint: "rgba(124, 111, 240, 0.06)" as ColorValue,
   success: c.systemGreen,
   warning: c.systemOrange,
   danger: c.systemRed,

@@ -44,6 +44,7 @@ import { savePairing } from "../services/runtime";
 import { type ParsedPairing, pairingHostName, parsePairing } from "../services/pairing";
 import { DeviceSetupCard } from "../components/DeviceSetupCard";
 import { AdminKeySection } from "../components/AdminKeySection";
+import { ThemePicker } from "../components/ThemePicker";
 import { DeviceIcon, fmtDuration, IS_DESKTOP } from "../ui";
 import { appearance$, setAppearance } from "../state/appearance";
 
@@ -279,6 +280,13 @@ export default function SettingsScreen() {
           </Pressable>
         </View>
       ) : null}
+
+      {/* Theme picks the PALETTE; appearance below picks the ground it paints
+            on. Both apps show this one — there's nowhere else to put it. */}
+      <View style={s.section}>
+        <Text style={s.sectionLabel}>Theme</Text>
+        <ThemePicker />
+      </View>
 
       {/* Appearance: mobile has the sun/moon header button; desktop has no
             navigation bar, so it keeps the explicit chips. */}

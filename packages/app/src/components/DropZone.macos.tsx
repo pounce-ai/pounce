@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { Ionicons } from "@expo/vector-icons";
 import { COLOR } from "../ui";
-import { T } from "../ui/theme";
 import type { DroppedFile, DropZoneProps } from "./DropZoneTypes";
 
 export type { DroppedFile, DropZoneProps } from "./DropZoneTypes";
@@ -69,7 +69,7 @@ export function DropZone({ children, style, onDropFiles }: DropZoneProps) {
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   overlay: {
     position: "absolute",
     top: 0,
@@ -81,18 +81,18 @@ const s = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 2,
     borderStyle: "dashed",
-    borderColor: T.accent,
+    borderColor: theme.colors.accent,
     // was bg at 80% — the semantic scrim token is the closest adaptive match.
-    backgroundColor: T.overlay,
+    backgroundColor: theme.colors.overlay,
   },
   card: {
     alignItems: "center",
     gap: 8,
     borderRadius: 16,
-    backgroundColor: T.bgElevated,
+    backgroundColor: theme.colors.bgElevated,
     paddingHorizontal: 24,
     paddingVertical: 20,
   },
-  title: { fontSize: 15, fontWeight: "600", color: T.fg },
-  body: { fontSize: 12, color: T.fgMuted },
-});
+  title: { fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  body: { fontSize: 12, color: theme.colors.fgMuted },
+}));

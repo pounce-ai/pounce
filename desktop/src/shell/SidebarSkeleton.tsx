@@ -7,8 +7,8 @@
  * @pounce/app was built for mobile's card list and looked nothing like either.
  */
 import { useState } from "react";
-import { StyleSheet, View, type LayoutChangeEvent } from "react-native";
-import { BONE } from "@pounce/app/components/Skeleton";
+import { View, type LayoutChangeEvent } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { Shimmer } from "./Motion";
 
 /** The shimmer needs a pixel width to travel across, and the sidebar is
@@ -63,7 +63,7 @@ export function SidebarSessionsSkeleton({ count = 6 }: { count?: number }) {
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   // Clips the sweeping band to the block it belongs to.
   sweepHost: { overflow: "hidden" },
   // Mirrors Sidebar's spaceRow.
@@ -75,9 +75,9 @@ const s = StyleSheet.create({
     gap: 7,
     paddingHorizontal: 8,
   },
-  dot: { height: 6, width: 6, borderRadius: 999, backgroundColor: BONE },
-  glyph: { height: 12, width: 12, borderRadius: 3, backgroundColor: BONE },
-  line: { height: 9, borderRadius: 999, backgroundColor: BONE },
+  dot: { height: 6, width: 6, borderRadius: 999, backgroundColor: theme.colors.surfaceHover },
+  glyph: { height: 12, width: 12, borderRadius: 3, backgroundColor: theme.colors.surfaceHover },
+  line: { height: 9, borderRadius: 999, backgroundColor: theme.colors.surfaceHover },
 
   // Mirrors Sidebar's sessionRow.
   sessionRow: {
@@ -88,8 +88,19 @@ const s = StyleSheet.create({
     paddingVertical: 6,
   },
   captionRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  caption: { height: 7, borderRadius: 999, backgroundColor: BONE },
-  time: { marginLeft: "auto", height: 7, width: 22, borderRadius: 999, backgroundColor: BONE },
-  title: { marginTop: 5, height: 10, borderRadius: 999, backgroundColor: BONE },
+  caption: { height: 7, borderRadius: 999, backgroundColor: theme.colors.surfaceHover },
+  time: {
+    marginLeft: "auto",
+    height: 7,
+    width: 22,
+    borderRadius: 999,
+    backgroundColor: theme.colors.surfaceHover,
+  },
+  title: {
+    marginTop: 5,
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: theme.colors.surfaceHover,
+  },
   metaRow: { marginTop: 6, flexDirection: "row", alignItems: "center", gap: 5 },
-});
+}));

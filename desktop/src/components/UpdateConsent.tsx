@@ -5,11 +5,11 @@
  * from Settings. Asked once — never nags again.
  */
 import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Modal } from "@pounce/app/components/AppModal";
 import { COLOR } from "@pounce/app/ui";
-import { T } from "@pounce/app/ui/theme";
 import { isUpdaterSupported, setAutoUpdateEnabled } from "@pounce/app/services/updater";
 
 const ASKED_KEY = "pounce.updateConsentAsked";
@@ -80,36 +80,36 @@ export function UpdateConsent() {
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   host: { alignItems: "center", justifyContent: "center" },
-  scrim: { backgroundColor: T.overlay },
+  scrim: { backgroundColor: theme.colors.overlay },
   card: {
     width: 380,
     gap: 12,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.bgElevated,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bgElevated,
     padding: 20,
   },
-  title: { fontSize: 16, fontWeight: "600", color: T.fg },
-  body: { fontSize: 13, lineHeight: 19, color: T.fgMuted },
+  title: { fontSize: 16, fontWeight: "600", color: theme.colors.fg },
+  body: { fontSize: 13, lineHeight: 19, color: theme.colors.fgMuted },
   buttonRow: { marginTop: 4, flexDirection: "row", justifyContent: "flex-end", gap: 8 },
   declineBtn: {
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  declineLabel: { fontSize: 13, fontWeight: "500", color: T.fgMuted },
+  declineLabel: { fontSize: 13, fontWeight: "500", color: theme.colors.fgMuted },
   acceptBtn: {
     borderRadius: 8,
-    backgroundColor: T.accent,
+    backgroundColor: theme.colors.accent,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  acceptLabel: { fontSize: 13, fontWeight: "600", color: T.onAccent },
+  acceptLabel: { fontSize: 13, fontWeight: "600", color: theme.colors.onAccent },
   pressed70: { opacity: 0.7 },
   pressed80: { opacity: 0.8 },
-});
+}));

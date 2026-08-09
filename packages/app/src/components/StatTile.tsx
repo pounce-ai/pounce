@@ -108,8 +108,8 @@ const s = StyleSheet.create((theme) => ({
     padding: 14,
   },
   tileHero: {
-    borderColor: "rgba(124, 111, 240, 0.4)",
-    backgroundColor: "rgba(124, 111, 240, 0.08)",
+    borderColor: theme.colors.accentLine,
+    backgroundColor: theme.colors.accentTint,
   },
   pressed: { opacity: 0.72 },
   labelRow: { flexDirection: "row", alignItems: "center", gap: 4 },

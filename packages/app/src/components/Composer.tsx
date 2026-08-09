@@ -1,14 +1,5 @@
 import { type Ref, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import {
-  ActionSheetIOS,
-  Alert,
-  Image,
-  Keyboard,
-  Pressable,
-  Text,
-  useColorScheme,
-  View,
-} from "react-native";
+import { ActionSheetIOS, Alert, Image, Keyboard, Pressable, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import {
   EnrichedMarkdownTextInput,
@@ -34,7 +25,7 @@ import { fetchFiles, type RepoEntry, type ThreadUsage } from "../services/bridge
 import { ContextRing } from "./ContextRing";
 import { isVoiceAvailable, startDictation, type Dictation } from "../services/voice";
 import { AgentLogo, COLOR, IS_DESKTOP } from "../ui";
-import { hexFor } from "../ui/theme-hex";
+import { useThemeHex } from "../ui/useThemeHex";
 
 const MENTION_RE = /((?:^|\s))@([^\s@]*)$/;
 
@@ -196,7 +187,7 @@ export function Composer({
   const markdownRef = useRef("");
   // The native rich input requires STRING colors — pick literal hexes for the
   // active scheme (PlatformColor values can't flow into it).
-  const hex = hexFor(useColorScheme());
+  const hex = useThemeHex();
   /** Inline formatting colours for the rich input (base text color/size come
    *  from the `style` prop). */
   const inputMdStyle = useMemo<MarkdownTextInputStyle>(

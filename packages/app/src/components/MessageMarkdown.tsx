@@ -25,7 +25,8 @@ import type { RemendOptions } from "remend";
 import { splitCodeBlocks } from "../components/runnableBlocks";
 import { usePacedText } from "./pacedText";
 import { COLOR } from "../ui";
-import { hexFor } from "../ui/theme-hex";
+import { useThemeHex } from "../ui/useThemeHex";
+import type { PaletteHex } from "../ui/palettes";
 import { SECONDARY_SCALE } from "../ui/tokens";
 
 const MONO = "JetBrainsMono";
@@ -58,9 +59,10 @@ const MD4C_FLAGS: Md4cFlags = {
 
 /** Markdown styling mapped onto Pounce tokens. The native engine requires
  *  STRING colors, so the styles are built per color scheme from the literal hex
- *  palette (never at module scope) — memoized per scheme below. */
-function buildAssistantStyle(scheme: string | null | undefined): MarkdownStyle {
-  const hex = hexFor(scheme);
+ *  palette (never at module scope) — memoized per scheme and theme below. The
+ *  palette arrives as an argument rather than a hook call: these are plain
+ *  builders, run inside a useMemo. */
+function buildAssistantStyle(scheme: string | null | undefined, hex: PaletteHex): MarkdownStyle {
   const light = scheme === "light";
   return {
     paragraph: { fontSize: 15, lineHeight: 21, color: hex.fg, marginTop: 0, marginBottom: 6 },
@@ -74,23 +76,18 @@ function buildAssistantStyle(scheme: string | null | undefined): MarkdownStyle {
     em: { fontStyle: "italic", color: hex.fg },
     strikethrough: { color: hex.fgMuted },
     link: { color: hex.accent, underline: false },
-    // Purple accent chip so inline code pops out of prose — the enriched default
-    // gives inline code a pink border, so pin the border to the fill to hide it.
-    code: light
-      ? {
-          fontFamily: MONO,
-          fontSize: 13.5,
-          color: "#5b4fd8",
-          backgroundColor: "rgba(124,111,240,0.12)",
-          borderColor: "rgba(124,111,240,0.12)",
-        }
-      : {
-          fontFamily: MONO,
-          fontSize: 13.5,
-          color: "#a99cf5",
-          backgroundColor: "rgba(124,111,240,0.16)",
-          borderColor: "rgba(124,111,240,0.16)",
-        },
+    // Accent chip so inline code pops out of prose — the enriched default
+    // gives inline code a pink border, so pin the border to the fill to hide
+    // it. Both come from the ACTIVE theme's accent (see `accentInk` in
+    // ui/palettes.ts): this used to be the brand purple hardcoded, which left
+    // a violet chip sitting in the middle of a green or amber theme.
+    code: {
+      fontFamily: MONO,
+      fontSize: 13.5,
+      color: hex.accentInk,
+      backgroundColor: hex.accentWash,
+      borderColor: hex.accentWash,
+    },
     codeBlock: light
       ? {
           fontFamily: MONO,
@@ -164,9 +161,8 @@ function buildAssistantStyle(scheme: string | null | undefined): MarkdownStyle {
  * against `bgElevated` rather than the page, so they step DOWN to the page
  * colour instead of up.
  */
-function buildUserStyle(scheme: string | null | undefined): MarkdownStyle {
-  const assistant = buildAssistantStyle(scheme);
-  const hex = hexFor(scheme);
+function buildUserStyle(scheme: string | null | undefined, hex: PaletteHex): MarkdownStyle {
+  const assistant = buildAssistantStyle(scheme, hex);
   const light = scheme === "light";
   return {
     ...assistant,
@@ -300,9 +296,14 @@ function MarkdownBody({
   scale?: number;
 }) {
   const scheme = useColorScheme();
+  const hex = useThemeHex();
   const markdownStyle = useMemo(
-    () => scaleStyle(role === "user" ? buildUserStyle(scheme) : buildAssistantStyle(scheme), scale),
-    [role, scheme, scale],
+    () =>
+      scaleStyle(
+        role === "user" ? buildUserStyle(scheme, hex) : buildAssistantStyle(scheme, hex),
+        scale,
+      ),
+    [role, scheme, scale, hex],
   );
   const paced = usePacedText(text, !!streaming);
   // Live turns run remend off the JS thread (streamdown's remend-processor

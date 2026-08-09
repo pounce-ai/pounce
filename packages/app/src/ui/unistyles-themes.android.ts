@@ -16,6 +16,7 @@
 import type { ColorValue } from "react-native";
 import { HEX } from "./theme-hex";
 import type { ThemeColor } from "./theme";
+import { NAMED_THEMES } from "./unistyles-named";
 
 type Scheme = "light" | "dark";
 type ExpoRouterNative = {
@@ -98,6 +99,8 @@ const colors = (scheme: Scheme): Record<ThemeColor, ColorValue> => ({
   /* Brand + status (status hues have no Material dynamic equivalents) */
   accent: "#7c6ff0",
   accentSoft: "rgba(124, 111, 240, 0.15)",
+  accentLine: "rgba(124, 111, 240, 0.4)",
+  accentTint: "rgba(124, 111, 240, 0.06)",
   success: "#3fb950",
   warning: "#d29922",
   danger: role("error", scheme),
@@ -119,4 +122,7 @@ const colors = (scheme: Scheme): Record<ThemeColor, ColorValue> => ({
 export const themes = {
   light: { colors: colors("light") },
   dark: { colors: colors("dark") },
+  // Every pickable theme is explicit hex, so Material You above is now only
+  // the pre-hydration fallback. See the note in ui/palettes.ts.
+  ...NAMED_THEMES,
 };

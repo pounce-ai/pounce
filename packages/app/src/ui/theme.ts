@@ -88,6 +88,12 @@ export const T = {
   /* Brand + status */
   accent: dual("#5b4fd6", "#7c6ff0"),
   accentSoft: dual("rgba(91, 79, 214, 0.10)", "rgba(124, 111, 240, 0.15)"),
+  /** Accent at 40% — the hairline around something the accent OWNS (the hero
+   *  stat, the latest todo card, an update banner) without filling it. */
+  accentLine: dual("rgba(91, 79, 214, 0.4)", "rgba(124, 111, 240, 0.4)"),
+  /** A whisper of accent behind such a card. Distinct from `accentSoft`, which
+   *  is a chip fill and three times as strong. */
+  accentTint: dual("rgba(91, 79, 214, 0.05)", "rgba(124, 111, 240, 0.06)"),
   success: mac("systemGreenColor", "#3fb950"),
   warning: mac("systemOrangeColor", "#d29922"),
   danger: mac("systemRedColor", "#f85149"),

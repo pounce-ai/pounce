@@ -12,12 +12,12 @@
  * with the same history. The trash control is what actually ends one.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { observable } from "@legendapp/state";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import { COLOR } from "@pounce/app/ui";
-import { T } from "@pounce/app/ui/theme";
 import {
   ATTR,
   COLOR_DEFAULT,
@@ -118,11 +118,11 @@ const PALETTE = Array.from({ length: 256 }, (_, i) => cubeColor(i));
 function Span({ run }: { run: Run }) {
   const [text, fg, bg, flags] = run;
   const inverse = (flags & ATTR.inverse) !== 0;
-  let color = fg === COLOR_DEFAULT ? T.fg : PALETTE[fg];
+  let color = fg === COLOR_DEFAULT ? COLOR.fg : PALETTE[fg];
   let background = bg === COLOR_DEFAULT ? undefined : PALETTE[bg];
   if (inverse) {
     const f = color;
-    color = (background ?? String(T.bg)) as string;
+    color = (background ?? String(COLOR.bg)) as string;
     background = f as string;
   }
   return (
@@ -390,11 +390,11 @@ const KEY_DOWN_EVENTS = [
   ...LETTERS.map((key) => ({ key, ...NO_MODS, ctrlKey: true })),
 ];
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   root: {
     borderTopWidth: 1,
-    borderTopColor: T.border,
-    backgroundColor: T.bg,
+    borderTopColor: theme.colors.border,
+    backgroundColor: theme.colors.bg,
   },
   // Sits above the header and overhangs the border, so the hit area is a
   // comfortable few pixels rather than the 1pt rule itself.
@@ -412,12 +412,12 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     borderBottomWidth: 1,
-    borderBottomColor: T.border,
+    borderBottomColor: theme.colors.border,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
-  headLabel: { flex: 1, fontSize: 11, color: T.fgMuted },
-  headSize: { fontFamily: "JetBrainsMono", fontSize: 10, color: T.fgFaint },
+  headLabel: { flex: 1, fontSize: 11, color: theme.colors.fgMuted },
+  headSize: { fontFamily: "JetBrainsMono", fontSize: 10, color: theme.colors.fgFaint },
   headBtn: {
     height: 18,
     width: 18,
@@ -425,14 +425,14 @@ const s = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 4,
   },
-  hover: { backgroundColor: T.surface },
+  hover: { backgroundColor: theme.colors.surface },
   screen: { paddingHorizontal: 8, paddingVertical: 4 },
   line: { height: LINE_H },
   cell: {
     fontFamily: "JetBrainsMono",
     fontSize: FONT_SIZE,
     lineHeight: LINE_H,
-    color: T.fg,
+    color: theme.colors.fg,
   },
   bold: { fontWeight: "700" },
   dim: { opacity: 0.6 },
@@ -450,4 +450,4 @@ const s = StyleSheet.create({
     opacity: 0,
     color: "transparent",
   },
-});
+}));

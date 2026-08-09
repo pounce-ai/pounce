@@ -1,8 +1,8 @@
-import { Platform, Pressable, StyleSheet, useColorScheme } from "react-native";
+import { Platform, Pressable, StyleSheet } from "react-native";
 import { router, Stack } from "expo-router";
 import { PounceIcon } from "@pounce/app/ui/native/Icon";
-import { T } from "@pounce/app/ui/theme";
-import { hexFor } from "@pounce/app/ui/theme-hex";
+import { COLOR } from "@pounce/app/ui";
+import { useThemeHex } from "@pounce/app/ui/useThemeHex";
 
 /**
  * Leave a modal, always landing somewhere.
@@ -64,13 +64,13 @@ export default function MainLayout() {
   // Subscribe to appearance changes: Android's Material dynamic colors only
   // re-resolve when the tree re-renders on a scheme flip (iOS adapts natively),
   // and the header hexes below are picked per scheme.
-  const hex = hexFor(useColorScheme());
+  const hex = useThemeHex();
 
   return (
     <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: T.bg },
+        contentStyle: { backgroundColor: COLOR.bg },
         // Navigation bars get LITERAL scheme-picked hexes, not PlatformColors:
         // react-native-screens resolves header colors against the system
         // trait, so semantic colors ignore the forced light/dark toggle
@@ -99,7 +99,7 @@ export default function MainLayout() {
           presentation: "formSheet",
           sheetAllowedDetents: "fitToContents",
           sheetCornerRadius: 24,
-          contentStyle: { backgroundColor: T.bgElevated },
+          contentStyle: { backgroundColor: COLOR.bgElevated },
         }}
       />
     </Stack>

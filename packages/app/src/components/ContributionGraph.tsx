@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef } from "react";
-import { Pressable, ScrollView, Text, View, useColorScheme } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import Svg, { Rect } from "react-native-svg";
 import type { HeatDay } from "../services/activity";
 import { monthOf } from "../ui/format";
+import { mix } from "../ui/color";
+import type { Appearance, PaletteHex } from "../ui/palettes";
+import { useGround, useThemeHex } from "../ui/useThemeHex";
 
 /**
  * Activity heatmap — a year of days as a week-per-column grid, GitHub-style.
@@ -28,13 +31,27 @@ const ROWS = 7;
  * put the darkest ink on the darkest background). Cell gaps and the tap-to-read
  * detail row carry the same information for anyone who can't separate the steps.
  */
-const RAMP = {
-  light: ["#ebebf0", "#e2ddfc", "#aca0f6", "#7c6ff0", "#4634c9"],
-  // The empty step has to sit ABOVE the card it's drawn on (surfaceAlt, #1b1b22
-  // in dark) or the grid disappears through a quiet stretch and the year reads
-  // as a few floating squares instead of a calendar.
-  dark: ["#2b2b35", "#332e63", "#5546a8", "#7c6ff0", "#b3a7ff"],
-} as const;
+function rampFor(hex: PaletteHex, scheme: Appearance): string[] {
+  const a = hex.accent;
+  // The empty step has to sit ABOVE the card it's drawn on (surfaceAlt) or the
+  // grid disappears through a quiet stretch and the year reads as a few
+  // floating squares instead of a calendar.
+  return scheme === "light"
+    ? [
+        mix(hex.bg, hex.fg, 0.08),
+        mix(a, "#ffffff", 0.82),
+        mix(a, "#ffffff", 0.42),
+        a,
+        mix(a, "#000000", 0.35),
+      ]
+    : [
+        mix(hex.bg, "#ffffff", 0.14),
+        mix(a, "#000000", 0.58),
+        mix(a, "#000000", 0.28),
+        a,
+        mix(a, "#ffffff", 0.35),
+      ];
+}
 
 /** Column index → the month it starts, for the labels above the grid. */
 function monthLabels(days: readonly HeatDay[], leadingBlanks: number) {
@@ -79,8 +96,9 @@ export function ContributionGraph({
    *  the phone size — on a narrow card the horizontal scroll still applies. */
   fillWidth?: number;
 }) {
-  const scheme = useColorScheme();
-  const ramp = RAMP[scheme === "light" ? "light" : "dark"];
+  const scheme = useGround();
+  const hex = useThemeHex();
+  const ramp = useMemo(() => rampFor(hex, scheme), [hex, scheme]);
   const scrollRef = useRef<ScrollView>(null);
 
   // Start each column on a Sunday so weekday rows line up like a calendar.

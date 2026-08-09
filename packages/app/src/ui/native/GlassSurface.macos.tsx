@@ -1,5 +1,5 @@
 import { requireNativeComponent, UIManager, View, type ViewProps } from "react-native";
-import { T } from "../theme";
+import { COLOR } from "../tokens";
 import type { GlassMaterial, GlassSurfaceProps } from "./glass";
 
 export type { GlassMaterial, GlassSurfaceProps } from "./glass";
@@ -36,7 +36,7 @@ export function GlassSurface({
     return (
       <View
         style={[
-          { backgroundColor: fallbackColor ?? T.bgElevated, borderRadius: cornerRadius },
+          { backgroundColor: fallbackColor ?? COLOR.bgElevated, borderRadius: cornerRadius },
           style,
         ]}
       >
