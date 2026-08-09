@@ -62,9 +62,6 @@ export function TodoCard({ items, latest }: { items: readonly TaskItem[]; latest
   );
 }
 
-const ACCENT_BORDER = "rgba(124, 111, 240, 0.4)";
-const ACCENT_TINT = "rgba(124, 111, 240, 0.08)";
-
 const s = StyleSheet.create((theme) => ({
   card: {
     gap: 8,
@@ -75,7 +72,7 @@ const s = StyleSheet.create((theme) => ({
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  cardLatest: { borderColor: ACCENT_BORDER, backgroundColor: ACCENT_TINT },
+  cardLatest: { borderColor: theme.colors.accentLine, backgroundColor: theme.colors.accentTint },
   header: { flexDirection: "row", alignItems: "center", gap: 6 },
   label: {
     fontSize: 12,

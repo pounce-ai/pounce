@@ -6,8 +6,9 @@
  * instead; layouts mirror SessionCard / Timeline so bones dissolve into rows.
  */
 import { useEffect, useRef } from "react";
-import { Animated, Easing, StyleSheet, View } from "react-native";
-import { T } from "../ui/theme";
+import { Animated, Easing, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
+import { COLOR } from "../ui";
 import { ActivityBones } from "./ActivityBones";
 
 export function usePulse(): Animated.Value {
@@ -39,24 +40,34 @@ export function usePulse(): Animated.Value {
  * Bone fill. A semantic surface, not a white overlay: `rgba(255,255,255,…)`
  * only reads as a bone on a dark background — in the light appearance it was
  * white-on-white and the whole skeleton vanished.
+ *
+ * Read through COLOR on every call rather than hoisted into a constant: a
+ * module-scope read freezes the palette the app booted with, which is wrong
+ * the moment the user picks a theme (see ui/tokens.ts).
  */
-export const BONE = T.surfaceHover;
+const bone = () => COLOR.surfaceHover;
 
 /** One skeleton card shaped like a SessionCard. */
 export function SessionCardSkeleton() {
   return (
     <View style={s.card}>
       <View style={s.titleRow}>
-        <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: BONE }} />
-        <View style={{ flex: 1, height: 14, borderRadius: 7, backgroundColor: BONE }} />
-        <View style={{ width: 50, height: 18, borderRadius: 9, backgroundColor: BONE }} />
+        <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: bone() }} />
+        <View style={{ flex: 1, height: 14, borderRadius: 7, backgroundColor: bone() }} />
+        <View style={{ width: 50, height: 18, borderRadius: 9, backgroundColor: bone() }} />
       </View>
       <View
-        style={{ marginTop: 10, width: "55%", height: 10, borderRadius: 5, backgroundColor: BONE }}
+        style={{
+          marginTop: 10,
+          width: "55%",
+          height: 10,
+          borderRadius: 5,
+          backgroundColor: bone(),
+        }}
       />
       <View style={s.footerRow}>
-        <View style={{ width: 84, height: 9, borderRadius: 5, backgroundColor: BONE }} />
-        <View style={{ width: 22, height: 9, borderRadius: 5, backgroundColor: BONE }} />
+        <View style={{ width: 84, height: 9, borderRadius: 5, backgroundColor: bone() }} />
+        <View style={{ width: 22, height: 9, borderRadius: 5, backgroundColor: bone() }} />
       </View>
     </View>
   );
@@ -74,12 +85,12 @@ export function SessionListSkeleton({ count = 5 }: { count?: number }) {
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   card: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
     padding: 14,
   },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
@@ -90,7 +101,7 @@ const s = StyleSheet.create({
     justifyContent: "space-between",
   },
   list: { gap: 10, paddingHorizontal: 16, paddingTop: 6 },
-});
+}));
 
 /** Activity-shaped bones — desktop pulse (core Animated), shared layout. */
 export function ActivitySkeleton() {

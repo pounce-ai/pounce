@@ -30,12 +30,12 @@
  * not time out — but "Not now" hides it and leaves the bell counting.
  */
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Easing, Pressable, Text, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { Ionicons } from "@expo/vector-icons";
 import { denyAccess } from "@pounce/app/services/peers";
 import { useRouter } from "expo-router";
 import { COLOR } from "@pounce/app/ui";
-import { T } from "@pounce/app/ui/theme";
 import { forgetAccessRequest, useAccessRequests } from "./accessRequests";
 
 export function AccessAlert() {
@@ -99,7 +99,7 @@ export function AccessAlert() {
           <Ionicons
             name={existing ? "add-circle" : "hand-left"}
             size={16}
-            color={existing ? T.warning : COLOR.accent}
+            color={existing ? COLOR.warning : COLOR.accent}
           />
         </View>
         <View style={s.grow}>
@@ -154,7 +154,7 @@ export function AccessAlert() {
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   host: {
     position: "absolute",
     top: 0,
@@ -183,9 +183,9 @@ const s = StyleSheet.create({
     borderWidth: 1,
     // Accent-bordered rather than accent-filled: loud enough to pull the eye
     // across a busy window, not so loud it reads as an error.
-    borderColor: COLOR.accent,
+    borderColor: theme.colors.accent,
     // (A widening request overrides this to warning — see cardMore.)
-    backgroundColor: T.bgElevated,
+    backgroundColor: theme.colors.bgElevated,
     paddingLeft: 12,
     paddingRight: 10,
     paddingVertical: 10,
@@ -196,14 +196,14 @@ const s = StyleSheet.create({
   },
   // Amber, not red: widening access is a normal thing to be asked and often
   // the right thing to say yes to. It needs a second look, not an alarm.
-  cardMore: { borderColor: T.warning },
+  cardMore: { borderColor: theme.colors.warning },
   badge: {
     height: 30,
     width: 30,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 9,
-    backgroundColor: T.accentSoft,
+    backgroundColor: theme.colors.accentSoft,
   },
   badgeMore: {
     height: 30,
@@ -211,26 +211,31 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 9,
-    backgroundColor: T.warningSoft,
+    backgroundColor: theme.colors.warningSoft,
   },
-  title: { fontSize: 13, fontWeight: "600", color: T.fg },
-  meta: { marginTop: 1, fontSize: 11.5, color: T.fgMuted },
-  code: { fontFamily: "JetBrainsMono", fontSize: 13, letterSpacing: 1, color: T.fgMuted },
+  title: { fontSize: 13, fontWeight: "600", color: theme.colors.fg },
+  meta: { marginTop: 1, fontSize: 11.5, color: theme.colors.fgMuted },
+  code: {
+    fontFamily: "JetBrainsMono",
+    fontSize: 13,
+    letterSpacing: 1,
+    color: theme.colors.fgMuted,
+  },
   primaryBtn: {
     borderRadius: 999,
-    backgroundColor: COLOR.accent,
+    backgroundColor: theme.colors.accent,
     paddingHorizontal: 14,
     paddingVertical: 7,
   },
-  primaryLabel: { fontSize: 12.5, fontWeight: "600", color: T.onAccent },
+  primaryLabel: { fontSize: 12.5, fontWeight: "600", color: theme.colors.onAccent },
   ghostBtn: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: T.borderStrong,
+    borderColor: theme.colors.borderStrong,
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  ghostLabel: { fontSize: 12.5, color: T.fgMuted },
+  ghostLabel: { fontSize: 12.5, color: theme.colors.fgMuted },
   close: { height: 20, width: 20, alignItems: "center", justifyContent: "center" },
   pressed: { opacity: 0.8 },
-});
+}));

@@ -1,8 +1,8 @@
-import { Pressable, StyleSheet, useColorScheme } from "react-native";
+import { Pressable, StyleSheet } from "react-native";
 import { useSelector } from "@legendapp/state/react";
 import { appearance$, setAppearance, type AppearanceMode } from "../state/appearance";
 import { PounceIcon } from "../ui/native/Icon";
-import { hexFor } from "../ui/theme-hex";
+import { useThemeHex } from "../ui/useThemeHex";
 
 const NEXT: Record<AppearanceMode, AppearanceMode> = {
   system: "light",
@@ -23,7 +23,7 @@ const ICON: Record<AppearanceMode, "contrast" | "sunny" | "moon"> = {
  *  react-native-screens trait-resolution note in the layouts). */
 export function AppearanceButton() {
   const mode = useSelector(() => appearance$.get());
-  const hex = hexFor(useColorScheme());
+  const hex = useThemeHex();
   return (
     <Pressable
       onPress={() => setAppearance(NEXT[mode])}

@@ -9,12 +9,12 @@
  * Doubles as the window's drag region: with the unified titlebar there is no
  * system title bar left to grab.
  */
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { useSelector } from "@legendapp/state/react";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { AgentStatusIcon, COLOR } from "@pounce/app/ui";
-import { T } from "@pounce/app/ui/theme";
 import { DragRegion, TITLEBAR_INSET } from "@pounce/app/ui/native/DragRegion";
 import { useTrafficLightInset } from "./fullscreen";
 import { OpenInButton } from "./OpenIn";
@@ -231,7 +231,7 @@ export function TabStrip() {
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   root: {
     height: TITLEBAR_INSET,
     flexDirection: "row",
@@ -240,7 +240,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 6,
   },
   flex1: { flex: 1 },
-  hover: { backgroundColor: T.surface },
+  hover: { backgroundColor: theme.colors.surface },
   iconBtn: {
     height: 24,
     width: 24,
@@ -258,10 +258,10 @@ const s = StyleSheet.create({
     paddingLeft: 9,
     paddingRight: 5,
   },
-  tabActive: { backgroundColor: T.surfaceHover },
-  tabDotFallback: { height: 6, width: 6, borderRadius: 999, backgroundColor: T.fgFaint },
-  tabLabel: { flexShrink: 1, fontSize: 11.5, color: T.fgMuted },
-  tabLabelActive: { color: T.fg },
+  tabActive: { backgroundColor: theme.colors.surfaceHover },
+  tabDotFallback: { height: 6, width: 6, borderRadius: 999, backgroundColor: theme.colors.fgFaint },
+  tabLabel: { flexShrink: 1, fontSize: 11.5, color: theme.colors.fgMuted },
+  tabLabelActive: { color: theme.colors.fg },
   tabClose: {
     height: 16,
     width: 16,
@@ -269,4 +269,4 @@ const s = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 4,
   },
-});
+}));

@@ -92,8 +92,7 @@ const s = StyleSheet.create((theme) => ({
     gap: 8,
     borderRadius: 999,
     borderWidth: 1,
-    // accent at 40% — no soft-accent border token; literal from the accent hex.
-    borderColor: "rgba(124, 111, 240, 0.4)",
+    borderColor: theme.colors.accentLine,
     backgroundColor: theme.colors.bgElevated,
     paddingVertical: 8,
     paddingLeft: 16,

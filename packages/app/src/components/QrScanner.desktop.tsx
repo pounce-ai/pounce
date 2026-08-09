@@ -4,8 +4,8 @@
  * local bridge and manual (URL + token) for other machines, so this fork just
  * points the user at the manual path.
  */
-import { Pressable, StyleSheet, Text, View } from "react-native";
-import { T } from "../ui/theme";
+import { Pressable, Text, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 
 export default function QrScanner({
   onCancel,
@@ -28,25 +28,25 @@ export default function QrScanner({
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   root: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     gap: 12,
-    backgroundColor: T.bg,
+    backgroundColor: theme.colors.bg,
     paddingHorizontal: 32,
   },
   emoji: { fontSize: 28 },
-  title: { textAlign: "center", fontSize: 14, fontWeight: "600", color: T.fg },
-  body: { textAlign: "center", fontSize: 12.5, color: T.fgMuted },
+  title: { textAlign: "center", fontSize: 14, fontWeight: "600", color: theme.colors.fg },
+  body: { textAlign: "center", fontSize: 12.5, color: theme.colors.fgMuted },
   backBtn: {
     marginTop: 8,
     borderRadius: 999,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 20,
     paddingVertical: 8,
   },
-  backText: { fontSize: 13, fontWeight: "500", color: T.fg },
+  backText: { fontSize: 13, fontWeight: "500", color: theme.colors.fg },
   pressed80: { opacity: 0.8 },
-});
+}));

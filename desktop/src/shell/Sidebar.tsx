@@ -10,7 +10,8 @@
  * uninterrupted.
  */
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, Text, TextInput, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { LegendList } from "@legendapp/list/react-native";
 import { useSelector } from "@legendapp/state/react";
 import { useRouter } from "expo-router";
@@ -21,7 +22,6 @@ import { useDevices, useIgnoredSet, useProjectNames, useThreads } from "@pounce/
 import { SidebarSessionsSkeleton, SidebarSpacesSkeleton } from "./SidebarSkeleton";
 import { Entrance } from "./Motion";
 import { AgentStatusIcon, COLOR, INPUT_TWEAKS, timeAgo } from "@pounce/app/ui";
-import { T } from "@pounce/app/ui/theme";
 import { GlassSurface } from "@pounce/app/ui/native/GlassSurface";
 import { DragRegion, TITLEBAR_INSET } from "@pounce/app/ui/native/DragRegion";
 import { useTrafficLightInset } from "./fullscreen";
@@ -30,6 +30,7 @@ import { useAccessRequests } from "./accessRequests";
 import { nav$, selectSpace } from "../shims/router";
 import { deriveSpaces, spaceKeyOf, type Space } from "./Spaces";
 import { SidebarGlyph } from "./icons";
+import { ThemeButton } from "./ThemeMenu";
 
 /** Tapping the appearance button cycles system → light → dark, and the glyph
  *  shows the mode you're in — same contract as mobile's header button. */
@@ -168,7 +169,7 @@ export function Sidebar() {
       <GlassSurface
         material="sidebar"
         blendingMode="behindWindow"
-        fallbackColor={T.bgElevated}
+        fallbackColor={COLOR.bgElevated}
         style={StyleSheet.absoluteFill}
       />
 
@@ -206,6 +207,11 @@ export function Sidebar() {
           hint={`Appearance: ${appearanceMode}`}
           onPress={() => setAppearance(NEXT_APPEARANCE[appearanceMode])}
         />
+        {/* Theme sits beside appearance because they're one thought: the theme
+            is the palette, appearance is the ground it paints on. A palette is
+            picked by looking rather than by name, so this one opens a menu
+            instead of cycling. */}
+        <ThemeButton />
         <TitleBarIcon
           name="search"
           hint="Search"
@@ -367,7 +373,7 @@ export function Sidebar() {
             carries the eye. Grey when there's nothing reachable, accent when
             there is. */}
         <View style={[s.avatar, connected ? s.avatarOnline : s.avatarOffline]}>
-          <Ionicons name="paw" size={13} color={connected ? T.onAccent : COLOR.fgMuted} />
+          <Ionicons name="paw" size={13} color={connected ? COLOR.onAccent : COLOR.fgMuted} />
         </View>
         <View style={s.flex1}>
           <Text numberOfLines={1} style={s.accountName}>
@@ -653,7 +659,7 @@ function PeersButton() {
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   // No background: the GlassSurface backdrop paints (vibrancy or fallback).
   root: { flex: 1 },
   flex1: { flex: 1 },
@@ -685,11 +691,11 @@ const s = StyleSheet.create({
     gap: 6,
     borderRadius: 7,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
     paddingHorizontal: 8,
   },
-  searchInput: { flex: 1, fontSize: 12, color: T.fg, paddingVertical: 0 },
+  searchInput: { flex: 1, fontSize: 12, color: theme.colors.fg, paddingVertical: 0 },
   listContent: { paddingBottom: 10 },
 
   sectionHeader: {
@@ -701,8 +707,8 @@ const s = StyleSheet.create({
     paddingBottom: 4,
     paddingTop: 12,
   },
-  sectionLabel: { fontSize: 11, fontWeight: "500", color: T.fgFaint },
-  sectionTrailing: { fontSize: 10.5, color: T.warning },
+  sectionLabel: { fontSize: 11, fontWeight: "500", color: theme.colors.fgFaint },
+  sectionTrailing: { fontSize: 10.5, color: theme.colors.warning },
   sectionAction: {
     height: 20,
     width: 20,
@@ -710,10 +716,15 @@ const s = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 5,
   },
-  sectionEmpty: { paddingHorizontal: 14, paddingVertical: 4, fontSize: 11.5, color: T.fgFaint },
+  sectionEmpty: {
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    fontSize: 11.5,
+    color: theme.colors.fgFaint,
+  },
 
-  rowSelected: { backgroundColor: T.surfaceHover },
-  rowHover: { backgroundColor: T.surface },
+  rowSelected: { backgroundColor: theme.colors.surfaceHover },
+  rowHover: { backgroundColor: theme.colors.surface },
 
   spaceRow: {
     marginHorizontal: 6,
@@ -725,9 +736,9 @@ const s = StyleSheet.create({
     paddingHorizontal: 8,
   },
   spaceDot: { height: 6, width: 6, borderRadius: 999 },
-  dotAccent: { backgroundColor: T.accent },
-  dotIdle: { backgroundColor: T.fgFaint, opacity: 0.5 },
-  spaceName: { flexShrink: 1, fontSize: 12.5, color: T.fg },
+  dotAccent: { backgroundColor: theme.colors.accent },
+  dotIdle: { backgroundColor: theme.colors.fgFaint, opacity: 0.5 },
+  spaceName: { flexShrink: 1, fontSize: 12.5, color: theme.colors.fg },
   moreSpaces: {
     marginHorizontal: 6,
     height: 24,
@@ -737,8 +748,8 @@ const s = StyleSheet.create({
     borderRadius: 6,
     paddingHorizontal: 8,
   },
-  moreSpacesLabel: { fontSize: 11, color: T.fgFaint },
-  spaceHost: { flexShrink: 0, marginLeft: "auto", fontSize: 11, color: T.fgFaint },
+  moreSpacesLabel: { fontSize: 11, color: theme.colors.fgFaint },
+  spaceHost: { flexShrink: 0, marginLeft: "auto", fontSize: 11, color: theme.colors.fgFaint },
 
   sessionRow: {
     marginHorizontal: 6,
@@ -748,44 +759,55 @@ const s = StyleSheet.create({
     paddingVertical: 6,
   },
   sessionCaptionRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  sessionCaption: { flex: 1, fontSize: 10.5, color: T.fgFaint },
-  sessionTime: { flexShrink: 0, fontSize: 10.5, color: T.fgFaint },
-  sessionTitle: { marginTop: 1, fontSize: 12.5, color: T.fg },
+  sessionCaption: { flex: 1, fontSize: 10.5, color: theme.colors.fgFaint },
+  sessionTime: { flexShrink: 0, fontSize: 10.5, color: theme.colors.fgFaint },
+  sessionTitle: { marginTop: 1, fontSize: 12.5, color: theme.colors.fg },
   sessionMetaRow: { marginTop: 3, flexDirection: "row", alignItems: "center", gap: 4 },
-  sessionBranch: { flex: 1, fontFamily: "JetBrainsMono", fontSize: 10, color: T.fgFaint },
+  sessionBranch: {
+    flex: 1,
+    fontFamily: "JetBrainsMono",
+    fontSize: 10,
+    color: theme.colors.fgFaint,
+  },
   dimmed: { opacity: 0.55 },
 
   emptyBox: { alignItems: "center", paddingHorizontal: 20, paddingVertical: 40 },
   emptyEmoji: { fontSize: 24 },
-  emptyTitle: { marginTop: 8, textAlign: "center", fontSize: 12.5, fontWeight: "600", color: T.fg },
+  emptyTitle: {
+    marginTop: 8,
+    textAlign: "center",
+    fontSize: 12.5,
+    fontWeight: "600",
+    color: theme.colors.fg,
+  },
   emptyBody: {
     marginTop: 4,
     textAlign: "center",
     fontSize: 11.5,
     lineHeight: 16,
-    color: T.fgMuted,
+    color: theme.colors.fgMuted,
   },
   emptyAction: {
     marginTop: 12,
     borderRadius: 7,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
-  emptyActionLabel: { fontSize: 11.5, fontWeight: "500", color: T.fgMuted },
+  emptyActionLabel: { fontSize: 11.5, fontWeight: "500", color: theme.colors.fgMuted },
 
   account: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     borderTopWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  accountHover: { backgroundColor: T.surface },
+  accountHover: { backgroundColor: theme.colors.surface },
   avatar: {
     height: 24,
     width: 24,
@@ -793,11 +815,11 @@ const s = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 999,
   },
-  avatarOnline: { backgroundColor: T.accent },
+  avatarOnline: { backgroundColor: theme.colors.accent },
   // Connecting counts as offline here on purpose: this is a two-state light,
   // and a third colour mid-handshake would flicker on every reconnect. The
   // subtitle beneath already says "Connecting…" for anyone watching.
-  avatarOffline: { backgroundColor: T.surfaceHover },
+  avatarOffline: { backgroundColor: theme.colors.surfaceHover },
   accountAction: {
     height: 24,
     width: 24,
@@ -815,8 +837,8 @@ const s = StyleSheet.create({
     width: 7,
     borderRadius: 999,
     borderWidth: 1.5,
-    borderColor: T.bg,
-    backgroundColor: T.accent,
+    borderColor: theme.colors.bg,
+    backgroundColor: theme.colors.accent,
   },
   // Count sits on the bell rather than beside it: the titlebar row is icons
   // only, and a number in the flow would break that rhythm.
@@ -830,13 +852,13 @@ const s = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 999,
     paddingHorizontal: 2,
-    backgroundColor: T.accent,
+    backgroundColor: theme.colors.accent,
   },
-  bellCountText: { fontSize: 8, fontWeight: "700", color: T.onAccent },
-  accountName: { fontSize: 12, fontWeight: "500", color: T.fg },
-  accountSub: { fontSize: 10.5, color: T.fgFaint },
-  dotWarning: { backgroundColor: T.warning },
+  bellCountText: { fontSize: 8, fontWeight: "700", color: theme.colors.onAccent },
+  accountName: { fontSize: 12, fontWeight: "500", color: theme.colors.fg },
+  accountSub: { fontSize: 10.5, color: theme.colors.fgFaint },
+  dotWarning: { backgroundColor: theme.colors.warning },
 
   pressed60: { opacity: 0.6 },
   pressed70: { opacity: 0.7 },
-});
+}));

@@ -572,7 +572,7 @@ const s = StyleSheet.create((theme) => ({
     marginBottom: 4,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "rgba(124, 111, 240, 0.4)",
+    borderColor: theme.colors.accentLine,
     paddingHorizontal: 12,
     paddingVertical: 7,
   },

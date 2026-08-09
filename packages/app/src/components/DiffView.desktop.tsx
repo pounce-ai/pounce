@@ -1,5 +1,6 @@
 import { memo, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View, type TextStyle } from "react-native";
+import { Pressable, Text, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { LegendList } from "@legendapp/list/react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -11,17 +12,19 @@ import {
   type PatchFile,
 } from "./diffPatch";
 import { COLOR } from "../ui";
-import { T } from "../ui/theme";
 import type { DiffViewProps } from "./DiffViewTypes";
 
-/** Styles per diff-line kind (replaces the old shared Tailwind LINE_CLASS map). */
-const LINE_STYLE: Record<LineKind, TextStyle> = {
-  header: { color: T.fgFaint },
-  hunk: { color: T.info },
-  add: { backgroundColor: T.diffAddBg, color: T.diffAddFg },
-  del: { backgroundColor: T.diffDelBg, color: T.diffDelFg },
-  ctx: { color: T.fgMuted },
-};
+/** Style key per diff-line kind (replaces the old shared Tailwind LINE_CLASS
+ *  map). The styles themselves live in the themed sheet at the bottom, so they
+ *  follow the chosen theme instead of freezing the boot palette. */
+const LINE_STYLE: Record<LineKind, "lineHeader" | "lineHunk" | "lineAdd" | "lineDel" | "lineCtx"> =
+  {
+    header: "lineHeader",
+    hunk: "lineHunk",
+    add: "lineAdd",
+    del: "lineDel",
+    ctx: "lineCtx",
+  };
 
 /** Flattened rows the list renders: a file separator, a unified line, or a
  *  split (side-by-side) pair. */
@@ -186,27 +189,32 @@ export const DiffView = memo(function DiffView({
             <View style={s.pairRow}>
               <Text
                 numberOfLines={1}
-                style={[s.pairLeft, item.left ? LINE_STYLE[item.left.kind] : null]}
+                style={[s.pairLeft, item.left ? s[LINE_STYLE[item.left.kind]] : null]}
               >
                 {item.left ? cellText(item.left.text) || " " : " "}
               </Text>
               <Text
                 numberOfLines={1}
-                style={[s.pairRight, item.right ? LINE_STYLE[item.right.kind] : null]}
+                style={[s.pairRight, item.right ? s[LINE_STYLE[item.right.kind]] : null]}
               >
                 {item.right ? cellText(item.right.text) || " " : " "}
               </Text>
             </View>
           );
         }
-        return <Text style={[s.diffLine, LINE_STYLE[item.kind]]}>{item.text || " "}</Text>;
+        return <Text style={[s.diffLine, s[LINE_STYLE[item.kind]]]}>{item.text || " "}</Text>;
       }}
       contentContainerStyle={{ paddingBottom: 6 }}
     />
   );
 });
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
+  lineHeader: { color: theme.colors.fgFaint },
+  lineHunk: { color: theme.colors.info },
+  lineAdd: { backgroundColor: theme.colors.diffAddBg, color: theme.colors.diffAddFg },
+  lineDel: { backgroundColor: theme.colors.diffDelBg, color: theme.colors.diffDelFg },
+  lineCtx: { color: theme.colors.fgMuted },
   fileHeader: {
     marginBottom: 4,
     marginTop: 12,
@@ -214,25 +222,25 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     borderBottomWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.bgElevated,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bgElevated,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   filePath: { flex: 1, fontFamily: "JetBrainsMono", fontSize: 12, fontWeight: "600" },
-  filePathViewed: { color: T.fgFaint },
-  filePathFg: { color: T.fg },
+  filePathViewed: { color: theme.colors.fgFaint },
+  filePathFg: { color: theme.colors.fg },
   fileStats: { fontSize: 12, fontWeight: "600" },
-  addStat: { color: T.diffAddFg },
-  delStat: { color: T.diffDelFg },
+  addStat: { color: theme.colors.diffAddFg },
+  delStat: { color: theme.colors.diffDelFg },
   viewedBtn: { flexDirection: "row", alignItems: "center", gap: 6 },
-  viewedLabel: { fontSize: 12, color: T.fgMuted },
+  viewedLabel: { fontSize: 12, color: theme.colors.fgMuted },
   pairRow: { flexDirection: "row", paddingHorizontal: 12 },
   pairLeft: {
     flex: 1,
     borderRightWidth: 1,
     // was border at 40% opacity; the semantic separator is already subtle.
-    borderColor: T.border,
+    borderColor: theme.colors.border,
     paddingRight: 8,
     fontFamily: "JetBrainsMono",
     fontSize: 11,
@@ -241,5 +249,5 @@ const s = StyleSheet.create({
   pairRight: { flex: 1, paddingLeft: 8, fontFamily: "JetBrainsMono", fontSize: 11, lineHeight: 18 },
   diffLine: { paddingHorizontal: 12, fontFamily: "JetBrainsMono", fontSize: 11, lineHeight: 18 },
   pressed70: { opacity: 0.7 },
-  pressedHover: { backgroundColor: T.surfaceHover },
-});
+  pressedHover: { backgroundColor: theme.colors.surfaceHover },
+}));

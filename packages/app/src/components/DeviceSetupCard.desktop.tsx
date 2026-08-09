@@ -8,15 +8,8 @@
  * Adding ANOTHER machine's bridge stays available via manual entry.
  */
 import { useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { Ionicons } from "@expo/vector-icons";
 import { addDeviceConfig, clearBridgeConfig, syncLiveData } from "../services/bridge";
 import { allCollections, clearCollection } from "../state/db/collections";
@@ -53,7 +46,6 @@ import {
   setAutoUpdateEnabled,
 } from "../services/updater";
 import { COLOR, INPUT_TWEAKS } from "../ui";
-import { T } from "../ui/theme";
 
 // Kept in sync with the mobile implementation's props (importing the type from
 // "./DeviceSetupCard" would resolve back to this platform fork — circular).
@@ -171,9 +163,13 @@ export function DeviceSetupCard({
           ]}
         >
           {resyncing ? (
-            <ActivityIndicator size="small" color={T.onAccent} />
+            <ActivityIndicator size="small" color={COLOR.onAccent} />
           ) : (
-            <Ionicons name={resyncDone ? "checkmark" : "refresh"} size={14} color={T.onAccent} />
+            <Ionicons
+              name={resyncDone ? "checkmark" : "refresh"}
+              size={14}
+              color={COLOR.onAccent}
+            />
           )}
           <Text style={s.resyncText}>
             {resyncing ? "Resyncing…" : resyncDone ? "Up to date" : "Resync now"}
@@ -266,17 +262,17 @@ export function DeviceSetupCard({
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   card: {
     gap: 10,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
     padding: 16,
   },
-  cardTitle: { fontSize: 15, fontWeight: "600", color: T.fg },
-  cardBody: { fontSize: 12.5, lineHeight: 18, color: T.fgMuted },
+  cardTitle: { fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  cardBody: { fontSize: 12.5, lineHeight: 18, color: theme.colors.fgMuted },
   // Desktop buttons, not phone buttons. These were two 44pt full-width slabs
   // splitting the card in half, which gave "Reset app data" — a destructive
   // action you use once, if ever — exactly the same weight as the routine one.
@@ -291,9 +287,9 @@ const s = StyleSheet.create({
     gap: 6,
     borderRadius: 8,
     paddingHorizontal: 12,
-    backgroundColor: T.accent,
+    backgroundColor: theme.colors.accent,
   },
-  resyncText: { fontSize: 13, fontWeight: "600", color: T.onAccent },
+  resyncText: { fontSize: 13, fontWeight: "600", color: theme.colors.onAccent },
   resetBtn: {
     height: 30,
     flexDirection: "row",
@@ -303,28 +299,33 @@ const s = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
   },
-  resetText: { fontSize: 13, fontWeight: "500", color: T.danger },
+  resetText: { fontSize: 13, fontWeight: "500", color: theme.colors.danger },
   grow: { flex: 1 },
-  section: { gap: 8, borderTopWidth: 1, borderColor: T.border, paddingTop: 12 },
+  section: { gap: 8, borderTopWidth: 1, borderColor: theme.colors.border, paddingTop: 12 },
   rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   updateCopy: { flex: 1, paddingRight: 12 },
-  updateTitle: { fontSize: 14, fontWeight: "500", color: T.fg },
-  updateBody: { fontSize: 12, lineHeight: 17, color: T.fgMuted },
+  updateTitle: { fontSize: 14, fontWeight: "500", color: theme.colors.fg },
+  updateBody: { fontSize: 12, lineHeight: 17, color: theme.colors.fgMuted },
   checkNow: { alignSelf: "flex-start" },
-  checkNowText: { fontSize: 13, fontWeight: "500", color: T.accent },
+  checkNowText: { fontSize: 13, fontWeight: "500", color: theme.colors.accent },
   manualToggle: { alignSelf: "center", paddingTop: 4 },
-  manualToggleText: { fontSize: 13, color: T.fgMuted },
-  fieldLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: T.fgFaint },
+  manualToggleText: { fontSize: 13, color: theme.colors.fgMuted },
+  fieldLabel: {
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: theme.colors.fgFaint,
+  },
   input: {
     borderRadius: 12,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontFamily: "JetBrainsMono",
     fontSize: 13,
-    color: T.fg,
+    color: theme.colors.fg,
   },
   syncBtn: {
     marginTop: 4,
@@ -334,11 +335,11 @@ const s = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
     borderRadius: 12,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
   },
-  syncText: { fontSize: 14, fontWeight: "600", color: T.fg },
+  syncText: { fontSize: 14, fontWeight: "600", color: theme.colors.fg },
   disabled40: { opacity: 0.4 },
   disabled50: { opacity: 0.5 },
   pressed60: { opacity: 0.6 },
   pressed90: { opacity: 0.9 },
-});
+}));

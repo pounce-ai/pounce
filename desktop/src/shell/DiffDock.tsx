@@ -12,9 +12,9 @@
  * own divider is there to give it.
  */
 import { useRef, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import ChangesScreen from "@pounce/app/screens/Changes";
-import { T } from "@pounce/app/ui/theme";
 import { nav$ } from "../shims/router";
 import { Splitter, SPLITTER_WIDTH } from "./Splitter";
 import { CrossFade } from "./Motion";
@@ -72,7 +72,7 @@ export function DiffDock({ threadId, maxWidth }: { threadId: string; maxWidth: n
   );
 }
 
-const s = StyleSheet.create({
-  root: { flexDirection: "row", backgroundColor: T.bg },
+const s = StyleSheet.create((theme) => ({
+  root: { flexDirection: "row", backgroundColor: theme.colors.bg },
   body: { flex: 1 },
-});
+}));

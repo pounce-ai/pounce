@@ -8,10 +8,11 @@
  * mobile implementation, including shell "Run" cards via runnableBlocks.
  */
 import { Fragment, useMemo, type ReactNode } from "react";
-import { Pressable, StyleSheet, Text, useColorScheme, View, type TextStyle } from "react-native";
+import { Pressable, Text, useColorScheme, View, type TextStyle } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import type { AppThemeColors } from "../ui/unistyles-named";
 import { Ionicons } from "@expo/vector-icons";
 import { COLOR } from "../ui";
-import { T } from "../ui/theme";
 import { splitCodeBlocks } from "./runnableBlocks";
 import { highlightLines, themeFor } from "./highlight";
 import { usePacedText } from "./pacedText";
@@ -31,10 +32,11 @@ import { SECONDARY_SCALE } from "../ui/tokens";
  * it glares, and every glyph edge fizzes. `fgProse` steps it down just enough
  * to settle while staying far above any contrast floor (see ui/theme.ts).
  */
-const BASE: Record<"user" | "assistant", TextStyle> = {
-  user: { fontSize: 15, lineHeight: 24, color: T.onAccent },
-  assistant: { fontSize: 15, lineHeight: 24, color: T.fgProse },
-};
+const baseFor = (role: "user" | "assistant", colors: AppThemeColors): TextStyle => ({
+  fontSize: 15,
+  lineHeight: 24,
+  color: role === "user" ? colors.onAccent : colors.fgProse,
+});
 
 /** Mirrors the native `ContextMenuItem`, declared locally because the native
  *  markdown package has no desktop build to import the type from. */
@@ -68,8 +70,12 @@ export function MessageMarkdown({
    *  SECONDARY_SCALE. */
   secondary?: boolean;
 }) {
+  // `theme` is a dependency, not decoration: the body colour comes out of the
+  // active palette, so a memo keyed only on role/secondary would keep painting
+  // the theme the turn first rendered under.
+  const { theme } = useUnistyles();
   const base = useMemo(() => {
-    const b = BASE[role];
+    const b = baseFor(role, theme.colors);
     if (!secondary) return b;
     const round = (n: number) => Math.round(n * SECONDARY_SCALE * 10) / 10;
     return {
@@ -77,7 +83,7 @@ export function MessageMarkdown({
       fontSize: round(b.fontSize as number),
       lineHeight: round(b.lineHeight as number),
     };
-  }, [role, secondary]);
+  }, [role, secondary, theme]);
   const onUser = role === "user";
   // Settled assistant turns get code blocks lifted out (Run cards); streaming
   // turns render on the single path (incomplete fences would mis-split).
@@ -209,8 +215,9 @@ function renderInline(
     plain(last, m.index);
     const tok = m[0];
     if (tok.startsWith("`")) {
-      // Purple chip so inline code pops out of prose (white-on-white/20 inside
-      // the accent user bubble, where purple-on-purple would vanish).
+      // Accent chip so inline code pops out of prose. The hue is the ACTIVE
+      // theme's, not the brand purple it used to be hardcoded to — a violet
+      // chip in the middle of a green or amber theme reads as a bug.
       out.push(
         <Text
           key={`${keyBase}:c${si++}`}
@@ -220,9 +227,7 @@ function renderInline(
             // so inline code no longer has to be white-on-purple to survive it.
             // Same treatment as the assistant's, just sunk against the bubble
             // instead of the page.
-            onUser
-              ? { color: "#a99cf5", backgroundColor: "rgba(0,0,0,0.30)" }
-              : { color: "#a99cf5", backgroundColor: "rgba(124,111,240,0.16)" },
+            onUser ? s.inlineCodeOnUser : s.inlineCodeOnPage,
           ]}
         >
           {tok.slice(1, -1)}
@@ -365,7 +370,7 @@ function Blocks({
               </View>
             );
           case "heading": {
-            const headingStyle: TextStyle = { ...HEADING_STYLE[b.level], color: T.fg };
+            const headingStyle: TextStyle = { ...HEADING_STYLE[b.level], color: COLOR.fg };
             return (
               <Text key={bi} selectable style={headingStyle}>
                 {renderInline(b.text, `h${bi}`, headingStyle, onUser)}
@@ -373,7 +378,7 @@ function Blocks({
             );
           }
           case "quote": {
-            const quoteStyle: TextStyle = { ...baseStyle, color: T.fgMuted };
+            const quoteStyle: TextStyle = { ...baseStyle, color: COLOR.fgMuted };
             return (
               <View key={bi} style={s.quote}>
                 <Text selectable style={quoteStyle}>
@@ -414,19 +419,19 @@ function Blocks({
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   gap1: { gap: 4 },
   gap2: { gap: 8 },
   // Between blocks (paragraph → paragraph, paragraph → list). Tighter than the
   // line height and the paragraphs stop being separate things.
   blocks: { gap: 12 },
-  cursor: { color: T.accent },
+  cursor: { color: theme.colors.accent },
   codeCard: {
     overflow: "hidden",
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.bg,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bg,
   },
   codeCardHeader: {
     flexDirection: "row",
@@ -435,33 +440,52 @@ const s = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 4,
   },
-  codeLang: { fontSize: 10.5, textTransform: "uppercase", letterSpacing: 0.5, color: T.fgFaint },
+  codeLang: {
+    fontSize: 10.5,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: theme.colors.fgFaint,
+  },
   runBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
     borderRadius: 6,
-    backgroundColor: T.surfaceAlt,
+    backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 8,
     paddingVertical: 2,
   },
-  runLabel: { fontSize: 11, fontWeight: "500", color: T.fg },
+  runLabel: { fontSize: 11, fontWeight: "500", color: theme.colors.fg },
   codeCardPad: { paddingHorizontal: 14, paddingBottom: 10 },
   codeCardBody: {
     fontFamily: "JetBrainsMono",
     fontSize: 12.5,
     lineHeight: 18,
-    color: T.fgMuted,
+    color: theme.colors.fgMuted,
   },
   pressed70: { opacity: 0.7 },
   inlineCode: { borderRadius: 4, paddingHorizontal: 4, fontFamily: "JetBrainsMono", fontSize: 13 },
+  inlineCodeOnPage: { color: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
+  // On the bubble the wash would sit accent-on-accent, so the chip sinks with
+  // a plain scrim instead and keeps only the accent text.
+  inlineCodeOnUser: { color: theme.colors.accent, backgroundColor: "rgba(0,0,0,0.30)" },
   semibold: { fontWeight: "600" },
   italic: { fontStyle: "italic" },
-  link: { color: T.info, textDecorationLine: "underline" },
+  link: { color: theme.colors.info, textDecorationLine: "underline" },
   // Same inset as codeCardPad, so a fenced block and a lifted one indent alike.
-  codeBlock: { borderRadius: 8, backgroundColor: T.bg, paddingHorizontal: 14, paddingVertical: 10 },
-  codeText: { fontFamily: "JetBrainsMono", fontSize: 12.5, lineHeight: 18, color: T.fgMuted },
-  quote: { borderLeftWidth: 2, borderColor: T.borderStrong, paddingLeft: 12 },
+  codeBlock: {
+    borderRadius: 8,
+    backgroundColor: theme.colors.bg,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  codeText: {
+    fontFamily: "JetBrainsMono",
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: theme.colors.fgMuted,
+  },
+  quote: { borderLeftWidth: 2, borderColor: theme.colors.borderStrong, paddingLeft: 12 },
   listItem: { flexDirection: "row", gap: 8, paddingLeft: 4 },
-  marker: { color: T.fgFaint },
-});
+  marker: { color: theme.colors.fgFaint },
+}));

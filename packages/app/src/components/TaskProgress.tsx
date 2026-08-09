@@ -60,8 +60,6 @@ export function TaskProgressBar({ state, running }: { state: TaskListState; runn
   );
 }
 
-const ACCENT_BORDER = "rgba(124, 111, 240, 0.4)";
-
 /** Plain style for the reanimated-managed view — unistyles theme styles must not
  *  mix into styles reanimated owns (same reason WorkingIndicator uses COLOR). */
 const ANIM = { wrap: { marginHorizontal: 12, marginBottom: 8 } } as const;
@@ -71,7 +69,7 @@ const s = StyleSheet.create((theme) => ({
     gap: 6,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: ACCENT_BORDER,
+    borderColor: theme.colors.accentLine,
     backgroundColor: theme.colors.surfaceAlt,
     paddingHorizontal: 12,
     paddingVertical: 8,

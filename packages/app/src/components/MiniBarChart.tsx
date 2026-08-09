@@ -1,8 +1,8 @@
 import { useMemo } from "react";
-import { Pressable, Text, View, useColorScheme } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import Svg, { Rect } from "react-native-svg";
-import { hexFor } from "../ui/theme-hex";
+import { useThemeHex } from "../ui/useThemeHex";
 
 export interface Bar {
   readonly key: string;
@@ -34,7 +34,7 @@ export function MiniBarChart({
   onSelect?: (key: string) => void;
   emptyLabel?: string;
 }) {
-  const hex = hexFor(useColorScheme());
+  const hex = useThemeHex();
   // 96 is the phone default; desktop measures its card and passes the real one.
   const height = heightProp && heightProp > 0 ? heightProp : 96;
   const max = useMemo(() => bars.reduce((m, b) => Math.max(m, b.value), 0), [bars]);

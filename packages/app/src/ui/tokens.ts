@@ -3,24 +3,36 @@
  * like AgentLogo.tsx can import these without a circular dependency.
  */
 
-import { T } from "./theme";
+import type { ColorValue } from "react-native";
+import { UnistylesRuntime } from "react-native-unistyles";
+import { T, type ThemeColor } from "./theme";
 
-/** Semantic color tokens (platform-adaptive — see theme.ts). Kept under the
- *  COLOR name so existing call sites keep working. */
-export const COLOR = {
-  /** The page fill. Needed by the few Reanimated-managed views that have to
-   *  cover content: those can't take a unistyles sheet entry, and deriving a
-   *  hex from `useColorScheme()` instead desyncs from this palette the moment
-   *  the in-app appearance override disagrees with the system trait. */
-  bg: T.bg,
-  accent: T.accent,
-  fg: T.fg,
-  fgMuted: T.fgMuted,
-  fgFaint: T.fgFaint,
-  success: T.success,
-  warning: T.warning,
-  danger: T.danger,
-} as const;
+/**
+ * The ACTIVE theme's colours, for the places a themed StyleSheet can't reach:
+ * inline style objects on Reanimated-managed views, and props that take a
+ * colour rather than a style (`color=`, `placeholderTextColor=`, an icon tint).
+ *
+ * Reads through to unistyles on every property access, so a call site picks up
+ * the current theme the next time its component renders — which is what
+ * happens anyway, because unistyles re-renders anything holding a themed
+ * sheet. Do NOT hoist a value out of it into a module constant or a worklet:
+ * that freezes the boot palette, which is exactly the bug this replaced.
+ *
+ * Falls back to the platform's own palette (`T`) before unistyles is
+ * configured — tests, and the frame before the entry file runs.
+ */
+export const COLOR = new Proxy({} as Record<ThemeColor, ColorValue>, {
+  get(_target, prop: string): ColorValue | undefined {
+    try {
+      const colors = UnistylesRuntime.getTheme().colors as Record<string, ColorValue>;
+      const value = colors[prop];
+      if (value != null) return value;
+    } catch {
+      /* not configured yet — fall through to the platform palette */
+    }
+    return (T as Record<string, ColorValue>)[prop];
+  },
+});
 
 /** Human-facing agent names (brands keep their own casing). */
 export const AGENT_LABEL: Record<string, string> = {

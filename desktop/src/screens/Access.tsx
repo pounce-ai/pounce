@@ -12,15 +12,8 @@
  * decides what actually goes.
  */
 import { useCallback, useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { Ionicons } from "@expo/vector-icons";
 import {
   approveAccess,
@@ -40,7 +33,6 @@ import {
   type Scope,
 } from "@pounce/app/services/peers";
 import { COLOR } from "@pounce/app/ui";
-import { T } from "@pounce/app/ui/theme";
 
 export default function AccessScreen() {
   const [pending, setPending] = useState<AccessRequest[]>([]);
@@ -213,7 +205,7 @@ function RequestCard({
           <Ionicons
             name={existing ? "add-circle-outline" : "laptop-outline"}
             size={17}
-            color={existing ? T.warning : COLOR.accent}
+            color={existing ? COLOR.warning : COLOR.accent}
           />
         </View>
         <View style={s.grow}>
@@ -493,23 +485,23 @@ function Radio({ on }: { on: boolean }) {
 function Check({ on }: { on: boolean }) {
   return (
     <View style={[s.check, on && s.checkOn]}>
-      {on ? <Ionicons name="checkmark" size={12} color={T.bg} /> : null}
+      {on ? <Ionicons name="checkmark" size={12} color={COLOR.bg} /> : null}
     </View>
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
   grow: { flex: 1 },
   center: { alignItems: "center", justifyContent: "center" },
   header: {
     height: 48,
     justifyContent: "center",
     borderBottomWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
     paddingHorizontal: 16,
   },
-  headerTitle: { fontSize: 15, fontWeight: "600", color: T.fg },
+  headerTitle: { fontSize: 15, fontWeight: "600", color: theme.colors.fg },
   // No `gap` here: a container gap applies to section titles and cards alike,
   // so the label sat as far from its own card as the cards sat from each other
   // and nothing read as grouped. Sections own their spacing instead.
@@ -525,20 +517,20 @@ const s = StyleSheet.create({
     fontWeight: "600",
     letterSpacing: 0.7,
     textTransform: "uppercase",
-    color: T.fgFaint,
+    color: theme.colors.fgFaint,
   },
 
   card: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surfaceAlt,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceAlt,
     overflow: "hidden",
   },
-  rowDivided: { borderTopWidth: 1, borderTopColor: T.border },
+  rowDivided: { borderTopWidth: 1, borderTopColor: theme.colors.border },
   empty: { alignItems: "center", gap: 5, paddingVertical: 26, paddingHorizontal: 24 },
-  emptyText: { fontSize: 13, fontWeight: "500", color: T.fgMuted },
-  emptyHint: { textAlign: "center", fontSize: 11.5, color: T.fgFaint },
+  emptyText: { fontSize: 13, fontWeight: "500", color: theme.colors.fgMuted },
+  emptyHint: { textAlign: "center", fontSize: 11.5, color: theme.colors.fgFaint },
 
   // The request card sets its OWN rhythm rather than a flat 8 between every
   // element: a form is groups of things, and an even gap between a label and
@@ -547,8 +539,8 @@ const s = StyleSheet.create({
     gap: 14,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surfaceAlt,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceAlt,
     padding: 16,
   },
   cardHead: { flexDirection: "row", alignItems: "center", gap: 12 },
@@ -558,7 +550,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 9,
-    backgroundColor: T.accentSoft,
+    backgroundColor: theme.colors.accentSoft,
   },
   // Neutral: this is a standing fact about a machine, not a call to action.
   badgeQuiet: {
@@ -567,9 +559,9 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 9,
-    backgroundColor: T.surface,
+    backgroundColor: theme.colors.surface,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
   },
   // Amber, not red: widening access is a normal ask and often the right thing
   // to approve. It wants a second look, not an alarm.
@@ -579,12 +571,17 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 9,
-    backgroundColor: T.warningSoft,
+    backgroundColor: theme.colors.warningSoft,
   },
-  cardTitle: { fontSize: 13.5, fontWeight: "600", color: T.fg },
-  cardMeta: { marginTop: 1, fontSize: 11.5, color: T.fgMuted },
-  code: { fontFamily: "JetBrainsMono", fontSize: 13, letterSpacing: 1, color: T.fgMuted },
-  note: { marginTop: -4, fontSize: 12, fontStyle: "italic", color: T.fgMuted },
+  cardTitle: { fontSize: 13.5, fontWeight: "600", color: theme.colors.fg },
+  cardMeta: { marginTop: 1, fontSize: 11.5, color: theme.colors.fgMuted },
+  code: {
+    fontFamily: "JetBrainsMono",
+    fontSize: 13,
+    letterSpacing: 1,
+    color: theme.colors.fgMuted,
+  },
+  note: { marginTop: -4, fontSize: 12, fontStyle: "italic", color: theme.colors.fgMuted },
 
   // A label belongs to what follows it, so it sits close to that and far from
   // whatever came before — hence the negative bottom against the parent gap.
@@ -594,12 +591,12 @@ const s = StyleSheet.create({
     fontWeight: "600",
     letterSpacing: 0.5,
     textTransform: "uppercase",
-    color: T.fgFaint,
+    color: theme.colors.fgFaint,
   },
   optRow: { flexDirection: "row", alignItems: "center", gap: 9, paddingVertical: 5 },
   optGroup: { marginTop: -4 },
   pickGroup: { gap: 8 },
-  optLabel: { fontSize: 13, color: T.fg },
+  optLabel: { fontSize: 13, color: theme.colors.fg },
   radio: {
     height: 16,
     width: 16,
@@ -607,16 +604,16 @@ const s = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
   },
-  radioOn: { borderColor: COLOR.accent },
-  radioDot: { height: 8, width: 8, borderRadius: 999, backgroundColor: COLOR.accent },
+  radioOn: { borderColor: theme.colors.accent },
+  radioDot: { height: 8, width: 8, borderRadius: 999, backgroundColor: theme.colors.accent },
 
   spaceBox: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
     // Five whole 28pt rows, the 6pt padding above and below them, and then a
     // 5pt sliver of the sixth. The old 180 landed mid-row, so the last thing
     // you saw was the top half of a word — which reads as a rendering bug, not
@@ -636,17 +633,17 @@ const s = StyleSheet.create({
     fontWeight: "600",
     letterSpacing: 0.5,
     textTransform: "uppercase",
-    color: T.fgFaint,
+    color: theme.colors.fgFaint,
   },
   search: {
     borderRadius: 9,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
     paddingHorizontal: 11,
     paddingVertical: 7,
     fontSize: 12.5,
-    color: T.fg,
+    color: theme.colors.fg,
   },
   // 28pt tall, which is what spaceBox's cap is measured in. Cramped rows were
   // the other half of the list looking broken: 4pt apart with no padding of
@@ -659,7 +656,7 @@ const s = StyleSheet.create({
     borderRadius: 7,
     paddingHorizontal: 6,
   },
-  spaceName: { flex: 1, fontSize: 12.5, color: T.fg },
+  spaceName: { flex: 1, fontSize: 12.5, color: theme.colors.fg },
   check: {
     height: 16,
     width: 16,
@@ -667,21 +664,21 @@ const s = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 4,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
   },
-  checkOn: { backgroundColor: COLOR.accent, borderColor: COLOR.accent },
+  checkOn: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
 
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
   chip: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  chipOn: { backgroundColor: COLOR.accent, borderColor: COLOR.accent },
-  chipLabel: { fontSize: 12, color: T.fgMuted },
-  chipLabelOn: { color: T.onAccent, fontWeight: "600" },
+  chipOn: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
+  chipLabel: { fontSize: 12, color: theme.colors.fgMuted },
+  chipLabelOn: { color: theme.colors.onAccent, fontWeight: "600" },
 
   // Separated from the form by a rule, not by a guess at whitespace: these two
   // buttons commit everything above them and should read as the end of it.
@@ -693,7 +690,7 @@ const s = StyleSheet.create({
     justifyContent: "flex-end",
     gap: 8,
     borderTopWidth: 1,
-    borderTopColor: T.border,
+    borderTopColor: theme.colors.border,
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
@@ -714,23 +711,23 @@ const s = StyleSheet.create({
     paddingRight: 14,
     paddingBottom: 10,
   },
-  subName: { flex: 1, fontSize: 12.5, color: T.fgMuted },
+  subName: { flex: 1, fontSize: 12.5, color: theme.colors.fgMuted },
   subBtn: { paddingHorizontal: 8, paddingVertical: 3 },
   primaryBtn: {
     borderRadius: 999,
-    backgroundColor: COLOR.accent,
+    backgroundColor: theme.colors.accent,
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
-  primaryLabel: { fontSize: 13, fontWeight: "600", color: T.onAccent },
+  primaryLabel: { fontSize: 13, fontWeight: "600", color: theme.colors.onAccent },
   ghostBtn: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: T.borderStrong,
+    borderColor: theme.colors.borderStrong,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  ghostLabel: { fontSize: 13, color: T.fgMuted },
+  ghostLabel: { fontSize: 13, color: theme.colors.fgMuted },
   disabled: { opacity: 0.4 },
   pressed: { opacity: 0.8 },
-});
+}));

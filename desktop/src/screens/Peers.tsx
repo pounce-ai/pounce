@@ -25,12 +25,12 @@ import {
   ActivityIndicator,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   View,
   type ColorValue,
 } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { Ionicons } from "@expo/vector-icons";
 import {
   grantDevice,
@@ -63,7 +63,6 @@ import {
 } from "@pounce/app/services/bridge";
 import { Toggle } from "@pounce/app/components/Toggle";
 import { COLOR } from "@pounce/app/ui";
-import { T } from "@pounce/app/ui/theme";
 
 type Step =
   | { name: "browse-peers" }
@@ -288,14 +287,14 @@ export default function PeersScreen() {
       ) : step.name === "connected" ? (
         <Centered
           icon="checkmark-circle-outline"
-          tint={T.success}
+          tint={COLOR.success}
           title={`Connected to ${step.peer.hostName}`}
           body={`You can read ${step.summary}. Its threads are syncing into your sidebar now.`}
         />
       ) : (
         <Centered
           icon="close-circle-outline"
-          tint={T.fgFaint}
+          tint={COLOR.fgFaint}
           title={`${step.peer.hostName} didn't grant access`}
           body={step.why}
         />
@@ -470,7 +469,7 @@ function PeerList({
                   <Ionicons
                     name={p.platform === "darwin" ? "laptop-outline" : "desktop-outline"}
                     size={17}
-                    color={grant || dev ? T.success : COLOR.accent}
+                    color={grant || dev ? COLOR.success : COLOR.accent}
                   />
                 </View>
                 <View style={s.grow}>
@@ -716,7 +715,7 @@ function Catalog({
     return (
       <Centered
         icon="alert-circle-outline"
-        tint={T.fgFaint}
+        tint={COLOR.fgFaint}
         title={`Couldn't read ${peer.hostName}'s catalog`}
         body={
           have
@@ -814,7 +813,7 @@ function Catalog({
 function Check({ on }: { on: boolean }) {
   return (
     <View style={[s.check, on && s.checkOn]}>
-      {on ? <Ionicons name="checkmark" size={13} color={T.bg} /> : null}
+      {on ? <Ionicons name="checkmark" size={13} color={COLOR.bg} /> : null}
     </View>
   );
 }
@@ -869,8 +868,8 @@ function span(from: string | null, to: string | null): string {
   return a === b ? a : `${a} → ${b}`;
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
   grow: { flex: 1 },
   header: {
     height: 48,
@@ -878,7 +877,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     borderBottomWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
     paddingLeft: 16,
     // The shell floats a close button over every modal at top:10/right:10,
     // 24pt square — so it owns everything right of `width - 34`. "Start over"
@@ -886,8 +885,8 @@ const s = StyleSheet.create({
     // 42 = 34 for the button, plus 8 of air so they read as separate controls.
     paddingRight: 42,
   },
-  headerTitle: { fontSize: 15, fontWeight: "600", color: T.fg },
-  link: { fontSize: 13, color: COLOR.accent },
+  headerTitle: { fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  link: { fontSize: 13, color: theme.colors.accent },
 
   list: { padding: 20, paddingBottom: 28 },
 
@@ -898,8 +897,8 @@ const s = StyleSheet.create({
   card: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surfaceAlt,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceAlt,
     // Rows draw edge-to-edge dividers; without this they'd poke past the
     // rounded corners.
     overflow: "hidden",
@@ -913,7 +912,7 @@ const s = StyleSheet.create({
   },
   // Hairline BETWEEN rows only — a border on every row would double up against
   // the card's own edge.
-  rowDivided: { borderTopWidth: 1, borderTopColor: T.border },
+  rowDivided: { borderTopWidth: 1, borderTopColor: theme.colors.border },
   // A tinted square keeps the icon from floating loose against the label, and
   // gives the accent somewhere to appear other than the button.
   badge: {
@@ -922,7 +921,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 9,
-    backgroundColor: T.accentSoft,
+    backgroundColor: theme.colors.accentSoft,
   },
   // Green rather than accent: this machine is already connected, which is a
   // state, not the call to action the accent is reserved for.
@@ -932,7 +931,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 9,
-    backgroundColor: T.successSoft,
+    backgroundColor: theme.colors.successSoft,
   },
   badgeQuiet: {
     height: 32,
@@ -940,17 +939,17 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 9,
-    backgroundColor: T.surface,
+    backgroundColor: theme.colors.surface,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
   },
-  rowName: { fontSize: 13.5, fontWeight: "600", color: T.fg },
-  rowMeta: { marginTop: 1, fontSize: 11.5, color: T.fgMuted },
-  rowNote: { fontSize: 11, color: T.fgFaint },
+  rowName: { fontSize: 13.5, fontWeight: "600", color: theme.colors.fg },
+  rowMeta: { marginTop: 1, fontSize: 11.5, color: theme.colors.fgMuted },
+  rowNote: { fontSize: 11, color: theme.colors.fgFaint },
 
   empty: { alignItems: "center", gap: 5, paddingVertical: 26, paddingHorizontal: 20 },
-  emptyText: { fontSize: 13, fontWeight: "500", color: T.fgMuted },
-  emptyHint: { textAlign: "center", fontSize: 11.5, color: T.fgFaint },
+  emptyText: { fontSize: 13, fontWeight: "500", color: theme.colors.fgMuted },
+  emptyHint: { textAlign: "center", fontSize: 11.5, color: theme.colors.fgFaint },
 
   center: {
     flex: 1,
@@ -960,14 +959,14 @@ const s = StyleSheet.create({
     paddingHorizontal: 40,
   },
 
-  waitTitle: { textAlign: "center", fontSize: 15, fontWeight: "600", color: T.fg },
-  waitBody: { textAlign: "center", fontSize: 13, lineHeight: 19, color: T.fgMuted },
+  waitTitle: { textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  waitBody: { textAlign: "center", fontSize: 13, lineHeight: 19, color: theme.colors.fgMuted },
   waitDetail: {
     fontFamily: "JetBrainsMono",
     textAlign: "center",
     fontSize: 10.5,
     lineHeight: 15,
-    color: T.fgFaint,
+    color: theme.colors.fgFaint,
   },
 
   codeCard: {
@@ -975,14 +974,14 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 2,
     borderRadius: 12,
-    backgroundColor: T.surface,
+    backgroundColor: theme.colors.surface,
     paddingHorizontal: 24,
     paddingVertical: 12,
   },
-  codeLabel: { fontSize: 11, color: T.fgFaint },
-  code: { fontFamily: "JetBrainsMono", fontSize: 24, letterSpacing: 2, color: T.fg },
+  codeLabel: { fontSize: 11, color: theme.colors.fgFaint },
+  code: { fontFamily: "JetBrainsMono", fontSize: 24, letterSpacing: 2, color: theme.colors.fg },
 
-  sectionHint: { paddingHorizontal: 16, paddingTop: 12, fontSize: 12, color: T.fgMuted },
+  sectionHint: { paddingHorizontal: 16, paddingTop: 12, fontSize: 12, color: theme.colors.fgMuted },
   sectionTitle: {
     marginBottom: 8,
     marginLeft: 2,
@@ -990,7 +989,7 @@ const s = StyleSheet.create({
     fontWeight: "600",
     letterSpacing: 0.7,
     textTransform: "uppercase",
-    color: T.fgFaint,
+    color: theme.colors.fgFaint,
   },
   // Still used by the catalog step, whose picker rows are a flat list rather
   // than a card.
@@ -998,12 +997,12 @@ const s = StyleSheet.create({
   search: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 13,
-    color: T.fg,
+    color: theme.colors.fg,
   },
 
   pickRow: {
@@ -1011,12 +1010,12 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 10,
     borderRadius: 10,
-    backgroundColor: T.surface,
+    backgroundColor: theme.colors.surface,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  pickName: { fontSize: 13, color: T.fg },
-  pickMeta: { fontSize: 11, color: T.fgFaint },
+  pickName: { fontSize: 13, color: theme.colors.fg },
+  pickMeta: { fontSize: 11, color: theme.colors.fgFaint },
   check: {
     height: 18,
     width: 18,
@@ -1024,22 +1023,22 @@ const s = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 5,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
   },
-  checkOn: { backgroundColor: COLOR.accent, borderColor: COLOR.accent },
+  checkOn: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
 
   footer: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     borderTopWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
   primaryBtn: {
     borderRadius: 10,
-    backgroundColor: COLOR.accent,
+    backgroundColor: theme.colors.accent,
     paddingHorizontal: 16,
     paddingVertical: 9,
   },
@@ -1047,17 +1046,17 @@ const s = StyleSheet.create({
   // light mode and near-black in dark — so a label written against it turned
   // into black text on a vivid purple pill the moment the theme flipped.
   // onAccent exists for exactly this and is white in both.
-  primaryLabel: { fontSize: 13, fontWeight: "600", color: T.onAccent },
+  primaryLabel: { fontSize: 13, fontWeight: "600", color: theme.colors.onAccent },
   // Revoke and Forget: destructive-ish actions that must not read as the thing
   // to do on the screen.
   ghostBtn: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  ghostLabel: { fontSize: 13, color: T.fgMuted },
+  ghostLabel: { fontSize: 13, color: theme.colors.fgMuted },
   disabled: { opacity: 0.4 },
   pressed: { opacity: 0.8 },
-});
+}));

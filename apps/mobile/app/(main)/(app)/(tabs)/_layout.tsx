@@ -1,7 +1,8 @@
-import { Platform, useColorScheme } from "react-native";
+import { Platform } from "react-native";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { COLOR } from "@pounce/app/ui/tokens";
-import { hexFor } from "@pounce/app/ui/theme-hex";
+import { useThemeHex } from "@pounce/app/ui/useThemeHex";
+import { alpha } from "@pounce/app/ui/color";
 
 /**
  * Home / Search / Activity / Settings on the system tab bar
@@ -11,7 +12,7 @@ import { hexFor } from "@pounce/app/ui/theme-hex";
  * the triggers are plain tabs.
  */
 export default function TabsLayout() {
-  const hex = hexFor(useColorScheme());
+  const hex = useThemeHex();
   return (
     <NativeTabs
       tintColor={COLOR.accent}
@@ -27,7 +28,7 @@ export default function TabsLayout() {
             backgroundColor: hex.bgElevated,
             iconColor: hex.fgMuted,
             labelStyle: { color: hex.fgMuted },
-            indicatorColor: "rgba(124, 111, 240, 0.22)",
+            indicatorColor: alpha(hex.accent, 0.22),
           }
         : null)}
     >

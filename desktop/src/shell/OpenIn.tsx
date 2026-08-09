@@ -14,12 +14,12 @@
  * the modal host uses.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { observable } from "@legendapp/state";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import { COLOR } from "@pounce/app/ui";
-import { T } from "@pounce/app/ui/theme";
 import { type EditorTarget, listEditors, openInEditor } from "@pounce/app/services/bridge";
 import { useThreads } from "@pounce/app/state/db/hooks";
 import { nav$ } from "../shims/router";
@@ -173,7 +173,7 @@ export function OpenInMenu() {
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   btn: {
     height: 24,
     flexDirection: "row",
@@ -182,17 +182,17 @@ const s = StyleSheet.create({
     borderRadius: 6,
     paddingHorizontal: 7,
   },
-  hover: { backgroundColor: T.surface },
-  btnLabel: { fontSize: 11.5, color: T.fgMuted },
-  btnLabelOn: { color: T.accent },
+  hover: { backgroundColor: theme.colors.surface },
+  btnLabel: { fontSize: 11.5, color: theme.colors.fgMuted },
+  btnLabelOn: { color: theme.colors.accent },
   menu: {
     position: "absolute",
     width: MENU_W,
     gap: 1,
     borderRadius: 9,
     borderWidth: 1,
-    borderColor: T.border,
-    backgroundColor: T.bgElevated,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bgElevated,
     padding: 5,
     // The menu floats over a transcript — without a shadow it reads as part of
     // the page rather than above it.
@@ -209,16 +209,16 @@ const s = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 6,
   },
-  itemLabel: { fontSize: 12.5, color: T.fg },
-  note: { paddingHorizontal: 8, paddingVertical: 6, fontSize: 12, color: T.fgFaint },
+  itemLabel: { fontSize: 12.5, color: theme.colors.fg },
+  note: { paddingHorizontal: 8, paddingVertical: 6, fontSize: 12, color: theme.colors.fgFaint },
   path: {
     marginTop: 3,
     borderTopWidth: 1,
-    borderTopColor: T.border,
+    borderTopColor: theme.colors.border,
     paddingHorizontal: 8,
     paddingTop: 5,
     fontSize: 10,
-    color: T.fgFaint,
+    color: theme.colors.fgFaint,
   },
-  error: { paddingHorizontal: 8, paddingTop: 3, fontSize: 10.5, color: T.danger },
-});
+  error: { paddingHorizontal: 8, paddingTop: 3, fontSize: 10.5, color: theme.colors.danger },
+}));

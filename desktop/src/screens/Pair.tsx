@@ -5,7 +5,8 @@
  * (loopback-only endpoint), so this screen just displays it.
  */
 import { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Text, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { SvgXml } from "react-native-svg";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -14,7 +15,6 @@ import {
   type LocalBridgeInfo,
 } from "../services/localBridge";
 import { COLOR } from "@pounce/app/ui";
-import { T } from "@pounce/app/ui/theme";
 
 export default function PairScreen() {
   const [info, setInfo] = useState<LocalBridgeInfo | null>(null);
@@ -104,17 +104,17 @@ export default function PairScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
   header: {
     height: 48,
     flexDirection: "row",
     alignItems: "center",
     borderBottomWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
     paddingHorizontal: 16,
   },
-  headerTitle: { flex: 1, fontSize: 15, fontWeight: "600", color: T.fg },
+  headerTitle: { flex: 1, fontSize: 15, fontWeight: "600", color: theme.colors.fg },
   content: {
     flex: 1,
     alignItems: "center",
@@ -123,7 +123,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 32,
     paddingVertical: 24,
   },
-  hintText: { textAlign: "center", fontSize: 14, color: T.fgMuted },
+  hintText: { textAlign: "center", fontSize: 14, color: theme.colors.fgMuted },
   qrCard: {
     width: 248,
     height: 248,
@@ -138,16 +138,16 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 4,
     borderRadius: 12,
-    backgroundColor: T.surface,
+    backgroundColor: theme.colors.surface,
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
-  manualHint: { fontSize: 12, color: T.fgFaint },
-  manualUrl: { fontFamily: "JetBrainsMono", fontSize: 13, color: T.fg },
-  manualToken: { fontFamily: "JetBrainsMono", fontSize: 12, color: T.fgMuted },
+  manualHint: { fontSize: 12, color: theme.colors.fgFaint },
+  manualUrl: { fontFamily: "JetBrainsMono", fontSize: 13, color: theme.colors.fg },
+  manualToken: { fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fgMuted },
   statusRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   statusDot: { height: 8, width: 8, borderRadius: 999 },
-  dotConnected: { backgroundColor: T.success },
-  dotIdle: { backgroundColor: T.fgFaint },
-  statusText: { fontSize: 12, color: T.fgMuted },
-});
+  dotConnected: { backgroundColor: theme.colors.success },
+  dotIdle: { backgroundColor: theme.colors.fgFaint },
+  statusText: { fontSize: 12, color: theme.colors.fgMuted },
+}));

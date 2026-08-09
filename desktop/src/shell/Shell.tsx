@@ -16,12 +16,12 @@
  * them onto this layout.
  */
 import { useRef, useState, type ComponentType } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import { nav$, RouteParamsProvider, screenKey } from "../shims/router";
 import { COLOR } from "@pounce/app/ui";
-import { T } from "@pounce/app/ui/theme";
 import { useThread } from "@pounce/app/state/db/hooks";
 import { sessionChrome$ } from "@pounce/app/state/sessionChrome";
 import { ThreadUsageSummary } from "@pounce/app/components/ThreadStatusBar";
@@ -29,6 +29,7 @@ import { AccessAlert } from "./AccessAlert";
 import { Sidebar } from "./Sidebar";
 import { TabStrip } from "./TabStrip";
 import { OpenInMenu } from "./OpenIn";
+import { ThemeMenu } from "./ThemeMenu";
 import { TerminalDock, isTermOpen, toggleTerm } from "./TerminalDock";
 import { DiffDock, DOCK_HIDE_BELOW } from "./DiffDock";
 import { Splitter, SPLITTER_WIDTH } from "./Splitter";
@@ -288,6 +289,7 @@ export function Shell() {
       {/* Above the panes, below the modal host: a menu has to escape the tab
           strip it's anchored to, but must never cover a modal. */}
       <OpenInMenu />
+      <ThemeMenu />
 
       {modal && entry ? (
         <View style={s.modalHost}>
@@ -319,8 +321,8 @@ export function Shell() {
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, flexDirection: "row", backgroundColor: T.bg },
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, flexDirection: "row", backgroundColor: theme.colors.bg },
   // No right border: the splitter floating over the seam draws it.
   sidebar: {},
   sidebarSplitter: { position: "absolute", top: 0, bottom: 0, zIndex: 5 },
@@ -335,7 +337,7 @@ const s = StyleSheet.create({
     // Rule below, not above: it separates the chrome block (tabs + status) from
     // the transcript, and the tab strip needs no second line under it.
     borderBottomWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
     paddingHorizontal: 12,
     paddingVertical: 5,
   },
@@ -347,11 +349,16 @@ const s = StyleSheet.create({
     borderRadius: 5,
     paddingHorizontal: 5,
   },
-  statusChipOn: { backgroundColor: T.accentSoft },
-  statusChipText: { fontSize: 10, color: T.fgFaint, fontVariant: ["tabular-nums"] },
-  statusChipTextOn: { color: T.accent },
-  statusPath: { flexShrink: 1, fontSize: 10.5, color: T.fgFaint },
-  statusBranch: { flexShrink: 1, fontFamily: "JetBrainsMono", fontSize: 10.5, color: T.fgFaint },
+  statusChipOn: { backgroundColor: theme.colors.accentSoft },
+  statusChipText: { fontSize: 10, color: theme.colors.fgFaint, fontVariant: ["tabular-nums"] },
+  statusChipTextOn: { color: theme.colors.accent },
+  statusPath: { flexShrink: 1, fontSize: 10.5, color: theme.colors.fgFaint },
+  statusBranch: {
+    flexShrink: 1,
+    fontFamily: "JetBrainsMono",
+    fontSize: 10.5,
+    color: theme.colors.fgFaint,
+  },
   modalHost: {
     position: "absolute",
     top: 0,
@@ -371,16 +378,16 @@ const s = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: T.overlay,
+    backgroundColor: theme.colors.overlay,
   },
   modalCard: {
     overflow: "hidden",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
     // Raised off the scrim, like a real sheet — bg would match the window
     // behind it and the card would read as a hole rather than a panel.
-    backgroundColor: T.bgElevated,
+    backgroundColor: theme.colors.bgElevated,
     shadowColor: "#000",
     shadowOpacity: 0.35,
     shadowRadius: 30,
@@ -396,7 +403,7 @@ const s = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 999,
   },
-  modalClosePressed: { backgroundColor: T.surfaceHover },
+  modalClosePressed: { backgroundColor: theme.colors.surfaceHover },
   // Inherits the card's surface: a second fill here made the body a grey slab
   // sitting inside a white card.
   // paddingTop clears the close button this shell floats over every modal
@@ -404,4 +411,4 @@ const s = StyleSheet.create({
   // whose own header carries a right-aligned control ("Clear all"), so without
   // the reserved band the × lands on top of that label.
   filtersBody: { flex: 1, paddingHorizontal: 16, paddingTop: 40 },
-});
+}));

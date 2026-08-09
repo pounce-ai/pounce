@@ -1,6 +1,6 @@
-import { Platform, useColorScheme } from "react-native";
+import { Platform } from "react-native";
 import { Stack } from "expo-router";
-import { hexFor } from "@pounce/app/ui/theme-hex";
+import { useThemeHex } from "@pounce/app/ui/useThemeHex";
 import { AppearanceButton } from "@pounce/app/components/AppearanceButton";
 
 /** Per-tab stack so Settings gets a native large-title navigation bar.
@@ -8,7 +8,7 @@ import { AppearanceButton } from "@pounce/app/components/AppearanceButton";
  *  resolves header colors against the system trait, so PlatformColors would
  *  ignore the forced light/dark toggle. */
 export default function SettingsLayout() {
-  const hex = hexFor(useColorScheme());
+  const hex = useThemeHex();
   return (
     <Stack
       screenOptions={{

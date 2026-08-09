@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
-import { StyleSheet, useColorScheme, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { TrueSheet } from "@lodev09/react-native-true-sheet";
-import { hexFor } from "../ui/theme-hex";
+import { useThemeHex } from "../ui/useThemeHex";
 import type { NativeSheetProps } from "./NativeSheet";
 
 /** iOS/Android: a REAL system sheet (UISheetPresentationController /
@@ -22,7 +22,7 @@ export function NativeSheet({ visible, onClose, children }: NativeSheetProps) {
   // Scheme-picked hex, not a PlatformColor: the sheet's background resolves
   // against the presented VC's traits, which ignore the forced light/dark
   // toggle (same trap as navigation-bar colors).
-  const hex = hexFor(useColorScheme());
+  const hex = useThemeHex();
   const insets = useSafeAreaInsets();
   return (
     <TrueSheet

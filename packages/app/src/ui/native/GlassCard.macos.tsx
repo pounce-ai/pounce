@@ -1,5 +1,5 @@
-import { StyleSheet, View } from "react-native";
-import { T } from "../theme";
+import { View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import type { GlassCardProps } from "./glass";
 import { GlassSurface, hasNativeGlass } from "./GlassSurface";
 
@@ -35,11 +35,11 @@ export function GlassCard({ children, style, radius = 16, shadow }: GlassCardPro
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme) => ({
   borderOverlay: {
     ...StyleSheet.absoluteFillObject,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
   },
   shadow: {
     shadowColor: "#000",
@@ -48,9 +48,9 @@ const s = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
   },
   fallback: {
-    backgroundColor: T.surface,
+    backgroundColor: theme.colors.surface,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: T.border,
+    borderColor: theme.colors.border,
     overflow: "hidden",
   },
-});
+}));

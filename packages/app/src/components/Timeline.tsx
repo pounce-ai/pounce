@@ -1518,8 +1518,6 @@ function MetaDetail({
 
 /* Soft accent/warning/danger tints (the old accent/40-style alpha classes) have
  * no PlatformColor equivalent, so they stay literal rgba of the palette hexes. */
-const ACCENT_BORDER = "rgba(124, 111, 240, 0.4)";
-const ACCENT_TINT = "rgba(124, 111, 240, 0.05)";
 const WARNING_BORDER = "rgba(210, 153, 34, 0.4)";
 const WARNING_TINT = "rgba(210, 153, 34, 0.1)";
 const DANGER_BORDER = "rgba(248, 81, 73, 0.4)";
@@ -1576,8 +1574,8 @@ const s = StyleSheet.create((theme) => ({
   accentCard: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: ACCENT_BORDER,
-    backgroundColor: ACCENT_TINT,
+    borderColor: theme.colors.accentLine,
+    backgroundColor: theme.colors.accentTint,
     padding: 12,
   },
   planLabel: {
@@ -1608,7 +1606,7 @@ const s = StyleSheet.create((theme) => ({
     gap: 6,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: ACCENT_BORDER,
+    borderColor: theme.colors.accentLine,
     backgroundColor: theme.colors.accentSoft,
     paddingHorizontal: 12,
     paddingVertical: 6,

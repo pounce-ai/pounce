@@ -12,8 +12,8 @@
  * plain token map, so it crosses fine.
  */
 import { View } from "react-native";
-import { T } from "../ui/theme";
-import { IS_DESKTOP } from "../ui";
+
+import { COLOR, IS_DESKTOP } from "../ui";
 
 /** One bone. `w` may be a percentage string or a number of points. */
 export function Bone({
@@ -34,24 +34,26 @@ export function Bone({
         height: h,
         borderRadius: r,
         marginTop: mt,
-        backgroundColor: T.surfaceHover,
+        backgroundColor: COLOR.surfaceHover,
       }}
     />
   );
 }
 
-const card = {
-  borderRadius: 12,
-  borderWidth: 1,
-  borderColor: T.border,
-  backgroundColor: T.surfaceAlt,
-  padding: 14,
-} as const;
+/** Called per render, never hoisted: the palette can change under it. */
+const card = () =>
+  ({
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLOR.border,
+    backgroundColor: COLOR.surfaceAlt,
+    padding: 14,
+  }) as const;
 
 /** A metric tile: label, figure, delta. */
 function TileBone() {
   return (
-    <View style={{ ...card, flex: 1, gap: 6 }}>
+    <View style={{ ...card(), flex: 1, gap: 6 }}>
       <Bone w="55%" h={9} r={3} />
       <Bone w="70%" h={20} r={5} mt={2} />
       <Bone w="35%" h={9} r={3} />
@@ -75,7 +77,7 @@ export function ActivityBones() {
       </View>
 
       {/* Heatmap card */}
-      <View style={{ ...card, gap: 10 }}>
+      <View style={{ ...card(), gap: 10 }}>
         <Bone w="30%" h={9} r={3} />
         <Bone w="100%" h={IS_DESKTOP ? 96 : 26} r={6} />
         <Bone w="45%" h={9} r={3} />
@@ -93,12 +95,12 @@ export function ActivityBones() {
 
       {/* Plan usage: a heading over per-agent cards */}
       <Bone w="28%" h={9} r={3} mt={2} />
-      <View style={{ ...card, gap: 8 }}>
+      <View style={{ ...card(), gap: 8 }}>
         <Bone w="40%" h={13} r={4} />
         <Bone w="75%" h={9} r={3} />
         <Bone w="100%" h={5} r={999} mt={2} />
       </View>
-      <View style={{ ...card, gap: 8 }}>
+      <View style={{ ...card(), gap: 8 }}>
         <Bone w="35%" h={13} r={4} />
         <Bone w="60%" h={9} r={3} />
       </View>
@@ -106,7 +108,7 @@ export function ActivityBones() {
       {/* Streak row */}
       <View
         style={{
-          ...card,
+          ...card(),
           flexDirection: "row",
           justifyContent: "space-around",
           alignItems: "center",
@@ -118,7 +120,7 @@ export function ActivityBones() {
       </View>
 
       {/* Trend chart */}
-      <View style={{ ...card, gap: 10 }}>
+      <View style={{ ...card(), gap: 10 }}>
         <Bone w="42%" h={9} r={3} />
         <Bone w="100%" h={IS_DESKTOP ? 120 : 96} r={6} />
       </View>

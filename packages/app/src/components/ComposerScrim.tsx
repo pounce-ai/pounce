@@ -1,6 +1,6 @@
-import { useColorScheme, View } from "react-native";
+import { View } from "react-native";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
-import { hexFor } from "../ui/theme-hex";
+import { useThemeHex } from "../ui/useThemeHex";
 
 /**
  * A short fade from transparent into the page background, sitting on the top
@@ -20,7 +20,7 @@ import { hexFor } from "../ui/theme-hex";
 export const SCRIM_HEIGHT = 28;
 
 export function ComposerScrim() {
-  const bg = hexFor(useColorScheme()).bg;
+  const bg = useThemeHex().bg;
   return (
     // In NORMAL FLOW, deliberately: it has to be part of what the composer
     // wrapper measures. Floated above the bar it covered SCRIM_HEIGHT of
