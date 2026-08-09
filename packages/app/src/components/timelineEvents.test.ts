@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineEvent } from "@pounce/shared";
-import { collapseToolResults } from "./timelineEvents";
+import { collapseToolResults, formatElapsed, runElapsedMs } from "./timelineEvents";
 
 // Minimal fixtures — collapseToolResults only reads .type, .id, .call.id and
 // .result.toolCallId, so we build just those shapes and cast.
@@ -64,5 +64,77 @@ describe("collapseToolResults", () => {
     const once = collapseToolResults(input);
     const twice = collapseToolResults(once);
     expect(ids(twice)).toEqual(ids(once));
+  });
+});
+
+// `ts` matters here where it did not above, so these build their own fixtures.
+const callAt = (id: string, ts: string, callId = id): TimelineEvent =>
+  ({ type: "tool_call", id, ts, call: { id: callId } }) as unknown as TimelineEvent;
+const resultAt = (toolCallId: string, ts: string): TimelineEvent =>
+  ({
+    type: "tool_result",
+    id: `${toolCallId}:o`,
+    ts,
+    result: { toolCallId },
+  }) as unknown as TimelineEvent;
+
+describe("runElapsedMs", () => {
+  it("spans the first call to the LAST result, not the last call", () => {
+    // The finishing timestamp lives on the result — measuring call-to-call
+    // would drop however long the final command actually took.
+    const events = [
+      callAt("a", "2026-08-09T10:00:00.000Z"),
+      callAt("b", "2026-08-09T10:00:05.000Z"),
+      resultAt("a", "2026-08-09T10:00:03.000Z"),
+      resultAt("b", "2026-08-09T10:00:22.000Z"),
+    ];
+    expect(runElapsedMs(events, ["a", "b"])).toBe(22_000);
+  });
+
+  it("matches a result by call.id when it differs from the event id", () => {
+    const events = [
+      callAt("evt1", "2026-08-09T10:00:00.000Z", "toolu_X"),
+      resultAt("toolu_X", "2026-08-09T10:00:04.000Z"),
+    ];
+    expect(runElapsedMs(events, ["evt1"])).toBe(4_000);
+  });
+
+  it("ignores calls outside the run", () => {
+    const events = [
+      callAt("a", "2026-08-09T10:00:00.000Z"),
+      resultAt("a", "2026-08-09T10:00:02.000Z"),
+      callAt("z", "2026-08-09T10:05:00.000Z"),
+      resultAt("z", "2026-08-09T10:09:00.000Z"),
+    ];
+    expect(runElapsedMs(events, ["a"])).toBe(2_000);
+  });
+
+  it("is null under a second — 'Worked for 0s' says less than nothing", () => {
+    const events = [
+      callAt("a", "2026-08-09T10:00:00.000Z"),
+      resultAt("a", "2026-08-09T10:00:00.400Z"),
+    ];
+    expect(runElapsedMs(events, ["a"])).toBeNull();
+  });
+
+  it("is null while the run is still going (no results yet)", () => {
+    expect(runElapsedMs([callAt("a", "2026-08-09T10:00:00.000Z")], ["a"])).toBeNull();
+  });
+
+  it("is null when the run has no calls at all", () => {
+    expect(runElapsedMs([msg("m")], ["nope"])).toBeNull();
+  });
+});
+
+describe("formatElapsed", () => {
+  it.each([
+    [22_000, "22s"],
+    [59_400, "59s"],
+    [60_000, "1m"],
+    [90_000, "1m 30s"],
+    [125_000, "2m 5s"],
+    [120_000, "2m"],
+  ])("formats %ims as %s", (ms, expected) => {
+    expect(formatElapsed(ms)).toBe(expected);
   });
 });
