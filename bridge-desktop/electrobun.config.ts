@@ -1,0 +1,74 @@
+import { existsSync } from "node:fs";
+import type { ElectrobunConfig } from "electrobun";
+
+export default {
+  app: {
+    name: "Pounce",
+    identifier: "app.pounce.bridge",
+    version: "1.1.0",
+  },
+  // Auto-update: the app checks this URL on launch and self-updates (tiny BSDIFF
+  // deltas, full bundle fallback).
+  //
+  // NOT /releases/latest/download, which is the obvious choice and is already
+  // taken. The macOS desktop app's Sparkle feed (SUFeedURL in
+  // desktop/macos/PounceDesktop-macOS/Info.plist) resolves through that exact
+  // tag-less path, and that URL is baked into every shipped desktop build — it
+  // cannot be moved without stranding them. Two updaters cannot both own
+  // "latest": whichever released last would 404 the other's manifest.
+  //
+  // So the bridge uses a rolling `bridge-latest` tag instead. CI re-uploads the
+  // auto-update artifacts to that one release every time (see
+  // .github/workflows/release-bridge.yml), giving a stable moving pointer that
+  // leaves GitHub's "latest" to Sparkle.
+  //
+  // Installs from the deprecated v1.0.20 and earlier have a different URL baked
+  // into their binary and will not pick these up; that channel is not being
+  // kept alive, so those few installs need a manual reinstall.
+  release: {
+    baseUrl: "https://github.com/pounce-ai/pounce/releases/download/bridge-latest",
+  },
+  runtime: {
+    // It's a tray app — closing the window leaves it running in the menu bar.
+    exitOnLastWindowClosed: false,
+  },
+  build: {
+    bun: { entrypoint: "src/bun/index.ts" },
+    views: {
+      mainview: { entrypoint: "src/mainview/index.ts" },
+    },
+    copy: {
+      // pounce-tunnel (iroh p2p, off-LAN access) — built per-platform by CI
+      // into assets/; absent in plain local dev builds, hence the guard.
+      ...(existsSync("assets/pounce-tunnel") ? { "assets/pounce-tunnel": "views/pounce-tunnel" } : {}),
+      // zigpty's native PTY addons. The bridge's pty.mjs hosts interactive
+      // (answerable) agent sessions in a real TTY; zigpty resolves its binding
+      // as `new URL("../prebuilds/<platform>-<arch>.node", import.meta.url)`,
+      // and that URL survives bundling — so from app/bun/index.js it lands on
+      // app/prebuilds/. Without these files `hasNative` is false and zigpty
+      // silently degrades to a pure-JS pipe: no real TTY, so agent TUIs don't
+      // render and prompts can't be answered from the phone. All eight
+      // prebuilds together are 336KB, so ship them rather than branch on host.
+      "../node_modules/zigpty/prebuilds": "prebuilds",
+      "src/mainview/index.html": "views/mainview/index.html",
+      "src/mainview/index.css": "views/mainview/index.css",
+      "assets/tray.png": "views/tray.png",
+      // Full-color tray icon for Windows/Linux, where macOS template rendering
+      // doesn't exist and the dark template glyph would disappear.
+      "assets/icon.iconset/icon_32x32.png": "views/tray-color.png",
+    },
+    mac: {
+      bundleCEF: false,
+      icons: "assets/icon.iconset",
+      // Sign when a Developer ID is present; only let Electrobun notarize when
+      // notarization creds are also present. (release-bridge.sh signs here and
+      // notarizes separately via the `asc` CLI's stored credentials.)
+      codesign: !!process.env.ELECTROBUN_DEVELOPER_ID,
+      notarize: !!(process.env.ELECTROBUN_APPLEID || process.env.ELECTROBUN_APPLEAPIKEY),
+    },
+    // PNG icons are auto-converted (png-to-ico for the Windows installer);
+    // png-to-ico caps input at 256px, so don't point it at the 512 variant.
+    linux: { bundleCEF: false, icon: "assets/icon.iconset/icon_512x512.png" },
+    win: { bundleCEF: false, icon: "assets/icon.iconset/icon_256x256.png" },
+  },
+} satisfies ElectrobunConfig;

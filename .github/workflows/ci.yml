@@ -50,7 +50,21 @@ jobs:
             -- '*.ts' '*.tsx' '*.mjs' '*.cjs' '*.js' '*.jsx' | tr '\n' ' ')
           if [ -n "$files" ]; then
             echo "Checking formatting of added files:"; echo "$files" | tr ' ' '\n'
-            bunx oxfmt --check $files
+            # oxfmt exits 2 with "Expected at least one target file" when every
+            # path it was handed is covered by .oxfmtrc ignorePatterns. That is
+            # a clean pass, not a failure — a PR that only adds files under an
+            # ignored path (e.g. bridge-desktop/) would otherwise always fail.
+            # The step runs under `bash -e`, so capture the status explicitly —
+            # a failing command substitution would otherwise abort the step
+            # before the check below can run.
+            set +e
+            out="$(bunx oxfmt --check $files 2>&1)"
+            status=$?
+            set -e
+            echo "$out"
+            if [ $status -ne 0 ] && ! grep -q "Expected at least one target file" <<<"$out"; then
+              exit $status
+            fi
           else
             echo "No added source files to format-check."
           fi
