@@ -137,7 +137,11 @@ jobs:
       # Notarization rejects bundled executables without the hardened runtime;
       # sign the tunnel binary from build.keychain (created above) and pin the
       # keychain open — it auto-locks after 300s and electrobun signs later too.
-      - name: Sign pounce-tunnel (hardened runtime)
+      # Notarization inspects EVERY executable in the bundle, so both natives we
+      # add ourselves must be signed before electrobun packages them: the tunnel
+      # binary, and zigpty's .node addon. Signing them in place (assets/ and
+      # node_modules/) means the copies electrobun makes are already signed.
+      - name: Sign bundled natives (hardened runtime)
         if: ${{ matrix.slug == 'macos-arm64' && env.HAS_SIGNING_CERT == 'true' }}
         env:
           CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
@@ -147,8 +151,17 @@ jobs:
           security find-identity -v -p codesigning build.keychain
           ID=$(security find-identity -v -p codesigning build.keychain | awk '/[0-9A-F]{40}/ {print $2; exit}')
           test -n "$ID"
-          codesign --force --options runtime --timestamp --keychain build.keychain --sign "$ID" assets/pounce-tunnel
-          codesign --verify --strict assets/pounce-tunnel
+          sign() {
+            codesign --force --options runtime --timestamp \
+              --keychain build.keychain --sign "$ID" "$1"
+            codesign --verify --strict "$1"
+          }
+          sign assets/pounce-tunnel
+          # Only the host's prebuild is bundled (see zigptyPrebuilds() in
+          # electrobun.config.ts), so only that one needs a signature.
+          PREBUILD="../node_modules/zigpty/prebuilds/zigpty.darwin-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/').node"
+          test -f "$PREBUILD" || { echo "::error::missing $PREBUILD"; exit 1; }
+          sign "$PREBUILD"
 
       # The signing/notarization env vars are only set on the macOS job; the
       # electrobun config keys code signing off their presence, so Windows and
