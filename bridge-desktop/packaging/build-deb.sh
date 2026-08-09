@@ -25,20 +25,55 @@ VERSION="$(node -p "require('$HERE/../package.json').version")"
 
 # Electrobun names the bundle folder from the app name; don't hardcode it —
 # a rename upstream should fail loudly here rather than ship an empty package.
-BUNDLE="$(find "$APP_DIR_ROOT" -maxdepth 1 -mindepth 1 -type d | head -1)"
+#
+# Plain globs, not `find | grep | head`: under `set -euo pipefail` that pipeline
+# aborts the script even on success, because `head` closing the pipe SIGPIPEs
+# its upstream and pipefail propagates the 141. The guards below are only
+# reachable without it.
+BUNDLE=""
+for d in "$APP_DIR_ROOT"/*/; do
+  [ -d "$d" ] || continue
+  BUNDLE="${d%/}"
+  break
+done
 if [ -z "$BUNDLE" ]; then
   echo "no app bundle under $APP_DIR_ROOT — did 'bun run build:stable' run?" >&2
   exit 1
 fi
 
-# The launcher is the one top-level executable that starts the app. Locate it
-# rather than assuming a name, for the same reason.
-LAUNCHER="$(find "$BUNDLE" -maxdepth 1 -type f -perm -u+x -printf '%f\n' | grep -E '^(launcher|Pounce)$' | head -1)"
+# On Linux, Electrobun puts the launcher in <bundle>/bin, not at the top level
+# ("Use bin instead of MacOS" — cli/index.ts), and the generated .desktop file
+# runs it as `Exec=launcher`. Search bin/ first, then the root, and record the
+# path RELATIVE to the bundle so the desktop entry and symlink stay correct
+# wherever it lives.
+LAUNCHER=""
+CANDIDATES=()
+for dir in bin .; do
+  [ -d "$BUNDLE/$dir" ] || continue
+  for f in "$BUNDLE/$dir"/*; do
+    [ -f "$f" ] && [ -x "$f" ] || continue
+    rel="$(basename "$f")"
+    [ "$dir" = "." ] || rel="$dir/$rel"
+    CANDIDATES+=("$rel")
+    case "$(basename "$f")" in
+      launcher | launcher.exe | Pounce)
+        [ -n "$LAUNCHER" ] || LAUNCHER="$rel"
+        ;;
+    esac
+  done
+done
+# An upstream rename should degrade to a warning when it is unambiguous, not a
+# failure — but never guess between several executables.
+if [ -z "$LAUNCHER" ] && [ "${#CANDIDATES[@]}" -eq 1 ]; then
+  LAUNCHER="${CANDIDATES[0]}"
+  echo "note: no launcher executable by name; using the only candidate '$LAUNCHER'" >&2
+fi
 if [ -z "$LAUNCHER" ]; then
-  echo "no launcher executable at the top level of $BUNDLE; found:" >&2
-  find "$BUNDLE" -maxdepth 1 -type f -perm -u+x -printf '  %f\n' >&2
+  echo "cannot identify the launcher under $BUNDLE (looked in bin/ and the root)" >&2
+  printf '  candidate: %s\n' "${CANDIDATES[@]:-(none)}" >&2
   exit 1
 fi
+echo "▸ bundle=$BUNDLE launcher=$LAUNCHER version=$VERSION arch=$DEB_ARCH"
 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT

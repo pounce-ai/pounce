@@ -1,11 +1,44 @@
 import { existsSync } from "node:fs";
+import { arch, platform } from "node:os";
 import type { ElectrobunConfig } from "electrobun";
+
+/**
+ * zigpty's native PTY binding, for the host being built.
+ *
+ * The bridge's pty.mjs hosts interactive (answerable) agent sessions in a real
+ * TTY. zigpty resolves its addon as `new URL("../prebuilds/<name>.node",
+ * import.meta.url)` and that URL survives bundling, so from app/bun/index.js it
+ * lands on app/prebuilds/. Without it `hasNative` is false and zigpty degrades
+ * to a pure-JS pipe: no TTY, so agent TUIs don't render and prompts can't be
+ * answered from the phone, while everything else looks fine.
+ *
+ * Only the host's own prebuild is copied. Shipping all eight was tempting (they
+ * total 336KB) but wrong: macOS notarization inspects every executable in the
+ * bundle and rejects unsigned ones, so the win32/linux .node files — useless
+ * inside a .app — failed the build outright. The macOS job signs the one that
+ * remains before packaging (see release-bridge.yml).
+ */
+function zigptyPrebuilds(): Record<string, string> {
+  const os = platform() === "android" ? "linux" : platform();
+  const base = `zigpty.${os}-${arch()}`;
+  // glibc vs musl is resolved at runtime by zigpty, so Linux needs both.
+  const names = os === "linux" ? [base, `${base}-musl`] : [base];
+  const entries = names
+    .map((n) => [`../node_modules/zigpty/prebuilds/${n}.node`, `prebuilds/${n}.node`] as const)
+    .filter(([src]) => existsSync(src));
+  if (entries.length === 0) {
+    throw new Error(
+      `no zigpty prebuild for ${os}-${arch()} — interactive prompts would silently stop working`,
+    );
+  }
+  return Object.fromEntries(entries);
+}
 
 export default {
   app: {
     name: "Pounce",
     identifier: "app.pounce.bridge",
-    version: "1.1.0",
+    version: "1.1.1",
   },
   // Auto-update: the app checks this URL on launch and self-updates (tiny BSDIFF
   // deltas, full bundle fallback).
@@ -41,15 +74,8 @@ export default {
       // pounce-tunnel (iroh p2p, off-LAN access) — built per-platform by CI
       // into assets/; absent in plain local dev builds, hence the guard.
       ...(existsSync("assets/pounce-tunnel") ? { "assets/pounce-tunnel": "views/pounce-tunnel" } : {}),
-      // zigpty's native PTY addons. The bridge's pty.mjs hosts interactive
-      // (answerable) agent sessions in a real TTY; zigpty resolves its binding
-      // as `new URL("../prebuilds/<platform>-<arch>.node", import.meta.url)`,
-      // and that URL survives bundling — so from app/bun/index.js it lands on
-      // app/prebuilds/. Without these files `hasNative` is false and zigpty
-      // silently degrades to a pure-JS pipe: no real TTY, so agent TUIs don't
-      // render and prompts can't be answered from the phone. All eight
-      // prebuilds together are 336KB, so ship them rather than branch on host.
-      "../node_modules/zigpty/prebuilds": "prebuilds",
+      // zigpty's native PTY addon for this host — see zigptyPrebuilds() above.
+      ...zigptyPrebuilds(),
       "src/mainview/index.html": "views/mainview/index.html",
       "src/mainview/index.css": "views/mainview/index.css",
       "assets/tray.png": "views/tray.png",
