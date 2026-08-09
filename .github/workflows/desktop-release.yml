@@ -274,6 +274,14 @@ jobs:
           name: Pounce Desktop ${{ needs.desktop.outputs.version }}
           # Load-bearing: SUFeedURL resolves through releases/latest/download/,
           # so a release that isn't "latest" is invisible to auto-update.
+          #
+          # This repo has a second updater — the Windows/Linux tray app in
+          # bridge-desktop/ — and only one release can be "latest". Sparkle wins
+          # because SUFeedURL is baked into every shipped desktop build and
+          # cannot be changed retroactively. The bridge therefore reads a
+          # rolling `bridge-latest` release instead (see release-bridge.yml) and
+          # publishes with make_latest: false. Do not "fix" that to true: it
+          # would 404 this appcast and silently kill desktop auto-update.
           make_latest: true
           body: |
             Desktop app ${{ needs.desktop.outputs.version }}. Auto-updates via Sparkle; requires macOS 14+.

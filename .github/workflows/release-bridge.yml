@@ -8,11 +8,18 @@ name: Release Bridge
 # Bump the version in BOTH bridge-desktop/package.json and
 # bridge-desktop/electrobun.config.ts, merge, then push a `bridge-v<version>`
 # tag. The resulting Release is tagged `v<version>`.
+# Can also be run from the Actions tab without pushing a tag — use dry_run to
+# build all four platforms and inspect the artifacts without publishing.
 on:
   push:
     tags:
       - "bridge-v*"
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build every platform but do NOT publish a release"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -53,6 +60,31 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      # The version lives in two files and both are load-bearing: package.json
+      # names the GitHub release, electrobun.config.ts is stamped into the app
+      # and compared by the updater. If they drift, the release says one version
+      # and installed apps believe another — so fail here, before a four-platform
+      # build, rather than after publishing. When a tag triggered this run, it
+      # must agree too.
+      - name: Check version consistency
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          CFG=$(grep -oE 'version: *"[^"]+"' electrobun.config.ts | head -1 | sed 's/.*"\(.*\)"/\1/')
+          echo "package.json=$PKG  electrobun.config.ts=$CFG  tag=${GITHUB_REF_NAME:-n/a}"
+          if [ "$PKG" != "$CFG" ]; then
+            echo "::error::version mismatch — package.json=$PKG but electrobun.config.ts=$CFG"
+            exit 1
+          fi
+          case "$GITHUB_REF" in
+            refs/tags/bridge-v*)
+              TAG="${GITHUB_REF_NAME#bridge-v}"
+              if [ "$TAG" != "$PKG" ]; then
+                echo "::error::tag bridge-v$TAG does not match version $PKG"
+                exit 1
+              fi
+              ;;
+          esac
 
       - run: bun install
 
@@ -176,11 +208,11 @@ jobs:
           if-no-files-found: error
 
   # Publish as `v{app-version}` (e.g. v1.0.8) to match releases cut locally by
-  # scripts/release-bridge.sh — not the `bridge-v*` trigger tag. Both work for
-  # auto-update ("latest non-prerelease"), but this keeps the Releases page
-  # consistent regardless of which path built it.
+  # scripts/release-bridge.sh — not the `bridge-v*` trigger tag. This keeps the
+  # Releases page consistent regardless of which path built it.
   release:
     needs: build
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -209,6 +241,39 @@ jobs:
 
             Once running, Pounce sits in the tray: it shows today's usage and your plan quota, and "Show pairing window" brings up the QR to scan.
 
-            The `stable-*` files are auto-update artifacts — installed apps pick this release up automatically. The `.deb` is the exception: it installs to root-owned `/opt`, which the in-place updater can't write to, so update it by installing a newer `.deb`. The `.tar.gz` install self-updates.
+            The `stable-*` files are auto-update artifacts — installed apps pick them up from the rolling `bridge-latest` release automatically. The `.deb` is the exception: it installs to root-owned `/opt`, which the in-place updater can't write to, so update it by installing a newer `.deb`. The `.tar.gz` install self-updates.
           files: release-assets/*
           fail_on_unmatched_files: true
+          # Load-bearing: GitHub's "latest" belongs to the macOS desktop app.
+          # Its Sparkle feed (SUFeedURL) resolves through
+          # releases/latest/download/appcast.xml, and that URL is baked into
+          # every shipped desktop build. Marking a bridge release "latest" would
+          # 404 that feed and silently kill desktop auto-update until the next
+          # desktop release. The bridge's own updater reads the rolling
+          # `bridge-latest` release below instead, so it does not need this.
+          make_latest: false
+
+      # The rolling pointer the bridge's updater actually reads. One release,
+      # re-uploaded every time, holding only the auto-update artifacts —
+      # `--clobber` replaces the previous build's files in place. Electrobun
+      # builds its BSDIFF delta by fetching the *previous* .tar.zst from this
+      # same URL, so the assets must be replaced here rather than accumulated
+      # under per-version tags.
+      - name: Refresh the rolling bridge-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view bridge-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create bridge-latest \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Bridge auto-update channel" \
+              --notes "Rolling update channel for the Pounce tray app. Not a download — see the versioned releases for installers." \
+              --latest=false
+          fi
+          # Only the update manifests and payloads; installers stay on the
+          # versioned release so this one never looks like a download page.
+          gh release upload bridge-latest \
+            --repo "$GITHUB_REPOSITORY" --clobber \
+            release-assets/stable-*
+          gh release edit bridge-latest --repo "$GITHUB_REPOSITORY" \
+            --notes "Rolling update channel for the Pounce tray app — currently v${{ steps.ver.outputs.version }}. Not a download; see the versioned releases for installers."

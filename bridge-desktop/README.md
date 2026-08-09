@@ -42,6 +42,34 @@ release missing one platform's `update.json` strands that platform's updaters).
 Artifacts: `Pounce.dmg` (signed + notarized), `Pounce-Setup-Windows.exe`,
 `Pounce-Linux-<arch>.deb`, `Pounce-Setup-Linux-<arch>.tar.gz`.
 
+To rehearse without publishing, run **Release Bridge** from the Actions tab —
+`dry_run` defaults to on, so it builds every platform and uploads the artifacts
+for inspection while skipping the release job entirely. Merging to `main` never
+publishes anything; only the tag or a `dry_run: false` manual run does.
+
+### Two updaters, one "latest"
+
+This repo publishes two independently updating apps, and GitHub has only one
+`releases/latest`:
+
+| App | Updater | Reads |
+| --- | --- | --- |
+| `desktop/` (macOS) | Sparkle | `releases/latest/download/appcast.xml` |
+| `bridge-desktop/` (Win/Linux) | Electrobun | `releases/download/bridge-latest/…` |
+
+Sparkle owns `latest` and cannot be moved: `SUFeedURL` is compiled into every
+desktop build already in the field. So bridge releases publish with
+`make_latest: false`, and CI additionally re-uploads the `stable-*` auto-update
+artifacts to a rolling **`bridge-latest`** release, which is what
+`electrobun.config.ts`'s `baseUrl` points at. Electrobun builds its BSDIFF delta
+by fetching the previous `.tar.zst` from that same URL, so those assets are
+replaced in place (`gh release upload --clobber`) rather than accumulated under
+per-version tags.
+
+If a bridge release ever marks itself latest, the desktop app's appcast 404s and
+macOS auto-update dies silently until the next desktop release — and the reverse
+is equally true. Neither failure is visible without checking.
+
 ## Two things that fail silently
 
 **zigpty's native binding.** `apps/bridge/agents/pty.mjs` hosts interactive

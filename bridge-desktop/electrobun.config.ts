@@ -8,15 +8,25 @@ export default {
     version: "1.1.0",
   },
   // Auto-update: the app checks this URL on launch and self-updates (tiny BSDIFF
-  // deltas, full bundle fallback). GitHub's /releases/latest/download always
-  // points at the newest non-prerelease, so each release ships itself.
+  // deltas, full bundle fallback).
   //
-  // Deliberately the only update channel. Installs from the deprecated v1.0.20
-  // and earlier have a different URL baked into their binary and will not pick
-  // these releases up; that channel is not being kept alive, so those few
-  // installs need a manual reinstall from the current release.
+  // NOT /releases/latest/download, which is the obvious choice and is already
+  // taken. The macOS desktop app's Sparkle feed (SUFeedURL in
+  // desktop/macos/PounceDesktop-macOS/Info.plist) resolves through that exact
+  // tag-less path, and that URL is baked into every shipped desktop build — it
+  // cannot be moved without stranding them. Two updaters cannot both own
+  // "latest": whichever released last would 404 the other's manifest.
+  //
+  // So the bridge uses a rolling `bridge-latest` tag instead. CI re-uploads the
+  // auto-update artifacts to that one release every time (see
+  // .github/workflows/release-bridge.yml), giving a stable moving pointer that
+  // leaves GitHub's "latest" to Sparkle.
+  //
+  // Installs from the deprecated v1.0.20 and earlier have a different URL baked
+  // into their binary and will not pick these up; that channel is not being
+  // kept alive, so those few installs need a manual reinstall.
   release: {
-    baseUrl: "https://github.com/pounce-ai/pounce/releases/latest/download",
+    baseUrl: "https://github.com/pounce-ai/pounce/releases/download/bridge-latest",
   },
   runtime: {
     // It's a tray app — closing the window leaves it running in the menu bar.
