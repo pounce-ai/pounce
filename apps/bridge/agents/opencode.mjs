@@ -197,14 +197,14 @@ export class OpencodeAdapter {
       if (limit && turns.length > limit) turns.shift();
     };
 
-    for (const { data, parts } of messages) {
+    for (const { id: msgId, data, parts } of messages) {
       const role = data.role;
       const ts = msIso(data.time?.created) || new Date().toISOString();
       for (const part of parts) {
         const base = { id: part.id, conversationId: threadId, seq: 0, ts };
         const d = part.data;
         if (d.type === "text" && d.text?.trim()) {
-          if (role === "user") add(userMessage(base, d.text), true);
+          if (role === "user") add(userMessage(base, unwrapRunPrompt(d.text)), true);
           else add(assistantMessage(base, d.text));
         } else if (d.type === "reasoning" && d.text?.trim()) {
           add(thinking(base, d.text));
@@ -263,6 +263,19 @@ export class OpencodeAdapter {
         // step-start / step-finish / snapshot / patch parts: plumbing, skipped.
         // (`patch` is only {hash, files[]} — a snapshot marker with no diff text.)
       }
+      // The failure hangs off the MESSAGE, not any part, so it has to be read
+      // here or the refetch quietly drops what the live stream just showed —
+      // the error would flash during the turn and vanish a second later.
+      const failure = role === "assistant" ? errorText(data.error) : null;
+      if (failure) {
+        add(
+          systemEvent(
+            { id: `${msgId || "opencode"}:err`, conversationId: threadId, seq: 0, ts },
+            failure,
+            "error",
+          ),
+        );
+      }
     }
 
     const events = turns.flat();
@@ -300,7 +313,7 @@ export class OpencodeAdapter {
         } catch {
           data = {};
         }
-        return { data, parts: bucket.get(m.id) || [] };
+        return { id: m.id, data, parts: bucket.get(m.id) || [] };
       });
     } catch {
       return [];
@@ -445,6 +458,13 @@ export class OpencodeAdapter {
       if (!realThreadId && typeof sid === "string" && sid.startsWith("ses_")) {
         realThreadId = sid;
         this.turns.alias(entry, "opencode", sid);
+      }
+      // A failed turn arrives as its own line with no `part` — without this it
+      // fell through the guard below and the turn ended silently.
+      if (o.type === "error" || o.error) {
+        const text = errorText(o.error);
+        if (text) emit(systemEvent(base(`opencode:err:${seq}`), text, "error"));
+        return;
       }
       const part = o.part || (o.type && o.text !== undefined ? o : null);
       if (!part) return;
@@ -623,7 +643,7 @@ export class OpencodeAdapter {
               data: JSON.parse(readFileSync(path.join(partDir, p), "utf8")),
             }));
         } catch {}
-        out.push({ data, parts });
+        out.push({ id: msgId, data, parts });
       } catch {}
     }
     return out;
@@ -632,6 +652,59 @@ export class OpencodeAdapter {
 
 function msIso(ms) {
   return typeof ms === "number" && ms > 0 ? new Date(ms).toISOString() : null;
+}
+
+/**
+ * Undo the quoting `opencode run` applies to a prompt before storing it.
+ *
+ * A prompt sent through `run` (every turn Pounce starts) comes back out of the
+ * store wrapped in double quotes with inner quotes backslash-escaped — measured
+ * on a real store: 19 of 1083 user prompts were wrapped, and every one of them
+ * was `run`-invoked; the 1064 typed in opencode's own TUI were untouched. It is
+ * NOT JSON: literal newlines survive unescaped, so `JSON.parse` both fails on
+ * multi-line prompts and would wreck a backslash in a single-line one.
+ *
+ * This cost more than a stray pair of quotes on screen. Session.tsx matches a
+ * fetched user_message to the streamed one by exact text, so the quoted copy
+ * never matched and the transcript showed the prompt TWICE — once as sent, once
+ * as stored.
+ *
+ * Only unwraps when the body has no BARE double quote, which is the invariant
+ * that wrapping guarantees. A TUI prompt that is itself one fully-quoted phrase
+ * is indistinguishable and loses its outer quotes; that is cosmetic, and rarer
+ * than every headless prompt being wrong.
+ */
+function unwrapRunPrompt(text) {
+  if (typeof text !== "string" || text.length < 2) return text;
+  if (!text.startsWith('"') || !text.endsWith('"')) return text;
+  const inner = text.slice(1, -1);
+  if (/(?:^|[^\\])"/.test(inner)) return text;
+  return inner.replace(/\\"/g, '"');
+}
+
+/**
+ * Readable one-liner for an opencode error object.
+ *
+ * opencode reports a failed turn two ways and BOTH used to be dropped on the
+ * floor: `run --format json` prints a top-level `{type:"error", error:{…}}`
+ * line (no `part`, so the stream handler skipped it), and the store hangs the
+ * same object off the assistant message as `data.error` (the history reader
+ * only walked `parts`). The turn therefore ended with nothing but the user's
+ * own message in the transcript — which the app can only render as an empty
+ * thread, so a billing failure looked exactly like a hang.
+ *
+ * Shape: `{name, data:{message, statusCode?, …}}`. The name alone ("APIError",
+ * "UnknownError") says nothing, so it only leads when there is no message.
+ */
+function errorText(err) {
+  if (!err) return null;
+  if (typeof err === "string") return err.trim() || null;
+  const name = typeof err.name === "string" ? err.name : null;
+  const raw = err.data?.message ?? err.message;
+  const msg = typeof raw === "string" ? raw.trim() : "";
+  const code = err.data?.statusCode;
+  if (!msg) return name ? `${name}${code ? ` (${code})` : ""}` : "The agent reported an error.";
+  return `${msg}${code ? ` (${code})` : ""}`;
 }
 
 /**
