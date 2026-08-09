@@ -123,6 +123,64 @@ describe("opencode history — previously dropped parts", () => {
     expect(ev[0].message).toBe("Context compacted");
   });
 
+  // `opencode run` stores the prompt wrapped in quotes with inner quotes
+  // escaped. Left alone, the app matched the fetched user message against the
+  // streamed one by exact text, failed, and rendered the prompt twice.
+  describe("unwraps `opencode run` prompt quoting", () => {
+    const userText = async (stored) =>
+      (await adapterWith([msg("user", [{ type: "text", text: stored }])]).getEvents("ses_1"))[0]
+        .text;
+
+    it("strips the wrapper", async () => {
+      expect(await userText('"Add a LICENSE file."')).toBe("Add a LICENSE file.");
+    });
+
+    it("unescapes inner quotes and keeps literal newlines", async () => {
+      // Verbatim shape from a real store: newlines are NOT escaped, so this is
+      // not JSON and JSON.parse would throw on it.
+      expect(await userText('"run \'{\\"key\\":\\"v\\"}\'\nsecond line"')).toBe(
+        'run \'{"key":"v"}\'\nsecond line',
+      );
+    });
+
+    it("leaves an ordinary prompt alone", async () => {
+      expect(await userText("just do the thing")).toBe("just do the thing");
+    });
+
+    it("leaves a prompt that merely mentions quotes alone", async () => {
+      // A bare inner quote can't have come from the wrapper — don't touch it.
+      const s = '"He said "hi" to me"';
+      expect(await userText(s)).toBe(s);
+    });
+
+    it("does not mangle a backslash", async () => {
+      expect(await userText('"match \\d+ digits"')).toBe("match \\d+ digits");
+    });
+  });
+
+  // The failure hangs off the message, not a part. Without this the refetch
+  // that lands after a turn quietly erased the error the stream had shown.
+  it("keeps a failed turn's error on refetch", async () => {
+    const failed = msg("assistant", []);
+    failed.id = "msg_1";
+    failed.data.error = {
+      name: "APIError",
+      data: { message: "Insufficient balance.", statusCode: 401 },
+    };
+    const ev = await adapterWith([failed]).getEvents("ses_1");
+    expect(ev).toHaveLength(1);
+    expect(ev[0].type).toBe("system_event");
+    expect(ev[0].level).toBe("error");
+    expect(ev[0].message).toBe("Insufficient balance. (401)");
+  });
+
+  it("does not invent an error for a healthy turn", async () => {
+    const ev = await adapterWith([msg("assistant", [{ type: "text", text: "done" }])]).getEvents(
+      "ses_1",
+    );
+    expect(ev.some((e) => e.type === "system_event")).toBe(false);
+  });
+
   it("still skips step/snapshot plumbing (history)", async () => {
     const ev = await adapterWith([
       msg("assistant", [
@@ -194,6 +252,33 @@ describe("opencode streaming — `opencode run --format json`", () => {
   it("picks up the session id from the stream", async () => {
     const { tid } = await streamed([wrap({ id: "p", type: "text", text: "hi" })]);
     expect(tid).toBe("ses_live1");
+  });
+
+  // Verbatim from a run against an out-of-credit opencode Zen account. The
+  // whole turn is this one line: no part, so it used to be dropped and the
+  // thread ended holding nothing but the user's own message.
+  it("surfaces a failed turn instead of ending silently", async () => {
+    const { events } = await streamed([
+      {
+        type: "error",
+        timestamp: 1786223457805,
+        sessionID: "ses_live1",
+        error: {
+          name: "APIError",
+          data: { message: "Insufficient balance.", statusCode: 401 },
+        },
+      },
+    ]);
+    const err = events.find((e) => e.type === "system_event");
+    expect(err.level).toBe("error");
+    expect(err.message).toBe("Insufficient balance. (401)");
+  });
+
+  it("falls back to the error name when there is no message", async () => {
+    const { events } = await streamed([
+      { type: "error", sessionID: "ses_live1", error: { name: "UnknownError" } },
+    ]);
+    expect(events.find((e) => e.type === "system_event").message).toBe("UnknownError");
   });
 
   it("emits no result while a tool is still running", async () => {

@@ -282,11 +282,19 @@ export default function SessionScreen() {
   const [newWhileAway, setNewWhileAway] = useState(false);
   const countWhenLeftRef = useRef(0);
   // Opening a different thread is a clean slate for all of the above.
+  //
+  // Keyed on routeId, NOT id. `id` also flips when a new_* thread re-keys onto
+  // the daemon's real id mid-turn — and that deliberately does not remount the
+  // screen (see the alias above), so the list underneath keeps its mount. Since
+  // `onLoad` is a once-per-mount signal, resetting listReady on a re-key armed a
+  // covering overlay that nothing could ever clear: the first task a new user
+  // ran finished behind a permanent "Loading conversation…", while opening the
+  // same thread again in a fresh tab rendered it fine.
   useEffect(() => {
     setListReady(false);
     setScrollDir(null);
     setNewWhileAway(false);
-  }, [id]);
+  }, [routeId]);
   // ChatGPT-style send anchor: the id of the just-sent (optimistic) user
   // message. While set, Timeline scrolls it to the TOP of the viewport, shows
   // a footer spacer for the reply to stream into, and suspends pin-to-tail.
@@ -458,6 +466,16 @@ export default function SessionScreen() {
   // data says there ARE events but none have landed yet; a genuinely empty
   // thread reports length 0 and falls through to the empty state as before.
   const seeding = canFetch && (freshest?.length ?? 0) > 0 && events.length === 0;
+  // Belt and braces for the re-key case above. `onLoad` belongs to the list, not
+  // to us; if it is ever missed (a re-key, a recycle, a future list version) the
+  // cost is the worst thing this screen can do — cover a drawn transcript with a
+  // loading label forever. Once there are events to show, give the list a beat to
+  // report in and then uncover regardless.
+  useEffect(() => {
+    if (listReady || events.length === 0) return;
+    const t = setTimeout(() => setListReady(true), 1200);
+    return () => clearTimeout(t);
+  }, [listReady, events.length]);
   // Read at send time to decide whether the scroll-to-end animates (the very
   // first message has nothing to scroll past). A ref, not a dep: threading the
   // event array into runTurn would rebuild it on every streamed token.

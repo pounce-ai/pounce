@@ -7,6 +7,7 @@ import { SCRIM_HEIGHT } from "./ComposerScrim";
 import type { ChatKeyboardProps } from "./chatListTypes";
 import Animated, { Easing, SlideInDown } from "./animation";
 import { PounceIcon } from "../ui/native/Icon";
+import { isShellTool, toolIcon } from "./toolIcons";
 import { VideoPlayer } from "../ui/native/VideoPlayer";
 import {
   assertNeverEvent,
@@ -26,7 +27,7 @@ import { Modal } from "../components/AppModal";
 import { cleanAssistantText, isEmptyUserMessage, parseUserMessage } from "@pounce/transcript";
 // collapseToolResults lives in a pure (RN-free) module so it can be unit-tested;
 // imported for use below and re-exported since Session.tsx imports it from here.
-import { collapseToolResults } from "./timelineEvents";
+import { collapseToolResults, formatElapsed, runElapsedMs } from "./timelineEvents";
 import { isTaskCall, type TaskItem, type TaskTimeline } from "./taskEvents";
 import { HIGHLIGHT } from "../ui/tokens";
 import { TodoCard } from "./TodoCard";
@@ -134,6 +135,11 @@ function batchHeaders(data: TimelineEvent[]): Map<string, string> {
   }
   return m;
 }
+
+/** How many of an open run's calls show before the rest fold behind a
+ *  "+N previous tool calls" line. Four is what fits above the composer without
+ *  the tail itself needing a scroll. */
+const RUN_TAIL = 4;
 
 /** One virtualized timeline for a session — every event type, recycled rows. */
 export const Timeline = memo(function Timeline({
@@ -249,17 +255,64 @@ export const Timeline = memo(function Timeline({
       return next;
     });
   }, []);
+  /**
+   * Runs the reader asked to see in FULL. Opening a long run shows only its
+   * last few calls behind a "+N previous tool calls" line (t3code's pattern):
+   * the tail is what the agent just did, and a 17-call run opening to 17 cards
+   * buries the prose the run was attached to — the same reason runs collapse at
+   * all. Separate from `openRuns` so closing and reopening a run returns to the
+   * tail rather than remembering a full expansion the reader has moved past.
+   */
+  const [fullRuns, setFullRuns] = useState<ReadonlySet<string>>(() => new Set());
+  const revealRun = useCallback((id: string) => {
+    setFullRuns((prev) => new Set(prev).add(id));
+  }, []);
+  useEffect(() => {
+    setFullRuns((prev) => {
+      if (!prev.size) return prev;
+      const next = new Set([...prev].filter((id) => openRuns.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [openRuns]);
 
-  /** Every tool call inside a CLOSED run, so the list can skip it. The run's
-   *  first event survives and renders as the summary row. */
+  /** How many leading calls an open run hides behind its "+N previous" line. */
+  const truncatedRuns = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const run of runs) {
+      if (!openRuns.has(run.id) || fullRuns.has(run.id)) continue;
+      const extra = run.ids.length - RUN_TAIL;
+      if (extra > 0) m.set(run.id, extra);
+    }
+    return m;
+  }, [runs, openRuns, fullRuns]);
+
+  /** Every tool call the list should skip: all but the first of a CLOSED run
+   *  (that one renders the summary row), and the leading calls of an open run
+   *  that is showing only its tail. */
   const hidden = useMemo(() => {
     const set = new Set<string>();
     for (const run of runs) {
-      if (openRuns.has(run.id)) continue;
-      for (const id of run.ids) if (id !== run.id) set.add(id);
+      if (!openRuns.has(run.id)) {
+        for (const id of run.ids) if (id !== run.id) set.add(id);
+        continue;
+      }
+      const extra = truncatedRuns.get(run.id);
+      if (extra) for (const id of run.ids.slice(0, extra)) set.add(id);
     }
     return set;
-  }, [runs, openRuns]);
+  }, [runs, openRuns, truncatedRuns]);
+
+  /** Elapsed wall-clock per run, for the "Worked for 22s" header. Computed off
+   *  the RAW events — results carry the finishing timestamp and `all` drops
+   *  them. */
+  const runElapsed = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const run of runs) {
+      const ms = runElapsedMs(events, run.ids);
+      if (ms != null) m.set(run.id, formatElapsed(ms));
+    }
+    return m;
+  }, [events, runs]);
 
   const collapsedRuns = useMemo(() => {
     const m = new Map<string, number>();
@@ -271,6 +324,29 @@ export const Timeline = memo(function Timeline({
     () => (hidden.size ? all.filter((e) => !hidden.has(e.id)) : all),
     [all, hidden],
   );
+
+  /**
+   * An open run's header, keyed by the first call still ON SCREEN.
+   *
+   * A closed run hangs its summary on the run's first call, which is the only
+   * one rendered. An open-but-truncated run has that call folded away, so the
+   * header moves to the first survivor — otherwise opening a long run would
+   * silently lose the row that leads (and closes) it.
+   */
+  const openHeaders = useMemo(() => {
+    const m = new Map<string, { runId: string; hiddenCount?: number; elapsed?: string }>();
+    for (const run of runs) {
+      if (!openRuns.has(run.id)) continue;
+      const firstVisible = run.ids.find((id) => !hidden.has(id));
+      if (!firstVisible) continue;
+      m.set(firstVisible, {
+        runId: run.id,
+        hiddenCount: truncatedRuns.get(run.id),
+        elapsed: runElapsed.get(run.id),
+      });
+    }
+    return m;
+  }, [runs, openRuns, hidden, truncatedRuns, runElapsed]);
   // Subscribe to this thread's marker overrides once; each row gets its resolved
   // marked state as a prop (a per-row live query would be far too heavy).
   const markerMap = useThreadMarkers(sessionId);
@@ -371,8 +447,11 @@ export const Timeline = memo(function Timeline({
               item.type === "tool_call" ? resultByCallId.get(item.call.id || item.id) : undefined
             }
             batchHeader={headers.get(item.id)}
+            batchElapsed={runElapsed.get(item.id)}
+            openHeader={openHeaders.get(item.id)}
             collapsedCount={collapsedRuns.get(item.id)}
             onToggleRun={toggleRun}
+            onRevealRun={revealRun}
             taskList={item.id === tasks.latestEventId ? tasks.state?.items : undefined}
             taskLabel={tasks.labels.get(item.id)}
             onRespondPermission={onRespondPermission}
@@ -474,8 +553,11 @@ const Row = memo(function Row({
   onRunCommand,
   pairedResult,
   batchHeader,
+  batchElapsed,
+  openHeader,
   collapsedCount,
   onToggleRun,
+  onRevealRun,
   taskList,
   taskLabel,
   cwd,
@@ -496,6 +578,13 @@ const Row = memo(function Row({
   pairedResult?: ToolResultEvent;
   /** For the first call of a parallel batch: the synthesized summary line. */
   batchHeader?: string;
+  /** How long that batch took ("22s") — absent while it is still running. */
+  batchElapsed?: string;
+  /** Set on the first call of an OPEN run that is still on screen: the header
+   *  above it, which either offers the folded-away calls or closes the run. */
+  openHeader?: { runId: string; hiddenCount?: number; elapsed?: string };
+  /** Show every call of a run that is currently showing only its tail. */
+  onRevealRun?: (id: string) => void;
   /** Set on the FIRST call of a closed run: how many calls it stands for. The
    *  rest of the run isn't in the list at all while it's closed. */
   collapsedCount?: number;
@@ -576,8 +665,27 @@ const Row = memo(function Row({
       );
     case "thinking_started":
       return <Meta text="Thinking…" />;
-    case "thinking_finished":
-      return <Meta text={event.text ? `💭 ${event.text}` : "Thought"} align="left" />;
+    case "thinking_finished": {
+      const thought = event.text?.trim();
+      if (!thought) return <Meta text="Thought" />;
+      // Reasoning is the model talking to itself, and some models emit a LOT of
+      // it — opencode's runs pushed screens of raw planning prose (with literal
+      // ``` fences and "1." lists, since a plain Text renders no markdown)
+      // between the messages you actually came to read. Long ones collapse to a
+      // single line and render as markdown once opened. Short ones stay inline:
+      // a one-sentence aside is a useful beat, and burying it behind a
+      // disclosure costs a tap to learn nothing.
+      if (thought.length <= THINKING_INLINE_MAX && !thought.includes("\n"))
+        return <Meta text={`💭 ${thought}`} align="left" />;
+      return (
+        <MetaDetail
+          id={event.id}
+          align="left"
+          text={`💭 Thought · ${countWords(thought)} words`}
+          detail={thought}
+        />
+      );
+    }
     case "tool_call": {
       // Captured before the guards below: `isTaskCall` is a type predicate, and
       // once TS has narrowed past it `event` is `never` for the rest of the
@@ -608,7 +716,8 @@ const Row = memo(function Row({
       if (collapsedCount != null)
         return (
           <RunSummary
-            label={batchHeader}
+            // "Calling write ×3… · 22s" — what ran, and how long it took.
+            label={batchElapsed && batchHeader ? `${batchHeader} · ${batchElapsed}` : batchHeader}
             count={collapsedCount}
             open={false}
             onPress={() => onToggleRun?.(runId)}
@@ -619,18 +728,36 @@ const Row = memo(function Row({
           <ToolAccordion event={event} result={pairedResult} cwd={cwd} />
         </SearchHighlight>
       );
-      // Open run: the summary stays as the way back to closed.
-      if (batchHeader)
+      // Open run: a header above the calls. It offers the folded-away ones
+      // while the run is showing only its tail, and is the way back to closed
+      // once everything is on screen — one row either way.
+      if (openHeader) {
+        const hiddenCount = openHeader.hiddenCount;
         return (
           <View style={s.gap8}>
             <RunSummary
-              label={batchHeader}
-              open
-              onPress={onToggleRun ? () => onToggleRun(runId) : undefined}
+              label={
+                hiddenCount
+                  ? `+${hiddenCount} previous tool call${hiddenCount === 1 ? "" : "s"}`
+                  : openHeader.elapsed
+                    ? `Worked for ${openHeader.elapsed}`
+                    : batchHeader
+              }
+              open={!hiddenCount}
+              onPress={
+                hiddenCount
+                  ? onRevealRun
+                    ? () => onRevealRun(openHeader.runId)
+                    : undefined
+                  : onToggleRun
+                    ? () => onToggleRun(openHeader.runId)
+                    : undefined
+              }
             />
             <Reveal>{accordion}</Reveal>
           </View>
         );
+      }
       return accordion;
     }
     case "tool_result":
@@ -1046,12 +1173,12 @@ function previewInput(input: unknown, cwd?: string | null): string {
   return typeof input === "string" ? input : "";
 }
 
-const SHELL_TOOLS = new Set(["shell", "bash", "exec", "terminal"]);
 const SHELL_GOLD = "#d29922";
 
 /**
  * One tool invocation as a collapsible card. Collapsed it is a single quiet
- * line — `$ command…` for shell, `⚙ name input…` otherwise — with a chevron.
+ * line — `$ command…` for shell, `<icon> name input…` otherwise (see
+ * ./toolIcons for how the glyph is chosen) — with a chevron.
  * Expanding reveals the full command and the tool's output nested in the same
  * card, instead of the output sprawling as its own full-width block.
  */
@@ -1070,7 +1197,7 @@ function ToolAccordion({
   const [openId, setOpenId] = useState<string | null>(null);
   const open = openId === event.id;
   const { name, status, input } = event.call;
-  const shell = SHELL_TOOLS.has(name.toLowerCase());
+  const shell = isShellTool(name);
   const preview = previewInput(input, cwd);
   const failed = status === "error" || result?.result.isError === true;
   const running = status === "pending" || status === "running";
@@ -1096,13 +1223,23 @@ function ToolAccordion({
       onPress={() => setOpenId(open ? null : event.id)}
       style={[s.toolCard, failed ? s.toolCardFailed : s.toolCardOk]}
     >
-      <View style={s.rowCenter8}>
+      {/* Only the HEADER disowns the mouse — see RunSummary for the RCTText
+          swallow. Scoped to this row rather than the whole card so the result
+          body below stays selectable once the card is open. */}
+      <View pointerEvents="none" style={s.rowCenter8}>
         {shell ? (
           <Text style={[s.shellDollar, { color: failed ? theme.colors.danger : SHELL_GOLD }]}>
             $
           </Text>
         ) : (
-          <Text style={s.toolName}>⚙ {name}</Text>
+          <View style={s.rowCenter6}>
+            <PounceIcon
+              name={toolIcon(name)}
+              size={12}
+              color={failed ? theme.colors.danger : theme.colors.fgMuted}
+            />
+            <Text style={s.toolName}>{name}</Text>
+          </View>
         )}
         {shell ? (
           // Highlight the command as bash — the collapsed row stays one line.
@@ -1220,6 +1357,13 @@ function RunSummary({
       accessibilityRole="button"
       accessibilityState={{ expanded: open }}
       accessibilityLabel={open ? `Hide details: ${text}` : `Show details: ${text}`}
+      // box-only: on react-native-macos an RCTText child takes the mouse-down
+      // for selection and the Pressable never fires — and an Ionicon is itself
+      // a Text (icon font), so BOTH children swallowed it and a run of tool
+      // calls simply could not be opened on desktop. Same swallow MetaDetail
+      // works around with pointerEvents="none"; this row has no selectable
+      // content of its own, so disowning the whole box is the simpler cure.
+      pointerEvents="box-only"
       style={({ pressed }) => [s.runSummary, pressed && s.pressed80]}
     >
       {/* One glyph that turns, not two that swap — see Chevron. */}
@@ -1302,22 +1446,35 @@ function Meta({
   );
 }
 
+/** Roughly one line at transcript width — past this a thought is a paragraph,
+ *  and a paragraph of reasoning belongs behind a disclosure. */
+const THINKING_INLINE_MAX = 140;
+
+function countWords(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
 /**
  * A system note carrying long-form context (the summary a compaction carried
- * over). Stays a one-line note until tapped — it's bookkeeping, not a turn, and
- * inlining it would bury the surrounding conversation.
+ * over, a model's reasoning). Stays a one-line note until tapped — it's
+ * bookkeeping, not a turn, and inlining it would bury the surrounding
+ * conversation.
  */
 function MetaDetail({
   id,
   text,
   detail,
   level,
+  /** Same choice `Meta` makes. Reasoning rows pass "left" so a collapsed thought
+   *  lines up with the short ones that stayed inline beside it. */
+  align = "center",
 }: {
   /** This row's event id — see `openId` below. */
   id: string;
   text: string;
   detail: string;
   level?: "info" | "warning" | "error";
+  align?: "center" | "left";
 }) {
   // Rows are recycled: key the expansion to the event id so an open summary
   // can't bleed into whatever event this component instance shows next.
@@ -1335,7 +1492,14 @@ function MetaDetail({
         {/* pointerEvents="none": RCTText takes the mouse-down for selection on
             macOS, so the Pressable above never sees it and tapping the note did
             nothing — same swallow ContributionGraph hits with RNSVG. */}
-        <Text pointerEvents="none" style={[s.meta, level === "error" ? s.textDanger : s.textFaint]}>
+        <Text
+          pointerEvents="none"
+          style={[
+            s.meta,
+            align === "left" && s.metaLeft,
+            level === "error" ? s.textDanger : s.textFaint,
+          ]}
+        >
           {text} {open ? "▾" : "▸"}
         </Text>
       </Pressable>
