@@ -76,6 +76,7 @@ import {
   SUPPORTED as ccusageReads,
   resetCcusageCache,
 } from "./agents/ccusage.mjs";
+import { listSettled, setSettled } from "./agents/settled.mjs";
 import { mergeBilledCost, mergeEstimatedCost, mergeTokens } from "./agents/series-overlay.mjs";
 import { listEditors, openIn } from "./agents/editors.mjs";
 import { closeShell, getShell, killAllShells, openShell, reapShells } from "./agents/term.mjs";
@@ -2751,6 +2752,23 @@ const server = http.createServer(async (req, res) => {
       if (token && pushTokens.delete(token)) savePushTokens();
       return send(res, 200, { ok: true });
     }
+    // Settled threads — the inbox gesture. The whole map comes back on every
+    // write so a client never has to guess what the machine now believes; it is
+    // one small string per settled thread (see agents/settled.mjs).
+    if (url.pathname === "/v1/settled" && req.method === "GET") {
+      return send(res, 200, { settled: listSettled() });
+    }
+    if (url.pathname === "/v1/settled" && req.method === "POST") {
+      const { threadId, settledAt } = await readBody(req);
+      if (!threadId) return send(res, 400, { error: "threadId required" });
+      // `settledAt: null` un-settles. The CLIENT's timestamp is stored, not
+      // ours: it has to be comparable with the thread's own updatedAt, and a
+      // server clock a second behind would settle a thread "before" its last
+      // message and have it spring straight back.
+      setSettled(threadId, settledAt === null ? null : settledAt || undefined);
+      return send(res, 200, { ok: true, settled: listSettled() });
+    }
+
     // Markers — the user's jump-to points in a thread. Overrides only; the
     // client still computes the default for every event (see agents/markers.mjs).
     if (url.pathname === "/v1/markers" && req.method === "GET") {

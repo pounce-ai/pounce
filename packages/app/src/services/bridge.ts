@@ -1290,6 +1290,53 @@ export interface AgentQuota {
 }
 
 /**
+ * Which threads each machine considers settled, merged into one map.
+ *
+ * Bridge-owned rather than local, so settling on the phone settles on the
+ * desktop. Thread ids are unique per machine, so merging maps cannot collide;
+ * a host that fails to answer simply contributes nothing rather than making
+ * its threads look un-settled.
+ */
+export async function fetchSettled(): Promise<Record<string, string>> {
+  const devices = await hostsToQuery();
+  const pages = await Promise.all(
+    devices.map(async (cfg) => {
+      try {
+        const { settled } = await get<{ settled: Record<string, string> }>(cfg, "/v1/settled");
+        return settled ?? {};
+      } catch {
+        return {};
+      }
+    }),
+  );
+  return Object.assign({}, ...pages);
+}
+
+/**
+ * Settle a thread as of now, or un-settle it with `settledAt: null`.
+ *
+ * Returns the host's whole map so the caller replaces rather than patches — the
+ * machine is the authority on what it now believes, and a patch would drift if
+ * a write raced a sync.
+ */
+export async function setSettled(
+  hostId: string,
+  threadId: string,
+  settledAt: string | null,
+): Promise<Record<string, string>> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) throw new Error("That machine isn't paired any more.");
+  const res = await fetch(`${await bridgeBase(cfg)}/v1/settled`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+    body: JSON.stringify({ threadId, settledAt }),
+  });
+  if (!res.ok) throw new Error(`bridge /v1/settled -> ${res.status}`);
+  const { settled } = (await res.json()) as { settled: Record<string, string> };
+  return settled ?? {};
+}
+
+/**
  * Plan quota across every paired device. On a subscription this is the number
  * that actually means something — dollars don't exist to report. Agents with
  * nothing to say are simply absent.

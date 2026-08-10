@@ -18,6 +18,8 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@pounce/shared";
 import { applyFilters, connection$, filters$, needsYou } from "@pounce/app/state/stores";
+import { canSettle, partitionSettled } from "@pounce/app/state/settled";
+import { loadSettled, settled$, toggleSettled } from "@pounce/app/state/settledStore";
 import { useDevices, useIgnoredSet, useProjectNames, useThreads } from "@pounce/app/state/db/hooks";
 import { SidebarSessionsSkeleton, SidebarSpacesSkeleton } from "./SidebarSkeleton";
 import { Entrance } from "./Motion";
@@ -132,16 +134,29 @@ export function Sidebar() {
     );
   }, [visible, space, q]);
 
+  // The inbox split. `partitionSettled` owns the rule — including that busy or
+  // blocked work is never hidden, whatever the user settled earlier.
+  const settledAt = useSelector(() => ({ ...settled$.get() }));
+  const { active, settled: done } = useMemo(
+    () => partitionSettled(sessions, settledAt),
+    [sessions, settledAt],
+  );
+  const [showSettled, setShowSettled] = useState(false);
+  // One read per connect: the map is small, and the bridge owns it.
+  useEffect(() => {
+    if (connected) void loadSettled();
+  }, [connected]);
+
   // The entrance is a first-impression, not a permanent behaviour: it plays
   // once when the first sync lands, then switches off so scrolling a recycled
   // list doesn't re-animate rows under the cursor.
-  const [settled, setSettled] = useState(false);
+  const [entranceDone, setEntranceDone] = useState(false);
   const hasRows = visible.length > 0;
   useEffect(() => {
-    if (!hasRows || settled) return;
-    const id = setTimeout(() => setSettled(true), 900);
+    if (!hasRows || entranceDone) return;
+    const id = setTimeout(() => setEntranceDone(true), 900);
     return () => clearTimeout(id);
-  }, [hasRows, settled]);
+  }, [hasRows, entranceDone]);
 
   const attention = useMemo(() => visible.filter(needsYou).length, [visible]);
   const online = deviceList.filter((d) => d.online);
@@ -270,7 +285,7 @@ export function Sidebar() {
 
       <LegendList
         style={s.flex1}
-        data={sessions}
+        data={active}
         keyExtractor={(item) => item.id}
         // No entrance animation on these rows. LegendList recycles and
         // repositions row containers itself; wrapping each one in an extra
@@ -284,6 +299,7 @@ export function Sidebar() {
             showHost={showHost}
             selected={item.id === selectedId}
             onPress={() => router.push(`/session/${item.id}`)}
+            onSettle={canSettle(item) ? () => void toggleSettled(item) : undefined}
           />
         )}
         estimatedItemSize={54}
@@ -300,7 +316,7 @@ export function Sidebar() {
               <Text style={s.sectionEmpty}>No projects synced yet.</Text>
             ) : (
               shownSpaces.map((sp, i) => (
-                <Entrance key={sp.key} index={i} animate={!settled}>
+                <Entrance key={sp.key} index={i} animate={!entranceDone}>
                   <SpaceRow
                     space={sp}
                     showHost={showHost}
@@ -359,6 +375,54 @@ export function Sidebar() {
           )
         }
         contentContainerStyle={s.listContent}
+        ListFooterComponent={
+          // Settled work, out of the way but not gone. Collapsed by default and
+          // newest-settled first, so the thing just cleared is the easiest to
+          // get back. Deliberately outside the virtualized list: it is short,
+          // and it is the one part of the sidebar that should feel like a
+          // drawer rather than a feed.
+          done.length ? (
+            <View style={s.settledBlock}>
+              <Pressable
+                onPress={() => setShowSettled((v) => !v)}
+                style={({ pressed }) => [s.settledHeader, pressed && s.rowHover]}
+              >
+                <Ionicons
+                  name={showSettled ? "chevron-down" : "chevron-forward"}
+                  size={11}
+                  color={COLOR.fgFaint}
+                />
+                <Text style={s.settledLabel}>Settled</Text>
+                <Text style={s.settledCount}>{done.length}</Text>
+              </Pressable>
+              {showSettled
+                ? done.map((item) => (
+                    <Pressable
+                      key={item.id}
+                      onPress={() => router.push(`/session/${item.id}`)}
+                      style={({ pressed }) => [
+                        s.settledRow,
+                        item.id === selectedId ? s.rowSelected : pressed && s.rowHover,
+                      ]}
+                    >
+                      <Text numberOfLines={1} style={s.settledTitle}>
+                        {item.title}
+                      </Text>
+                      <Pressable
+                        onPress={() => void toggleSettled(item)}
+                        hitSlop={6}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Bring back ${item.title}`}
+                        style={({ pressed }) => pressed && s.pressed60}
+                      >
+                        <Ionicons name="arrow-up-circle-outline" size={13} color={COLOR.fgFaint} />
+                      </Pressable>
+                    </Pressable>
+                  ))
+                : null}
+            </View>
+          ) : null
+        }
       />
 
       {/* Account row — who you are and what's reachable, one click from
@@ -491,26 +555,46 @@ function SessionRow({
   showHost,
   selected,
   onPress,
+  onSettle,
 }: {
   session: Session;
   project: string;
   showHost: boolean;
   selected: boolean;
   onPress: () => void;
+  /** Absent when the thread is busy or blocked — those can't be settled. */
+  onSettle?: () => void;
 }) {
   // Archived threads (worktree gone) are history — they stay readable but drop
   // back so the live list reads first.
   const dim = !session.isLive;
+  const [hover, setHover] = useState(false);
   return (
     <Pressable
       onPress={onPress}
+      onHoverIn={() => setHover(true)}
+      onHoverOut={() => setHover(false)}
       style={({ pressed }) => [s.sessionRow, selected ? s.rowSelected : pressed && s.rowHover]}
     >
       <View style={s.sessionCaptionRow}>
         <Text numberOfLines={1} style={[s.sessionCaption, dim && s.dimmed]}>
           {showHost ? `${project} · ${session.host}` : project}
         </Text>
-        <Text style={s.sessionTime}>{timeAgo(session.updatedAt)}</Text>
+        {/* The timestamp gives up its place on hover rather than the row growing
+            a column that is empty most of the time. */}
+        {hover && onSettle ? (
+          <Pressable
+            onPress={onSettle}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={`Settle ${session.title}`}
+            style={({ pressed }) => pressed && s.pressed60}
+          >
+            <Ionicons name="checkmark-circle-outline" size={13} color={COLOR.accent} />
+          </Pressable>
+        ) : (
+          <Text style={s.sessionTime}>{timeAgo(session.updatedAt)}</Text>
+        )}
       </View>
       <Text numberOfLines={1} style={[s.sessionTitle, dim && s.dimmed]}>
         {session.title}
@@ -770,6 +854,36 @@ const s = StyleSheet.create((theme) => ({
   },
   dimmed: { opacity: 0.55 },
 
+  settledBlock: { marginTop: 10, gap: 1 },
+  settledHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  settledLabel: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: COLOR.fgFaint,
+  },
+  settledCount: { fontFamily: "JetBrainsMono", fontSize: 11, color: COLOR.fgFaint },
+  /* Compact and quiet: settled rows are a record, not a feed. One line, no
+     agent mark, no branch — everything that made the active row scannable is
+     what would make this list compete with it. */
+  settledRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  settledTitle: { flex: 1, fontSize: 12, color: COLOR.fgMuted },
   emptyBox: { alignItems: "center", paddingHorizontal: 20, paddingVertical: 40 },
   emptyTitle: {
     marginTop: 8,
