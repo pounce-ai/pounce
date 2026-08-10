@@ -10,7 +10,7 @@
  * uninterrupted.
  */
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { LegendList } from "@legendapp/list/react-native";
 import { useSelector } from "@legendapp/state/react";
@@ -150,13 +150,15 @@ export function Sidebar() {
   // The entrance is a first-impression, not a permanent behaviour: it plays
   // once when the first sync lands, then switches off so scrolling a recycled
   // list doesn't re-animate rows under the cursor.
-  const [entranceDone, setEntranceDone] = useState(false);
+  // `pristine` in the form-field sense: the list as first rendered, before the
+  // user has had a chance to touch it. The entrance plays once while it holds.
+  const [pristine, setPristine] = useState(true);
   const hasRows = visible.length > 0;
   useEffect(() => {
-    if (!hasRows || entranceDone) return;
-    const id = setTimeout(() => setEntranceDone(true), 900);
+    if (!hasRows || !pristine) return;
+    const id = setTimeout(() => setPristine(false), 900);
     return () => clearTimeout(id);
-  }, [hasRows, entranceDone]);
+  }, [hasRows, pristine]);
 
   const attention = useMemo(() => visible.filter(needsYou).length, [visible]);
   const online = deviceList.filter((d) => d.online);
@@ -316,7 +318,7 @@ export function Sidebar() {
               <Text style={s.sectionEmpty}>No projects synced yet.</Text>
             ) : (
               shownSpaces.map((sp, i) => (
-                <Entrance key={sp.key} index={i} animate={!entranceDone}>
+                <Entrance key={sp.key} index={i} animate={pristine}>
                   <SpaceRow
                     space={sp}
                     showHost={showHost}
@@ -375,55 +377,57 @@ export function Sidebar() {
           )
         }
         contentContainerStyle={s.listContent}
-        ListFooterComponent={
-          // Settled work, out of the way but not gone. Collapsed by default and
-          // newest-settled first, so the thing just cleared is the easiest to
-          // get back. Deliberately outside the virtualized list: it is short,
-          // and it is the one part of the sidebar that should feel like a
-          // drawer rather than a feed.
-          done.length ? (
-            <View style={s.settledBlock}>
-              <Pressable
-                onPress={() => setShowSettled((v) => !v)}
-                style={({ pressed }) => [s.settledHeader, pressed && s.rowHover]}
-              >
-                <Ionicons
-                  name={showSettled ? "chevron-down" : "chevron-forward"}
-                  size={11}
-                  color={COLOR.fgFaint}
-                />
-                <Text style={s.settledLabel}>Settled</Text>
-                <Text style={s.settledCount}>{done.length}</Text>
-              </Pressable>
-              {showSettled
-                ? done.map((item) => (
-                    <Pressable
-                      key={item.id}
-                      onPress={() => router.push(`/session/${item.id}`)}
-                      style={({ pressed }) => [
-                        s.settledRow,
-                        item.id === selectedId ? s.rowSelected : pressed && s.rowHover,
-                      ]}
-                    >
-                      <Text numberOfLines={1} style={s.settledTitle}>
-                        {item.title}
-                      </Text>
-                      <Pressable
-                        onPress={() => void toggleSettled(item)}
-                        hitSlop={6}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Bring back ${item.title}`}
-                        style={({ pressed }) => pressed && s.pressed60}
-                      >
-                        <Ionicons name="arrow-up-circle-outline" size={13} color={COLOR.fgFaint} />
-                      </Pressable>
-                    </Pressable>
-                  ))
-                : null}
-            </View>
-          ) : null
-        }
       />
+
+      {/* Settled work — PINNED, not the end of the list.
+          As a list footer this sat below every thread, so reaching it meant
+          scrolling past 177 of them: a drawer you have to hunt for is not a
+          drawer. Fixed here it stays one click away, and expanding it gives the
+          settled threads their own bounded scroll rather than extending the
+          feed above. */}
+      {done.length ? (
+        <View style={s.settledBlock}>
+          <Pressable
+            onPress={() => setShowSettled((v) => !v)}
+            style={({ pressed }) => [s.settledHeader, pressed && s.rowHover]}
+          >
+            <Ionicons
+              name={showSettled ? "chevron-down" : "chevron-forward"}
+              size={11}
+              color={COLOR.fgFaint}
+            />
+            <Text style={s.settledLabel}>Settled</Text>
+            <Text style={s.settledCount}>{done.length}</Text>
+          </Pressable>
+          {showSettled ? (
+            <ScrollView style={s.settledScroll} contentContainerStyle={s.settledList}>
+              {done.map((item) => (
+                <Pressable
+                  key={item.id}
+                  onPress={() => router.push(`/session/${item.id}`)}
+                  style={({ pressed }) => [
+                    s.settledRow,
+                    item.id === selectedId ? s.rowSelected : pressed && s.rowHover,
+                  ]}
+                >
+                  <Text numberOfLines={1} style={s.settledTitle}>
+                    {item.title}
+                  </Text>
+                  <Pressable
+                    onPress={() => void toggleSettled(item)}
+                    hitSlop={6}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Bring back ${item.title}`}
+                    style={({ pressed }) => pressed && s.pressed60}
+                  >
+                    <Ionicons name="arrow-up-circle-outline" size={13} color={COLOR.fgFaint} />
+                  </Pressable>
+                </Pressable>
+              ))}
+            </ScrollView>
+          ) : null}
+        </View>
+      ) : null}
 
       {/* Account row — who you are and what's reachable, one click from
           Settings. Takes the place of mobile's Settings tab. */}
@@ -854,7 +858,19 @@ const s = StyleSheet.create((theme) => ({
   },
   dimmed: { opacity: 0.55 },
 
-  settledBlock: { marginTop: 10, gap: 1 },
+  /* Sits between the list and the account row. A hairline above separates it
+     from the feed without drawing a heavy divider across the sidebar. */
+  settledBlock: {
+    gap: 1,
+    borderTopWidth: 1,
+    borderTopColor: COLOR.border,
+    paddingTop: 6,
+    paddingBottom: 2,
+  },
+  /* Bounded: settling a hundred threads must not turn the drawer into the
+     sidebar. Past this it scrolls on its own. */
+  settledScroll: { maxHeight: 220 },
+  settledList: { gap: 1, paddingBottom: 4 },
   settledHeader: {
     flexDirection: "row",
     alignItems: "center",
