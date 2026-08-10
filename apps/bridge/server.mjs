@@ -76,6 +76,7 @@ import {
   SUPPORTED as ccusageReads,
   resetCcusageCache,
 } from "./agents/ccusage.mjs";
+import { mergeEstimatedCost } from "./agents/cost-overlay.mjs";
 import { listEditors, openIn } from "./agents/editors.mjs";
 import { closeShell, getShell, killAllShells, openShell, reapShells } from "./agents/term.mjs";
 
@@ -756,84 +757,17 @@ async function withCcusageTokens(series, since) {
 }
 
 /**
- * Fill days the official sources left blank with ccusage's list-price estimate.
+ * Overlay ccusage's list-price estimate onto the activity series.
  *
- * Runs BEFORE withAdminCost so the billing report still overwrites anything it
- * covers: the precedence is reported > billed > estimated, and this is the
- * bottom of it. A day that already has a dollar figure is never touched, so no
- * real number is ever replaced by a guess — the fill only reaches `cost: null`,
- * which is the state that used to render as "not knowable".
- *
- * Every estimated figure is flagged `costEstimated: true` at whatever level it
- * landed (day, agent, totals) so the app can mark it rather than passing list
- * prices off as billing. See agents/ccusage.mjs for why a zero never arrives
- * here as a zero.
+ * Runs BEFORE withAdminCost so the org billing report still sits on top of
+ * both. The merge itself — and the coverage rule that decides what outranks
+ * what — lives in agents/cost-overlay.mjs, where it can be tested.
  */
 async function withEstimatedCost(series, days, since) {
   // Same `since` the token read used, so both share one ccusage run.
   const est = await estimatedDailyCost({ days, since }).catch(() => ({ available: false }));
   if (!est.available) return series;
-  const byDay = est.byDay || {};
-  let estimated = false;
-  const daysOut = series.days.map((d) => {
-    const e = byDay[d.date];
-    if (!e) return d;
-    const out = { ...d, byAgent: { ...d.byAgent } };
-    if (out.cost == null) {
-      out.cost = e.total;
-      out.costEstimated = true;
-      estimated = true;
-    }
-    for (const [agent, cost] of Object.entries(e.byAgent)) {
-      const cur = out.byAgent[agent];
-      // An agent with no row at all still gets one: it did work that day, we
-      // just had no dated token counts for it (opencode and cursor keep none).
-      if (!cur) {
-        out.byAgent[agent] = { sessions: 0, messages: 0, tokens: 0, cost, costEstimated: true };
-        estimated = true;
-      } else if (cur.cost == null) {
-        out.byAgent[agent] = { ...cur, cost, costEstimated: true };
-        estimated = true;
-      }
-    }
-    return out;
-  });
-  // Days ccusage saw that the series never did — same reasoning as the billing
-  // overlay: a day with spend and no readable transcript still happened.
-  const known = new Set(daysOut.map((d) => d.date));
-  for (const [date, e] of Object.entries(byDay)) {
-    if (known.has(date)) continue;
-    const byAgent = {};
-    for (const [agent, cost] of Object.entries(e.byAgent)) {
-      byAgent[agent] = { sessions: 0, messages: 0, tokens: 0, cost, costEstimated: true };
-    }
-    daysOut.push({
-      date,
-      sessions: 0,
-      messages: 0,
-      tokens: 0,
-      cost: e.total,
-      costEstimated: true,
-      byAgent,
-    });
-    estimated = true;
-  }
-  if (!estimated) return series;
-  let total = null;
-  for (const d of daysOut) if (d.cost != null) total = (total ?? 0) + d.cost;
-  daysOut.sort((a, b) => a.date.localeCompare(b.date));
-  return {
-    ...series,
-    days: daysOut,
-    totals: {
-      ...series.totals,
-      cost: total == null ? null : Math.round(total * 100) / 100,
-      // `costComplete` keeps its meaning — whether every agent reported its own
-      // dollars — and stays false here. `costEstimated` is the separate fact
-      // that some of this total was priced rather than billed.
-      costEstimated: true,
-    },
-  };
+  return mergeEstimatedCost(series, est.byDay || {});
 }
 
 /**

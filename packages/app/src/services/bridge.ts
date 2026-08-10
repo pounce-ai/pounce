@@ -1154,8 +1154,32 @@ export async function fetchUsage(
  * Merging (day sums, worst-case coverage) lives in services/activity.ts so it
  * stays unit-testable.
  */
+/**
+ * One entry per physical machine.
+ *
+ * A machine can end up in the device list twice — paired by QR and then found
+ * again on the LAN, or reachable at two addresses — and `resolvePairing` only
+ * collapses that at ADD time, by bridgeId, which a bridge too old to report one
+ * doesn't supply. Anything that SUMS across devices has to defend itself, or a
+ * duplicate silently doubles every figure on the dashboard: tokens, sessions,
+ * messages and dollars all exactly 2×, which reads as real growth rather than
+ * as a bug. Observed once in testing and fixed here rather than at the call
+ * site, because the next fan-out would have inherited it.
+ *
+ * The url is the fallback key: two configs for the same address are the same
+ * host whatever they call themselves.
+ */
+function oneEach(devices: readonly DeviceConfig[]): DeviceConfig[] {
+  const seen = new Map<string, DeviceConfig>();
+  for (const d of devices) {
+    const key = d.bridgeId || d.url.replace(/\/$/, "");
+    if (!seen.has(key)) seen.set(key, d);
+  }
+  return [...seen.values()];
+}
+
 export async function fetchActivity(days = 365, opts?: { fresh?: boolean }): Promise<ActivityPage> {
-  const devices = await listDeviceConfigs();
+  const devices = oneEach(await listDeviceConfigs());
   const qs = `days=${days}${opts?.fresh ? "&fresh=1" : ""}`;
   const pages = await Promise.all(
     devices.map(async (cfg) => {
