@@ -37,6 +37,7 @@ import { Animated, LinearTransition } from "../components/animation";
 import { ContributionGraph } from "../components/ContributionGraph";
 import { QuotaCard } from "../components/QuotaCard";
 import { MiniBarChart } from "../components/MiniBarChart";
+import { trendBars } from "../components/usageSeries";
 import { StatTile } from "../components/StatTile";
 import type { MetricKey } from "./Metric";
 import { ActivitySkeleton } from "../components/Skeleton";
@@ -175,19 +176,7 @@ export default function DashboardScreen() {
   // marker from an older month that ccusage had to price.
   const estimated = now.costEstimated === true;
 
-  // Trend bars: a day each for week/month, a month each for year (365 bars
-  // would be 1px wide and unreadable).
-  const bars = useMemo(() => {
-    if (period !== "year") {
-      return window.map((d) => ({ key: d.date, value: d.messages }));
-    }
-    const byMonth = new Map<string, number>();
-    for (const d of year) {
-      const k = d.date.slice(0, 7);
-      byMonth.set(k, (byMonth.get(k) ?? 0) + d.messages);
-    }
-    return [...byMonth].map(([k, value]) => ({ key: k, value }));
-  }, [period, window, year]);
+  const bars = useMemo(() => trendBars(window, period, (d) => d.messages), [window, period]);
 
   const detail = useMemo<ActivityDay | null>(
     () => (selected ? (year.find((d) => d.date === selected) ?? null) : null),

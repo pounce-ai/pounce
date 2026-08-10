@@ -33,6 +33,7 @@ import {
 } from "../services/activity";
 import { useProjectNames } from "../state/db/hooks";
 import { MiniBarChart } from "../components/MiniBarChart";
+import { trendBars } from "../components/usageSeries";
 import { UsageChart } from "../components/UsageChart";
 import { ActivitySkeleton } from "../components/Skeleton";
 import { PounceIcon } from "../ui/native/Icon";
@@ -226,17 +227,10 @@ export default function MetricScreen() {
    *  messages have none of that behind them. */
   const isUsage = key === "tokens" || key === "spend";
 
-  // A year is charted by month; shorter windows by day. Same rule as the
-  // dashboard's chart, so the two never disagree about a period.
-  const bars = useMemo(() => {
-    if (period !== "year") return window.map((d) => ({ key: d.date, value: valueOf(d, key) }));
-    const byMonth = new Map<string, number>();
-    for (const d of window) {
-      const k = d.date.slice(0, 7);
-      byMonth.set(k, (byMonth.get(k) ?? 0) + valueOf(d, key));
-    }
-    return [...byMonth].map(([k, value]) => ({ key: k, value }));
-  }, [period, window, key]);
+  const bars = useMemo(
+    () => trendBars(window, period, (d) => valueOf(d, key)),
+    [window, period, key],
+  );
 
   const agents = useMemo(() => byAgentTotals(window), [window]);
   // Both folds walk the whole window, and each is read by only two of the four

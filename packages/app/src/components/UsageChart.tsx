@@ -15,10 +15,10 @@ import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import Svg, { Line, Path } from "react-native-svg";
 import type { ActivityDay } from "../services/activity";
-import { agentHex, agentLabel } from "../ui/tokens";
+import { agentLabel } from "../ui/tokens";
 import { fmtCost, fmtDayLabel, fmtTokens } from "../ui/format";
 import { buildPlot, plotScale, seriesPaths, type UsageMetric } from "./usageSeries";
-import { useGround, useThemeHex } from "../ui/useThemeHex";
+import { useAgentHex, useThemeHex } from "../ui/useThemeHex";
 
 const HEIGHT = 150;
 
@@ -36,9 +36,7 @@ export function UsageChart({
   width: number;
 }) {
   const hex = useThemeHex();
-  // The app's own ground, not the platform trait — the appearance override has
-  // to move these fills with everything else.
-  const ground = useGround();
+  const hueOf = useAgentHex();
   const [picked, setPicked] = useState<number | null>(null);
 
   const plot = useMemo(() => buildPlot(days, agents, metric), [days, agents, metric]);
@@ -48,10 +46,10 @@ export function UsageChart({
     () =>
       plot.series.map((s) => ({
         agent: s.agent,
-        hue: agentHex(s.agent, ground) ?? hex.accent,
+        hue: hueOf(s.agent, hex.accent)!,
         ...seriesPaths(s.values, plot.max, width, HEIGHT),
       })),
-    [plot, width, ground, hex.accent],
+    [plot, width, hueOf, hex.accent],
   );
 
   if (!plot.series.length) {

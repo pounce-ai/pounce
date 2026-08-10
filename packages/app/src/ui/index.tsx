@@ -15,12 +15,12 @@ import { PounceIcon } from "./native/Icon";
 import type { IoniconName } from "./native/icon-map";
 import type { ActivityStatus } from "@pounce/shared";
 import { AgentLogo } from "./AgentLogo";
-import { useGround } from "./useThemeHex";
+import { useAgentHex } from "./useThemeHex";
 
 // Shared tokens live in tokens.ts (no circular dep with AgentLogo); re-export
 // them here so call sites keep importing everything from "../ui".
 export { COLOR, AGENT_LABEL, AGENT_HEX, agentLabel } from "./tokens";
-import { agentHex, agentLabel } from "./tokens";
+import { agentLabel } from "./tokens";
 
 /** Real brand logos for agents (Claude, Codex, OpenCode, Grok, …). */
 export { AgentLogo };
@@ -210,7 +210,7 @@ export function AgentStatusIcon({
   // Same reason as AgentLogo, and the same ground: the thinking glyph is tinted
   // with a plain brand hex, picked for the ground the APP is painting on rather
   // than the platform trait.
-  const scheme = useGround();
+  const hueOf = useAgentHex();
   const active =
     animated && (activity === "running" || activity === "streaming" || activity === "queued");
   const frame = useSyncExternalStore(active ? subscribeTicker : noTick, getFrame);
@@ -221,7 +221,7 @@ export function AgentStatusIcon({
         <Text
           allowFontScaling={false}
           style={{
-            color: agentHex(agent, scheme) ?? theme.colors.accent,
+            color: hueOf(agent, theme.colors.accent as string),
             fontSize: size + 1,
             lineHeight: size + 3,
             textAlign: "center",

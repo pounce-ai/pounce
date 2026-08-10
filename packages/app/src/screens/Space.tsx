@@ -44,6 +44,7 @@ import {
   type Period,
 } from "../services/activity";
 import { MiniBarChart } from "../components/MiniBarChart";
+import { trendBars } from "../components/usageSeries";
 import { ContextEditor } from "../components/ContextEditor";
 import { PounceIcon } from "../ui/native/Icon";
 import type { IoniconName } from "../ui/native/icon-map";
@@ -205,15 +206,7 @@ function SpaceDetail({ space, sessions }: { space: Space; sessions: Session[] })
 
   const run = useMemo(() => streaks(series), [series]);
   const agents = useMemo(() => byAgentTotals(window, [...space.agents]), [window, space.agents]);
-  const bars = useMemo(() => {
-    if (period !== "year") return window.map((d) => ({ key: d.date, value: d.messages }));
-    const byMonth = new Map<string, number>();
-    for (const d of series) {
-      const k = d.date.slice(0, 7);
-      byMonth.set(k, (byMonth.get(k) ?? 0) + d.messages);
-    }
-    return [...byMonth].map(([key, value]) => ({ key, value }));
-  }, [period, window, series]);
+  const bars = useMemo(() => trendBars(window, period, (d) => d.messages), [window, period]);
   const detailDay = useMemo(
     () => (day ? (series.find((d) => d.date === day) ?? null) : null),
     [day, series],

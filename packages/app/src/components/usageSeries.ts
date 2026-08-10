@@ -6,9 +6,41 @@
  * them. Stacking puts whichever agent is drawn last permanently above the
  * others, which reads as "that one is bigger" even on days when it isn't.
  */
-import type { ActivityDay } from "../services/activity";
+import type { ActivityDay, Period } from "../services/activity";
 
 export type UsageMetric = "cost" | "tokens";
+
+/** One bar of a trend chart. */
+export interface Bar {
+  readonly key: string;
+  readonly value: number;
+}
+
+/**
+ * A window as chart bars: one per day, or one per MONTH for a year.
+ *
+ * 365 bars would be a pixel wide and unreadable, so a year is bucketed — and
+ * because every screen showing this has the same problem, they each grew their
+ * own copy of the fold. Three copies asserting by comment that they agree about
+ * a period is exactly what a shared function is for.
+ *
+ * Safe to pass the window for both branches: a year window IS the whole series
+ * (both are 365 days, and `PERIOD_DAYS.year` is 365), which is why the callers
+ * that used to bucket their full series can pass the same array here.
+ */
+export function trendBars(
+  days: readonly ActivityDay[],
+  period: Period,
+  value: (day: ActivityDay) => number,
+): Bar[] {
+  if (period !== "year") return days.map((d) => ({ key: d.date, value: value(d) }));
+  const byMonth = new Map<string, number>();
+  for (const d of days) {
+    const k = d.date.slice(0, 7);
+    byMonth.set(k, (byMonth.get(k) ?? 0) + value(d));
+  }
+  return [...byMonth].map(([key, value]) => ({ key, value }));
+}
 
 export interface Series {
   readonly agent: string;
