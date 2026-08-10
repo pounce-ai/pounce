@@ -66,6 +66,11 @@ export function niceScale(peak: number, count: number): { max: number; ticks: nu
  */
 const VISIBLE_SHARE = 0.01;
 
+/** Gridlines the axis has room for, and the sliver above the top one that keeps
+ *  a peak's stroke from being shaved off. */
+const TICKS = 3;
+const TOP_PAD = 3;
+
 /**
  * Build the plot for a window.
  *
@@ -78,7 +83,6 @@ export function buildPlot(
   days: readonly ActivityDay[],
   agents: readonly string[],
   metric: UsageMetric,
-  tickCount = 3,
 ): Plot {
   const built = agents.map((agent) => {
     const values = days.map((d) => valueOf(d, agent, metric));
@@ -91,7 +95,7 @@ export function buildPlot(
   });
 
   const peak = built.reduce((m, s) => Math.max(m, s.peak), 0);
-  const { max, ticks } = niceScale(peak, tickCount);
+  const { max, ticks } = niceScale(peak, TICKS);
 
   const drawn: Series[] = [];
   const hidden: string[] = [];
@@ -166,18 +170,31 @@ export function curvePath(pts: readonly Point[]): string {
   return d;
 }
 
+/**
+ * Value → plot coordinates, for a given scale and box.
+ *
+ * Exported because the AXIS has to use the very same mapping the curves do: the
+ * gridlines, the tick labels and the tapped-day rule are all positioned by it,
+ * and a private second copy in the component silently detached them from the
+ * series whenever a constant here changed.
+ */
+export function plotScale(max: number, width: number, height: number, points: number) {
+  return {
+    /** Horizontal distance between two days. */
+    step: points <= 1 ? 0 : width / (points - 1),
+    toY: (v: number) => (max <= 0 ? height : height - (v / max) * (height - TOP_PAD)),
+  };
+}
+
 /** The line and the closed area for one series, in plot coordinates. */
 export function seriesPaths(
   values: readonly number[],
   max: number,
   width: number,
   height: number,
-  /** Sliver above the top gridline so a peak's stroke isn't shaved off. */
-  top = 3,
 ): { line: string; area: string } {
   if (values.length === 0 || max <= 0) return { line: "", area: "" };
-  const step = values.length === 1 ? 0 : width / (values.length - 1);
-  const toY = (v: number) => height - (v / max) * (height - top);
+  const { step, toY } = plotScale(max, width, height, values.length);
   const line = curvePath(values.map((v, i) => ({ x: i * step, y: toY(v) })));
   return { line, area: line === "" ? "" : `${line} L${width},${height} L0,${height} Z` };
 }

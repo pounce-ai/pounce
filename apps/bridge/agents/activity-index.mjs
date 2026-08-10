@@ -63,7 +63,9 @@ function dayOf(ts) {
   return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
 }
 
-const round = (n, p = 4) => Math.round(n * 10 ** p) / 10 ** p;
+/** Money to `p` decimals. Exported so every overlay that touches a dollar
+ *  figure rounds it the same way — there were three private copies. */
+export const round = (n, p = 4) => Math.round(n * 10 ** p) / 10 ** p;
 
 /**
  * Stream a file's complete lines from `start`, returning the offset through the

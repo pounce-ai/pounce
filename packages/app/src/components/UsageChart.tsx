@@ -17,7 +17,7 @@ import Svg, { Line, Path } from "react-native-svg";
 import type { ActivityDay } from "../services/activity";
 import { agentHex, agentLabel } from "../ui/tokens";
 import { fmtCost, fmtDayLabel, fmtTokens } from "../ui/format";
-import { buildPlot, seriesPaths, type UsageMetric } from "./usageSeries";
+import { buildPlot, plotScale, seriesPaths, type UsageMetric } from "./usageSeries";
 import { useGround, useThemeHex } from "../ui/useThemeHex";
 
 const HEIGHT = 150;
@@ -48,9 +48,10 @@ export function UsageChart({
     () =>
       plot.series.map((s) => ({
         agent: s.agent,
+        hue: agentHex(s.agent, ground) ?? hex.accent,
         ...seriesPaths(s.values, plot.max, width, HEIGHT),
       })),
-    [plot, width],
+    [plot, width, ground, hex.accent],
   );
 
   if (!plot.series.length) {
@@ -61,8 +62,9 @@ export function UsageChart({
     );
   }
 
-  const step = days.length <= 1 ? 0 : width / (days.length - 1);
-  const toY = (v: number) => HEIGHT - (v / plot.max) * (HEIGHT - 3);
+  // The SAME mapping the curves are drawn with, so the gridlines, the tick
+  // labels and the picked-day rule cannot drift off the series.
+  const { step, toY } = plotScale(plot.max, width, HEIGHT, days.length);
   const day = picked == null ? null : days[picked];
 
   return (
@@ -98,21 +100,10 @@ export function UsageChart({
             {/* Every fill first, then every stroke, so no series can cover
                 another's line. */}
             {paths.map((p) => (
-              <Path
-                key={`f-${p.agent}`}
-                d={p.area}
-                fill={agentHex(p.agent, ground) ?? hex.accent}
-                fillOpacity={0.14}
-              />
+              <Path key={`f-${p.agent}`} d={p.area} fill={p.hue} fillOpacity={0.14} />
             ))}
             {paths.map((p) => (
-              <Path
-                key={`l-${p.agent}`}
-                d={p.line}
-                fill="none"
-                stroke={agentHex(p.agent, ground) ?? hex.accent}
-                strokeWidth={1.75}
-              />
+              <Path key={`l-${p.agent}`} d={p.line} fill="none" stroke={p.hue} strokeWidth={1.75} />
             ))}
             {picked == null ? null : (
               <Line
@@ -147,15 +138,12 @@ export function UsageChart({
         </Text>
       ) : (
         <View style={s.legend}>
-          {plot.series.map((series) => (
-            <View key={series.agent} style={s.legendItem}>
-              <View
-                style={[
-                  s.swatch,
-                  { backgroundColor: agentHex(series.agent, ground) ?? hex.accent },
-                ]}
-              />
-              <Text style={s.legendLabel}>{agentLabel(series.agent)}</Text>
+          {paths.map((p) => (
+            <View key={p.agent} style={s.legendItem}>
+              {/* The same hue object the line is stroked with — a swatch that
+                  disagrees with its own series is worse than no legend. */}
+              <View style={[s.swatch, { backgroundColor: p.hue }]} />
+              <Text style={s.legendLabel}>{agentLabel(p.agent)}</Text>
             </View>
           ))}
         </View>

@@ -145,6 +145,35 @@ export async function listDeviceConfigs(): Promise<DeviceConfig[]> {
   }
   return [];
 }
+/**
+ * The paired machines to ASK, one entry per physical machine.
+ *
+ * A machine can appear in the stored list twice — paired by QR and then found
+ * again on the LAN, or reachable at two addresses — because `resolvePairing`
+ * only collapses that at ADD time, by bridgeId, which a bridge too old to
+ * report one doesn't supply. Anything that fans out and combines the answers
+ * has to defend itself: a duplicate silently doubled every figure on the
+ * dashboard (tokens, sessions, messages and dollars all exactly 2×), which
+ * reads as real growth rather than as a bug.
+ *
+ * Deliberately NOT folded into `listDeviceConfigs`, which stays the literal
+ * store read. The management paths depend on that: `reconcileDevices` is handed
+ * the full id list and would garbage-collect the surviving row's siblings, and
+ * add/remove/token paths read-modify-write the stored array, so a deduped read
+ * would delete configs on the next write and make a duplicate row invisible in
+ * Settings — and therefore undeletable.
+ *
+ * `deviceId` decides sameness, so this and pairing agree on what one machine is.
+ */
+export async function hostsToQuery(): Promise<DeviceConfig[]> {
+  const seen = new Map<string, DeviceConfig>();
+  for (const d of await listDeviceConfigs()) {
+    const key = deviceId(d.url, d.bridgeId);
+    if (!seen.has(key)) seen.set(key, d);
+  }
+  return [...seen.values()];
+}
+
 async function writeDeviceConfigs(list: DeviceConfig[]): Promise<void> {
   await SecureStore.setItemAsync(DEVICES_KEY, JSON.stringify(list));
 }
@@ -829,7 +858,7 @@ export async function syncLiveData(opts?: {
   // On an explicit pull-to-refresh we bypass the bridge's 20s cache so a
   // just-opened session shows up immediately.
   const q = opts?.fresh ? "?fresh=1" : "";
-  const configs = await dropLapsedGrants(await listDeviceConfigs());
+  const configs = await dropLapsedGrants(await hostsToQuery());
   const repos: Record<string, Repository> = {};
   const sessions: Record<string, Session> = {};
   const devices: Record<string, Device> = {};
@@ -985,8 +1014,9 @@ export async function searchMessages(
   q: string,
   opts?: { limit?: number; thread?: string; agent?: string; workspace?: string; hostId?: string },
 ): Promise<MessageSearchHit[]> {
-  const all = await listDeviceConfigs();
-  const devices = opts?.hostId ? all.filter((d) => d.id === opts.hostId) : all;
+  const devices = opts?.hostId
+    ? (await listDeviceConfigs()).filter((d) => d.id === opts.hostId)
+    : await hostsToQuery();
   const params = new URLSearchParams({ q, limit: String(opts?.limit ?? 20) });
   if (opts?.thread) params.set("thread", opts.thread);
   if (opts?.agent) params.set("agent", opts.agent);
@@ -1154,32 +1184,8 @@ export async function fetchUsage(
  * Merging (day sums, worst-case coverage) lives in services/activity.ts so it
  * stays unit-testable.
  */
-/**
- * One entry per physical machine.
- *
- * A machine can end up in the device list twice — paired by QR and then found
- * again on the LAN, or reachable at two addresses — and `resolvePairing` only
- * collapses that at ADD time, by bridgeId, which a bridge too old to report one
- * doesn't supply. Anything that SUMS across devices has to defend itself, or a
- * duplicate silently doubles every figure on the dashboard: tokens, sessions,
- * messages and dollars all exactly 2×, which reads as real growth rather than
- * as a bug. Observed once in testing and fixed here rather than at the call
- * site, because the next fan-out would have inherited it.
- *
- * The url is the fallback key: two configs for the same address are the same
- * host whatever they call themselves.
- */
-function oneEach(devices: readonly DeviceConfig[]): DeviceConfig[] {
-  const seen = new Map<string, DeviceConfig>();
-  for (const d of devices) {
-    const key = d.bridgeId || d.url.replace(/\/$/, "");
-    if (!seen.has(key)) seen.set(key, d);
-  }
-  return [...seen.values()];
-}
-
 export async function fetchActivity(days = 365, opts?: { fresh?: boolean }): Promise<ActivityPage> {
-  const devices = oneEach(await listDeviceConfigs());
+  const devices = await hostsToQuery();
   const qs = `days=${days}${opts?.fresh ? "&fresh=1" : ""}`;
   const pages = await Promise.all(
     devices.map(async (cfg) => {
@@ -1289,7 +1295,7 @@ export interface AgentQuota {
  * nothing to say are simply absent.
  */
 export async function fetchQuota(): Promise<AgentQuota[]> {
-  const devices = await listDeviceConfigs();
+  const devices = await hostsToQuery();
   const pages = await Promise.all(
     devices.map(async (cfg) => {
       try {
@@ -1674,7 +1680,7 @@ export async function fetchPairing(cfg: BridgeConfig): Promise<PairPayload | nul
 
 /** Register an Expo push token with every configured device's bridge. */
 export async function registerPushToken(token: string): Promise<void> {
-  const configs = await listDeviceConfigs();
+  const configs = await hostsToQuery();
   await Promise.all(
     configs.map(async (cfg) => {
       try {

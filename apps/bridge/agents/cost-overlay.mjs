@@ -12,6 +12,8 @@
  * arrives here as a zero.
  */
 
+import { round } from "./activity-index.mjs";
+
 /** Day/agent shape with no counts and no dollars — what an agent gets when the
  *  report knows about it but the transcript scan never saw it. */
 const emptyAgent = () => ({ sessions: 0, messages: 0, tokens: 0, cost: null });
@@ -62,22 +64,22 @@ export function mergeEstimatedCost(series, byDay) {
     }
 
     let total = null;
+    let anyPriced = false;
     for (const agent of new Set([...Object.keys(out.byAgent), ...Object.keys(e.byAgent)])) {
       const cur = out.byAgent[agent] ?? emptyAgent();
       const priced = e.byAgent[agent];
-      if (priced == null) {
-        out.byAgent[agent] = cur;
-      } else {
-        out.byAgent[agent] = { ...cur, cost: priced, costEstimated: true };
-        estimated = true;
-      }
-      const cost = out.byAgent[agent].cost;
-      if (cost != null) total = (total ?? 0) + cost;
+      const row = priced == null ? cur : { ...cur, cost: priced, costEstimated: true };
+      out.byAgent[agent] = row;
+      if (priced != null) anyPriced = true;
+      if (row.cost != null) total = (total ?? 0) + row.cost;
     }
     // Rebuilt from the rows above rather than carried over, so a day's headline
     // and the breakdown under it can't disagree.
-    out.cost = total == null ? null : round(total, 4);
-    if (Object.values(out.byAgent).some((a) => a.costEstimated)) out.costEstimated = true;
+    out.cost = total == null ? null : round(total);
+    if (anyPriced) {
+      out.costEstimated = true;
+      estimated = true;
+    }
     return out;
   });
 
@@ -120,8 +122,3 @@ export function mergeEstimatedCost(series, byDay) {
     },
   };
 }
-
-const round = (n, places) => {
-  const f = 10 ** places;
-  return Math.round(n * f) / f;
-};
