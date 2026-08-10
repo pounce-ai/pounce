@@ -25,6 +25,29 @@ export const storage = new MMKV({ id: "pounce" });
   }
 })();
 
+/**
+ * Read a persisted observable's value WITHOUT hydrating its store — for the
+ * frame before Legend State has hydrated, where waiting would show the wrong
+ * thing (the theme unistyles must configure with, before any component renders).
+ *
+ * Legend State's MMKV plugin is registered with no mmkv config, so it writes to
+ * its OWN store (`obsPersist`) rather than the app's. That's the single fact
+ * this function exists to hide — pointing the plugin at `storage` instead would
+ * orphan every value already persisted on every installed copy of the app.
+ */
+export function readPersisted(key: string): string | null {
+  try {
+    legendStore ??= new MMKV({ id: "obsPersist" });
+    const raw = legendStore.getString(key) ?? storage.getString(key);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+let legendStore: MMKV | null = null;
+
 /** Persist an observable under a stable key. Hydrates synchronously on boot. */
 export function persist<T>(obs$: Observable<T>, key: string): void {
   // Cast at the boundary: syncObservable's param type rejects the generic

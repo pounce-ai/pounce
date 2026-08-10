@@ -551,7 +551,6 @@ function Empty({
 }) {
   return (
     <View style={s.emptyBox}>
-      <Text style={s.emptyEmoji}>🐾</Text>
       <Text style={s.emptyTitle}>{title}</Text>
       {body ? <Text style={s.emptyBody}>{body}</Text> : null}
       {action ? (
@@ -772,7 +771,6 @@ const s = StyleSheet.create((theme) => ({
   dimmed: { opacity: 0.55 },
 
   emptyBox: { alignItems: "center", paddingHorizontal: 20, paddingVertical: 40 },
-  emptyEmoji: { fontSize: 24 },
   emptyTitle: {
     marginTop: 8,
     textAlign: "center",

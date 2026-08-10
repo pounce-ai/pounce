@@ -17,6 +17,8 @@ import { AgentLogo, IS_DESKTOP } from "../ui";
 import { agentLabel } from "../ui/tokens";
 import { fmtCost, fmtCount, fmtDayLabel, fmtDelta, fmtTokens } from "../ui/format";
 import { fetchActivity, fetchQuota } from "../services/bridge";
+import { useDevices } from "../state/db/hooks";
+import { ConnectFlow } from "../components/ConnectFlow";
 import {
   type ActivityDay,
   PERIOD_DAYS,
@@ -71,6 +73,7 @@ const PERIODS: Period[] = ["week", "month", "year"];
  */
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
+  const devices = useDevices();
   const { theme } = useUnistyles();
   const router = useRouter();
   const [period, setPeriod] = useState<Period>("month");
@@ -202,7 +205,12 @@ export default function DashboardScreen() {
     }
   }, []);
 
+  // Sharing a card of zeroes is a worse outcome than no button: it looks like
+  // the app failed. Gated on there being activity at all (`empty` below).
   const canShare = !IS_DESKTOP && captureAvailable();
+  /** A machine has been paired at all — not whether it answers right now. A
+   *  brief disconnect shouldn't wipe the charts you were just reading. */
+  const paired = devices.length > 0;
   // "Nothing here" is a claim about the DATA, so it may only be made when the
   // data actually arrived. A failed read is `q.isError`, handled separately —
   // and sessions count, since agents that publish no dated tokens (opencode,
@@ -272,12 +280,18 @@ export default function DashboardScreen() {
           <View style={s.shrink}>
             <Text style={s.title}>Activity</Text>
             <Text style={s.subtitle}>
-              {q.isLoading ? "Reading your history…" : `${fmtCount(run.longest)}-day best streak`}
+              {/* "0-day best streak" is a statistic about nothing. With no
+                  machine paired there is no history to have a streak in. */}
+              {!paired
+                ? "Nothing connected"
+                : q.isLoading
+                  ? "Reading your history…"
+                  : `${fmtCount(run.longest)}-day best streak`}
             </Text>
           </View>
           {IS_DESKTOP ? <View style={s.headerSpacer} /> : null}
           {IS_DESKTOP ? segment : null}
-          {canShare ? (
+          {canShare && paired && !empty ? (
             <Pressable
               onPress={onShare}
               disabled={sharing || q.isLoading}
@@ -295,10 +309,25 @@ export default function DashboardScreen() {
         </View>
 
         {/* Period selector — drives everything below it, the heatmap included:
-          the grid shows the chosen window, not a fixed year. */}
-        {IS_DESKTOP ? null : segment}
+          the grid shows the chosen window, not a fixed year. Hidden with
+          nothing paired: it would narrow an empty set three ways. */}
+        {IS_DESKTOP || !paired ? null : segment}
 
-        {q.isLoading ? (
+        {!paired ? (
+          // Analytics are read from a machine, so with none paired there is
+          // nothing to load and a skeleton would be a lie about work in
+          // progress. Same self-advancing card as Home, so the fix is here
+          // rather than a sentence pointing at another screen.
+          <View style={s.emptyWrap}>
+            <Text style={s.emptyTitle}>Nothing to chart yet</Text>
+            <Text style={s.emptyBody}>
+              {IS_DESKTOP
+                ? "Reading this Mac's history — give it a moment."
+                : "Connect a computer — its history is what fills this in."}
+            </Text>
+            <ConnectFlow />
+          </View>
+        ) : q.isLoading ? (
           <ActivitySkeleton />
         ) : q.isError ? (
           // Couldn't read — say so and offer another go, rather than reporting
@@ -306,7 +335,6 @@ export default function DashboardScreen() {
           // months of history parses every transcript it hasn't summarised yet,
           // and that can outlast the request.
           <View style={s.emptyWrap}>
-            <Text style={s.emptyEmoji}>🐾</Text>
             <Text style={s.emptyTitle}>Couldn&apos;t read your history</Text>
             <Text style={s.emptyBody}>
               The machine didn&apos;t answer in time. If it&apos;s been a while since you opened

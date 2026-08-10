@@ -2,7 +2,15 @@ import { Component, memo, type ReactNode, useMemo, useRef, useState } from "reac
 // eslint-disable-next-line @react-native/no-deprecated-api -- core Clipboard is
 // the only clipboard already inside shipped binaries (OTA-safe); expo-clipboard
 // would need a new native module and a store build.
-import { Clipboard, Pressable, ScrollView, Text, useColorScheme, View } from "react-native";
+import {
+  ActivityIndicator,
+  Clipboard,
+  Pressable,
+  ScrollView,
+  Text,
+  useColorScheme,
+  View,
+} from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { PounceIcon } from "../ui/native/Icon";
 import {
@@ -22,7 +30,7 @@ import { highlightLines, themeFor } from "./highlight";
 import * as WebBrowser from "expo-web-browser";
 import { StreamdownText } from "react-native-streamdown";
 import type { RemendOptions } from "remend";
-import { splitCodeBlocks } from "../components/runnableBlocks";
+import { isDestructive, splitCodeBlocks } from "../components/runnableBlocks";
 import { usePacedText } from "./pacedText";
 import { COLOR } from "../ui";
 import { useThemeHex } from "../ui/useThemeHex";
@@ -30,6 +38,10 @@ import type { PaletteHex } from "../ui/palettes";
 import { SECONDARY_SCALE } from "../ui/tokens";
 
 const MONO = "JetBrainsMono";
+
+/** Executes a command on the thread's host and resolves with its result (null
+ *  when there's no host to run on). See Session's onRunCommand. */
+export type RunCommand = (command: string) => Promise<{ code: number; output: string } | null>;
 
 /** Open tapped links in an in-app browser (SFSafariViewController / Custom Tabs)
  *  so the user stays inside Pounce instead of being kicked out to Safari. Only
@@ -203,8 +215,9 @@ export function MessageMarkdown({
   text: string;
   role: "user" | "assistant";
   streaming?: boolean;
-  /** Present only for live assistant turns — enables shell "Run" cards. */
-  onRun?: (command: string) => void;
+  /** Present only for live assistant turns — enables command cards. Resolves
+   *  with the command's result so the card can show it. */
+  onRun?: RunCommand;
   /** Render the whole text as ONE markdown view instead of lifting code blocks
    *  into separate cards. Used where the text is a document rather than a chat
    *  turn (the project-context reader), so a selection can span the whole
@@ -281,6 +294,40 @@ function scaleStyle(style: MarkdownStyle, scale: number): MarkdownStyle {
   return out as MarkdownStyle;
 }
 
+/**
+ * Built style trees, shared by every message on screen.
+ *
+ * The inputs are all global — palette, role, scheme, scale — so the old
+ * per-instance useMemo built ~25 nested objects per mounted row AND handed the
+ * native renderer a distinct `markdownStyle` identity per row, which it can
+ * never diff away. Keyed by the palette OBJECT (stable per theme, so a theme
+ * switch simply lands on a fresh entry) then by the rest.
+ */
+const STYLE_CACHE = new WeakMap<PaletteHex, Map<string, MarkdownStyle>>();
+
+function markdownStyleFor(
+  role: "user" | "assistant",
+  scheme: string | null | undefined,
+  hex: PaletteHex,
+  scale: number,
+): MarkdownStyle {
+  let byKey = STYLE_CACHE.get(hex);
+  if (!byKey) {
+    byKey = new Map();
+    STYLE_CACHE.set(hex, byKey);
+  }
+  const key = `${role}|${scheme ?? ""}|${scale}`;
+  let style = byKey.get(key);
+  if (!style) {
+    style = scaleStyle(
+      role === "user" ? buildUserStyle(scheme, hex) : buildAssistantStyle(scheme, hex),
+      scale,
+    );
+    byKey.set(key, style);
+  }
+  return style;
+}
+
 function MarkdownBody({
   text,
   role,
@@ -297,14 +344,7 @@ function MarkdownBody({
 }) {
   const scheme = useColorScheme();
   const hex = useThemeHex();
-  const markdownStyle = useMemo(
-    () =>
-      scaleStyle(
-        role === "user" ? buildUserStyle(scheme, hex) : buildAssistantStyle(scheme, hex),
-        scale,
-      ),
-    [role, scheme, scale, hex],
-  );
+  const markdownStyle = markdownStyleFor(role, scheme, hex, scale);
   const paced = usePacedText(text, !!streaming);
   // Live turns run remend off the JS thread (streamdown's remend-processor
   // worklet runtime — needs worklets bundle mode); settled turns skip remend
@@ -353,7 +393,9 @@ const CodeBlock = memo(function CodeBlock({
 }: {
   lang: string;
   code: string;
-  onRun?: (c: string) => void;
+  /** Runs the command on the host and resolves with its result — see
+   *  Session's onRunCommand. Absent on a thread that can't be steered. */
+  onRun?: RunCommand;
   /** Match the surrounding secondary body so the card doesn't out-shout it. */
   secondary?: boolean;
 }) {
@@ -368,6 +410,27 @@ const CodeBlock = memo(function CodeBlock({
   // Brief "Copied" confirmation on the copy action; timer cleared on re-tap so
   // rapid taps don't flicker.
   const [copied, setCopied] = useState(false);
+  // What this command did, once run — kept on the card so the output stays
+  // beside the command that produced it rather than only in the turn below.
+  const [result, setResult] = useState<{ code: number; output: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const risky = useMemo(() => isDestructive(code), [code]);
+  // A tap on a risky command explains the hold rather than doing nothing —
+  // silence would read as a broken button.
+  const [armed, setArmed] = useState(false);
+  const run = () => {
+    if (busy) return;
+    setArmed(false);
+    setBusy(true);
+    setResult(null);
+    void onRun?.(code)
+      .then(setResult)
+      .finally(() => setBusy(false));
+  };
+  const warn = () => {
+    setArmed(true);
+    setTimeout(() => setArmed(false), 2500);
+  };
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copy = () => {
     Clipboard.setString(code);
@@ -382,12 +445,30 @@ const CodeBlock = memo(function CodeBlock({
         <Text style={s.lang}>{lang || "code"}</Text>
         {onRun ? (
           <Pressable
-            onPress={() => onRun(code)}
+            // A command that is hard to take back needs a deliberate gesture:
+            // detection is a heuristic and the ARGUMENTS are whatever an agent
+            // wrote, so `rm -rf build` reaches this button looking like `ls`.
+            // A hold is the same bar any other irreversible control gets — and
+            // it keeps the one-gesture flow, unlike a confirm dialog.
+            onPress={risky ? warn : run}
+            onLongPress={risky ? run : undefined}
+            delayLongPress={550}
+            disabled={busy}
             hitSlop={6}
             style={({ pressed }) => [s.action, pressed && s.pressed70]}
           >
-            <PounceIcon name="play" size={12} color={theme.colors.accent} />
-            <Text style={s.runLabel}>Run</Text>
+            {busy ? (
+              <ActivityIndicator size="small" color={theme.colors.accent} />
+            ) : (
+              <PounceIcon
+                name={risky ? "alert-circle" : "play"}
+                size={12}
+                color={risky ? theme.colors.warning : theme.colors.accent}
+              />
+            )}
+            <Text style={[s.runLabel, risky && { color: theme.colors.warning }]}>
+              {busy ? "Running…" : risky ? (armed ? "Hold to run" : "Run") : "Run"}
+            </Text>
           </Pressable>
         ) : null}
         <Pressable
@@ -435,6 +516,20 @@ const CodeBlock = memo(function CodeBlock({
           ))}
         </View>
       </ScrollView>
+      {/* What it actually did. Shown here as well as in the turn below, so the
+          output stays attached to the command that produced it. */}
+      {result ? (
+        <View style={s.resultBox}>
+          <Text style={result.code === 0 ? s.resultOk : s.resultFail}>
+            {result.code === 0 ? "Ran · exit 0" : `Failed · exit ${result.code}`}
+          </Text>
+          {result.output.trim() ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <Text style={s.resultText}>{result.output.trim()}</Text>
+            </ScrollView>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 });
@@ -463,6 +558,16 @@ class MarkdownErrorBoundary extends Component<
 
 const s = StyleSheet.create((theme) => ({
   card: { overflow: "hidden", borderRadius: 12, borderWidth: 1, borderColor: theme.colors.border },
+  resultBox: {
+    gap: 4,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  resultOk: { fontSize: 11, fontWeight: "600", color: theme.colors.success },
+  resultFail: { fontSize: 11, fontWeight: "600", color: theme.colors.danger },
+  resultText: { fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: theme.colors.fgMuted },
   cardHeader: {
     flexDirection: "row",
     alignItems: "center",

@@ -71,12 +71,19 @@ type MiniRuntime = Record<string, never>;
  *  palette is read; results are cached per theme name. */
 function themedSheet<S extends NamedStyles<S>>(fn: (theme: AppTheme, rt: MiniRuntime) => S): S {
   const cache = new Map<string, S>();
+  // Hot path: every `s.foo` in every row of every render lands here, so the
+  // steady state is an int compare rather than a string-keyed Map lookup.
+  let live: S | null = null;
+  let liveVersion = -1;
   const resolve = (): S => {
+    if (live && liveVersion === version) return live;
     let sheet = cache.get(currentName);
     if (!sheet) {
       sheet = RNStyleSheet.create(fn(themeFor(currentName), {}));
       cache.set(currentName, sheet);
     }
+    live = sheet;
+    liveVersion = version;
     return sheet;
   };
   return new Proxy({} as S, {

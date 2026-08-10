@@ -203,16 +203,7 @@ export default function ContextScreen() {
   };
 
   return (
-    <View style={[s.root, IS_DESKTOP ? { paddingTop: insets.top + 8 } : null]}>
-      {IS_DESKTOP ? (
-        <View style={s.headerRow}>
-          <Text style={s.headerTitle}>Project context</Text>
-          <Pressable onPress={() => router.back()} style={({ pressed }) => pressed && s.pressed60}>
-            <Text style={s.cancelLabel}>Close</Text>
-          </Pressable>
-        </View>
-      ) : null}
-
+    <View style={s.root}>
       {target ? (
         <Text numberOfLines={1} style={s.cwdLine}>
           {target.cwd}

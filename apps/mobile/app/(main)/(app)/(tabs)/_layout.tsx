@@ -1,6 +1,5 @@
 import { Platform } from "react-native";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
-import { COLOR } from "@pounce/app/ui/tokens";
 import { useThemeHex } from "@pounce/app/ui/useThemeHex";
 import { alpha } from "@pounce/app/ui/color";
 
@@ -15,7 +14,9 @@ export default function TabsLayout() {
   const hex = useThemeHex();
   return (
     <NativeTabs
-      tintColor={COLOR.accent}
+      // hex.accent, not COLOR.accent: COLOR is a non-subscribing read, so the
+      // bar would keep the palette it mounted with.
+      tintColor={hex.accent}
       // LegendList content under the bar can leave the scroll-edge glass fully
       // transparent; keep the bar legible over the dark thread lists.
       disableTransparentOnScrollEdge

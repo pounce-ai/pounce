@@ -41,7 +41,24 @@ const MAX_PENDING = 5;
 /** Minimum gap between requests from one address. */
 const RATE_MS = 10_000;
 
-const KINDS = new Set(["preview", "read"]);
+/**
+ * `device` is the odd one out and deliberately so.
+ *
+ * A grant is read-only by construction (see grantAllowsRoute — non-GET is
+ * refused before any path is consulted), which is right for someone else's
+ * laptop and useless for your own phone: a phone has to SEND messages, steer a
+ * turn, stop one. That capability already has a credential — the bridge's own
+ * token, all-or-nothing and forever, which is exactly what scanning the pairing
+ * QR hands over.
+ *
+ * So a `device` request mints no grant at all. It reuses this handshake purely
+ * as the consent gate — discover on the LAN, ask, a human approves — and the
+ * approval hands back that same pairing token. Same access as the QR, reached
+ * by tapping Approve instead of aiming a camera. Inventing a second, writable
+ * grant kind would have been a parallel authorization system for a capability
+ * that already has one.
+ */
+const KINDS = new Set(["preview", "read", "device"]);
 
 const sha256 = (s) => createHash("sha256").update(s).digest();
 
@@ -395,6 +412,17 @@ export function createAccess({ store = new Store("access"), now = () => Date.now
       }
       if (r.state !== "approved") return { ok: true, state: r.state };
 
+      // A device approval carries the bridge's own token and mints no grant, so
+      // there is nothing to look up — and nothing to expire.
+      if (r.kind === "device") {
+        const out = { ok: true, state: "approved", kind: "device", bridge: r.bridge };
+        if (r.token) {
+          out.token = r.token;
+          store.set(`req:${id}`, { ...r, token: null, deliveredAt: now() });
+        }
+        return out;
+      }
+
       const g = store.get(`grant:${r.grantId}`);
       if (!g) return { ok: true, state: "revoked" };
       const out = {
@@ -420,9 +448,35 @@ export function createAccess({ store = new Store("access"), now = () => Date.now
      * `bridge` is how the guest reaches us afterwards (url, and the per-grant
      * tunnel identity when one was started), carried back on its next poll.
      */
-    approve(requestId, { scope, expiresAt, bridge } = {}) {
+    approve(requestId, { scope, expiresAt, bridge, deviceToken } = {}) {
       const r = store.get(`req:${requestId}`);
       if (!r || r.state !== "pending") return { ok: false, error: "unknown request" };
+
+      // Approving a DEVICE hands over the bridge's own pairing token — the
+      // caller supplies it, because this module deliberately doesn't hold it.
+      // No grant, no scope, no expiry: the phone becomes a paired device, and
+      // un-pairing it is removing the device, not revoking a grant.
+      if (r.kind === "device") {
+        if (!deviceToken) return { ok: false, error: "deviceToken required" };
+        // Remembered so "Shared access" can list the phones holding this
+        // machine's token. It is a RECORD, not a credential: the token is the
+        // machine's own, so this row cannot be revoked on its own — see
+        // listDevices().
+        store.set(`device:${r.requester.bridgeId}`, {
+          bridgeId: r.requester.bridgeId,
+          hostName: r.requester.hostName,
+          platform: r.requester.platform,
+          pairedAt: now(),
+        });
+        store.set(`req:${requestId}`, {
+          ...r,
+          state: "approved",
+          grantId: null,
+          token: deviceToken, // held only until the requester's next poll collects it
+          bridge: bridge ?? null,
+        });
+        return { ok: true, device: true };
+      }
 
       const isPreview = r.kind === "preview";
       const finalScope = isPreview ? null : (normalizeScope(scope) ?? r.scope ?? { kind: "full" });
@@ -624,6 +678,22 @@ export function createAccess({ store = new Store("access"), now = () => Date.now
       return pending()
         .sort((a, b) => b.createdAt - a.createdAt)
         .map(publicRequest);
+    },
+
+    /**
+     * Phones and tablets paired through a `device` ask.
+     *
+     * Listed separately from grants because they are a different thing: a grant
+     * is read-only, scoped and revocable on its own, while a paired device
+     * holds this machine's pairing token — the same credential the QR hands
+     * out. Un-pairing one means rotating that token, which ends every device.
+     * Showing them here at least answers "what has access?" honestly.
+     */
+    listDevices() {
+      return Object.values(store.withPrefix("device:")).map((d) => ({
+        ...d,
+        pairedAt: new Date(d.pairedAt).toISOString(),
+      }));
     },
 
     listGrants() {

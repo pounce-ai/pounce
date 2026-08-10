@@ -13,21 +13,18 @@
  * draws the menu at those coordinates over the whole window — the same trick
  * the modal host uses.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { observable } from "@legendapp/state";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import { COLOR } from "@pounce/app/ui";
 import { type EditorTarget, listEditors, openInEditor } from "@pounce/app/services/bridge";
 import { useThreads } from "@pounce/app/state/db/hooks";
 import { nav$ } from "../shims/router";
+import { AnchoredMenu, anchorStore, useAnchorButton } from "./AnchoredMenu";
 
-/** Where the button is, in window coordinates — null when the menu is shut. */
-const openIn$ = observable<{ anchor: { x: number; y: number; w: number } | null }>({
-  anchor: null,
-});
+const openIn$ = anchorStore();
 
 /** Menu width. Fixed rather than content-sized so it doesn't resize as the
  *  editor list arrives. */
@@ -60,20 +57,14 @@ function useActiveThread() {
  *  a new thread with no cwd yet, or an archived one whose worktree is gone. */
 export function OpenInButton() {
   const thread = useActiveThread();
-  const open = useSelector(() => openIn$.anchor.get()) != null;
-  const ref = useRef<View>(null);
+  const { open, ref, onPress } = useAnchorButton(openIn$);
 
   if (!folderOf(thread)) return null;
 
   return (
     <View ref={ref} collapsable={false}>
       <Pressable
-        onPress={() => {
-          if (open) return openIn$.anchor.set(null);
-          // Measured at press time, not on layout: the strip reflows as tabs
-          // open and close, and a position cached at mount would drift.
-          ref.current?.measureInWindow((x, y, w, h) => openIn$.anchor.set({ x, y: y + h + 4, w }));
-        }}
+        onPress={onPress}
         accessibilityLabel="Open in"
         style={({ pressed }) => [s.btn, (pressed || open) && s.hover]}
       >
@@ -129,47 +120,34 @@ export function OpenInMenu() {
     if (!r.ok) setError(r.error ?? "couldn't open");
   };
 
+  // Right-aligned: the control sits near the window's right edge, so a
+  // left-aligned card would hang off it.
   return (
-    <>
-      {/* Full-window catcher, under the card: clicking anywhere else dismisses,
-          which is what every other menu on this platform does. */}
-      <Pressable style={StyleSheet.absoluteFill} onPress={close} />
-      <View
-        style={[
-          s.menu,
-          {
-            top: anchor.y,
-            // Right-aligned to the button. The control sits near the window's
-            // right edge, so a left-aligned menu would hang off it.
-            left: Math.max(8, anchor.x + anchor.w - MENU_W),
-          },
-        ]}
-      >
-        {editors == null ? (
-          <Text style={s.note}>Looking…</Text>
-        ) : editors.length === 0 ? (
-          <Text style={s.note}>No editor found on this machine.</Text>
-        ) : (
-          editors.map((e) => (
-            <Pressable
-              key={e.id}
-              onPress={() => void pick(e.id)}
-              style={({ pressed }) => [s.item, pressed && s.hover]}
-            >
-              <Ionicons name={ICON[e.id] ?? DEFAULT_ICON} size={13} color={COLOR.fgMuted} />
-              <Text style={s.itemLabel}>{e.name}</Text>
-            </Pressable>
-          ))
-        )}
-        {/* The folder about to be opened. A thread's worktree is not always the
+    <AnchoredMenu store={openIn$} width={MENU_W} align="right" style={s.menuBody}>
+      {editors == null ? (
+        <Text style={s.note}>Looking…</Text>
+      ) : editors.length === 0 ? (
+        <Text style={s.note}>No editor found on this machine.</Text>
+      ) : (
+        editors.map((e) => (
+          <Pressable
+            key={e.id}
+            onPress={() => void pick(e.id)}
+            style={({ pressed }) => [s.item, pressed && s.hover]}
+          >
+            <Ionicons name={ICON[e.id] ?? DEFAULT_ICON} size={13} color={COLOR.fgMuted} />
+            <Text style={s.itemLabel}>{e.name}</Text>
+          </Pressable>
+        ))
+      )}
+      {/* The folder about to be opened. A thread's worktree is not always the
             path you'd guess, and this is the only place the choice is visible
             before something launches. */}
-        <Text numberOfLines={1} style={s.path}>
-          {folder}
-        </Text>
-        {error ? <Text style={s.error}>{error}</Text> : null}
-      </View>
-    </>
+      <Text numberOfLines={1} style={s.path}>
+        {folder}
+      </Text>
+      {error ? <Text style={s.error}>{error}</Text> : null}
+    </AnchoredMenu>
   );
 }
 
@@ -185,22 +163,7 @@ const s = StyleSheet.create((theme) => ({
   hover: { backgroundColor: theme.colors.surface },
   btnLabel: { fontSize: 11.5, color: theme.colors.fgMuted },
   btnLabelOn: { color: theme.colors.accent },
-  menu: {
-    position: "absolute",
-    width: MENU_W,
-    gap: 1,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.bgElevated,
-    padding: 5,
-    // The menu floats over a transcript — without a shadow it reads as part of
-    // the page rather than above it.
-    shadowColor: "#000",
-    shadowOpacity: 0.28,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-  },
+  menuBody: { gap: 1 },
   item: {
     flexDirection: "row",
     alignItems: "center",

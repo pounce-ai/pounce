@@ -20,14 +20,14 @@ import {
 } from "@pounce/shared";
 import { defaultMarked } from "../state/stores";
 import { useThreadMarkers } from "../state/db/hooks";
-import { MessageMarkdown } from "../components/MessageMarkdown";
+import { MessageMarkdown, type RunCommand } from "../components/MessageMarkdown";
 import { PromptForm } from "../components/PromptForm";
 import { DiffBlock, HlText } from "../components/CodeHighlight";
 import { Modal } from "../components/AppModal";
 import { cleanAssistantText, isEmptyUserMessage, parseUserMessage } from "@pounce/transcript";
 // collapseToolResults lives in a pure (RN-free) module so it can be unit-tested;
 // imported for use below and re-exported since Session.tsx imports it from here.
-import { collapseToolResults, formatElapsed, runElapsedMs } from "./timelineEvents";
+import { collapseToolResults, formatElapsed, runElapsedByRun } from "./timelineEvents";
 import { isTaskCall, type TaskItem, type TaskTimeline } from "./taskEvents";
 import { HIGHLIGHT } from "../ui/tokens";
 import { TodoCard } from "./TodoCard";
@@ -94,8 +94,16 @@ function batchPhrase(name: string, n: number): string {
  * transcript that alternates prose, one command, prose, one command is just as
  * busy, and a rule that only folded pairs would leave half the pills on screen.
  */
-function toolRuns(data: TimelineEvent[]): { id: string; ids: string[] }[] {
-  const runs: { id: string; ids: string[] }[] = [];
+/** A run and the label its collapsed row shows — found in ONE walk, because
+ *  finding the boundaries and summing the names are the same scan. */
+interface ToolRun {
+  id: string;
+  ids: string[];
+  header: string;
+}
+
+function toolRuns(data: TimelineEvent[]): ToolRun[] {
+  const runs: ToolRun[] = [];
   let i = 0;
   while (i < data.length) {
     if (data[i].type !== "tool_call") {
@@ -103,37 +111,21 @@ function toolRuns(data: TimelineEvent[]): { id: string; ids: string[] }[] {
       continue;
     }
     let j = i;
-    while (j < data.length && data[j].type === "tool_call") j++;
-    runs.push({ id: data[i].id, ids: data.slice(i, j).map((e) => e.id) });
+    const counts = new Map<string, number>();
+    const ids: string[] = [];
+    while (j < data.length && data[j].type === "tool_call") {
+      const name = (data[j] as ToolCallEvent).call.name;
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+      ids.push(data[j].id);
+      j++;
+    }
+    // Every run gets a header, including a run of one: it's the COLLAPSED row's
+    // label, so a lone call would otherwise have nothing to show.
+    const text = [...counts.entries()].map(([name, n]) => batchPhrase(name, n)).join(", ") + "…";
+    runs.push({ id: data[i].id, ids, header: text.charAt(0).toUpperCase() + text.slice(1) });
     i = j;
   }
   return runs;
-}
-
-function batchHeaders(data: TimelineEvent[]): Map<string, string> {
-  const m = new Map<string, string>();
-  let i = 0;
-  while (i < data.length) {
-    if (data[i].type !== "tool_call") {
-      i++;
-      continue;
-    }
-    let j = i;
-    while (j < data.length && data[j].type === "tool_call") j++;
-    // Every run, including a run of one: the header is now the COLLAPSED row's
-    // label, so a lone call needs one too or it would have nothing to show.
-    {
-      const counts = new Map<string, number>();
-      for (let k = i; k < j; k++) {
-        const name = (data[k] as ToolCallEvent).call.name;
-        counts.set(name, (counts.get(name) ?? 0) + 1);
-      }
-      const text = [...counts.entries()].map(([name, n]) => batchPhrase(name, n)).join(", ") + "…";
-      m.set(data[i].id, text.charAt(0).toUpperCase() + text.slice(1));
-    }
-    i = j;
-  }
-  return m;
 }
 
 /** How many of an open run's calls show before the rest fold behind a
@@ -183,7 +175,7 @@ export const Timeline = memo(function Timeline({
   onLongPressEvent?: (ev: TimelineEvent) => void;
   /** Queue a shell command into the composer (Run buttons on shell code blocks).
    *  Absent for read-only threads. */
-  onRunCommand?: (command: string) => void;
+  onRunCommand?: RunCommand;
   /** Fires as the user scrolls, telling the parent whether the list is pinned to
    *  the bottom — drives the floating "jump to latest" pill. */
   onAtBottomChange?: (atBottom: boolean) => void;
@@ -234,8 +226,8 @@ export const Timeline = memo(function Timeline({
     return m;
   }, [events]);
   const all = useMemo(() => collapseToolResults(events), [events]);
-  const headers = useMemo(() => batchHeaders(all), [all]);
   const runs = useMemo(() => toolRuns(all), [all]);
+  const headers = useMemo(() => new Map(runs.map((r) => [r.id, r.header])), [runs]);
 
   /**
    * Which tool runs the reader has opened. Collapsed is the default, and that
@@ -307,10 +299,7 @@ export const Timeline = memo(function Timeline({
    *  them. */
   const runElapsed = useMemo(() => {
     const m = new Map<string, string>();
-    for (const run of runs) {
-      const ms = runElapsedMs(events, run.ids);
-      if (ms != null) m.set(run.id, formatElapsed(ms));
-    }
+    for (const [runId, ms] of runElapsedByRun(events, runs)) m.set(runId, formatElapsed(ms));
     return m;
   }, [events, runs]);
 
@@ -573,7 +562,7 @@ const Row = memo(function Row({
   /** Resolved marker state (override ▸ default), computed by the Timeline root. */
   marked: boolean;
   onLongPressEvent?: (ev: TimelineEvent) => void;
-  onRunCommand?: (command: string) => void;
+  onRunCommand?: RunCommand;
   /** For tool_call rows: the matching tool_result, rendered inside the accordion. */
   pairedResult?: ToolResultEvent;
   /** For the first call of a parallel batch: the synthesized summary line. */
@@ -668,13 +657,9 @@ const Row = memo(function Row({
     case "thinking_finished": {
       const thought = event.text?.trim();
       if (!thought) return <Meta text="Thought" />;
-      // Reasoning is the model talking to itself, and some models emit a LOT of
-      // it — opencode's runs pushed screens of raw planning prose (with literal
-      // ``` fences and "1." lists, since a plain Text renders no markdown)
-      // between the messages you actually came to read. Long ones collapse to a
-      // single line and render as markdown once opened. Short ones stay inline:
-      // a one-sentence aside is a useful beat, and burying it behind a
-      // disclosure costs a tap to learn nothing.
+      // Some models emit screens of raw reasoning: long thoughts collapse
+      // behind a disclosure (and render as markdown once opened), one-liners
+      // stay inline.
       if (thought.length <= THINKING_INLINE_MAX && !thought.includes("\n"))
         return <Meta text={`💭 ${thought}`} align="left" />;
       return (
@@ -728,31 +713,20 @@ const Row = memo(function Row({
           <ToolAccordion event={event} result={pairedResult} cwd={cwd} />
         </SearchHighlight>
       );
-      // Open run: a header above the calls. It offers the folded-away ones
-      // while the run is showing only its tail, and is the way back to closed
-      // once everything is on screen — one row either way.
       if (openHeader) {
-        const hiddenCount = openHeader.hiddenCount;
+        const { hiddenCount, runId: openRunId } = openHeader;
+        // Folded-away calls are offered first; with everything on screen the
+        // same row is the way back to closed.
+        const label = hiddenCount
+          ? `+${hiddenCount} previous tool call${hiddenCount === 1 ? "" : "s"}`
+          : (openHeader.elapsed && `Worked for ${openHeader.elapsed}`) || batchHeader;
+        const press = hiddenCount ? onRevealRun : onToggleRun;
         return (
           <View style={s.gap8}>
             <RunSummary
-              label={
-                hiddenCount
-                  ? `+${hiddenCount} previous tool call${hiddenCount === 1 ? "" : "s"}`
-                  : openHeader.elapsed
-                    ? `Worked for ${openHeader.elapsed}`
-                    : batchHeader
-              }
+              label={label}
               open={!hiddenCount}
-              onPress={
-                hiddenCount
-                  ? onRevealRun
-                    ? () => onRevealRun(openHeader.runId)
-                    : undefined
-                  : onToggleRun
-                    ? () => onToggleRun(openHeader.runId)
-                    : undefined
-              }
+              onPress={press && (() => press(openRunId))}
             />
             <Reveal>{accordion}</Reveal>
           </View>
@@ -806,7 +780,7 @@ function AssistantBubble({
   agent?: string;
   streaming?: boolean;
   marked?: boolean;
-  onRun?: (command: string) => void;
+  onRun?: RunCommand;
 }) {
   const clean = useMemo(() => cleanAssistantText(text, agent), [text, agent]);
   return (
@@ -1115,7 +1089,7 @@ function Bubble({
    *  are marked by default, so decorating them all would be noise. */
   marked?: boolean;
   /** Enables shell "Run" cards on assistant turns (queues !cmd to composer). */
-  onRun?: (command: string) => void;
+  onRun?: RunCommand;
 }) {
   const { theme } = useUnistyles();
   // User turns are compact right-aligned accent bubbles; assistant turns render

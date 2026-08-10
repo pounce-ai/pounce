@@ -1804,6 +1804,10 @@ function renderDiscoveryToggle(){
 
 function renderRequest(r){
   var isPreview = r.kind === 'preview';
+  // A phone asking to pair. Full access, like the QR — so it gets a plain
+  // sentence and no scope picker rather than controls that would imply the
+  // access can be narrowed.
+  var isDevice = r.kind === 'device';
   var sel = {everything: !r.scope || r.scope.kind === 'full', picked:{}, hours:24, q:'', hits:[], timer:null};
   if(r.scope && r.scope.repoKeys) r.scope.repoKeys.forEach(function(k){ sel.picked[k] = true; });
   var loose = (r.scope && r.scope.threads) ? r.scope.threads.slice() : [];
@@ -1817,14 +1821,14 @@ function renderRequest(r){
     card.innerHTML = '';
     card.appendChild(h('div',{class:'row'},[
       h('div',{class:'grow'},[
-        h('div',{class:'name',text:r.requester.hostName + ' wants ' + (isPreview ? 'a look at what is here' : 'read access')}),
-        h('div',{class:'meta',text:isPreview ? 'Space and thread names only — no messages, for a few minutes.' : 'Asked for: ' + summarize(r.scope)})
+        h('div',{class:'name',text:r.requester.hostName + ' wants ' + (isDevice ? 'to pair with this Mac' : isPreview ? 'a look at what is here' : 'read access')}),
+        h('div',{class:'meta',text:isDevice ? 'Full access to your agents, the same as scanning the pairing code. Remove it later from Settings on that device.' : isPreview ? 'Space and thread names only — no messages, for a few minutes.' : 'Asked for: ' + summarize(r.scope)})
       ]),
       h('div',{class:'code',text:fmtCode(r.code)})
     ]));
     if(r.note) card.appendChild(h('p',{class:'note',text:'“' + r.note + '”'}));
 
-    if(!isPreview){
+    if(!isPreview && !isDevice){
       card.appendChild(h('div',{class:'field',text:'They can read'}));
       [['Everything on this machine', true], ['Only what I pick', false]].forEach(function(o){
         var input = h('input',{type:'radio',name:'sc' + r.id});
@@ -1879,11 +1883,11 @@ function renderRequest(r){
     var approve = h('button',{class:'p', onclick:function(){
       act('/v1/access/approve',{
         requestId:r.id,
-        scope: isPreview ? undefined : sc,
-        expiresAt: (isPreview || sel.hours === null) ? null : new Date(Date.now() + sel.hours*3600000).toISOString()
+        scope: (isPreview || isDevice) ? undefined : sc,
+        expiresAt: (isPreview || isDevice || sel.hours === null) ? null : new Date(Date.now() + sel.hours*3600000).toISOString()
       });
-    }, text: isPreview ? 'Let them look' : 'Approve · ' + summarize(sc)});
-    if(!isPreview && !sel.everything && !sc.repoKeys.length && !loose.length) approve.disabled = true;
+    }, text: isDevice ? 'Pair this device' : isPreview ? 'Let them look' : 'Approve · ' + summarize(sc)});
+    if(!isPreview && !isDevice && !sel.everything && !sc.repoKeys.length && !loose.length) approve.disabled = true;
     card.appendChild(h('div',{class:'actions'},[
       h('button',{onclick:function(){ act('/v1/access/deny',{requestId:r.id}); }, text:'Deny'}),
       approve
@@ -1992,6 +1996,30 @@ const server = http.createServer(async (req, res) => {
   if (req.headers.origin && !isOwnOrigin(req)) return send(res, 403, { error: "forbidden" });
 
   if (url.pathname === "/health") return send(res, 200, { ok: true });
+
+  /**
+   * "Who are you?" — for a phone sweeping the local subnet.
+   *
+   * Deliberately unauthenticated and LAN-reachable, carrying exactly what the
+   * discovery beacon already broadcasts to the whole network (agents/discovery.mjs):
+   * a name, a platform, a stable id. No token, no repo names, no thread titles.
+   * A phone can't join the beacon's multicast group without an entitlement Apple
+   * grants case by case, so it probes for this instead — same information, same
+   * exposure, reachable over plain HTTP.
+   *
+   * `bridgeId` is the machine id devices canonicalize on, so a machine found
+   * here and one paired by QR collapse onto a single row.
+   */
+  if (url.pathname === "/v1/hello") {
+    return send(res, 200, {
+      ok: true,
+      bridgeId: machineBridgeId(),
+      hostName: os.hostname().replace(/\.local$/, ""),
+      platform: process.platform,
+      port: PORT,
+      appVersion: APP_VERSION,
+    });
+  }
 
   // Localhost-only UI surface for the desktop app: pairing QR + live status.
   // Gated to loopback because it exposes the pairing token.
@@ -2257,7 +2285,14 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/v1/access" && req.method === "GET") {
       if (!isOwner(req)) return send(res, 403, { error: "local only" });
       sweepAccess();
-      return send(res, 200, { pending: access.listPending(), grants: access.listGrants() });
+      return send(res, 200, {
+        pending: access.listPending(),
+        grants: access.listGrants(),
+        // Phones paired through the LAN flow. Not grants — they hold this
+        // machine's own token — but they ARE things with access, and a screen
+        // that answers "who can see this?" has to say so.
+        devices: access.listDevices(),
+      });
     }
     if (url.pathname === "/v1/access/approve" && req.method === "POST") {
       if (!isOwner(req)) return send(res, 403, { error: "local only" });
@@ -2266,8 +2301,14 @@ const server = http.createServer(async (req, res) => {
         scope: scope === undefined ? undefined : (normalizeScope(scope) ?? { kind: "full" }),
         expiresAt: expiresAt ?? null,
         bridge: ownIdentity(),
+        // Only a `device` approval consumes this: it hands the asker this
+        // machine's pairing token instead of minting a grant (see access.mjs).
+        deviceToken: TOKEN,
       });
       if (!r.ok) return send(res, 400, r);
+      // A device is now paired, exactly as if it had scanned the code — there is
+      // no grant to tunnel or to show in the grants list.
+      if (r.device) return send(res, 200, { ok: true, device: true });
       // Give the guest a way back in from another network. Best-effort: no
       // tunnel binary just means the grant is LAN-only.
       const tunnel = startGrantTunnel(r.grant.id);

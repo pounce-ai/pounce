@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActionSheetIOS,
   ActivityIndicator,
-  Alert,
   Clipboard,
   Pressable,
   Text,
@@ -28,7 +27,6 @@ import type { PermissionMode, TimelineEvent } from "@pounce/shared";
 import { collapseToolResults, Timeline } from "../components/Timeline";
 import { deriveTaskTimeline } from "../components/taskEvents";
 import { TaskProgressBar } from "../components/TaskProgress";
-import { WorkingIndicator } from "../components/WorkingIndicator";
 import { ShimmerLabel } from "../components/ShimmerLabel";
 import { ComposerScrim, SCRIM_HEIGHT } from "../components/ComposerScrim";
 import { useSessionChrome, usePublishTasks, usePublishUsage } from "../state/sessionChrome";
@@ -91,6 +89,7 @@ import {
   fetchThreadMarkers,
   fetchUsage,
   interruptTurn,
+  runExec,
   pushMarker,
   respondPermission,
   respondPrompt,
@@ -102,21 +101,18 @@ import {
   type ThreadUsage,
 } from "../services/bridge";
 import { PounceIcon } from "../ui/native/Icon";
-import {
-  ACTIVITY_LABEL,
-  AgentStatusIcon,
-  BranchChip,
-  COLOR,
-  INPUT_TWEAKS,
-  IS_DESKTOP,
-  pickSheet,
-} from "../ui";
+import { BranchChip, COLOR, INPUT_TWEAKS, IS_DESKTOP, pickSheet } from "../ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "../ui/agent-meta";
 
 /** Desktop renders this screen in a wide pane: pickers use Alert instead of
  *  ActionSheetIOS (which doesn't exist there) and the transcript is capped at
  *  a readable column width. */
 const DESKTOP = Platform.OS === "macos" || Platform.OS === "windows";
+
+/** One size for every control in the thread header — back, agent mark, search
+ *  and more. They had drifted to 22/18/18/20, which reads as a wobble along a
+ *  row the eye scans horizontally. */
+const HEADER_ICON = 20;
 
 /** Order host-fetched history chronologically. Turns share one timestamp, so a
  *  stable sort keeps items within a turn in place while fixing turn order — a
@@ -225,7 +221,6 @@ export default function SessionScreen() {
   const router = useRouter();
   const { theme } = useUnistyles();
   const [sending, setSending] = useState(false);
-  const [stopping, setStopping] = useState(false);
 
   const session = useThread(id);
   // "live" = a real bridge is in use (not demo). Gating history on the transient
@@ -471,11 +466,14 @@ export default function SessionScreen() {
   // cost is the worst thing this screen can do — cover a drawn transcript with a
   // loading label forever. Once there are events to show, give the list a beat to
   // report in and then uncover regardless.
+  // Depends on "are there events", NOT on how many: the raw count changes with
+  // every streamed token, which tore down and re-armed this timer each time.
+  const hasEvents = events.length > 0;
   useEffect(() => {
-    if (listReady || events.length === 0) return;
+    if (listReady || !hasEvents) return;
     const t = setTimeout(() => setListReady(true), 1200);
     return () => clearTimeout(t);
-  }, [listReady, events.length]);
+  }, [listReady, hasEvents]);
   // Read at send time to decide whether the scroll-to-end animates (the very
   // first message has nothing to scroll past). A ref, not a dep: threading the
   // event array into runTurn would rebuild it on every streamed token.
@@ -516,13 +514,6 @@ export default function SessionScreen() {
   const { keyboard, onComposerLayout, scrollMessageToEnd, composerHeight } = useChatKeyboard(
     listRef,
     composerBarRef,
-  );
-
-  // Tapping "Run" on a shell code block queues !command into the composer for
-  // review. Stable so it doesn't churn Timeline's memoized rows.
-  const onRunCommand = useCallback(
-    (cmd: string) => composerRef.current?.insert(`!${cmd.trim()}`),
-    [],
   );
 
   const [markerSheet, setMarkerSheet] = useState(false);
@@ -886,6 +877,9 @@ export default function SessionScreen() {
   // Claude Code / Codex model. inFlightRef gates re-entrancy synchronously so a
   // fast second submit can't start a parallel turn before `sending` updates.
   const inFlightRef = useRef(false);
+  /** When a turn WE ran finished, or null if we've never run one here. Beats
+   *  the synced record, which lags — see `running` below. */
+  const turnEndedAt = useRef<number | null>(null);
   const queueRef = useRef<ComposerSubmit[]>([]);
   const [queued, setQueued] = useState<ComposerSubmit[]>([]);
 
@@ -909,6 +903,8 @@ export default function SessionScreen() {
         return;
       }
       inFlightRef.current = true;
+      // A new turn supersedes what we knew about the last one.
+      turnEndedAt.current = null;
       setSending(true);
       try {
         await runTurn(s);
@@ -921,10 +917,47 @@ export default function SessionScreen() {
         }
       } finally {
         inFlightRef.current = false;
+        // First-hand: this turn is over. Held until the record catches up (or
+        // a genuinely new turn arrives), so the stale "running" it still
+        // reports can't re-animate a finished turn.
+        turnEndedAt.current = Date.now();
         setSending(false);
       }
     },
     [runTurn],
+  );
+
+  /**
+   * Tapping "Run" on a command block: execute it on the HOST, then tell the
+   * agent what happened.
+   *
+   * It used to prefill the composer with `!cmd` — Claude's REPL bang prefix,
+   * which does nothing on the headless path we drive (`claude -p`), so it
+   * arrived as a message starting with "!" and the agent decided what to make
+   * of it. This runs the command for real through /v1/exec: same shell, same
+   * cwd, deterministic, no model in the loop.
+   *
+   * The result is then relayed as a turn, because an agent that doesn't know
+   * the command ran will offer it again — the transcript has to stay a true
+   * record of what happened on the machine.
+   */
+  const onRunCommand = useCallback(
+    async (cmd: string) => {
+      if (!session) return null;
+      const r = await runExec(session.hostId, session.cwd, cmd.trim());
+      // Bounded: a turn carrying 100kB of build log is unreadable and expensive.
+      // The full output stays on screen in the card.
+      const shown = r.output.length > 4000 ? `${r.output.slice(0, 4000)}\n… (truncated)` : r.output;
+      void onSubmit({
+        text:
+          `I ran this command and got exit code ${r.code}:\n\n` +
+          `\`\`\`bash\n${cmd.trim()}\n\`\`\`\n\n` +
+          (shown.trim() ? `Output:\n\n\`\`\`\n${shown.trim()}\n\`\`\`` : "It printed nothing."),
+        images: [],
+      });
+      return r;
+    },
+    [session, onSubmit],
   );
 
   const cancelQueued = useCallback((i: number) => {
@@ -952,12 +985,7 @@ export default function SessionScreen() {
     queueRef.current = [];
     setQueued([]);
     inFlightRef.current = false;
-    setStopping(true);
-    try {
-      await interruptTurn(session.hostId, session.agent, session.id);
-    } finally {
-      setStopping(false);
-    }
+    await interruptTurn(session.hostId, session.agent, session.id);
   }, [session]);
 
   // Fire the first turn handed off from the New-task composer (once).
@@ -971,7 +999,26 @@ export default function SessionScreen() {
     void Promise.resolve(onSubmit(pending)).catch(() => {});
   }, [session, id, onSubmit]);
 
-  const running = sending || session?.activity === "running" || session?.activity === "streaming";
+  /**
+   * Is a turn actually in flight?
+   *
+   * `sending` is DEFINITIVE for a turn this screen started: runTurn resolved,
+   * so the agent is done, full stop. `session.activity` is the synced record,
+   * which lags — it is how a MIRRORED turn (started on the Mac) is seen at all,
+   * but after our own turn ends it keeps reading "running" until the next sync
+   * and would leave the composer animating over a finished turn.
+   *
+   * So the local answer wins once we've had one: only trust the record while
+   * this screen has no first-hand knowledge.
+   */
+  const mirrored = session?.activity === "running" || session?.activity === "streaming";
+  // The stamp only outranks a record that hasn't moved since. Once the host
+  // reports anything NEWER than our turn's end — the catch-up sync, or a fresh
+  // turn started on the Mac — the record is first-hand again and wins.
+  const staleRunning =
+    turnEndedAt.current != null &&
+    !(session?.updatedAt && Date.parse(session.updatedAt) > turnEndedAt.current);
+  const running = sending || (mirrored && !staleRunning);
 
   // Working-tree +/- totals for the composer's diff shortcut. Refreshed when
   // a turn starts/ends (`running` flips) — that's when the working tree moves.
@@ -1008,14 +1055,10 @@ export default function SessionScreen() {
 
   const canSteer = session.isLive;
   const caps = effectiveCaps(session.agent, reportedCaps);
-  // The synced thread record lags live turns (short turns never re-sync), so
-  // the header trusts the screen's own in-flight state over session.activity.
-  const headerActivity = running ? ("running" as const) : session.activity;
-  // Turn start = the newest user message; seeds the indicator's verb + elapsed
-  // timer. Also estimate output tokens streamed since then (~4 chars/token) for
-  // the "↓ N tokens" readout — approximate (it can't see hidden reasoning
-  // tokens), and jumpy on mirrored sessions whose transcript only lands text on
-  // message completion; smooth for turns started here (they stream live).
+  // Turn start = the newest user message; drives the elapsed readout in the
+  // composer's pill row. Output tokens are estimated at ~4 chars/token —
+  // approximate (it can't see hidden reasoning tokens), and jumpy on mirrored
+  // sessions whose transcript only lands text on message completion.
   let turnStartTs: string | undefined;
   let turnStartIdx = rawEvents.length;
   for (let i = rawEvents.length - 1; i >= 0; i--) {
@@ -1090,10 +1133,12 @@ export default function SessionScreen() {
                   onPress={() => router.back()}
                   style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
                 >
-                  <Text style={s.backGlyph}>‹</Text>
+                  {/* The system's own chevron, not a typographic "‹": that was
+                      a font character sitting among SF Symbols, which is
+                      exactly what made this header look mismatched. */}
+                  <PounceIcon name="chevron-back" size={HEADER_ICON} color={theme.colors.fg} />
                 </Pressable>
               ) : null}
-              <AgentStatusIcon agent={session.agent} activity={headerActivity} size={18} />
               <View style={s.flex1}>
                 {!DESKTOP ? (
                   <Text numberOfLines={1} style={s.headerTitle}>
@@ -1101,12 +1146,6 @@ export default function SessionScreen() {
                   </Text>
                 ) : null}
                 <View style={s.headerSubRow}>
-                  {/* "Idle" reads as a broken state to users (the synced record
-                    lags live turns, so it shows mid-work) — only surface
-                    activity when there's something to say. */}
-                  {headerActivity !== "idle" ? (
-                    <Text style={s.activityLabel}>{ACTIVITY_LABEL[headerActivity]}</Text>
-                  ) : null}
                   {session.branch ? (
                     <View style={s.shrink}>
                       <BranchChip
@@ -1128,7 +1167,7 @@ export default function SessionScreen() {
               >
                 <PounceIcon
                   name="search"
-                  size={18}
+                  size={HEADER_ICON}
                   color={threadSearchOpen ? theme.colors.accent : theme.colors.fgMuted}
                 />
               </Pressable>
@@ -1138,7 +1177,7 @@ export default function SessionScreen() {
               >
                 <PounceIcon
                   name="ellipsis-horizontal"
-                  size={20}
+                  size={HEADER_ICON}
                   color={running ? theme.colors.danger : theme.colors.fgMuted}
                 />
               </Pressable>
@@ -1147,7 +1186,7 @@ export default function SessionScreen() {
           {threadSearchOpen ? (
             <View style={[s.searchRow, DESKTOP && s.searchRowDesktop]}>
               <View style={[s.searchField, DESKTOP && s.searchFieldDesktop]}>
-                <PounceIcon name="search" size={DESKTOP ? 12 : 13} color={theme.colors.fgFaint} />
+                <PounceIcon name="search" size={DESKTOP ? 14 : 16} color={theme.colors.fgFaint} />
                 <TextInput
                   {...INPUT_TWEAKS}
                   value={threadQuery}
@@ -1304,65 +1343,62 @@ export default function SessionScreen() {
                   </Animated.View>
                 ) : null}
                 <View style={s.listRow}>
-                <Timeline
-                  events={rawEvents}
-                  tasks={tasks}
-                  agent={session.agent}
-                  cwd={session.cwd}
-                  sessionId={id!}
-                  listRef={listRef}
-                  keyboard={keyboard}
-                  onReady={() => {
-                    setListReady(true);
-                    // Opening a thread lands at the newest message. The list can
-                    // momentarily report the end as out of view while it settles,
-                    // which is not the user having scrolled away — don't let it
-                    // raise the Latest pill over the last message.
-                    setAtBottom(true);
-                  }}
-                  onScrollDirection={setScrollDir}
-                  onVisibleIndex={TURN_RAIL && IS_DESKTOP ? setVisibleIndex : undefined}
-                  highlight={searchHighlight}
-                  anchorToId={anchorId}
-                  onLongPressEvent={onLongPressEvent}
-                  onRunCommand={canSteer ? onRunCommand : undefined}
-                  onRetrySend={canSteer ? onRetrySend : undefined}
-                  onAtBottomChange={setAtBottom}
-                  onRespondPermission={(requestId, optionId) => {
-                    if (session?.hostId)
-                      void respondPermission(session.hostId, requestId, optionId);
-                  }}
-                  onRespondPrompt={(_promptId, optionIndex) => {
-                    if (session?.hostId && id) void respondPrompt(session.hostId, id, optionIndex);
-                  }}
-                  onSendInput={(data) => {
-                    if (session?.hostId && id) void sendSessionInput(session.hostId, id, data);
-                  }}
-                  footer={
-                    running ? (
-                      // Held back so it doesn't pop in while the just-sent
-                      // message is still sliding up — it eases in once that has
-                      // settled.
-                      <Animated.View entering={FadeIn.delay(450).duration(300)}>
-                        <WorkingIndicator
-                          since={turnStartTs}
-                          tokens={turnTokens}
-                        />
-                      </Animated.View>
-                    ) : undefined
-                  }
-                />
-                {/* Beside the transcript, not over it: a rail that floats on top
+                  <Timeline
+                    events={rawEvents}
+                    tasks={tasks}
+                    agent={session.agent}
+                    cwd={session.cwd}
+                    sessionId={id!}
+                    listRef={listRef}
+                    keyboard={keyboard}
+                    onReady={() => {
+                      setListReady(true);
+                      // Opening a thread lands at the newest message. The list can
+                      // momentarily report the end as out of view while it settles,
+                      // which is not the user having scrolled away — don't let it
+                      // raise the Latest pill over the last message.
+                      setAtBottom(true);
+                    }}
+                    onScrollDirection={setScrollDir}
+                    onVisibleIndex={TURN_RAIL && IS_DESKTOP ? setVisibleIndex : undefined}
+                    highlight={searchHighlight}
+                    anchorToId={anchorId}
+                    onLongPressEvent={onLongPressEvent}
+                    onRunCommand={canSteer ? onRunCommand : undefined}
+                    onRetrySend={canSteer ? onRetrySend : undefined}
+                    onAtBottomChange={setAtBottom}
+                    onRespondPermission={(requestId, optionId) => {
+                      if (session?.hostId)
+                        void respondPermission(session.hostId, requestId, optionId);
+                    }}
+                    onRespondPrompt={(_promptId, optionIndex) => {
+                      if (session?.hostId && id)
+                        void respondPrompt(session.hostId, id, optionIndex);
+                    }}
+                    onSendInput={(data) => {
+                      if (session?.hostId && id) void sendSessionInput(session.hostId, id, data);
+                    }}
+                    footer={
+                      running
+                        ? // "Working" moved into the composer's pill row as dots
+                          // (components/WorkingDots.tsx) — a word in the
+                          // transcript claimed a line of the conversation to say
+                          // what a pulse says without one.
+                          undefined
+                        : undefined
+                    }
+                  />
+                  {/* Beside the transcript, not over it: a rail that floats on top
                     would sit on the text at narrow widths. Desktop only — the
                     preview is a hover, and a phone has no pointer. */}
-                {TURN_RAIL && IS_DESKTOP ? (
-                  <TurnRail
-                    markers={markers}
-                    agent={session.agent}
-                    visibleIndex={visibleIndex}
-                    onJump={jumpTo}
-                  />
-                ) : null}
+                  {TURN_RAIL && IS_DESKTOP ? (
+                    <TurnRail
+                      markers={markers}
+                      agent={session.agent}
+                      visibleIndex={visibleIndex}
+                      onJump={jumpTo}
+                    />
+                  ) : null}
                 </View>
               </Animated.View>
             )}
@@ -1519,8 +1555,9 @@ export default function SessionScreen() {
                   agent={session.agent}
                   caps={caps}
                   disabled={!canSteer}
-                  sending={sending}
                   running={running}
+                  turnStartedAt={turnStartTs}
+                  turnTokens={turnTokens}
                   hostId={session.hostId}
                   cwd={session.cwd}
                   onSubmit={onSubmit}
@@ -1638,10 +1675,8 @@ const s = StyleSheet.create((theme) => ({
     paddingTop: 4,
   },
   iconBtn: { height: 36, width: 36, alignItems: "center", justifyContent: "center" },
-  backGlyph: { fontSize: 22, color: theme.colors.fg },
   headerTitle: { fontSize: 15, fontWeight: "600", color: theme.colors.fg },
   headerSubRow: { marginTop: 2, flexDirection: "row", alignItems: "center", gap: 8 },
-  activityLabel: { fontSize: 12, color: theme.colors.fgMuted },
   searchRow: {
     flexDirection: "row",
     alignItems: "center",

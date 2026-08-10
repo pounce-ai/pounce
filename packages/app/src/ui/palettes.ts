@@ -1,22 +1,12 @@
 /**
- * Named colour themes.
+ * Named colour themes. Every variant is explicit hex, never PlatformColor —
+ * `PlatformColor("labelColor")` resolves natively and can't be repainted.
  *
- * The app used to have ONE palette per platform, drawn from the platform's own
- * semantic colours (UIKit labels on iOS, Material-You roles on Android, AppKit
- * NSColors on macOS). Every theme here is explicit hex instead, because that is
- * the only thing that can repaint: `PlatformColor("labelColor")` resolves
- * natively and cannot be overridden, so a themed app has to stop asking the OS
- * for its colours. Those semantic palettes still exist as the `light`/`dark`
- * entries in ui/unistyles-themes.* — see the note on THEMES below.
+ * A variant is a four-value seed (canvas, fg, accent, appearance); `makePalette`
+ * derives the 25 roles from it, so a new theme is a two-line addition. Status
+ * hues are shared — "danger" shouldn't change meaning under a green theme.
  *
- * A theme variant is authored as a SEED of four values (canvas, foreground,
- * accent, appearance); `makePalette` derives the surface ramp, lines and text
- * steps from it so the 25 roles stay internally consistent and a new theme is
- * a two-line addition. Status hues are shared — "danger" should not change
- * meaning because the user picked a green theme.
- *
- * Runtime type note: this module is imported by vitest, so it must stay free
- * of react-native runtime imports (type-only import below).
+ * Keep react-native runtime imports out of this module: vitest imports it.
  */
 import { alpha, mix, readableOn } from "./color";
 import type { ThemeColor } from "./theme";
@@ -198,20 +188,7 @@ const define = (
   };
 };
 
-/**
- * Ordered — this is the order the picker renders, and the first entry is the
- * default.
- *
- * There was a "System" theme here (the platform's own semantic colours: UIKit
- * labels, AppKit NSColors, Material You). It was dropped because on macOS and
- * iOS it was indistinguishable from Pounce — the palette had been tuned to
- * match the platform in the first place, so the picker offered the same look
- * twice. The machinery is still in place (`light`/`dark` in
- * ui/unistyles-themes.* are those semantic palettes, and stay registered as the
- * pre-hydration fallback), so bringing it back is a `define()` away — worth
- * knowing on ANDROID, where it was NOT a duplicate: Material You tints the
- * whole palette from the user's wallpaper, and that is now gone.
- */
+/** Ordered — picker order, and the first entry is the default. */
 export const THEMES: ReadonlyArray<ThemeDefinition> = [
   define("pounce", "Pounce", "The brand purple, identical on every platform", {
     light: { canvas: "#f6f6fa", fg: "#1c1c22", accent: "#5b4fd6" },
@@ -234,8 +211,6 @@ export const THEMES: ReadonlyArray<ThemeDefinition> = [
     dark: { canvas: "#0d0d0d", fg: "#ededed", accent: "#b4b4b4" },
   }),
 ];
-
-export const THEME_IDS: ReadonlyArray<ThemeId> = THEMES.map((t) => t.id);
 
 const BY_ID: Record<string, ThemeDefinition> = Object.fromEntries(THEMES.map((t) => [t.id, t]));
 

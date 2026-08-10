@@ -17,9 +17,10 @@ import {
 import { useAgentCaps, useDevices, useProjects, useThreads } from "../state/db/hooks";
 import { Composer, type ComposerHandle, type ComposerSubmit } from "../components/Composer";
 import { FolderBrowser } from "../components/FolderBrowser";
+import { ConnectFlow } from "../components/ConnectFlow";
 import { contextDraft$ } from "../state/contextComments";
 import { startInteractive } from "../services/bridge";
-import { AgentLogo, agentLabel, IS_DESKTOP } from "../ui";
+import { AgentLogo, agentLabel } from "../ui";
 import { effectiveCaps } from "../ui/agent-meta";
 
 // Fallback order when the selected device hasn't reported its agents yet
@@ -169,12 +170,16 @@ export default function NewTaskScreen() {
       }
     }
 
+    // No machine, no task. The old fallback invented `dev:local` and inserted a
+    // thread that could never run — a phantom session in the list forever.
+    if (!device) return;
+
     const id = `new_${Date.now()}`;
     insertThread({
       id,
       repoId: selectedRepoId ?? repoIdForCwd(cwd),
-      hostId: device?.id ?? "dev:local",
-      host: device?.name ?? "local",
+      hostId: device.id,
+      host: device.name,
       agent,
       title: s.text.slice(0, 100) || "New task",
       branch: null,
@@ -191,21 +196,25 @@ export default function NewTaskScreen() {
     router.replace(`/session/${id}`);
   };
 
+  // Reachable by deep link and from Space even when Home hides its + button.
+  // A folder picker, an agent list and a composer are all meaningless with
+  // nowhere to run — offer the one thing that changes that.
+  if (!devices.length) {
+    return (
+      <View style={[s.root, { paddingTop: 8 }]}>
+        <ScrollView style={s.scroll} contentContainerStyle={{ gap: 16, paddingBottom: 16 }}>
+          <Text style={s.emptyTitle}>Nothing to run this on</Text>
+          <ConnectFlow />
+        </ScrollView>
+      </View>
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : undefined}
-      style={[s.root, IS_DESKTOP ? { paddingTop: insets.top + 8 } : { paddingTop: 8 }]}
+      style={[s.root, { paddingTop: 8 }]}
     >
-      {/* Mobile shows the native modal navigation bar; this row is desktop chrome. */}
-      {IS_DESKTOP ? (
-        <View style={s.headerRow}>
-          <Text style={s.headerTitle}>New task</Text>
-          <Pressable onPress={() => router.back()} style={({ pressed }) => pressed && s.pressed60}>
-            <Text style={s.cancelLabel}>Cancel</Text>
-          </Pressable>
-        </View>
-      ) : null}
-
       <ScrollView style={s.scroll} contentContainerStyle={{ gap: 16, paddingBottom: 16 }}>
         {devices.length > 1 ? (
           <Field label="Device">
@@ -347,6 +356,7 @@ function Chip({ label, active, onPress }: { label: string; active: boolean; onPr
 }
 
 const s = StyleSheet.create((theme) => ({
+  emptyTitle: { fontSize: 17, fontWeight: "600", color: theme.colors.fg },
   root: { flex: 1, backgroundColor: theme.colors.bg },
   headerRow: {
     flexDirection: "row",
