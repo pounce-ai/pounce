@@ -3,7 +3,6 @@ import {
   ActionSheetIOS,
   Alert,
   Platform,
-  useColorScheme,
   View,
   Text,
   type ColorValue,
@@ -16,6 +15,7 @@ import { PounceIcon } from "./native/Icon";
 import type { IoniconName } from "./native/icon-map";
 import type { ActivityStatus } from "@pounce/shared";
 import { AgentLogo } from "./AgentLogo";
+import { useGround } from "./useThemeHex";
 
 // Shared tokens live in tokens.ts (no circular dep with AgentLogo); re-export
 // them here so call sites keep importing everything from "../ui".
@@ -207,9 +207,10 @@ export function AgentStatusIcon({
   animated?: boolean;
 }) {
   const { theme } = useUnistyles();
-  // Same reason as AgentLogo: the thinking glyph is tinted with a plain brand
-  // hex, which has to be picked for the current ground.
-  const scheme = useColorScheme();
+  // Same reason as AgentLogo, and the same ground: the thinking glyph is tinted
+  // with a plain brand hex, picked for the ground the APP is painting on rather
+  // than the platform trait.
+  const scheme = useGround();
   const active =
     animated && (activity === "running" || activity === "streaming" || activity === "queued");
   const frame = useSyncExternalStore(active ? subscribeTicker : noTick, getFrame);
