@@ -582,18 +582,9 @@ function SpaceRow({
           space.attention > 0 ? s.dotWarning : space.live ? s.dotAccent : s.dotIdle,
         ]}
       />
-      <Ionicons name="folder-outline" size={13} color={COLOR.fgMuted} />
-      <Text numberOfLines={1} style={s.spaceName}>
-        {space.name}
-      </Text>
-      {showHost && !hover ? (
-        <Text numberOfLines={1} style={s.spaceHost}>
-          @ {space.host}
-        </Text>
-      ) : null}
-      {/* Compose HERE. The global + asks which project; this one already knows,
-          which is the whole difference between starting a task and setting one
-          up. Revealed on hover so a list of projects stays a list of projects. */}
+      {/* The folder glyph BECOMES the compose control on hover — the row's
+          leading icon is where the eye already is, and swapping it in place
+          keeps the list from reflowing under the cursor. */}
       {hover ? (
         <Pressable
           onPress={onCompose}
@@ -604,6 +595,16 @@ function SpaceRow({
         >
           <Ionicons name="create-outline" size={13} color={COLOR.accent} />
         </Pressable>
+      ) : (
+        <Ionicons name="folder-outline" size={13} color={COLOR.fgMuted} />
+      )}
+      <Text numberOfLines={1} style={s.spaceName}>
+        {space.name}
+      </Text>
+      {showHost ? (
+        <Text numberOfLines={1} style={s.spaceHost}>
+          @ {space.host}
+        </Text>
       ) : null}
     </Pressable>
   );

@@ -108,6 +108,7 @@ const PANE_SCREENS: Record<string, ComponentType> = {
   "/space": SpaceScreen,
   "/metric": MetricScreen,
   "/settings": SettingsScreen,
+  "/new": NewTaskScreen,
 };
 
 /**
@@ -136,13 +137,6 @@ const MODALS: Record<string, ModalEntry> = {
   "/sessions": { component: SessionsScreen, width: 620, height: 660 },
   // Wider than the list modals: the heatmap is ~700px of grid at its cell size.
   "/activity": { component: DashboardScreen, width: 760, height: 700 },
-  "/new": {
-    component: NewTaskScreen,
-    width: 640,
-    height: 660,
-    title: "New task",
-    dismissLabel: "Cancel",
-  },
   "/context": {
     component: ContextScreen,
     width: 720,
