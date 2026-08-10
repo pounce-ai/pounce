@@ -188,6 +188,9 @@ function SpaceDetail({ space, sessions }: { space: Space; sessions: Session[] })
   const series = useMemo(() => zeroFill(activityQ.data?.days ?? [], SERIES_DAYS), [activityQ.data]);
   const { window } = useMemo(() => periodSlice(series, period), [series, period]);
   const now = useMemo(() => sumDays(window), [window]);
+  /** The activity read failed (or hasn't landed): the tiles below have nothing
+   *  real to show, so they show `—` rather than a manufactured 0. */
+  const unread = !activityQ.isLoading && activityQ.data == null;
 
   const allNow = useMemo(() => {
     if (!allQ.data) return null;
@@ -291,20 +294,10 @@ function SpaceDetail({ space, sessions }: { space: Space; sessions: Session[] })
         ))}
       </View>
 
-      <View style={s.tiles}>
-        <Metric label="Tokens" value={fmtTokens(now.tokens)} icon="sparkles" />
-        <Metric label="Messages" value={fmtCount(now.messages)} icon="git-commit-outline" />
-      </View>
-      <View style={s.tiles}>
-        <Metric label="Threads started" value={fmtCount(now.sessions)} icon="chatbubbles-outline" />
-        <Metric
-          label="Reported spend"
-          value={now.cost == null ? "—" : `${now.costEstimated ? "~" : ""}${fmtCost(now.cost)}`}
-          hint={now.cost == null ? "not reported" : now.costEstimated ? "list price" : null}
-          icon="card-outline"
-        />
-      </View>
-
+      {/* The note goes ABOVE the tiles it qualifies. Below them the page
+          contradicted itself top-to-bottom: four tiles asserting 0 tokens, 0
+          messages, 0 threads, and only then a line admitting none of it was
+          read. */}
       {activityQ.isLoading ? (
         <Text style={s.note}>Reading this project&apos;s history…</Text>
       ) : activityQ.data == null ? (
@@ -312,6 +305,41 @@ function SpaceDetail({ space, sessions }: { space: Space; sessions: Session[] })
           Couldn&apos;t read activity from {space.host}. The rest of this page still works.
         </Text>
       ) : null}
+
+      {/* `—` rather than 0 when the read failed: a zero is a claim about this
+          project, and we don't have one. Matches "Reported spend", which has
+          always said `—` for a number it doesn't know. */}
+      <View style={s.tiles}>
+        <Metric label="Tokens" value={unread ? "—" : fmtTokens(now.tokens)} icon="sparkles" />
+        <Metric
+          label="Messages"
+          value={unread ? "—" : fmtCount(now.messages)}
+          icon="git-commit-outline"
+        />
+      </View>
+      <View style={s.tiles}>
+        <Metric
+          label="Threads started"
+          value={unread ? "—" : fmtCount(now.sessions)}
+          icon="chatbubbles-outline"
+        />
+        <Metric
+          label="Reported spend"
+          value={
+            unread || now.cost == null ? "—" : `${now.costEstimated ? "~" : ""}${fmtCost(now.cost)}`
+          }
+          hint={
+            unread
+              ? null
+              : now.cost == null
+                ? "not reported"
+                : now.costEstimated
+                  ? "list price"
+                  : null
+          }
+          icon="card-outline"
+        />
+      </View>
 
       {/* One block, three questions: WHEN the work happened, HOW MUCH OF YOU it
           took, and HOW it gets worked. */}

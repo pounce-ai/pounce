@@ -280,18 +280,21 @@ export default function DashboardScreen() {
           <View style={s.shrink}>
             <Text style={s.title}>Activity</Text>
             <Text style={s.subtitle}>
-              {/* "0-day best streak" is a statistic about nothing. With no
-                  machine paired there is no history to have a streak in. */}
+              {/* "0-day best streak" is a statistic about nothing — true with
+                  no machine paired, and equally true when the read FAILED and
+                  every number below is a zero we never actually got. */}
               {!paired
                 ? "Nothing connected"
                 : q.isLoading
                   ? "Reading your history…"
-                  : `${fmtCount(run.longest)}-day best streak`}
+                  : q.isError
+                    ? "History unavailable"
+                    : `${fmtCount(run.longest)}-day best streak`}
             </Text>
           </View>
           {IS_DESKTOP ? <View style={s.headerSpacer} /> : null}
           {IS_DESKTOP ? segment : null}
-          {canShare && paired && !empty ? (
+          {canShare && paired && !empty && !q.isError ? (
             <Pressable
               onPress={onShare}
               disabled={sharing || q.isLoading}

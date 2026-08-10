@@ -267,20 +267,46 @@ export default function MetricScreen() {
         </View>
       </View>
 
-      <View style={s.periods}>
-        {(["week", "month", "year"] as const).map((p) => (
-          <Pressable
-            key={p}
-            onPress={() => setPeriod(p)}
-            style={({ pressed }) => [s.period, period === p && s.periodOn, pressed && s.pressed]}
-          >
-            <Text style={[s.periodLabel, period === p && s.periodLabelOn]}>{PERIOD_LABEL[p]}</Text>
-          </Pressable>
-        ))}
-      </View>
+      {/* No period picker over a failed read: it would narrow numbers we never
+          got, three ways. */}
+      {q.isError ? null : (
+        <View style={s.periods}>
+          {(["week", "month", "year"] as const).map((p) => (
+            <Pressable
+              key={p}
+              onPress={() => setPeriod(p)}
+              style={({ pressed }) => [s.period, period === p && s.periodOn, pressed && s.pressed]}
+            >
+              <Text style={[s.periodLabel, period === p && s.periodLabelOn]}>
+                {PERIOD_LABEL[p]}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
 
       {q.isPending ? (
         <ActivitySkeleton />
+      ) : q.isError ? (
+        // `fetchActivity` THROWS when every paired host fails — deliberately, so
+        // callers can say "couldn't read" instead of asserting a zero. Without
+        // this branch `zeroFill` manufactured a clean year and the page rendered
+        // a confident 0 hero, "no earlier month to compare against" and "Nothing
+        // in this period" — for someone with months of history whose Mac is
+        // asleep. Same words the dashboard uses for the same failure.
+        <View style={s.errorBox}>
+          <Text style={s.errorTitle}>Couldn&apos;t read your history</Text>
+          <Text style={s.errorBody}>
+            The machine didn&apos;t answer in time. If it&apos;s been a while since you opened
+            Pounce there, it may still be reading through your transcripts.
+          </Text>
+          <Pressable
+            onPress={() => void q.refetch()}
+            style={({ pressed }) => [s.retryBtn, pressed && s.pressed]}
+          >
+            <Text style={s.retryLabel}>Try again</Text>
+          </Pressable>
+        </View>
       ) : (
         <>
           <View style={s.hero}>
@@ -579,4 +605,20 @@ const s = StyleSheet.create((theme) => ({
   track: { height: 4, borderRadius: 999, backgroundColor: theme.colors.border, overflow: "hidden" },
   fill: { height: 4, borderRadius: 999, backgroundColor: theme.colors.accent },
   empty: { fontSize: 12, color: theme.colors.fgFaint },
+  errorBox: { alignItems: "center", gap: 8, paddingHorizontal: 24, paddingVertical: 48 },
+  errorTitle: { textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  errorBody: {
+    textAlign: "center",
+    fontSize: 13,
+    lineHeight: 18,
+    color: theme.colors.fgMuted,
+  },
+  retryBtn: {
+    marginTop: 4,
+    borderRadius: 999,
+    backgroundColor: theme.colors.surfaceAlt,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  retryLabel: { fontSize: 13, fontWeight: "600", color: theme.colors.accent },
 }));
