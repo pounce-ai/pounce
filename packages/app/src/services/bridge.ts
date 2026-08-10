@@ -37,6 +37,7 @@ import {
 } from "../state/stores";
 import { type ActivityPage, mergeActivity } from "./activity";
 import { applyBridgeToken, deviceId, resolveAdoption, resolvePairing } from "./deviceIdentity";
+import type { SettleOverrides } from "../state/settled";
 import { clearNotify, notifyOnce } from "./notify";
 import { alertAwaitingSessions } from "./promptAlerts";
 import { streamTurn } from "./streamTurn";
@@ -1290,19 +1291,19 @@ export interface AgentQuota {
 }
 
 /**
- * Which threads each machine considers settled, merged into one map.
+ * What the user has said about each thread, merged across machines.
  *
  * Bridge-owned rather than local, so settling on the phone settles on the
  * desktop. Thread ids are unique per machine, so merging maps cannot collide;
  * a host that fails to answer simply contributes nothing rather than making
  * its threads look un-settled.
  */
-export async function fetchSettled(): Promise<Record<string, string>> {
+export async function fetchSettled(): Promise<SettleOverrides> {
   const devices = await hostsToQuery();
   const pages = await Promise.all(
     devices.map(async (cfg) => {
       try {
-        const { settled } = await get<{ settled: Record<string, string> }>(cfg, "/v1/settled");
+        const { settled } = await get<{ settled: SettleOverrides }>(cfg, "/v1/settled");
         return settled ?? {};
       } catch {
         return {};
@@ -1322,17 +1323,18 @@ export async function fetchSettled(): Promise<Record<string, string>> {
 export async function setSettled(
   hostId: string,
   threadId: string,
-  settledAt: string | null,
-): Promise<Record<string, string>> {
+  state: "settled" | "active" | null,
+  at: string,
+): Promise<SettleOverrides> {
   const cfg = await deviceForHost(hostId);
   if (!cfg) throw new Error("That machine isn't paired any more.");
   const res = await fetch(`${await bridgeBase(cfg)}/v1/settled`, {
     method: "POST",
     headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
-    body: JSON.stringify({ threadId, settledAt }),
+    body: JSON.stringify({ threadId, state, at }),
   });
   if (!res.ok) throw new Error(`bridge /v1/settled -> ${res.status}`);
-  const { settled } = (await res.json()) as { settled: Record<string, string> };
+  const { settled } = (await res.json()) as { settled: SettleOverrides };
   return settled ?? {};
 }
 

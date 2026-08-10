@@ -3,11 +3,23 @@
  *
  * Every rule here is a safety rule. An inbox that hides a thread waiting on you
  * is worse than no inbox at all, so the blockers are pinned in both directions:
- * they refuse the gesture, and they override a settle that already happened.
+ * they refuse the gesture, and they override anything already recorded.
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@pounce/shared";
-import { canSettle, isBusy, isSettled, partitionSettled } from "./settled";
+import {
+  canSettle,
+  isBusy,
+  isSettled,
+  partitionSettled,
+  type SettleOptions,
+  type SettleOverride,
+} from "./settled";
+
+const NOW = "2026-08-10T12:00:00.000Z";
+/** Default policy: three quiet days, as T3 Code does it. */
+const OPTS: SettleOptions = { now: NOW, autoSettleAfterDays: 3 };
+const NO_AUTO: SettleOptions = { now: NOW, autoSettleAfterDays: null };
 
 const session = (over: Partial<Session> = {}): Session =>
   ({
@@ -24,33 +36,71 @@ const session = (over: Partial<Session> = {}): Session =>
     activity: "idle",
     needsAttention: false,
     createdAt: "2026-08-01T00:00:00.000Z",
-    updatedAt: "2026-08-01T10:00:00.000Z",
+    // An hour ago: recent enough that auto-settle never fires by accident.
+    updatedAt: "2026-08-10T11:00:00.000Z",
     ...over,
   }) as Session;
 
-const AFTER = "2026-08-01T11:00:00.000Z";
-const BEFORE = "2026-08-01T09:00:00.000Z";
+const settledAt = (at: string): SettleOverride => ({ state: "settled", at });
+const activeAt = (at: string): SettleOverride => ({ state: "active", at });
 
-describe("a settled thread", () => {
-  it("stays settled while nothing happens", () => {
-    expect(isSettled(session(), AFTER)).toBe(true);
+const LATER = "2026-08-10T11:30:00.000Z";
+const EARLIER = "2026-08-10T10:00:00.000Z";
+/** Older than the auto-settle window. */
+const stale = session({ updatedAt: "2026-08-01T00:00:00.000Z" });
+
+describe("an explicit settle", () => {
+  it("holds while nothing happens", () => {
+    expect(isSettled(session(), settledAt(LATER), OPTS)).toBe(true);
   });
 
-  it("comes back the moment the thread is touched again", () => {
-    // The whole auto-unsettle mechanism: updatedAt moved past the stamp.
-    expect(isSettled(session({ updatedAt: "2026-08-01T12:00:00.000Z" }), AFTER)).toBe(false);
+  it("is overtaken the moment the thread is touched again", () => {
+    // Auto-unsettle: the override predates the thread's own last activity.
+    expect(isSettled(session(), settledAt(EARLIER), OPTS)).toBe(false);
   });
 
-  it("was never settled if the stamp predates the activity", () => {
-    expect(isSettled(session(), BEFORE)).toBe(false);
-  });
-
-  it("is not settled without a stamp", () => {
-    expect(isSettled(session(), undefined)).toBe(false);
+  it("is not needed for a thread nobody has an opinion about", () => {
+    expect(isSettled(session(), undefined, OPTS)).toBe(false);
   });
 });
 
-describe("work that outranks a settle", () => {
+describe("auto-settle", () => {
+  it("settles a thread that has been quiet past the window", () => {
+    expect(isSettled(stale, undefined, OPTS)).toBe(true);
+  });
+
+  it("leaves a recent thread alone", () => {
+    expect(isSettled(session(), undefined, OPTS)).toBe(false);
+  });
+
+  it("does nothing when switched off", () => {
+    expect(isSettled(stale, undefined, NO_AUTO)).toBe(false);
+  });
+
+  it("respects a longer window", () => {
+    expect(isSettled(stale, undefined, { now: NOW, autoSettleAfterDays: 30 })).toBe(false);
+  });
+});
+
+/**
+ * The reason an override records a DIRECTION rather than a boolean. Without a
+ * storable "active", pulling an old thread back out would do nothing: the
+ * inactivity rule would settle it again on the same render.
+ */
+describe("keeping an old thread out of the drawer", () => {
+  it("holds a stale thread active when the user says so", () => {
+    expect(isSettled(stale, activeAt(NOW), OPTS)).toBe(false);
+  });
+
+  it("lets it settle again once the thread moves on", () => {
+    // The keep-active is older than the thread's own last activity, so it has
+    // been overtaken — and the thread is quiet again.
+    const touched = session({ updatedAt: "2026-08-02T00:00:00.000Z" });
+    expect(isSettled(touched, activeAt("2026-08-01T00:00:00.000Z"), OPTS)).toBe(true);
+  });
+});
+
+describe("work that outranks anything recorded", () => {
   it.each([
     ["awaiting_input", { activity: "awaiting_input" }],
     ["failed", { activity: "failed" }],
@@ -59,9 +109,12 @@ describe("work that outranks a settle", () => {
     ["queued", { activity: "queued" }],
     ["flagged as needing attention", { needsAttention: true }],
   ])("refuses to hide a thread that is %s", (_label, over) => {
-    // Settled long ago, but the thread now wants something: it comes back.
-    expect(isSettled(session(over as Partial<Session>), AFTER)).toBe(false);
-    expect(canSettle(session(over as Partial<Session>))).toBe(false);
+    const busy = session(over as Partial<Session>);
+    expect(isSettled(busy, settledAt(LATER), OPTS)).toBe(false);
+    expect(canSettle(busy)).toBe(false);
+    // And auto-settle can't reach it either, however old it is.
+    const oldBusy = { ...busy, updatedAt: "2026-01-01T00:00:00.000Z" } as Session;
+    expect(isSettled(oldBusy, undefined, OPTS)).toBe(false);
   });
 
   it("offers the gesture for a quiet thread", () => {
@@ -71,44 +124,63 @@ describe("work that outranks a settle", () => {
 });
 
 describe("bad data never hides a thread", () => {
-  it.each(["", "not-a-date", "2026-13-45T99:99:99Z"])("ignores the stamp %s", (stamp) => {
-    expect(isSettled(session(), stamp)).toBe(false);
+  it.each(["", "not-a-date", "2026-13-45T99:99:99Z"])("ignores the stamp %s", (at) => {
+    expect(isSettled(session(), settledAt(at), OPTS)).toBe(false);
   });
 
-  it("keeps a thread settled when the thread's own timestamp is unreadable", () => {
-    // The stamp is the deliberate act; an unparseable updatedAt shouldn't undo it.
-    expect(isSettled(session({ updatedAt: "nonsense" }), AFTER)).toBe(true);
+  it("keeps a deliberate settle when the thread's own timestamp is unreadable", () => {
+    expect(isSettled(session({ updatedAt: "nonsense" }), settledAt(LATER), OPTS)).toBe(true);
+  });
+
+  it("won't auto-settle a thread whose timestamp it can't read", () => {
+    expect(isSettled(session({ updatedAt: "nonsense" }), undefined, OPTS)).toBe(false);
   });
 });
 
 describe("partitionSettled", () => {
   it("splits the list without dropping or duplicating a thread", () => {
     const list = [session({ id: "a" }), session({ id: "b" }), session({ id: "c" })];
-    const { active, settled } = partitionSettled(list, { a: AFTER, c: AFTER });
+    const { active, settled } = partitionSettled(
+      list,
+      { a: settledAt(LATER), c: settledAt(LATER) },
+      OPTS,
+    );
     expect(settled.map((s) => s.id)).toEqual(["a", "c"]);
     expect(active.map((s) => s.id)).toEqual(["b"]);
     expect(active.length + settled.length).toBe(list.length);
   });
 
-  it("orders settled rows by when they were settled, newest first", () => {
+  it("puts what you just cleared at the top", () => {
     const list = [session({ id: "old" }), session({ id: "new" })];
-    const { settled } = partitionSettled(list, {
-      old: "2026-08-01T11:00:00.000Z",
-      new: "2026-08-01T18:00:00.000Z",
-    });
-    // What you just cleared is what you might want back.
+    const { settled } = partitionSettled(
+      list,
+      { old: settledAt("2026-08-10T11:10:00.000Z"), new: settledAt("2026-08-10T11:50:00.000Z") },
+      OPTS,
+    );
     expect(settled.map((s) => s.id)).toEqual(["new", "old"]);
   });
 
-  it("leaves a busy thread in the active half however old its stamp", () => {
+  it("leaves a busy thread in the active half however old its override", () => {
     const list = [session({ id: "a", activity: "running" })];
-    const { active, settled } = partitionSettled(list, { a: AFTER });
+    const { active, settled } = partitionSettled(list, { a: settledAt(LATER) }, OPTS);
     expect(active.map((s) => s.id)).toEqual(["a"]);
     expect(settled).toEqual([]);
   });
 
   it("keeps the order it was given for the active half", () => {
     const list = [session({ id: "a" }), session({ id: "b" }), session({ id: "c" })];
-    expect(partitionSettled(list, {}).active.map((s) => s.id)).toEqual(["a", "b", "c"]);
+    expect(partitionSettled(list, {}, OPTS).active.map((s) => s.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("clears a backlog on its own — the reason auto-settle is on by default", () => {
+    // A year of history with a handful of live threads: the inbox has to open
+    // in a usable state without anyone hand-clearing hundreds of rows.
+    const old = Array.from({ length: 200 }, (_, i) =>
+      session({ id: `old${i}`, updatedAt: "2026-06-01T00:00:00.000Z" }),
+    );
+    const live = Array.from({ length: 6 }, (_, i) => session({ id: `live${i}` }));
+    const { active, settled } = partitionSettled([...old, ...live], {}, OPTS);
+    expect(active).toHaveLength(6);
+    expect(settled).toHaveLength(200);
   });
 });

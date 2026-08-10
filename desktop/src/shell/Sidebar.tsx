@@ -19,7 +19,13 @@ import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@pounce/shared";
 import { applyFilters, connection$, filters$, needsYou } from "@pounce/app/state/stores";
 import { canSettle, partitionSettled } from "@pounce/app/state/settled";
-import { loadSettled, settled$, toggleSettled } from "@pounce/app/state/settledStore";
+import {
+  autoSettleDays$,
+  loadSettled,
+  settled$,
+  settleOptions,
+  toggleSettled,
+} from "@pounce/app/state/settledStore";
 import { useDevices, useIgnoredSet, useProjectNames, useThreads } from "@pounce/app/state/db/hooks";
 import { SidebarSessionsSkeleton, SidebarSpacesSkeleton } from "./SidebarSkeleton";
 import { Entrance } from "./Motion";
@@ -136,10 +142,13 @@ export function Sidebar() {
 
   // The inbox split. `partitionSettled` owns the rule — including that busy or
   // blocked work is never hidden, whatever the user settled earlier.
-  const settledAt = useSelector(() => ({ ...settled$.get() }));
+  const overrides = useSelector(() => ({ ...settled$.get() }));
+  // Re-read on the policy change too, or turning auto-settle off leaves the
+  // list exactly as it was.
+  const autoDays = useSelector(() => autoSettleDays$.get());
   const { active, settled: done } = useMemo(
-    () => partitionSettled(sessions, settledAt),
-    [sessions, settledAt],
+    () => partitionSettled(sessions, overrides, settleOptions()),
+    [sessions, overrides, autoDays],
   );
   const [showSettled, setShowSettled] = useState(false);
   // One read per connect: the map is small, and the bridge owns it.

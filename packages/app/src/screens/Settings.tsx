@@ -15,9 +15,11 @@ import { useDevices } from "../state/db/hooks";
 import { SettingsPage, SettingsRow, SettingsSection } from "../components/settings/primitives";
 import { UpdateRows } from "../components/settings/UpdateRows";
 import { settingsHref } from "./settings/routes";
+import { autoSettleDays$ } from "../state/settledStore";
 
 export default function SettingsScreen() {
   const status = useSelector(() => connection$.status.get());
+  const autoDays = useSelector(() => autoSettleDays$.get());
   const devices = useDevices();
   const live = status === "connected";
 
@@ -46,6 +48,13 @@ export default function SettingsScreen() {
           icon="color-palette-outline"
           label="Appearance"
           href={settingsHref("appearance")}
+        />
+        <SettingsRow
+          icon="checkmark-circle-outline"
+          label="Inbox"
+          value={autoDays == null ? "Manual" : `${autoDays}d`}
+          href={settingsHref("inbox")}
+          divided
         />
         <SettingsRow
           icon="card-outline"

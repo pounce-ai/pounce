@@ -12,7 +12,7 @@
  */
 export interface SettingsRoute {
   /** Route segment under /settings — also the mobile stack's screen name. */
-  readonly name: "devices" | "appearance" | "spend";
+  readonly name: "devices" | "appearance" | "inbox" | "spend";
   readonly title: string;
   /** Desktop modal card size. */
   readonly width: number;
@@ -22,6 +22,7 @@ export interface SettingsRoute {
 export const SETTINGS_ROUTES: readonly SettingsRoute[] = [
   { name: "devices", title: "Devices", width: 600, height: 640 },
   { name: "appearance", title: "Appearance", width: 560, height: 620 },
+  { name: "inbox", title: "Inbox", width: 560, height: 520 },
   { name: "spend", title: "Official spend", width: 600, height: 560 },
 ];
 

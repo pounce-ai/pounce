@@ -19,39 +19,48 @@
  * to hook a cleanup onto today. If this ever needs pruning it is one pass over
  * the known thread ids, added here.
  *
- * What is stored is deliberately just a TIMESTAMP, not a boolean. "Settled as
- * of this moment" is what makes auto-unsettle free: the app compares it against
- * the thread's own `updatedAt`, so any turn, message or status change after the
- * settle brings the thread back on its own. Nothing has to watch for activity
- * and nothing can go stale — see `isSettled` in packages/shared.
+ * What is stored is a DIRECTION AND A MOMENT, never a plain boolean. "The user
+ * said X as of this time" is what makes auto-unsettle free: the app compares
+ * `at` against the thread's own `updatedAt`, so any turn, message or status
+ * change after the fact overtakes the override and the thread falls back to the
+ * automatic rule. Nothing has to watch for activity and nothing can go stale —
+ * see `isSettled` in packages/app/src/state/settled.ts.
  */
 import { Store } from "./store.mjs";
 
 const store = new Store("settled");
 const now = () => new Date().toISOString();
 
-/** `{ [threadId]: settledAt }` for every settled thread on this machine. */
+/** `{ [threadId]: { state, at } }` — every thread the user has an opinion on. */
 export function listSettled() {
   const out = {};
   for (const [threadId, row] of Object.entries(store.all())) {
-    if (row?.settledAt) out[threadId] = row.settledAt;
+    if (row?.at && (row.state === "settled" || row.state === "active")) {
+      out[threadId] = { state: row.state, at: row.at };
+    }
   }
   return out;
 }
 
 /**
- * Settle a thread as of `at` (defaults to now), or clear it with `null`.
+ * Record what the user said about a thread, or clear it with `state: null`.
+ *
+ * BOTH directions are storable. "active" is not the absence of a settle: once
+ * threads settle themselves after N quiet days, "keep this one out" is a thing
+ * the user has to be able to say, and clearing the row would just let the
+ * inactivity rule settle it again.
  *
  * `at` is a parameter because the CALLER's clock is the one the user acted on,
  * and it has to be comparable with the thread's `updatedAt`: stamping server
  * time here would let a phone settle a thread a moment "before" its own last
  * message and have it spring straight back.
  */
-export function setSettled(threadId, at = now()) {
+export function setSettled(threadId, state, at = now()) {
   if (!threadId) return false;
-  if (at === null) return store.delete(threadId);
+  if (state == null) return store.delete(threadId);
+  if (state !== "settled" && state !== "active") return false;
   const stamp = typeof at === "string" && !Number.isNaN(Date.parse(at)) ? at : now();
-  store.set(threadId, { settledAt: stamp, updatedAt: now() });
+  store.set(threadId, { state, at: stamp, updatedAt: now() });
   return true;
 }
 

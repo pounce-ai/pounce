@@ -2759,13 +2759,16 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { settled: listSettled() });
     }
     if (url.pathname === "/v1/settled" && req.method === "POST") {
-      const { threadId, settledAt } = await readBody(req);
+      const { threadId, state, at } = await readBody(req);
       if (!threadId) return send(res, 400, { error: "threadId required" });
-      // `settledAt: null` un-settles. The CLIENT's timestamp is stored, not
-      // ours: it has to be comparable with the thread's own updatedAt, and a
-      // server clock a second behind would settle a thread "before" its last
-      // message and have it spring straight back.
-      setSettled(threadId, settledAt === null ? null : settledAt || undefined);
+      if (state != null && state !== "settled" && state !== "active") {
+        return send(res, 400, { error: "state must be settled, active or null" });
+      }
+      // `state: null` clears the override and hands the thread back to the
+      // automatic rule. The CLIENT's timestamp is stored, not ours: it has to
+      // be comparable with the thread's own updatedAt, and a server clock a
+      // second behind would settle a thread "before" its last message.
+      setSettled(threadId, state ?? null, at || undefined);
       return send(res, 200, { ok: true, settled: listSettled() });
     }
 
