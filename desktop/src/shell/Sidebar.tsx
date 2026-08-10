@@ -19,6 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@pounce/shared";
 import { applyFilters, connection$, filters$, needsYou } from "@pounce/app/state/stores";
 import { canSettle, partitionSettled } from "@pounce/app/state/settled";
+import { draftTitle, drafts$, listDrafts, newDraft } from "@pounce/app/state/drafts";
 import {
   autoSettleDays$,
   loadSettled,
@@ -36,7 +37,7 @@ import { useTrafficLightInset } from "./fullscreen";
 import { appearance$, setAppearance, type AppearanceMode } from "@pounce/app/state/appearance";
 import { useAccessRequests } from "./accessRequests";
 import { nav$, selectSpace } from "../shims/router";
-import { deriveSpaces, spaceKeyOf, type Space } from "./Spaces";
+import { deriveSpaces, spaceKeyFor, spaceKeyOf, type Space } from "./Spaces";
 import { SidebarGlyph } from "./icons";
 import { ThemeButton } from "./ThemeMenu";
 
@@ -151,6 +152,14 @@ export function Sidebar() {
     [sessions, overrides, autoDays],
   );
   const [showSettled, setShowSettled] = useState(false);
+  // Parked tasks, above the threads: a draft is the newest thing you touched
+  // and the only row here that is waiting on YOU rather than on an agent.
+  // Narrowed with the space, like everything else in this list.
+  const allDrafts = useSelector(() => listDrafts(drafts$.get()));
+  const drafts = useMemo(
+    () => (space ? allDrafts.filter((d) => spaceKeyFor(d.hostId, d.repoId) === space) : allDrafts),
+    [allDrafts, space],
+  );
   // One read per connect: the map is small, and the bridge owns it.
   useEffect(() => {
     if (connected) void loadSettled();
@@ -336,6 +345,11 @@ export function Sidebar() {
                     // opens its page. Second click leaves — a Space is
                     // somewhere you step into, not a mode you have to escape.
                     onPress={() => selectSpace(space === sp.key ? null : sp.key)}
+                    onCompose={() =>
+                      router.push(
+                        `/new?draft=${newDraft({ hostId: sp.hostId, repoId: sp.repoId }).id}`,
+                      )
+                    }
                   />
                 </Entrance>
               ))
@@ -361,6 +375,19 @@ export function Sidebar() {
                 attention > 0 ? `${attention} need${attention === 1 ? "s" : ""} you` : undefined
               }
             />
+            {drafts.map((d) => (
+              <Pressable
+                key={d.id}
+                onPress={() => router.push(`/new?draft=${d.id}`)}
+                style={({ pressed }) => [s.draftRow, pressed && s.rowHover]}
+              >
+                <Ionicons name="create-outline" size={12} color={COLOR.fgFaint} />
+                <Text numberOfLines={1} style={s.draftTitle}>
+                  {draftTitle(d)}
+                </Text>
+                <Text style={s.draftTag}>Draft</Text>
+              </Pressable>
+            ))}
           </View>
         }
         ListEmptyComponent={
@@ -532,15 +559,21 @@ function SpaceRow({
   showHost,
   selected,
   onPress,
+  onCompose,
 }: {
   space: Space;
   showHost: boolean;
   selected: boolean;
   onPress: () => void;
+  /** Start a task already scoped to this project. */
+  onCompose: () => void;
 }) {
+  const [hover, setHover] = useState(false);
   return (
     <Pressable
       onPress={onPress}
+      onHoverIn={() => setHover(true)}
+      onHoverOut={() => setHover(false)}
       style={({ pressed }) => [s.spaceRow, selected ? s.rowSelected : pressed && s.rowHover]}
     >
       <View
@@ -553,10 +586,24 @@ function SpaceRow({
       <Text numberOfLines={1} style={s.spaceName}>
         {space.name}
       </Text>
-      {showHost ? (
+      {showHost && !hover ? (
         <Text numberOfLines={1} style={s.spaceHost}>
           @ {space.host}
         </Text>
+      ) : null}
+      {/* Compose HERE. The global + asks which project; this one already knows,
+          which is the whole difference between starting a task and setting one
+          up. Revealed on hover so a list of projects stays a list of projects. */}
+      {hover ? (
+        <Pressable
+          onPress={onCompose}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel={`New task in ${space.name}`}
+          style={({ pressed }) => pressed && s.pressed60}
+        >
+          <Ionicons name="create-outline" size={13} color={COLOR.accent} />
+        </Pressable>
       ) : null}
     </Pressable>
   );
@@ -869,6 +916,24 @@ const s = StyleSheet.create((theme) => ({
 
   /* Sits between the list and the account row. A hairline above separates it
      from the feed without drawing a heavy divider across the sidebar. */
+  /* Quieter than a session row and visibly unstarted: a draft has no agent
+     mark and no time, because nothing has happened to it yet. */
+  draftRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  draftTitle: { flex: 1, fontSize: 12.5, color: COLOR.fgMuted },
+  draftTag: {
+    fontSize: 9.5,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    color: COLOR.fgFaint,
+  },
   settledBlock: {
     gap: 1,
     borderTopWidth: 1,

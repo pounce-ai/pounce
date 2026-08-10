@@ -19,6 +19,7 @@ import { Composer, type ComposerHandle, type ComposerSubmit } from "../component
 import { FolderBrowser } from "../components/FolderBrowser";
 import { ConnectFlow } from "../components/ConnectFlow";
 import { contextDraft$ } from "../state/contextComments";
+import { drafts$, newDraft, removeDraft, updateDraft } from "../state/drafts";
 import { startInteractive } from "../services/bridge";
 import { AgentLogo, agentLabel } from "../ui";
 import { effectiveCaps } from "../ui/agent-meta";
@@ -45,7 +46,16 @@ export default function NewTaskScreen() {
     repoId,
     cwd: cwdParam,
     hostId: hostParam,
-  } = useLocalSearchParams<{ repoId?: string; cwd?: string; hostId?: string }>();
+    draft: draftParam,
+  } = useLocalSearchParams<{
+    repoId?: string;
+    cwd?: string;
+    hostId?: string;
+    draft?: string;
+  }>();
+  // Resuming a parked task: the draft's own answers outrank the route's seeds,
+  // since they are what the user last chose.
+  const resumed = draftParam ? drafts$[String(draftParam)].peek() : undefined;
   const devices = useDevices();
   const rawThreads = useThreads();
   const projectList = useProjects();
@@ -57,11 +67,14 @@ export default function NewTaskScreen() {
   // Default to a REACHABLE device — a stale/dead pairing (e.g. an old IP) can
   // otherwise sit at devices[0] and silently swallow the turn (no response).
   const [hostId, setHostId] = useState<string | undefined>(
-    hostParam ? String(hostParam) : (devices.find((d) => d.online) ?? devices[0])?.id,
+    resumed?.hostId ??
+      (hostParam ? String(hostParam) : (devices.find((d) => d.online) ?? devices[0])?.id),
   );
-  const [cwd, setCwd] = useState<string | null>(cwdParam ? String(cwdParam) : null);
-  const [selectedRepoId, setSelectedRepoId] = useState<string | null>(null);
-  const [agent, setAgent] = useState<AgentId>("claude");
+  const [cwd, setCwd] = useState<string | null>(
+    resumed?.cwd ?? (cwdParam ? String(cwdParam) : null),
+  );
+  const [selectedRepoId, setSelectedRepoId] = useState<string | null>(resumed?.repoId ?? null);
+  const [agent, setAgent] = useState<AgentId>(resumed?.agent ?? "claude");
   const [browsing, setBrowsing] = useState(false);
   // Interactive = the bridge hosts claude's real TUI in a PTY, so its prompts
   // (AskUserQuestion, …) are answerable from the app. Claude-only for now.
@@ -135,6 +148,24 @@ export default function NewTaskScreen() {
     composerRef.current?.insert(draft);
   }, []);
 
+  /**
+   * This visit's draft, created on open so nothing typed is ever lost.
+   *
+   * An empty one is never LISTED (see listDrafts), so opening the screen and
+   * changing your mind leaves no trace — but the moment there is a prompt or a
+   * folder, closing the screen parks the task instead of discarding it.
+   */
+  const draftId = useRef<string>(resumed?.id ?? newDraft().id).current;
+  useEffect(() => {
+    if (resumed?.text) composerRef.current?.insert(resumed.text);
+    // Once, on mount: re-inserting on every change would fight the input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Every choice is part of the parked task, not just the words.
+  useEffect(() => {
+    updateDraft(draftId, { hostId: hostId ?? null, cwd, repoId: selectedRepoId, agent });
+  }, [draftId, hostId, cwd, selectedRepoId, agent]);
+
   const launch = async (s: ComposerSubmit) => {
     const nowIso = new Date().toISOString();
     const device = devices.find((d) => d.id === hostId) ?? devices[0];
@@ -165,6 +196,7 @@ export default function NewTaskScreen() {
           createdAt: nowIso,
           updatedAt: nowIso,
         });
+        removeDraft(draftId);
         router.replace(`/session/${realId}`);
         return;
       }
@@ -193,6 +225,7 @@ export default function NewTaskScreen() {
     });
     // Hand the first turn (prompt + mode/effort/images) to the session screen.
     pendingTurns$[id].set(s);
+    removeDraft(draftId);
     router.replace(`/session/${id}`);
   };
 
@@ -314,6 +347,7 @@ export default function NewTaskScreen() {
         ) : null}
         <Composer
           ref={composerRef}
+          onDraftChange={(text) => updateDraft(draftId, { text })}
           agent={agent}
           caps={caps}
           hostId={hostId}

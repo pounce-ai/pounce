@@ -40,8 +40,19 @@ export interface Space {
   readonly lastActivityAt: string;
 }
 
+/**
+ * The key identifying one project on one machine.
+ *
+ * Takes the two ids rather than a Session so a DRAFT can be placed in a space
+ * too — it has a repo and a host but no thread, and a second copy of this rule
+ * would be a way for the sidebar's narrowing to disagree with itself.
+ */
+export function spaceKeyFor(hostId: string | null, repoId: string | null): string {
+  return `${repoId ?? ""} ${hostId ?? ""}`;
+}
+
 export function spaceKeyOf(s: Session): string {
-  return `${s.repoId} ${s.hostId}`;
+  return spaceKeyFor(s.hostId, s.repoId);
 }
 
 /** Working directories for a space's sessions, repo root before worktrees and

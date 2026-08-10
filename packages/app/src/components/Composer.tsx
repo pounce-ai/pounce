@@ -130,6 +130,7 @@ export function Composer({
   hostId,
   cwd,
   onSubmit,
+  onDraftChange,
   onStop,
   onViewChanges,
   diffStat,
@@ -153,6 +154,10 @@ export function Composer({
   hostId?: string;
   cwd?: string | null;
   onSubmit: (s: ComposerSubmit) => Promise<void> | void;
+  /** Every keystroke, for callers that persist what is typed (the New screen
+   *  saves it into a draft). Deliberately not a controlled `value` prop: the
+   *  native rich input owns its buffer, and driving it from outside fights it. */
+  onDraftChange?: (text: string) => void;
   /** Interrupt the running turn (from the stop button). */
   onStop?: () => void;
   /** Open the session's diff review — shows a diff shortcut in the control row. */
@@ -188,6 +193,11 @@ export function Composer({
   // slash/mention menus + canSend), `markdownRef` mirrors the markdown we send,
   // and we push text back through the imperative ref (not a `value` prop).
   const [draft, setDraft] = useState("");
+  // One place the text moves, so a caller persisting it can't miss an edit.
+  const onDraftChangeAndSet = (t: string) => {
+    setDraft(t);
+    onDraftChange?.(t);
+  };
   const inputRef = useRef<EnrichedMarkdownTextInputInstance>(null);
   const markdownRef = useRef("");
   // The native rich input requires STRING colors — pick literal hexes for the
@@ -644,7 +654,7 @@ export function Composer({
         <GlassCard radius={24} shadow style={s.card}>
           <EnrichedMarkdownTextInput
             ref={inputRef}
-            onChangeText={setDraft}
+            onChangeText={onDraftChangeAndSet}
             onChangeMarkdown={(md) => {
               markdownRef.current = md;
             }}
