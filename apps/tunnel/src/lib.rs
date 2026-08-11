@@ -1,4 +1,5 @@
-//! Tunnel-client core, shared by the CLI (`main.rs`) and the iOS FFI (`ffi.rs`).
+//! Tunnel-client core, shared by the CLI (`main.rs`), the C ABI iOS links
+//! (`ffi.rs`) and the JNI shims Android loads (`android.rs`).
 //!
 //! A client is a local TCP listener whose every connection is spliced over one
 //! authed QUIC bi-stream to a `pounce-tunnel serve` peer, dialed by node id
@@ -7,6 +8,11 @@
 //! response and SSE alike — works exactly as on the LAN.
 
 pub mod ffi;
+
+// The JNI shims Kotlin binds to. Android-only: the symbol names are JVM-shaped
+// and the `jni` crate isn't a dependency anywhere else.
+#[cfg(target_os = "android")]
+pub mod android;
 
 use anyhow::{anyhow, Context, Result};
 use iroh::endpoint::presets::N0;

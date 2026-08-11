@@ -1,0 +1,24 @@
+// The Rust core is cross-compiled ahead of time by apps/tunnel/build-android.sh
+// and lands in src/main/jniLibs, which is AGP's default location — so there is
+// no native build step here and gradle needs no NDK of its own. Same division
+// of labour as iOS, where the podspec just vendors a prebuilt xcframework.
+
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.pounce'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.pouncetunnel"
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+    // Stated rather than inherited: it must match the API level
+    // build-android.sh compiles the .so against, so if the app ever drops its
+    // minSdk the mismatch fails the build instead of failing on a device.
+    minSdkVersion 24
+  }
+}

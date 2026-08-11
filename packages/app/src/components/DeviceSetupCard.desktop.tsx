@@ -11,6 +11,7 @@ import { useState } from "react";
 import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { addDeviceConfig, clearBridgeConfig, syncLiveData } from "../services/bridge";
 import { allCollections, clearCollection } from "../state/db/collections";
 import { SettingsCard } from "./settings/primitives";
@@ -69,6 +70,7 @@ export function DeviceSetupCard({
   onSync,
 }: DeviceSetupCardProps) {
   const COLOR = useColors();
+  const router = useRouter();
   const [resyncing, setResyncing] = useState(false);
   const [resyncDone, setResyncDone] = useState(false);
 
@@ -174,6 +176,24 @@ export function DeviceSetupCard({
 
         {manual ? (
           <View style={s.section}>
+            {/* Two ways to add a machine, and they are the same work: SSH in,
+                install Pounce, bring back the address and code. Pounce can do
+                that itself, so that's the offer — pasting is what's left when
+                you can't SSH (or already have a code in hand). */}
+            <Pressable
+              onPress={() => router.push("/add-machine")}
+              style={({ pressed }) => [s.sshBtn, pressed && s.pressed90]}
+            >
+              <Ionicons name="terminal-outline" size={15} color={COLOR.onAccent} />
+              <View style={s.grow}>
+                <Text style={s.sshTitle}>Set it up over SSH</Text>
+                <Text style={s.sshBody}>
+                  Any server you can ssh into. Works from your phone afterwards too.
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={14} color={COLOR.onAccent} />
+            </Pressable>
+            <Text style={s.orLine}>or paste its address and code</Text>
             <Text style={s.fieldLabel}>Address</Text>
             <TextInput
               {...INPUT_TWEAKS}
@@ -251,6 +271,20 @@ const s = StyleSheet.create((theme) => ({
   resetText: { fontSize: 13, fontWeight: "500", color: theme.colors.danger },
   grow: { flex: 1 },
   section: { gap: 8, borderTopWidth: 1, borderColor: theme.colors.border, paddingTop: 12 },
+  // The recommended route, so it wears the accent — the manual fields below are
+  // the fallback, and read as one.
+  sshBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: theme.colors.accent,
+  },
+  sshTitle: { fontSize: 13, fontWeight: "600", color: theme.colors.onAccent },
+  sshBody: { marginTop: 1, fontSize: 11.5, lineHeight: 15, color: theme.colors.onAccent },
+  orLine: { alignSelf: "center", fontSize: 12, color: theme.colors.fgFaint },
   rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   updateCopy: { flex: 1, paddingRight: 12 },
   updateTitle: { fontSize: 14, fontWeight: "500", color: theme.colors.fg },

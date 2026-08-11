@@ -1,7 +1,9 @@
-# EAS project-archive ignores. This file exists so cloud builds can include
-# apps/mobile/modules/pounce-tunnel/ios/PounceTunnelCore.xcframework — which is
-# gitignored (412MB build artifact, rebuilt by apps/tunnel/build-ios.sh) and
-# would be dropped by git-based packing. Used with EAS_NO_VCS=1.
+# EAS project-archive ignores. This file exists so cloud builds can include the
+# tunnel's prebuilt native cores — the iOS PounceTunnelCore.xcframework (412MB,
+# build-ios.sh) and the Android jniLibs .so per ABI (build-android.sh) — both of
+# which are gitignored and would be dropped by git-based packing. The exclusions
+# below are deliberately anchored, so `apps/mobile/android` drops the prebuild
+# output WITHOUT touching modules/pounce-tunnel/android. Used with EAS_NO_VCS=1.
 .git
 **/node_modules
 **/.expo

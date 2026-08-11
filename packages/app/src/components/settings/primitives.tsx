@@ -44,15 +44,24 @@ export function SettingsScroll({ children }: { children: ReactNode }) {
 export function SettingsSection({
   title,
   caption,
+  action,
   children,
 }: {
   title?: string;
   caption?: string;
+  /** A control on the title line — Refresh, Edit, See all. Belongs to the
+   *  section rather than to any one row, which is why it sits up here. */
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <View style={s.section}>
-      {title ? <Text style={s.sectionTitle}>{title}</Text> : null}
+      {title || action ? (
+        <View style={s.sectionHeader}>
+          {title ? <Text style={s.sectionTitle}>{title}</Text> : null}
+          {action ? <View style={s.sectionAction}>{action}</View> : null}
+        </View>
+      ) : null}
       <View style={s.card}>{children}</View>
       {caption ? <Text style={s.caption}>{caption}</Text> : null}
     </View>
@@ -197,7 +206,12 @@ const s = StyleSheet.create((theme) => ({
   },
   headerTitle: { fontSize: 22, fontWeight: "700", color: theme.colors.fg },
   section: { gap: 8 },
+  // Baseline-ish alignment: the title sets the line, the action sits to its
+  // right without stretching the row taller than the text.
+  sectionHeader: { flexDirection: "row", alignItems: "flex-end", gap: 12 },
+  sectionAction: { paddingHorizontal: 8 },
   sectionTitle: {
+    flex: 1,
     paddingHorizontal: 8,
     fontSize: 14,
     fontWeight: "500",

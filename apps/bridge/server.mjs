@@ -80,6 +80,14 @@ import { listSettled, setSettled } from "./agents/settled.mjs";
 import { mergeBilledCost, mergeEstimatedCost, mergeTokens } from "./agents/series-overlay.mjs";
 import { listEditors, openIn } from "./agents/editors.mjs";
 import { closeShell, getShell, killAllShells, openShell, reapShells } from "./agents/term.mjs";
+import {
+  cancelSshBootstrap,
+  getSshBootstrap,
+  killAllSshBootstraps,
+  startSshBootstrap,
+} from "./agents/ssh.mjs";
+import { ensureTunnelBinary, lastTunnelError, tunnelBinary } from "./agents/tunnel-bin.mjs";
+import { listSshHosts } from "./agents/ssh-hosts.mjs";
 
 const IS_WIN = process.platform === "win32";
 
@@ -2090,6 +2098,91 @@ const server = http.createServer(async (req, res) => {
         return send(res, 503, { error: String(e?.message || e) });
       }
     }
+    // --- adding a machine over SSH ------------------------------------------
+    // Loopback only, like /v1/peers/dial above: these spawn an SSH client as
+    // this user, with this user's keys and ssh_config. Nobody on the LAN, and
+    // no holder of a scoped grant, gets to reach for that.
+    // Machines this computer already knows how to reach, so the form can offer
+    // them instead of describing where to find them. Read fresh each time: a
+    // host added to ~/.ssh/config while the app is open should show up on the
+    // next Refresh, not the next launch.
+    if (url.pathname === "/v1/ssh/hosts") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      return send(res, 200, { hosts: listSshHosts() });
+    }
+    if (url.pathname === "/v1/ssh/start" && req.method === "POST") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      const { host, user, sshPort, bridgePort, strictHostKey } = await readBody(req);
+      if (!host) return send(res, 400, { error: "host required" });
+      try {
+        const run = startSshBootstrap({
+          host,
+          user: user || null,
+          sshPort: sshPort || null,
+          bridgePort: bridgePort || DEFAULT_PORT,
+          strictHostKey: strictHostKey !== false,
+        });
+        return send(res, 200, run.state());
+      } catch (e) {
+        return send(res, 503, { error: String(e?.message || e) });
+      }
+    }
+    // Live progress: phase changes, the prompt SSH is sitting on, and the raw
+    // output so the app can show what a person would have seen in a terminal.
+    if (url.pathname === "/v1/ssh/stream") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      const run = getSshBootstrap(url.searchParams.get("id"));
+      if (!run) return send(res, 404, { error: "no such run" });
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      });
+      let closed = false;
+      const write = (obj) => {
+        if (!closed) res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      };
+      // First frame is everything so far: a client that attaches after the
+      // interesting part still paints the whole session.
+      write({ ...run.state(), output: run.snapshot(), first: true });
+      const detach = run.attach(write);
+      const stop = () => {
+        if (closed) return;
+        closed = true;
+        detach();
+        clearInterval(beat);
+        res.end();
+      };
+      // npx can sit silent for a minute while it downloads; without a comment
+      // frame a proxy in between may decide the connection is dead.
+      const beat = setInterval(() => {
+        if (!closed) res.write(": ping\n\n");
+      }, 25_000);
+      req.on("close", stop);
+      run.exited.finally(stop);
+      return;
+    }
+    // Answering a prompt. The client sends the trailing newline: a host-key
+    // answer is "yes\n", a password is the secret and a return.
+    if (url.pathname === "/v1/ssh/input" && req.method === "POST") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      const { id, data } = await readBody(req);
+      const run = getSshBootstrap(id);
+      if (!run) return send(res, 404, { error: "no such run" });
+      if (typeof data === "string" && data) run.write(data);
+      return send(res, 200, { ok: true });
+    }
+    if (url.pathname === "/v1/ssh/status") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      const run = getSshBootstrap(url.searchParams.get("id"));
+      if (!run) return send(res, 404, { error: "no such run" });
+      return send(res, 200, run.state());
+    }
+    if (url.pathname === "/v1/ssh/cancel" && req.method === "POST") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      const { id } = await readBody(req);
+      return send(res, 200, { ok: cancelSshBootstrap(id) });
+    }
     if (url.pathname === "/v1/access" && req.method === "GET") {
       if (!isOwner(req)) return send(res, 403, { error: "local only" });
       sweepAccess();
@@ -3005,13 +3098,10 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
 // proxies them to this bridge, so the app works from anywhere. Its identity
 // lands in ~/.pounce/tunnel.json, which /v1/pair serves. Best-effort: no
 // binary → LAN-only, exactly as before.
-function tunnelBinary() {
-  const candidates = [
-    process.env.POUNCE_TUNNEL_BIN,
-    path.join(os.homedir(), ".pounce", "bin", IS_WIN ? "pounce-tunnel.exe" : "pounce-tunnel"),
-  ].filter(Boolean);
-  return candidates.find((p) => existsSync(p)) || null;
-}
+// Resolution and download both live in agents/tunnel-bin.mjs — `serve` looks
+// for a binary that's already there, while `client` (dialPeer) will fetch one,
+// because the desktop can now be asked to dial a machine on a Mac that has
+// never had a reason to download it.
 
 // --- per-grant tunnels ---------------------------------------------------------
 // A guest that leaves the network still needs a way in, and the machine-wide
@@ -3137,8 +3227,14 @@ function freePort() {
 async function dialPeer(nodeId, relay, token) {
   const hit = peerDials.get(nodeId);
   if (hit) return hit.port;
-  const bin = tunnelBinary();
-  if (!bin) throw new Error("no tunnel binary on this machine");
+  // Fetch it if we haven't got it: this is the dialling side, and a machine
+  // added over SSH is reachable only through the tunnel.
+  const bin = await ensureTunnelBinary();
+  if (!bin) {
+    throw new Error(
+      `no tunnel binary on this machine${lastTunnelError() ? ` (${lastTunnelError()})` : ""}`,
+    );
+  }
   const port = await freePort();
   const args = ["client", "--token", token, "--node", nodeId, "--listen", `127.0.0.1:${port}`];
   if (relay) args.push("--relay", relay);
@@ -3223,6 +3319,8 @@ process.on("exit", killAllTunnels);
 // Shells are children of this process; without this they survive as orphans
 // holding the thread's worktree open.
 process.on("exit", killAllShells);
+// An SSH child outliving the bridge would sit holding a TTY nobody can reach.
+process.on("exit", killAllSshBootstraps);
 // Default signal deaths bypass the exit handler — reap the tunnel explicitly
 // so Ctrl-C'd bridges stop leaving identity-squatting orphans behind.
 for (const sig of ["SIGINT", "SIGTERM"]) {
