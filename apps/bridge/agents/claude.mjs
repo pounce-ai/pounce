@@ -52,6 +52,12 @@ const FOREIGN_WRITE_WINDOW_MS = 90_000;
 // With a live agent process confirmed in the thread's cwd, a quiet mid-turn
 // transcript stays "running" this long (covers long tool calls/builds).
 const LIVE_EXTENDED_WINDOW_MS = 2 * 60 * 60_000;
+// How long a turn waits for a session another process is driving (see
+// awaitForeignTurn), and how often it re-checks. The cap is generous because
+// the alternative is losing the message: a build or a long tool call routinely
+// holds a thread for minutes, and the wait costs an idle poll, not a process.
+const FOREIGN_WAIT_MS = Number(process.env.BRIDGE_FOREIGN_WAIT_MS || 15 * 60_000);
+const FOREIGN_POLL_MS = 3_000;
 const TURN_TIMEOUT_MS = Number(process.env.BRIDGE_TURN_TIMEOUT_MS || 300_000);
 // Hard ceiling on one cached history's retained size; oldest turns are dropped.
 const MAX_HISTORY_BYTES = 8 * 1024 * 1024;
@@ -664,6 +670,53 @@ export class ClaudeAdapter {
   }
 
   /**
+   * Hold a turn until the session another process is driving settles.
+   *
+   * A thread live in a terminal used to be a dead end: "wait for it to finish,
+   * then retry" put the retry on the user, from a phone, for a turn whose end
+   * they cannot see. Nothing about the message needed to be lost — only the
+   * RESUME had to wait, because resuming mid-turn forks a live agent (see the
+   * caller). So park it here and send it the moment the thread goes quiet.
+   *
+   * NOT a queue on disk: it lives in the open SSE turn, so it dies with the
+   * request. Someone who backgrounds the app and never comes back has simply
+   * not sent a message, which is the honest outcome — a durable queue would
+   * deliver a stale instruction into a session that has since moved on.
+   *
+   * Resolves true once the thread is quiet, false if it is still busy at the
+   * cap — the same refusal as before, just after actually waiting.
+   */
+  async awaitForeignTurn(
+    threadId,
+    sessionId,
+    onEvent,
+    { waitMs = FOREIGN_WAIT_MS, pollMs = FOREIGN_POLL_MS } = {},
+  ) {
+    onEvent({
+      id: `${sessionId}:waiting`,
+      conversationId: sessionId,
+      seq: 1,
+      ts: new Date().toISOString(),
+      type: "system_event",
+      message:
+        "This thread is active in another Claude Code session — holding your message until it finishes.",
+      level: "info",
+    });
+    const deadline = Date.now() + waitMs;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, pollMs));
+      const act = await this.getActivity(threadId).catch(() => null);
+      if (act?.activity === "running") continue;
+      // Both checks, same as the guard: `getActivity` reads the transcript's
+      // shape and `isForeignWriter` its mtime, and a session between two tool
+      // calls can look finished to the first while still being written.
+      if (await this.isForeignWriter(threadId)) continue;
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Models come from what this machine can actually show for itself, never a
    * pinned catalog. The CLI has no `models` subcommand and writes no full
    * catalog to disk, so three real sources are merged, best first:
@@ -745,13 +798,19 @@ export class ClaudeAdapter {
       // whole conversation into a new id, which then surfaced as a duplicate
       // thread). So this path also refuses on a transcript that is simply
       // still being written.
+      //
+      // Waiting is the answer, not refusing: only the RESUME has to wait, and
+      // asking someone on a phone to retry at the right moment made them poll a
+      // turn whose end they can't see. Held here, sent the instant it settles.
       const act = await this.getActivity(threadId).catch(() => null);
       if (act?.activity === "running" || (await this.isForeignWriter(threadId))) {
-        return failedTurn(
-          sessionId,
-          "This thread is currently active in another Claude Code session on the host — wait for it to finish, then retry.",
-          onEvent,
-        );
+        if (!(await this.awaitForeignTurn(threadId, sessionId, onEvent))) {
+          return failedTurn(
+            sessionId,
+            "This thread is still active in another Claude Code session on the host — your message wasn't sent. Try again once that session is done.",
+            onEvent,
+          );
+        }
       }
     }
 
