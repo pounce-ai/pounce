@@ -3,9 +3,18 @@
  * via `opencode run --format json`.
  *
  * Current opencode persists to ~/.local/share/opencode/opencode.db (sqlite,
- * WAL): session(id, directory, title, time_created, time_updated, …),
- * message(id, session_id, time_created, data JSON{role, time}), part(id,
- * message_id, session_id, data JSON{type: text|reasoning|tool|step-*}).
+ * WAL). Two schemas coexist in that file:
+ *   - v2 (opencode ≥1.18): session_v2(id, directory, title, parent_id,
+ *     time_created, time_updated, …) + session_message(id, session_id, type,
+ *     seq, data JSON). type is one of user|assistant|synthetic|compaction|
+ *     system|model-switched — only user/assistant are transcript; the rest are
+ *     opencode plumbing. Assistant data carries the parts inline as
+ *     content[{type: text|reasoning|tool, name, id, state{status, input,
+ *     metadata, content[{type:text,text}] | error{message}}}]; user data is
+ *     {text, time}. New sessions exist ONLY here.
+ *   - legacy: session(id, …) + message(id, session_id, data JSON{role,
+ *     time}) + part(id, message_id, session_id, data JSON{type: text|
+ *     reasoning|tool|step-*}). Some sessions are dual-written; prefer v2.
  * Read-only via node:sqlite — safe alongside a writing opencode (WAL).
  * Older installs used a JSON file tree (storage/session/<project>/ses_*.json +
  * storage/message/<ses>/msg_*.json + storage/part/<msg>/prt_*.json); we fall
@@ -50,9 +59,24 @@ export class OpencodeAdapter {
     };
     this.turns = turns;
     this._db = undefined; // undefined = not tried, null = unavailable
+    this._v2 = undefined; // undefined = not probed
     this._dirty = new Set();
     this._watcher = null;
     this._watchTimer = null;
+  }
+
+  /** Does the db carry the v2 schema (opencode ≥1.18)? Re-probed after writes
+   *  so a mid-run migration is picked up. */
+  _hasV2(db) {
+    if (this._v2 !== undefined) return this._v2;
+    try {
+      this._v2 = !!db
+        .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'session_v2'`)
+        .get();
+    } catch {
+      this._v2 = false;
+    }
+    return this._v2;
   }
 
   onDirty(cb) {
@@ -91,6 +115,7 @@ export class OpencodeAdapter {
         if (!f || !f.startsWith("opencode.db")) return;
         clearTimeout(this._watchTimer);
         this._watchTimer = setTimeout(() => {
+          this._v2 = undefined; // a write may have migrated the schema
           for (const cb of this._dirty) {
             try {
               cb("");
@@ -104,15 +129,40 @@ export class OpencodeAdapter {
   async listThreads() {
     const db = await this.db();
     if (db) {
+      // v2 is authoritative for opencode ≥1.18 (new sessions exist only
+      // there); merge legacy rows for sessions that predate the v2 schema.
+      // Each query gets its own try: a v2-only install has no legacy table,
+      // and a throw must not discard the v2 rows already collected.
+      const seen = new Set();
+      const rows = [];
+      if (this._hasV2(db)) {
+        try {
+          for (const r of db
+            .prepare(
+              `SELECT id, directory, title, time_created, time_updated
+                 FROM session_v2 WHERE parent_id IS NULL AND time_archived IS NULL
+                 ORDER BY time_updated DESC LIMIT 1000`,
+            )
+            .all()) {
+            seen.add(r.id);
+            rows.push(r);
+          }
+        } catch {}
+      }
       try {
-        const rows = db
+        for (const r of db
           .prepare(
             `SELECT id, directory, title, time_created, time_updated
-             FROM session WHERE parent_id IS NULL AND time_archived IS NULL
-             ORDER BY time_updated DESC LIMIT 1000`,
+               FROM session WHERE parent_id IS NULL AND time_archived IS NULL
+               ORDER BY time_updated DESC LIMIT 1000`,
           )
-          .all();
-        return rows.map((r) => ({
+          .all()) {
+          if (!seen.has(r.id)) rows.push(r);
+        }
+      } catch {}
+      if (rows.length) {
+        rows.sort((a, b) => (b.time_updated || 0) - (a.time_updated || 0));
+        return rows.slice(0, 1000).map((r) => ({
           id: r.id,
           filePath: null,
           cwd: r.directory || null,
@@ -123,7 +173,7 @@ export class OpencodeAdapter {
           gitBranch: null,
           sizeBytes: 0,
         }));
-      } catch {}
+      }
     }
     return this._listThreadsFiles();
   }
@@ -286,6 +336,69 @@ export class OpencodeAdapter {
   }
 
   _messagesDb(db, threadId) {
+    // v2 (opencode ≥1.18): parts ride inline in session_message.data.content.
+    // Map them to the legacy part shape so getEvents() works unchanged.
+    if (this._hasV2(db)) {
+      let rows;
+      try {
+        // session_message.type has six values; synthetic/compaction/system/
+        // model-switched are opencode plumbing (synthetic duplicates tool
+        // output, system carries injected instructions) — the legacy schema
+        // only ever had user/assistant, so keep the transcript to those.
+        rows = db
+          .prepare(
+            `SELECT id, type, data FROM session_message
+               WHERE session_id = ? AND type IN ('user', 'assistant')
+               ORDER BY seq, id`,
+          )
+          .all(threadId);
+      } catch {
+        rows = null;
+      }
+      if (rows?.length) {
+        // Map per-row: one malformed row must not abort the whole thread into
+        // a legacy fallback that has nothing for a v2-only session.
+        return rows.map((r) => {
+          try {
+            const d = JSON.parse(r.data);
+            const content = Array.isArray(d.content)
+              ? d.content
+              : typeof d.text === "string"
+                ? [{ type: "text", text: d.text }]
+                : [];
+            const parts = [];
+            content.forEach((c, i) => {
+              // v2 part ids are per-turn counters ("read_0") — namespace by
+              // message id so event ids stay unique across the conversation.
+              const id = `${r.id}:${c.id || i}`;
+              if (c.type === "text") parts.push({ id, data: { type: "text", text: c.text } });
+              else if (c.type === "reasoning")
+                parts.push({ id, data: { type: "reasoning", text: c.text } });
+              else if (c.type === "tool") {
+                const st = c.state || {};
+                parts.push({
+                  id,
+                  data: {
+                    type: "tool",
+                    tool: c.name || null,
+                    callID: id,
+                    // Spread st: getEvents reads metadata.diff (file-edit
+                    // diffs) and status off the state. output is derived —
+                    // errored tools carry their message in error.message
+                    // because content/output are null on failure.
+                    state: { ...st, output: v2ToolOutput(st) },
+                  },
+                });
+              }
+            });
+            return { id: r.id, data: { role: r.type, time: d.time, error: d.error }, parts };
+          } catch {
+            return { id: r.id, data: { role: r.type, time: null }, parts: [] };
+          }
+        });
+      }
+      // v2 tables exist but this session predates them — fall through to legacy.
+    }
     try {
       const msgs = db
         .prepare(`SELECT id, data FROM message WHERE session_id = ? ORDER BY time_created, id`)
@@ -327,16 +440,34 @@ export class OpencodeAdapter {
     const db = await this.db();
     if (db) {
       try {
-        const row = db
-          .prepare(
-            `SELECT data, time_updated FROM message WHERE session_id = ? ORDER BY time_created DESC, id DESC LIMIT 1`,
-          )
-          .get(threadId);
+        let row = null;
+        if (this._hasV2(db)) {
+          row =
+            db
+              .prepare(
+                // Restrict to user/assistant: synthetic/compaction rows are
+                // written mid-turn, so polling them would misreport a live
+                // (TUI-started) session as completed.
+                `SELECT type, data, time_updated FROM session_message
+                 WHERE session_id = ? AND type IN ('user', 'assistant')
+                 ORDER BY seq DESC, id DESC LIMIT 1`,
+              )
+              .get(threadId) || null;
+          if (row) row.isV2 = true;
+        }
+        if (!row) {
+          row = db
+            .prepare(
+              `SELECT data, time_updated FROM message WHERE session_id = ? ORDER BY time_created DESC, id DESC LIMIT 1`,
+            )
+            .get(threadId);
+        }
         if (!row) return { activity: "idle", lastActivityAt: null };
         let data = {};
         try {
           data = JSON.parse(row.data);
         } catch {}
+        if (row.isV2) data.role = row.type; // v2 keeps the role in a column, not the JSON
         const lastActivityAt = msIso(
           data.time?.completed || data.time?.created || row.time_updated,
         );
@@ -652,6 +783,23 @@ export class OpencodeAdapter {
 
 function msIso(ms) {
   return typeof ms === "number" && ms > 0 ? new Date(ms).toISOString() : null;
+}
+
+/** v2 tool state carries output as content blocks ([{type:"text",text}]);
+ *  flatten to the plain string legacy parts used. On failure the blocks are
+ *  null and the message lives in state.error — surface that instead. */
+function v2ToolOutput(st) {
+  const c = st.content ?? st.output;
+  if (typeof c === "string") return c;
+  if (Array.isArray(c)) {
+    const text = c
+      .map((b) => (b && b.type === "text" && typeof b.text === "string" ? b.text : ""))
+      .filter(Boolean)
+      .join("\n");
+    if (text) return text;
+  }
+  if (st.status === "error") return st.error?.message || "tool failed";
+  return "";
 }
 
 /**
