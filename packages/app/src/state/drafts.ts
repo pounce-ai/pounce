@@ -60,3 +60,14 @@ export function updateDraft(id: string, patch: Partial<Draft>): void {
 export function removeDraft(id: string): void {
   drafts$[id].delete();
 }
+
+/**
+ * Discard several at once — what "Clear" on the Drafts header does.
+ *
+ * Takes the ids rather than clearing the whole store: the sidebar's list is
+ * narrowed by space, and a Clear that also swept away drafts the user could not
+ * see would be the worst kind of surprise.
+ */
+export function removeDrafts(ids: readonly string[]): void {
+  for (const id of ids) drafts$[id].delete();
+}

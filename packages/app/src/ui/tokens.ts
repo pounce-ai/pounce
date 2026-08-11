@@ -105,7 +105,15 @@ const AGENT_HEX_LIGHT: Record<string, string> = {
   hermes: "#5B4FD6",
 };
 
-/** Brand hue for an agent on the given ground. Pass `useColorScheme()`. */
+/**
+ * Brand hue for an agent on the given ground.
+ *
+ * Prefer `useAgentHex()` in ui/useThemeHex — it binds the ground for you. The
+ * ground here is the APP's, never `useColorScheme()`'s system trait: this doc
+ * used to say the opposite, and every caller that believed it painted a mark
+ * tuned for white onto a dark window whenever the app was forced Dark on a
+ * light Mac.
+ */
 // `scheme` is widened to a plain string: RN's ColorSchemeName differs between
 // the mobile and macOS type packages, and this file is shared by both.
 export function agentHex(agent: string, scheme: string | null | undefined): string | undefined {

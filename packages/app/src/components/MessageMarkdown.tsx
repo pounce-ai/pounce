@@ -2,15 +2,7 @@ import { Component, memo, type ReactNode, useMemo, useRef, useState } from "reac
 // eslint-disable-next-line @react-native/no-deprecated-api -- core Clipboard is
 // the only clipboard already inside shipped binaries (OTA-safe); expo-clipboard
 // would need a new native module and a store build.
-import {
-  ActivityIndicator,
-  Clipboard,
-  Pressable,
-  ScrollView,
-  Text,
-  useColorScheme,
-  View,
-} from "react-native";
+import { ActivityIndicator, Clipboard, Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { PounceIcon } from "../ui/native/Icon";
 import {
@@ -33,7 +25,7 @@ import type { RemendOptions } from "remend";
 import { isDestructive, splitCodeBlocks } from "../components/runnableBlocks";
 import { usePacedText } from "./pacedText";
 import { COLOR } from "../ui";
-import { useThemeHex } from "../ui/useThemeHex";
+import { useThemeHex, useGround } from "../ui/useThemeHex";
 import type { PaletteHex } from "../ui/palettes";
 import { SECONDARY_SCALE } from "../ui/tokens";
 
@@ -342,7 +334,11 @@ function MarkdownBody({
   /** <1 renders the whole body one step down — see SECONDARY_SCALE. */
   scale?: number;
 }) {
-  const scheme = useColorScheme();
+  // The APP's ground, not the platform trait. These styles pair explicit
+  // colours with the native renderer's own light/dark defaults, so reading
+  // the trait while `hex` follows the app painted black text on a dark
+  // bubble for anyone running the app forced to Dark on a light Mac.
+  const scheme = useGround();
   const hex = useThemeHex();
   const markdownStyle = markdownStyleFor(role, scheme, hex, scale);
   const paced = usePacedText(text, !!streaming);
@@ -402,7 +398,7 @@ const CodeBlock = memo(function CodeBlock({
   const codeSize = secondary ? 12.5 * SECONDARY_SCALE : 12.5;
   const codeLine = secondary ? 18 * SECONDARY_SCALE : 18;
   const { theme } = useUnistyles();
-  const light = useColorScheme() === "light";
+  const light = useGround() === "light";
   const hlTheme = themeFor(light);
   // Highlighting is regex work over the whole block — keep it off the render
   // path for recycled rows that re-render on every marker/scroll tick.

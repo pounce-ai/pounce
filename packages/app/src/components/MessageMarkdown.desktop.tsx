@@ -8,7 +8,8 @@
  * mobile implementation, including shell "Run" cards via runnableBlocks.
  */
 import { Fragment, useMemo, useState, type ReactNode } from "react";
-import { Pressable, Text, useColorScheme, View, type TextStyle } from "react-native";
+import { Pressable, Text, View, type TextStyle } from "react-native";
+import { useGround } from "../ui/useThemeHex";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import type { AppThemeColors } from "../ui/unistyles-named";
 
@@ -192,7 +193,7 @@ function CodeCard({ lang, code, onRun }: { lang: string; code: string; onRun?: R
  *  same highlighting as mobile from the same module — this body used to render
  *  as flat unhighlighted text. */
 function HighlightedCode({ code, lang }: { code: string; lang: string }) {
-  const light = useColorScheme() === "light";
+  const light = useGround() === "light";
   const hlTheme = themeFor(light);
   const lines = useMemo(() => highlightLines(code, lang, light), [code, lang, light]);
   return (

@@ -49,7 +49,13 @@ static NSImage *PounceGlassRoundedMask(CGFloat radius) {
 
 @implementation PounceGlassViewManager
 
-RCT_EXPORT_MODULE(PounceGlassView)
+// NO explicit name. React Native derives a view's component name by stripping a
+// trailing "Manager" from the module name, so exporting "PounceGlassView" from
+// a class already called PounceGlassViewManager registers the SAME component
+// twice — "Tried to register two views with the same name PounceGlassView",
+// every launch. Bare RCT_EXPORT_MODULE() takes the class name and derives
+// exactly one.
+RCT_EXPORT_MODULE()
 
 - (NSView *)view {
   return [[PounceGlassNSView alloc] initWithFrame:NSZeroRect];
@@ -169,7 +175,8 @@ RCT_EXPORT_METHOD(setStyle:(NSString *)style) {
 
 @implementation PounceDragRegionViewManager
 
-RCT_EXPORT_MODULE(PounceDragRegionView)
+// Bare, for the same reason as PounceGlassViewManager above.
+RCT_EXPORT_MODULE()
 
 - (NSView *)view {
   return [[PounceDragRegionNSView alloc] initWithFrame:NSZeroRect];
