@@ -85,7 +85,19 @@ export function remoteScript({ bridgePort = 8099 } = {}) {
   const ui = `http://127.0.0.1:${bridgePort}/ui`;
   return [
     `printf '@@POUNCE:starting@@\\n'`,
+    // A cold `npx --yes` downloads the CLI and its dependencies in SILENCE, and
+    // on a fresh server that ran past the 150s idle watchdog — so the very first
+    // machine anyone adds, the whole point of this feature, was being killed
+    // mid-install. A tick every 20s is enough to say "still working".
+    //
+    // Only around THIS step. The watchdog exists to catch a session wedged on a
+    // prompt we failed to recognise, and heartbeating the whole script would
+    // trade that fast feedback for the 10-minute hard ceiling. `--yes` means
+    // this step can't be waiting on input, so it's the one safe stretch to
+    // silence it for.
+    `( while :; do sleep 20; printf '@@POUNCE_TICK@@\\n'; done ) & POUNCE_HB=$!`,
     `npx --yes use-pounce qr --port ${bridgePort} || printf '@@POUNCE:cli-failed@@\\n'`,
+    `kill $POUNCE_HB 2>/dev/null`,
     `printf '@@POUNCE:pairing@@\\n'`,
     `printf '@@POUNCE_HOST@@%s@@END@@\\n' "$(hostname 2>/dev/null || echo unknown)"`,
     `printf '@@POUNCE_UI@@'`,
