@@ -49,6 +49,33 @@ describe("remoteScript", () => {
     expect(script).toContain("command -v curl");
     expect(script).toContain("node -e");
   });
+
+  it("ticks while npx installs, so the idle watchdog doesn't kill a cold run", () => {
+    // Found on a real server: a cold `npx --yes` downloads in silence for over
+    // the 150s idle timeout, so the FIRST machine anyone adds got killed
+    // mid-install with "the server stopped responding".
+    const script = remoteScript();
+    const tick = script.indexOf("@@POUNCE_TICK@@");
+    const npx = script.indexOf("use-pounce qr");
+    expect(tick).toBeGreaterThan(-1);
+    expect(tick).toBeLessThan(npx);
+  });
+
+  it("stops ticking once npx is done", () => {
+    // A heartbeat outliving its step would defeat the watchdog for the rest of
+    // the session — including the interactive parts it exists to guard.
+    const script = remoteScript();
+    expect(script).toMatch(/kill \$POUNCE_HB/);
+    expect(script.indexOf("kill $POUNCE_HB")).toBeGreaterThan(script.indexOf("use-pounce qr"));
+  });
+
+  it("keeps the tick out of the phase vocabulary", () => {
+    // `@@POUNCE:<phase>@@` drives the status line; a tick that parsed as a phase
+    // would blank it, since the UI has no label for one.
+    const phases = [...remoteScript().matchAll(/@@POUNCE:([a-z-]+)@@/g)].map((m) => m[1]);
+    expect(phases).not.toContain("tick");
+    expect(phases).toEqual(expect.arrayContaining(["starting", "pairing", "done"]));
+  });
 });
 
 describe("sshArgs", () => {
