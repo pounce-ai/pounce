@@ -7,6 +7,7 @@
  * transcripts here. Pure + dependency-free so it's unit-testable.
  */
 import type { Device, Repository, Session } from "@pounce/shared";
+import type { ShowBucket } from "../state/stores";
 
 export interface VoiceContext {
   sessions: Session[];
@@ -14,7 +15,12 @@ export interface VoiceContext {
   agents: string[];
   repos: Record<string, Repository>;
   navigate: (path: string) => void;
-  setFilter: (f: { device?: string | null; agent?: string | null; needsOnly?: boolean }) => void;
+  setFilter: (f: {
+    device?: string | null;
+    agent?: string | null;
+    /** Which thread buckets to show — see ShowBucket. Omitted = leave as-is. */
+    show?: ShowBucket[];
+  }) => void;
 }
 
 export interface VoiceResult {
@@ -69,18 +75,18 @@ export function runVoiceCommand(transcript: string, ctx: VoiceContext): VoiceRes
 
   // Status filters
   if (/\b(needs? (you|me)|need attention|waiting on me|attention)\b/.test(t)) {
-    ctx.setFilter({ needsOnly: true });
+    ctx.setFilter({ show: ["needs"] });
     return { ok: true, say: "Showing what needs you" };
   }
   if (/\b(everything|all (tasks|threads|sessions)|show all|clear filter)/.test(t)) {
-    ctx.setFilter({ device: null, agent: null, needsOnly: false });
+    ctx.setFilter({ device: null, agent: null, show: ["needs", "active"] });
     return { ok: true, say: "Showing everything" };
   }
 
   // Agent filter: "show me codex tasks", "claude"
   for (const a of ctx.agents) {
     if (new RegExp(`\\b${a}\\b`).test(t)) {
-      ctx.setFilter({ agent: a, needsOnly: false });
+      ctx.setFilter({ agent: a, show: ["needs", "active"] });
       return { ok: true, say: `Showing ${AGENT_LABEL[a] ?? a} tasks` };
     }
   }
@@ -89,7 +95,7 @@ export function runVoiceCommand(transcript: string, ctx: VoiceContext): VoiceRes
   for (const d of ctx.devices) {
     const name = d.name.toLowerCase();
     if (t.includes(name) || t.includes(name.replace(/[-\s]/g, ""))) {
-      ctx.setFilter({ device: d.id, needsOnly: false });
+      ctx.setFilter({ device: d.id, show: ["needs", "active"] });
       return { ok: true, say: `Showing ${d.name}` };
     }
   }

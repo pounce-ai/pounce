@@ -8,7 +8,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { PounceIcon } from "../ui/native/Icon";
 import type { DoctorReport, PounceConfig } from "@pounce/shared";
@@ -157,7 +156,6 @@ function PathEditor({
 }
 
 export default function DiagnosticsScreen() {
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { theme } = useUnistyles();
   const devices = useDevices();
@@ -199,7 +197,7 @@ export default function DiagnosticsScreen() {
   };
 
   return (
-    <View style={[s.root, { paddingTop: insets.top + 8 }]}>
+    <View style={[s.root, s.rootPad]}>
       <View style={s.headerRow}>
         <Text style={s.headerTitle}>Diagnostics</Text>
         <View style={s.headerActions}>
@@ -241,7 +239,7 @@ export default function DiagnosticsScreen() {
           </Text>
         </View>
       ) : (
-        <ScrollView style={s.flex1} contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
+        <ScrollView style={s.flex1} contentContainerStyle={s.listPad}>
           <Text style={s.summary}>
             {(report.sessionsTotal ?? 0) > 0
               ? `Found ${report.sessionsTotal} session${report.sessionsTotal === 1 ? "" : "s"} on ${report.host ?? "this Mac"}.`
@@ -372,7 +370,10 @@ export default function DiagnosticsScreen() {
   );
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  rootPad: { paddingTop: rt.insets.top + 8 },
+  listPad: { paddingBottom: rt.insets.bottom + 24 },
   root: { flex: 1, backgroundColor: theme.colors.bg },
   flex1: { flex: 1 },
   pressed60: { opacity: 0.6 },

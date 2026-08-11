@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -9,9 +10,8 @@ import {
   type LayoutChangeEvent,
 } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
-import { useRouter } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { PounceIcon } from "../ui/native/Icon";
 import { AgentLogo, IS_DESKTOP } from "../ui";
 import { agentLabel } from "../ui/tokens";
@@ -22,7 +22,6 @@ import { ConnectFlow } from "../components/ConnectFlow";
 import {
   type ActivityDay,
   PERIOD_DAYS,
-  PERIOD_LABEL,
   type Period,
   byAgentTotals,
   delta,
@@ -36,8 +35,11 @@ import {
 import { Animated, LinearTransition } from "../components/animation";
 import { ContributionGraph } from "../components/ContributionGraph";
 import { QuotaCard } from "../components/QuotaCard";
-import { MiniBarChart } from "../components/MiniBarChart";
-import { trendBars } from "../components/usageSeries";
+import { CHART_GUTTER, UsageChart } from "../components/UsageChart";
+import { bucketByMonth } from "../components/usageSeries";
+import { PeriodPicker } from "../components/PeriodPicker";
+import { ScreenRoot } from "../components/ScreenRoot";
+import { TabHeaderIcon } from "../components/TabHeaderIcon";
 import { StatTile } from "../components/StatTile";
 import type { MetricKey } from "./Metric";
 import { ActivitySkeleton } from "../components/Skeleton";
@@ -73,7 +75,6 @@ const PERIODS: Period[] = ["week", "month", "year"];
  * inlined in render.
  */
 export default function DashboardScreen() {
-  const insets = useSafeAreaInsets();
   const devices = useDevices();
   const { theme } = useUnistyles();
   const router = useRouter();
@@ -81,7 +82,6 @@ export default function DashboardScreen() {
   const [selected, setSelected] = useState<string | null>(null);
   const [chartWidth, setChartWidth] = useState(0);
   const [heatWidth, setHeatWidth] = useState(0);
-  const [chartHeight, setChartHeight] = useState(0);
   const [sharing, setSharing] = useState(false);
   const shareRef = useRef<View>(null);
 
@@ -176,7 +176,22 @@ export default function DashboardScreen() {
   // marker from an older month that ccusage had to price.
   const estimated = now.costEstimated === true;
 
-  const bars = useMemo(() => trendBars(window, period, (d) => d.messages), [window, period]);
+  /** A year is charted at MONTH resolution, with the per-agent split carried
+   *  through the fold — same chart, same colours, coarser buckets. */
+  const chartDays = useMemo(
+    () => (period === "year" ? bucketByMonth(window) : window),
+    [window, period],
+  );
+  /** Colour order for the chart: busiest first, so the dominant series keeps the
+   *  same hue as the period changes. */
+  const chartAgents = useMemo(
+    () =>
+      agents
+        .filter((a) => (a.messages ?? 0) > 0)
+        .sort((x, y) => (y.messages ?? 0) - (x.messages ?? 0))
+        .map((a) => a.agent),
+    [agents],
+  );
 
   const detail = useMemo<ActivityDay | null>(
     () => (selected ? (year.find((d) => d.date === selected) ?? null) : null),
@@ -207,38 +222,64 @@ export default function DashboardScreen() {
   const empty =
     !q.isLoading && !q.isError && now.messages === 0 && now.sessions === 0 && run.longest === 0;
 
-  // A period picker is a toolbar control, not a page section. Full-bleed it
-  // became a 960pt bar with a slab of accent in the middle; on desktop it sits
-  // in the header beside the title, sized to its own labels.
-  const segment = (
-    <View style={[s.segment, IS_DESKTOP && s.segmentDesktop]}>
-      {PERIODS.map((p) => (
-        <Pressable
-          key={p}
-          onPress={() => setPeriod(p)}
-          style={[
-            s.segmentItem,
-            IS_DESKTOP && s.segmentItemDesktop,
-            p === period && s.segmentItemOn,
-          ]}
-        >
-          <Text
-            style={[
-              s.segmentLabel,
-              IS_DESKTOP && s.segmentLabelDesktop,
-              p === period && s.segmentLabelOn,
-            ]}
-          >
-            {PERIOD_LABEL[p]}
-          </Text>
-        </Pressable>
-      ))}
-    </View>
-  );
+  // A period picker is a toolbar control, not a page section. On desktop it
+  // sits in the header beside the title, sized to its own labels; on the phones
+  // it is the platform's own segmented control, full width under the title.
+  const segment = <PeriodPicker value={period} onChange={setPeriod} periods={PERIODS} />;
+
+  /** One sentence about the window, in every state it can be in. "0-day best
+   *  streak" is a statistic about nothing — true with no machine paired, and
+   *  equally true when the read FAILED and every number below is a zero we
+   *  never actually got. */
+  const streakLine = !paired
+    ? "Nothing connected"
+    : q.isLoading
+      ? "Reading your history…"
+      : q.isError
+        ? "History unavailable"
+        : `${fmtCount(run.longest)}-day best streak`;
 
   return (
-    <View style={s.root}>
+    <ScreenRoot style={s.root}>
+      <TabHeaderIcon sf="chart.bar.fill" md="insert-chart" />
+      {/* Share lives in the native bar. Gated exactly as the inline button was:
+          nothing to share without a machine, an empty window, or a failed read. */}
+      {IS_DESKTOP || !(canShare && paired && !empty && !q.isError) ? null : (
+        <Stack.Toolbar placement="right">
+          {/* Android gets a View rather than a Button: its Compose host drops a
+              bare Label and cannot read an SF Symbol, so the button rendered as
+              an empty tap target. Same fork as Home's toolbar. */}
+          {Platform.OS !== "ios" ? (
+            <Stack.Toolbar.View>
+              <Pressable
+                onPress={onShare}
+                disabled={sharing || q.isLoading}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Share"
+                style={({ pressed }) => [s.barAction, pressed && s.pressed]}
+              >
+                {sharing ? (
+                  <ActivityIndicator size="small" color={theme.colors.accent} />
+                ) : (
+                  <PounceIcon name="share-outline" size={21} color={theme.colors.accent} />
+                )}
+              </Pressable>
+            </Stack.Toolbar.View>
+          ) : (
+            <Stack.Toolbar.Button
+              onPress={() => void onShare()}
+              disabled={sharing || q.isLoading}
+              accessibilityLabel="Share"
+            >
+              <Stack.Toolbar.Icon sf="square.and.arrow.up" />
+            </Stack.Toolbar.Button>
+          )}
+        </Stack.Toolbar>
+      )}
       <ScrollView
+        // iOS ties the large title to this scroll view — see ScreenRoot.
+        contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={[
           s.content,
           // Desktop gets a capped, centred column: the same stack run edge to
@@ -249,10 +290,7 @@ export default function DashboardScreen() {
           // sits 9pt under its own titlebar row — both columns begin at the same
           // y instead of the content pane hanging 17pt lower. (No notch here, so
           // the phone's insets.top + 8 doesn't apply.)
-          {
-            paddingTop: IS_DESKTOP ? SIDEBAR_SECTION_TOP : insets.top + 8,
-            paddingBottom: insets.bottom + 32,
-          },
+          s.contentPad,
         ]}
         refreshControl={
           <RefreshControl
@@ -265,40 +303,38 @@ export default function DashboardScreen() {
           />
         }
       >
-        <View style={s.headerRow}>
-          <View style={s.shrink}>
-            <Text style={s.title}>Activity</Text>
-            <Text style={s.subtitle}>
-              {/* "0-day best streak" is a statistic about nothing — true with
-                  no machine paired, and equally true when the read FAILED and
-                  every number below is a zero we never actually got. */}
-              {!paired
-                ? "Nothing connected"
-                : q.isLoading
-                  ? "Reading your history…"
-                  : q.isError
-                    ? "History unavailable"
-                    : `${fmtCount(run.longest)}-day best streak`}
-            </Text>
+        {/* Desktop draws its own title row; mobile's lives in the native bar. */}
+        {IS_DESKTOP ? (
+          <View style={s.headerRow}>
+            <View style={s.shrink}>
+              <Text style={s.title}>Activity</Text>
+              <Text style={s.subtitle}>{streakLine}</Text>
+            </View>
+            <View style={s.headerSpacer} />
+            {segment}
+            {canShare && paired && !empty && !q.isError ? (
+              <Pressable
+                onPress={onShare}
+                disabled={sharing || q.isLoading}
+                hitSlop={8}
+                style={({ pressed }) => [s.shareBtn, pressed && s.pressed]}
+              >
+                {sharing ? (
+                  <ActivityIndicator size="small" color={theme.colors.accent} />
+                ) : (
+                  <PounceIcon name="share-outline" size={16} color={theme.colors.accent} />
+                )}
+                <Text style={s.shareLabel}>Share</Text>
+              </Pressable>
+            ) : null}
           </View>
-          {IS_DESKTOP ? <View style={s.headerSpacer} /> : null}
-          {IS_DESKTOP ? segment : null}
-          {canShare && paired && !empty && !q.isError ? (
-            <Pressable
-              onPress={onShare}
-              disabled={sharing || q.isLoading}
-              hitSlop={8}
-              style={({ pressed }) => [s.shareBtn, pressed && s.pressed]}
-            >
-              {sharing ? (
-                <ActivityIndicator size="small" color={theme.colors.accent} />
-              ) : (
-                <PounceIcon name="share-outline" size={16} color={theme.colors.accent} />
-              )}
-              <Text style={s.shareLabel}>Share</Text>
-            </Pressable>
-          ) : null}
-        </View>
+        ) : (
+          /* The streak line has no home in a large title, and it carries the
+             loading and error states as well as the number — so it becomes a
+             caption over the period control, the same treatment Metric gives
+             its date range. */
+          <Text style={s.subtitle}>{streakLine}</Text>
+        )}
 
         {/* Period selector — drives everything below it, the heatmap included:
           the grid shows the chosen window, not a fixed year. Hidden with
@@ -491,25 +527,24 @@ export default function DashboardScreen() {
                     ? "Messages by month"
                     : `Messages · last ${PERIOD_DAYS[period]} days`}
                 </Text>
-                {/* This card shares a row with "By agent", so its height is set
-                    by whichever is taller. Measure the space left under the
-                    title and draw into all of it, instead of a fixed 96pt bar
-                    area with a gap beneath. */}
-                <View
-                  style={IS_DESKTOP ? s.chartFill : undefined}
-                  onLayout={
-                    IS_DESKTOP
-                      ? (e: LayoutChangeEvent) => setChartHeight(e.nativeEvent.layout.height)
-                      : undefined
-                  }
-                >
+                {/* The chart draws at its own fixed height on both platforms —
+                    it carries an axis, a legend and a readout, so stretching it
+                    to fill a desktop card would space those apart rather than
+                    show more data. The card still shares a row with "By agent"
+                    and is sized by whichever is taller. */}
+                <View style={IS_DESKTOP ? s.chartFill : undefined}>
                   {chartWidth > 0 ? (
-                    <MiniBarChart
-                      bars={bars}
-                      width={chartWidth}
-                      height={IS_DESKTOP && chartHeight > 0 ? chartHeight : undefined}
-                      selected={period === "year" ? null : selected}
-                      onSelect={period === "year" ? undefined : setSelected}
+                    <UsageChart
+                      days={chartDays}
+                      agents={chartAgents}
+                      metric="messages"
+                      granularity={period === "year" ? "month" : "day"}
+                      width={chartWidth - CHART_GUTTER}
+                      // Controlled: the contribution heatmap above shares this
+                      // selection, and two components holding private copies of
+                      // it would disagree the moment you touched either.
+                      selected={selected}
+                      onSelect={setSelected}
                     />
                   ) : null}
                 </View>
@@ -572,11 +607,16 @@ export default function DashboardScreen() {
           </View>
         </View>
       ) : null}
-    </View>
+    </ScreenRoot>
   );
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  contentPad: {
+    paddingTop: IS_DESKTOP ? SIDEBAR_SECTION_TOP : 0,
+    paddingBottom: rt.insets.bottom + 32,
+  },
   root: { flex: 1, backgroundColor: theme.colors.bg },
   content: { paddingHorizontal: 12, gap: 12 },
   shrink: { flexShrink: 1 },
@@ -596,6 +636,8 @@ const s = StyleSheet.create((theme) => ({
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
+  /** Android toolbar slot: see the fork at the call site. */
+  barAction: { paddingHorizontal: 4 },
   shareLabel: { fontSize: 13, fontWeight: "600", color: theme.colors.accent },
   segment: {
     flexDirection: "row",

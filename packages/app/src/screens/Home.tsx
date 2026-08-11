@@ -1,20 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActionSheetIOS,
   Animated as RNAnimated,
   Easing,
+  Platform,
   Pressable,
   RefreshControl,
   Text,
   View,
 } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import { LinearTransition } from "react-native-reanimated";
 import { useObservable, useSelector } from "@legendapp/state/react";
-import { useRouter } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { PounceIcon } from "../ui/native/Icon";
+import type { IoniconName } from "../ui/native/icon-map";
 import type { Session } from "@pounce/shared";
 import {
   activeFilterCount,
@@ -27,6 +27,7 @@ import {
   filters$,
   isFavRepo,
   isFavThread,
+  showBucket,
   toggleFavRepo,
   toggleFavThread,
 } from "../state/stores";
@@ -40,16 +41,24 @@ import {
   useThreads,
 } from "../state/db/hooks";
 import { spaceKeyOf } from "../state/spaces";
+import { canSettle, isSettled, partitionSettled } from "../state/settled";
+import { autoSettleDays$, settled$, settleOptions, toggleSettled } from "../state/settledStore";
+import { type Draft, draftTitle, drafts$, listDrafts, removeDraft } from "../state/drafts";
+import { ScreenRoot } from "../components/ScreenRoot";
 import { SessionCard } from "../components/SessionCard";
 import { LiveStrip } from "../components/LiveStrip";
 import { ConnectFlow } from "../components/ConnectFlow";
 import { SessionListSkeleton } from "../components/Skeleton";
+import { TabHeaderIcon } from "../components/TabHeaderIcon";
 import { FilterButton, FilterSheet } from "../components/FilterSheet";
-import { DeviceIcon, IS_DESKTOP } from "../ui";
+import { DeviceIcon, IS_DESKTOP, pickSheet } from "../ui";
 import { refreshLive } from "../services/runtime";
 
 /** Collapse key for the Favourites pseudo-group (shares the collapsed$ map). */
 const FAV_KEY = "__fav__";
+/** The same, for the Drafts shelf. Distinct from any repoId, which is why it
+ *  carries the dunder shape. */
+const DRAFTS_KEY = "__drafts__";
 
 /** List props that never depend on render state — hoisted so the list doesn't
  *  see a new reference (and re-render every realised cell) on each commit. */
@@ -58,19 +67,35 @@ const FAV_KEY = "__fav__";
  *  valid style value". */
 const FILL = { flex: 1 } as const;
 const LIST_HEADER = <LiveStrip />;
-const rowKey = (r: Row) =>
-  r.type === "favHeader"
-    ? "favh"
-    : r.type === "header"
-      ? `h:${r.repoId}`
-      : `${r.fav ? "fav:" : ""}${r.session.id}`;
+const rowKey = (r: Row) => {
+  switch (r.type) {
+    case "favHeader":
+      return "favh";
+    case "draftHeader":
+      return "drafth";
+    case "header":
+      return `h:${r.repoId}`;
+    case "draft":
+      return `d:${r.draft.id}`;
+    default:
+      return `${r.fav ? "fav:" : ""}${r.session.id}`;
+  }
+};
 const rowType = (r: Row) => r.type;
 
-/** A pinned favourites header, a directory header, or one session beneath either.
+/** A shelf header (favourites, drafts), a directory header, or one row beneath
+ *  any of them.
+ *
  *  When every session in a directory lives on one device, the header carries that
- *  device's name/emoji so it can show the device glyph instead of a generic folder. */
+ *  device's name/emoji so it can show the device glyph instead of a generic folder.
+ *
+ *  There is no settled row type: the archive is a VIEW (the Settled filter), and
+ *  in it a settled thread is an ordinary session card grouped under its folder
+ *  like any other. It earns no special row because, once you have asked to see
+ *  it, it is just a thread. */
 type Row =
   | { type: "favHeader"; count: number; collapsed: boolean }
+  | { type: "draftHeader"; count: number; collapsed: boolean }
   | {
       type: "header";
       repoId: string;
@@ -86,10 +111,10 @@ type Row =
       deviceName?: string;
       deviceEmoji?: string;
     }
-  | { type: "session"; session: Session; fav?: boolean };
+  | { type: "session"; session: Session; fav?: boolean }
+  | { type: "draft"; draft: Draft };
 
 export default function HomeScreen() {
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { theme } = useUnistyles();
 
@@ -122,8 +147,8 @@ export default function HomeScreen() {
     repos: filters$.repos.get(),
     statuses: filters$.statuses.get(),
     branchQuery: filters$.branchQuery.get(),
-    needsOnly: filters$.needsOnly.get(),
     favOnly: filters$.favOnly.get(),
+    show: filters$.show.get(),
   }));
   const rawThreads = useThreads();
   const projectList = useProjects();
@@ -135,6 +160,17 @@ export default function HomeScreen() {
   // Same identity gotcha as `f` above: spread to a fresh object so the rows
   // memo re-runs when a folder is collapsed/expanded.
   const collapsedMap = useSelector(() => ({ ...collapsed$.get() }));
+  // The inbox inputs, both with the same fresh-object treatment for the same
+  // reason. `autoSettleDays$` is a scalar so it needs no spread — but it MUST be
+  // read here rather than only inside settleOptions(), or changing the policy in
+  // Settings wouldn't re-render this screen at all.
+  const overrides = useSelector(() => ({ ...settled$.get() }));
+  const autoSettleDays = useSelector(() => autoSettleDays$.get());
+  const draftList = useSelector(() => listDrafts(drafts$.get()));
+  /** Looking at the archive and nothing else — the one Show combination that
+   *  changes what the screen IS rather than how much of it you see, so the
+   *  header, the empty state and the Drafts shelf all key off it. */
+  const archiveOnly = f.show.length === 1 && f.show[0] === "settled";
 
   // Grouped rows, memoized to a STABLE value that only recomputes when the data
   // that feeds it changes. An unrelated re-render (e.g. a connection-status flip)
@@ -144,25 +180,52 @@ export default function HomeScreen() {
   const { rows, attention: attentionCount } = useMemo(() => {
     const repos = Object.fromEntries(projectList.map((r) => [r.id, r]));
     // applyFilters handles device + agent + selected folders + permanently
-    // ignored folders; needsOnly is applied below with its smart default.
+    // ignored folders; the Show buckets are applied below.
     let list = applyFilters(rawThreads, {
       filters: f,
       ignored,
       repoName: (id) => repos[id]?.name ?? "",
     });
-    const attention = list.filter(needsYou).length;
-    // Smart default: "needs you" narrows to attention items, but when nothing
-    // needs you we show everything rather than an empty screen.
-    if (f.needsOnly && attention > 0) list = list.filter(needsYou);
+    // Settledness is resolved for the WHOLE list in one pass, against one clock,
+    // before anything is dropped — `partitionSettled` owns the rule, including
+    // that busy or blocked work is never treated as settled whatever the user
+    // filed earlier, so nothing waiting on you can hide in the archive.
+    const { settled } = partitionSettled(list, overrides, {
+      now: new Date().toISOString(),
+      autoSettleAfterDays: autoSettleDays,
+    });
+    const settledIds = new Set(settled.map((s) => s.id));
+    // Counted over the FULL list, before the Show buckets narrow it: this drives
+    // the "N need you" header, which is a standing fact about your work and not
+    // a description of the current view. Turning the Needs-you bucket off should
+    // not make the count claim nothing needs you.
+    const attention = list.filter((s) => !settledIds.has(s.id) && needsYou(s)).length;
+    // One membership test, because the buckets are disjoint — a thread is in
+    // exactly one, so this can never double-count or drop a thread by accident.
+    list = list.filter((s) => f.show.includes(showBucket(s, settledIds.has(s.id))));
     // Parse each updatedAt once; the thread sort and the per-folder "latest
     // activity" key both reuse it instead of re-parsing inside comparators.
     const tsOf = new Map(list.map((s) => [s.id, Date.parse(s.updatedAt)]));
-    // Most-recently worked-upon first; attention rank only breaks exact-timestamp ties.
+    // Most-recently worked-upon first; attention rank only breaks exact-timestamp
+    // ties. `partitionSettled` already ordered the archive by when it was
+    // cleared, but re-sorting here keeps one comparator for both views — and in
+    // the archive the two orders agree, since clearing a thread IS the last
+    // thing that happened to it.
     const sorted = [...list].sort(
       (a, b) => tsOf.get(b.id)! - tsOf.get(a.id)! || rankSession(a) - rankSession(b),
     );
 
     const rows: Row[] = [];
+
+    // Parked tasks, above everything: a draft is the newest thing you touched
+    // and the one thing here that nothing else will remind you about. Not in
+    // the archive, though — a draft has never run, so it is the opposite of
+    // finished work rather than a quiet corner of it.
+    if (draftList.length && !archiveOnly) {
+      const draftsCollapsed = !!collapsedMap[DRAFTS_KEY];
+      rows.push({ type: "draftHeader", count: draftList.length, collapsed: draftsCollapsed });
+      if (!draftsCollapsed) for (const d of draftList) rows.push({ type: "draft", draft: d });
+    }
 
     // Pinned "Favourites" pseudo-group above the repo accordion.
     const favSessions = sorted.filter((s) => favT.has(s.id));
@@ -210,7 +273,20 @@ export default function HomeScreen() {
       if (!isCollapsed) for (const s of glist) rows.push({ type: "session", session: s });
     }
     return { rows, attention };
-  }, [rawThreads, projectList, deviceMap, favT, favR, ignored, f, collapsedMap]);
+  }, [
+    rawThreads,
+    projectList,
+    deviceMap,
+    favT,
+    favR,
+    ignored,
+    f,
+    collapsedMap,
+    overrides,
+    autoSettleDays,
+    draftList,
+    archiveOnly,
+  ]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -221,50 +297,72 @@ export default function HomeScreen() {
     }
   }, []);
 
-  // Long-press a thread to favourite it. New threads carry a temporary id that's
-  // swapped for the real one after the first turn, so block favouriting until
-  // then — a favourite keyed on the temp id would orphan.
+  // Long-press a thread to favourite or settle it. New threads carry a temporary
+  // id that's swapped for the real one after the first turn, so block
+  // favouriting until then — a favourite keyed on the temp id would orphan.
+  //
+  // Built as a list rather than fixed positions because the settle entry is
+  // CONDITIONAL: `canSettle` is false for anything running, queued or waiting on
+  // the user, and offering a control that would spring straight back is worse
+  // than not offering it. The handler indexes the same array, so the two can't
+  // drift.
   const onLongPressSession = useCallback((s: Session) => {
     if (s.id.startsWith("new_")) return;
     const fav = isFavThread(s.id);
-    ActionSheetIOS.showActionSheetWithOptions(
+    const actions: { label: string; run: () => void }[] = [
       {
-        title: s.title,
-        options: [fav ? "Remove from favourites" : "Add to favourites", "Cancel"],
-        cancelButtonIndex: 1,
+        label: fav ? "Remove from favourites" : "Add to favourites",
+        run: () => toggleFavThread(s.id),
       },
-      (i) => {
-        if (i === 0) toggleFavThread(s.id);
-      },
+    ];
+    if (canSettle(s)) {
+      const settled = isSettled(s, settled$[s.id].peek(), settleOptions());
+      actions.push({
+        label: settled ? "Move back to list" : "Settle",
+        run: () => void toggleSettled(s),
+      });
+    }
+    pickSheet(
+      s.title,
+      actions.map((a) => a.label),
+      (i) => actions[i].run(),
     );
   }, []);
 
   /** A folder's insights — its spend, its cadence, its agent instructions.
    *  Reached from the chart button on the header row; also offered here, since
    *  the long-press sheet is where people look for what a row can do. */
+  /** Carries the NAME as well as the key. The Space screen could look the name
+   *  up itself, but the navigation bar's title has to be set by the navigator —
+   *  a title pushed in from inside the screen is dropped from the large-title
+   *  label whenever the navigator re-renders (it does on every appearance
+   *  flip), leaving a blank header. In the route, it survives. */
   const openSpace = useCallback(
-    (spaceKey: string) => router.push({ pathname: "/space", params: { key: spaceKey } }),
+    (spaceKey: string, name: string) =>
+      router.push({ pathname: "/space", params: { key: spaceKey, name } }),
     [router],
   );
 
   const onLongPressRepo = useCallback(
     (repoId: string, name: string, spaceKey: string) => {
       const fav = isFavRepo(repoId);
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          title: name,
-          // One word for this thing everywhere: a Space is a repo on a machine,
-          // and the phone used to call the same object a folder or a project.
-          options: [fav ? "Unfavourite space" : "Favourite space", "Open space", "Cancel"],
-          cancelButtonIndex: 2,
-        },
+      pickSheet(
+        name,
+        // One word for this thing everywhere: a Space is a repo on a machine,
+        // and the phone used to call the same object a folder or a project.
+        [fav ? "Unfavourite space" : "Favourite space", "Open space"],
         (i) => {
           if (i === 0) toggleFavRepo(repoId);
-          else if (i === 1) openSpace(spaceKey);
+          else if (i === 1) openSpace(spaceKey, name);
         },
       );
     },
     [openSpace],
+  );
+
+  const openDraft = useCallback(
+    (id: string) => router.push({ pathname: "/new", params: { draft: id } }),
+    [router],
   );
 
   const newInRepo = useCallback(
@@ -276,33 +374,59 @@ export default function HomeScreen() {
   // re-render (a sync tick, a connection blip) — a fresh `renderItem` alone
   // re-renders every realised cell. Profiled with argent 2026-08-06.
   const renderItem = useCallback(
-    ({ item }: { item: Row }) =>
-      item.type === "favHeader" ? (
-        <FavHeader
-          count={item.count}
-          collapsed={item.collapsed}
-          onPress={() => toggleGroup(FAV_KEY)}
-        />
-      ) : item.type === "header" ? (
-        <DirHeader
-          name={item.name}
-          count={item.count}
-          attention={item.attention}
-          collapsed={item.collapsed}
-          fav={item.fav}
-          deviceName={item.deviceName}
-          deviceEmoji={item.deviceEmoji}
-          onPress={() => toggleGroup(item.repoId)}
-          onAdd={() => newInRepo(item.repoId)}
-          onOpen={() => openSpace(item.spaceKey)}
-          onLongPress={() => onLongPressRepo(item.repoId, item.name, item.spaceKey)}
-        />
-      ) : (
-        <View style={s.sessionRow}>
-          <SessionCard session={item.session} onLongPress={onLongPressSession} />
-        </View>
-      ),
-    [toggleGroup, newInRepo, openSpace, onLongPressRepo, onLongPressSession],
+    ({ item }: { item: Row }) => {
+      switch (item.type) {
+        case "favHeader":
+          return (
+            <FavHeader
+              count={item.count}
+              collapsed={item.collapsed}
+              onPress={() => toggleGroup(FAV_KEY)}
+            />
+          );
+        case "draftHeader":
+          return (
+            <ShelfHeader
+              label="Drafts"
+              icon="create-outline"
+              count={item.count}
+              collapsed={item.collapsed}
+              onPress={() => toggleGroup(DRAFTS_KEY)}
+            />
+          );
+        case "header":
+          return (
+            <DirHeader
+              name={item.name}
+              count={item.count}
+              attention={item.attention}
+              collapsed={item.collapsed}
+              fav={item.fav}
+              deviceName={item.deviceName}
+              deviceEmoji={item.deviceEmoji}
+              onPress={() => toggleGroup(item.repoId)}
+              onAdd={() => newInRepo(item.repoId)}
+              onOpen={() => openSpace(item.spaceKey, item.name)}
+              onLongPress={() => onLongPressRepo(item.repoId, item.name, item.spaceKey)}
+            />
+          );
+        case "draft":
+          return (
+            <DraftRow
+              draft={item.draft}
+              onPress={() => openDraft(item.draft.id)}
+              onDiscard={() => removeDraft(item.draft.id)}
+            />
+          );
+        default:
+          return (
+            <View style={s.sessionRow}>
+              <SessionCard session={item.session} onLongPress={onLongPressSession} />
+            </View>
+          );
+      }
+    },
+    [toggleGroup, newInRepo, openSpace, openDraft, onLongPressRepo, onLongPressSession],
   );
   const refreshControl = useMemo(
     () => (
@@ -314,10 +438,6 @@ export default function HomeScreen() {
     ),
     [refreshing, onRefresh, theme.colors.accent],
   );
-  const listContentStyle = useMemo(
-    () => ({ paddingTop: 6, paddingBottom: insets.bottom + 16 }),
-    [insets.bottom],
-  );
 
   // Header subtitle, one branch per state; syncing lives in the wordmark
   // badge (spinner → green tick), so null here = nothing worth a row.
@@ -325,6 +445,14 @@ export default function HomeScreen() {
     !connected && !loading ? (
       <Text numberOfLines={1} style={s.subFaint}>
         Not connected yet
+      </Text>
+    ) : archiveOnly ? (
+      /* Outranks the attention line, because in the archive that count would be
+         describing threads this view is not showing. Says the view's name
+         plainly: a list of old threads with no label is indistinguishable from
+         a list that has gone wrong. */
+      <Text numberOfLines={1} style={s.subFaint}>
+        Settled threads
       </Text>
     ) : attentionCount > 0 ? (
       <>
@@ -336,56 +464,128 @@ export default function HomeScreen() {
     ) : null;
 
   return (
-    <View style={[s.root, { paddingTop: insets.top }]}>
-      {/* Glance header */}
-      <View style={s.headerRow}>
-        <View style={s.headerLeft}>
-          <View style={s.wordmarkRow}>
-            <Text style={s.wordmark}>Pounce</Text>
-            {/* Superscript status badge: spinner while syncing, then a green
-                tick once connected and caught up. */}
-            {loading ? (
-              <SyncSpinner />
-            ) : connected && attentionCount === 0 ? (
-              <PounceIcon
-                name="checkmark-circle"
-                size={12}
-                color={theme.colors.success}
-                style={{ marginTop: 5 }}
+    /**
+     * A FRAGMENT on mobile, a View on desktop.
+     *
+     * iOS ties the large title to the screen's FIRST CHILD SCROLL VIEW — the
+     * same rule SettingsScroll documents, and the reason Settings collapses
+     * while this screen didn't. Wrapping the list in a View put a plain UIView
+     * between the screen and its scroll view, so UIKit had nothing to track and
+     * the title just sat there. A fragment adds no native view; the toolbars
+     * below render configuration rather than UI, so the list is still the only
+     * child. The background the wrapper used to paint comes from the stack's
+     * `contentStyle` instead.
+     */
+    <ScreenRoot style={[s.root, s.rootPad]}>
+      {/* The native bar's toolbar.
+          iOS: one `Stack.Toolbar.Button` per action, so each gets its own glass
+          capsule (a single `headerRight` would jam both into one).
+          Android: ONE `Stack.Toolbar.View` holding our own controls. Its Compose
+          host drops `Stack.Toolbar.Label` children and needs a real image source
+          rather than an SF Symbol, so icon-and-label buttons render as empty tap
+          targets there — the toolbar came up completely blank. A View lets the
+          same FilterButton the desktop header uses do the job.
+
+          Both are hidden with nothing paired, for the reason the inline pair
+          was: a new task has nothing to run on, and a filter narrows a list
+          that doesn't exist yet. Their absence leaves one thing on screen to
+          do, where a greyed control would read as "this app is broken". */}
+      {IS_DESKTOP || !connected ? null : (
+        <Stack.Toolbar placement="right">
+          {/* Each button a DIRECT child. `Stack.Toolbar` picks its items with
+              React.Children.toArray(...).filter(isChildOfType(Button)), and
+              toArray does not flatten fragments — wrapping the pair in a <>
+              made the filter match nothing and the iOS toolbar vanish. */}
+          {Platform.OS === "ios" && (
+            <Stack.Toolbar.Button
+              onPress={() => router.push("/filters")}
+              accessibilityLabel="Filter"
+            >
+              {/* The FILLED variant when a filter is on — iOS's own way of
+                    saying "this control is doing something". The badge can't
+                    say it: that slot is spoken for by the attention count. */}
+              <Stack.Toolbar.Icon
+                sf={
+                  filterCount > 0
+                    ? "line.3.horizontal.decrease.circle.fill"
+                    : "line.3.horizontal.decrease"
+                }
               />
+              {attentionCount > 0 ? (
+                <Stack.Toolbar.Badge>{String(attentionCount)}</Stack.Toolbar.Badge>
+              ) : null}
+            </Stack.Toolbar.Button>
+          )}
+          {Platform.OS === "ios" && (
+            <Stack.Toolbar.Button onPress={() => router.push("/new")} accessibilityLabel="New task">
+              <Stack.Toolbar.Icon sf="square.and.pencil" />
+            </Stack.Toolbar.Button>
+          )}
+          {Platform.OS !== "ios" && (
+            <Stack.Toolbar.View>
+              <View style={s.barActions}>
+                <FilterButton active={false} onPress={() => router.push("/filters")} />
+                <Pressable
+                  onPress={() => router.push("/new")}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="New task"
+                  style={({ pressed }) => pressed && s.pressed80}
+                >
+                  <PounceIcon name="create-outline" size={21} color={theme.colors.accent} />
+                </Pressable>
+              </View>
+            </Stack.Toolbar.View>
+          )}
+        </Stack.Toolbar>
+      )}
+      {/* The tab's own glyph, leading the bar — with the spinner standing in
+          while a sync runs. */}
+      <TabHeaderIcon sf="house.fill" md="home" busy={loading} />
+
+      {/* Desktop has no native bar, so it keeps drawing the glance header. */}
+      {IS_DESKTOP ? (
+        <View style={s.headerRow}>
+          <View style={s.headerLeft}>
+            <View style={s.wordmarkRow}>
+              <Text style={s.wordmark}>Pounce</Text>
+              {loading ? (
+                <SyncSpinner />
+              ) : connected && attentionCount === 0 ? (
+                <PounceIcon
+                  name="checkmark-circle"
+                  size={12}
+                  color={theme.colors.success}
+                  style={{ marginTop: 5 }}
+                />
+              ) : null}
+            </View>
+            {subtitle || filterCount ? (
+              <Pressable
+                onPress={() => router.push(connected ? "/settings" : "/settings/devices")}
+                style={({ pressed }) => [s.subtitleRow, pressed && s.pressed60]}
+              >
+                {subtitle}
+                {filterCount > (archiveOnly ? 1 : 0) ? (
+                  <Text style={s.subFaint}>· filtered</Text>
+                ) : null}
+              </Pressable>
             ) : null}
           </View>
-          {subtitle || filterCount ? (
-            <Pressable
-              onPress={() => router.push(connected ? "/settings" : "/settings/devices")}
-              style={({ pressed }) => [s.subtitleRow, pressed && s.pressed60]}
-            >
-              {subtitle}
-              {filterCount ? <Text style={s.subFaint}>· filtered</Text> : null}
-            </Pressable>
+          {connected ? (
+            <View style={s.headerActions}>
+              <FilterButton active={showFilters} onPress={() => setShowFilters(true)} />
+              <Pressable
+                onPress={() => router.push("/new")}
+                style={({ pressed }) => [s.newBtn, pressed && s.pressed80]}
+              >
+                <PounceIcon name="add" size={17} color="#fff" />
+                <Text style={s.newBtnLabel}>New</Text>
+              </Pressable>
+            </View>
           ) : null}
         </View>
-        {/* Both actions need a machine: a new task has nothing to run on, and a
-            filter narrows a list that doesn't exist yet. Hidden rather than
-            disabled — a greyed control still reads as "this app is broken",
-            while their absence leaves one thing on screen to do. They return
-            the moment a device is connected. */}
-        {connected ? (
-          <View style={s.headerActions}>
-            <FilterButton
-              active={showFilters}
-              onPress={() => (IS_DESKTOP ? setShowFilters(true) : router.push("/filters"))}
-            />
-            <Pressable
-              onPress={() => router.push("/new")}
-              style={({ pressed }) => [s.newBtn, pressed && s.pressed80]}
-            >
-              <PounceIcon name="add" size={17} color="#fff" />
-              <Text style={s.newBtnLabel}>New</Text>
-            </Pressable>
-          </View>
-        ) : null}
-      </View>
+      ) : null}
 
       {IS_DESKTOP ? (
         <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
@@ -436,6 +636,16 @@ export default function HomeScreen() {
                 <ConnectFlow />
               )}
             </View>
+          ) : archiveOnly ? (
+            /* The archive's own empty state. "All caught up" here would be
+               exactly backwards — an empty archive means nothing has been
+               finished with yet, not that there is nothing left to do. */
+            <View style={s.empty}>
+              <Text style={s.emptyTitle}>Nothing settled yet</Text>
+              <Text style={s.emptyBody}>
+                Threads you settle — and ones that go quiet for a while — collect here.
+              </Text>
+            </View>
           ) : (
             <View style={s.empty}>
               <Text style={s.emptyTitle}>All caught up</Text>
@@ -445,9 +655,9 @@ export default function HomeScreen() {
         }
         // Bottom pad clears the system tab bar (the old floating dock needed
         // +120; the native bar insets the scroll view itself).
-        contentContainerStyle={listContentStyle}
+        contentContainerStyle={s.listPad}
       />
-    </View>
+    </ScreenRoot>
   );
 }
 
@@ -497,6 +707,69 @@ function FavHeader({
       <PounceIcon name="star" size={13} color={theme.colors.accent} />
       <Text style={s.groupTitle}>Favourites</Text>
       <Text style={s.groupCount}>{count}</Text>
+    </Pressable>
+  );
+}
+
+/** The two inbox shelves share a shape with FavHeader so the list reads as one
+ *  set of sections rather than three different ideas of what a header is. */
+function ShelfHeader({
+  label,
+  icon,
+  count,
+  collapsed,
+  onPress,
+}: {
+  label: string;
+  icon: IoniconName;
+  count: number;
+  collapsed: boolean;
+  onPress: () => void;
+}) {
+  const { theme } = useUnistyles();
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [s.groupHeader, pressed && s.pressed70]}>
+      <PounceIcon
+        name={collapsed ? "chevron-forward" : "chevron-down"}
+        size={13}
+        color={theme.colors.fgFaint}
+      />
+      <PounceIcon name={icon} size={13} color={theme.colors.fgMuted} />
+      <Text style={s.groupTitle}>{label}</Text>
+      <Text style={s.groupCount}>{count}</Text>
+    </Pressable>
+  );
+}
+
+/** A parked task. Visibly unstarted — no agent chip, no status, no card — so it
+ *  can't be mistaken for a thread an agent has actually run. */
+function DraftRow({
+  draft,
+  onPress,
+  onDiscard,
+}: {
+  draft: Draft;
+  onPress: () => void;
+  onDiscard: () => void;
+}) {
+  const { theme } = useUnistyles();
+  const title = draftTitle(draft);
+  return (
+    // No leading pencil. The row sits under a "Drafts" header that already
+    // carries one, and a per-row edit glyph reads as a BUTTON — something to
+    // press to start editing — when the whole row is that button.
+    <Pressable onPress={onPress} style={({ pressed }) => [s.shelfRow, pressed && s.pressed70]}>
+      <Text numberOfLines={1} style={s.draftTitle}>
+        {title}
+      </Text>
+      <Pressable
+        onPress={onDiscard}
+        hitSlop={10}
+        accessibilityLabel={`Discard ${title}`}
+        style={({ pressed }) => pressed && s.pressed70}
+      >
+        <PounceIcon name="close" size={16} color={theme.colors.fgFaint} />
+      </Pressable>
     </Pressable>
   );
 }
@@ -586,7 +859,11 @@ function DirHeader({
   );
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  listPad: { paddingTop: 6, paddingBottom: rt.insets.bottom + 16 },
+  /** Desktop only — the mobile branch renders no view (see ScreenRoot). */
+  rootPad: { paddingTop: rt.insets.top },
   root: { flex: 1, backgroundColor: theme.colors.bg },
   headerRow: {
     flexDirection: "row",
@@ -648,7 +925,24 @@ const s = StyleSheet.create((theme) => ({
   },
   attentionText: { fontSize: 11, fontWeight: "600", color: theme.colors.warning },
   addBtn: { marginLeft: 2, height: 28, width: 28, alignItems: "center", justifyContent: "center" },
+  /* A SHELF row — a draft. One line, no card, starting under its header's ICON:
+     16 + chevron 13 + gap 8. Only the chevron is hung in the margin, which is
+     the disclosure control for the whole shelf; the rows line up with the
+     content it discloses. (Indenting all the way to the header's LABEL pushed
+     them too far in to read as a list.) */
+  shelfRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingLeft: 37,
+    paddingRight: 16,
+    minHeight: 38,
+  },
+  draftTitle: { flex: 1, fontSize: 14, color: theme.colors.fgMuted },
   pressed60: { opacity: 0.6 },
   pressed70: { opacity: 0.7 },
   pressed80: { opacity: 0.8 },
+  /** Android's toolbar slot — our own controls, since its Compose host can't
+   *  render an SF Symbol or a bare label. */
+  barActions: { flexDirection: "row", alignItems: "center", gap: 14, paddingRight: 4 },
 }));

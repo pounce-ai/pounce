@@ -64,7 +64,26 @@ function useThemeVersion(): number {
 }
 
 type NamedStyles<S> = { [P in keyof S]: ViewStyle | TextStyle | ImageStyle };
-type MiniRuntime = Record<string, never>;
+
+/**
+ * The slice of unistyles' runtime the shared styles actually read.
+ *
+ * `insets` is the whole of it today. Shared sheets take their safe-area padding
+ * from `rt.insets` rather than the useSafeAreaInsets hook, so this shim has to
+ * answer for it or every one of those sheets throws here — it used to hand the
+ * sheet function a bare `{}`.
+ *
+ * All ZERO, and that is the honest answer rather than a placeholder: a desktop
+ * window has no notch, no home indicator and no software keyboard inset. The
+ * chrome that needs breathing room on desktop asks for it in points.
+ */
+type MiniRuntime = {
+  insets: { top: number; bottom: number; left: number; right: number; ime: number };
+};
+
+const DESKTOP_RUNTIME: MiniRuntime = {
+  insets: { top: 0, bottom: 0, left: 0, right: 0, ime: 0 },
+};
 
 /** A sheet that re-resolves itself when the theme changes. Property access is
  *  what components do on every render (`s.row`), so that is where the current
@@ -79,7 +98,7 @@ function themedSheet<S extends NamedStyles<S>>(fn: (theme: AppTheme, rt: MiniRun
     if (live && liveVersion === version) return live;
     let sheet = cache.get(currentName);
     if (!sheet) {
-      sheet = RNStyleSheet.create(fn(themeFor(currentName), {}));
+      sheet = RNStyleSheet.create(fn(themeFor(currentName), DESKTOP_RUNTIME));
       cache.set(currentName, sheet);
     }
     live = sheet;
@@ -144,7 +163,7 @@ export function withUnistyles<P extends object>(
   if (!mappings) return Component;
   const Wrapped = (props: P) => {
     useThemeVersion();
-    return createElement(Component, { ...mappings(themeFor(currentName), {}), ...props });
+    return createElement(Component, { ...mappings(themeFor(currentName), DESKTOP_RUNTIME), ...props });
   };
   return Wrapped;
 }

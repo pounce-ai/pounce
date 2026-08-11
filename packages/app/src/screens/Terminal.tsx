@@ -3,7 +3,6 @@ import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Platform } from "react-native";
 import { KeyboardAvoidingView } from "../components/kav";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { PounceIcon } from "../ui/native/Icon";
 import { runExec } from "../services/bridge";
@@ -18,7 +17,6 @@ interface Entry {
 /** A one-shot command runner against a session's host + cwd. */
 export default function TerminalScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { theme } = useUnistyles();
   const session = useThread(id);
@@ -47,7 +45,7 @@ export default function TerminalScreen() {
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : undefined}
-      style={[s.root, { paddingTop: insets.top + 6 }]}
+      style={[s.root, s.rootPad]}
     >
       <View style={s.header}>
         <Pressable
@@ -88,7 +86,7 @@ export default function TerminalScreen() {
         ) : null}
       </ScrollView>
 
-      <View style={[s.footer, { paddingBottom: insets.bottom + 8 }]}>
+      <View style={[s.footer, s.footerPad]}>
         <View style={s.inputRow}>
           <Text style={s.inputPrompt}>❯</Text>
           <TextInput
@@ -116,7 +114,10 @@ export default function TerminalScreen() {
   );
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  rootPad: { paddingTop: rt.insets.top + 6 },
+  footerPad: { paddingBottom: rt.insets.bottom + 8 },
   root: { flex: 1, backgroundColor: theme.colors.bg },
   header: {
     flexDirection: "row",

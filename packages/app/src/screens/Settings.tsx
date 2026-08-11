@@ -14,6 +14,7 @@ import { connection$ } from "../state/stores";
 import { useDevices } from "../state/db/hooks";
 import { SettingsPage, SettingsRow, SettingsSection } from "../components/settings/primitives";
 import { UpdateRows } from "../components/settings/UpdateRows";
+import { TabHeaderIcon } from "../components/TabHeaderIcon";
 import { settingsHref } from "./settings/routes";
 import { autoSettleDays$ } from "../state/settledStore";
 
@@ -34,6 +35,7 @@ export default function SettingsScreen() {
 
   return (
     <SettingsPage title="Settings" chrome="pane">
+      <TabHeaderIcon sf="gearshape.fill" md="settings" />
       <SettingsSection title="Devices">
         <SettingsRow
           icon="desktop-outline"

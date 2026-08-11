@@ -1,5 +1,5 @@
 import { type Ref, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { ActionSheetIOS, Alert, Image, Keyboard, Pressable, Text, View } from "react-native";
+import { Alert, Image, Keyboard, Pressable, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import {
   EnrichedMarkdownTextInput,
@@ -25,7 +25,7 @@ import { SLASH_COMMANDS } from "../ui/agent-meta";
 import { fetchFiles, type RepoEntry, type ThreadUsage } from "../services/bridge";
 import { ContextRing } from "./ContextRing";
 import { isVoiceAvailable, startDictation, type Dictation } from "../services/voice";
-import { AgentStatusIcon, COLOR, IS_DESKTOP } from "../ui";
+import { AgentStatusIcon, COLOR, IS_DESKTOP, pickSheet } from "../ui";
 import { useThemeHex } from "../ui/useThemeHex";
 
 const MENTION_RE = /((?:^|\s))@([^\s@]*)$/;
@@ -454,11 +454,13 @@ export function Composer({
       opts[0].run();
       return;
     }
-    ActionSheetIOS.showActionSheetWithOptions(
-      { options: [...opts.map((o) => o.label), "Cancel"], cancelButtonIndex: opts.length },
-      (i) => {
-        if (i >= 0 && i < opts.length) opts[i].run();
-      },
+    // pickSheet, not ActionSheetIOS: the latter is iOS-only, so on Android "+"
+    // silently did nothing whenever the agent accepted images and there were
+    // two options to choose between.
+    pickSheet(
+      undefined,
+      opts.map((o) => o.label),
+      (i) => opts[i].run(),
     );
   };
 

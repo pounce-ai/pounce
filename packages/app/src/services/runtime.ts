@@ -50,13 +50,26 @@ export async function connectSaved(): Promise<boolean> {
   }
 }
 
-/** Refresh the current workspace (live sync if a bridge is configured). */
+/**
+ * Refresh the current workspace (live sync if a bridge is configured).
+ *
+ * Settled overrides ride along here rather than being loaded by whichever
+ * screen draws the inbox: they are bridge-owned, so settling on the desktop has
+ * to show up on the phone, and hanging the read off the foreground heartbeat
+ * means every surface gets the same answer without each one remembering to ask.
+ * Fired alongside the thread sync, not after it — neither read depends on the
+ * other, and the settle rule tolerates a map that arrives a moment late far
+ * better than the user tolerates a slower refresh.
+ */
 export async function refreshLive(fresh = false): Promise<void> {
   const bridge = await loadBridgeConfig();
   if (!bridge) return; // not paired — nothing to refresh
   const { syncLiveData } = await import("./bridge");
+  const { loadSettled } = await import("../state/settledStore");
   try {
-    await syncLiveData({ fresh });
+    // loadSettled swallows its own failures (a failed read keeps the last known
+    // map rather than showing everything as un-settled), so it can't reject.
+    await Promise.all([syncLiveData({ fresh }), loadSettled()]);
   } catch {
     /* keep cached */
   }

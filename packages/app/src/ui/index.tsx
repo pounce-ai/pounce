@@ -16,6 +16,7 @@ import type { IoniconName } from "./native/icon-map";
 import type { ActivityStatus } from "@pounce/shared";
 import { AgentLogo } from "./AgentLogo";
 import { useAgentHex } from "./useThemeHex";
+import { openSheet } from "./sheet";
 
 // Shared tokens live in tokens.ts (no circular dep with AgentLogo); re-export
 // them here so call sites keep importing everything from "../ui".
@@ -73,13 +74,39 @@ export const ACTIVITY_LABEL: Record<ActivityStatus, string> = {
   queued: "Queued",
 };
 
-/** Platform picker: NSAlert buttons on desktop, an action sheet on mobile. */
-export function pickSheet(title: string, labels: string[], onPick: (i: number) => void): void {
+/**
+ * Platform picker: NSAlert buttons on desktop, a system action sheet on iOS, a
+ * bottom sheet on Android.
+ *
+ * The Android branch is not decoration. ActionSheetIOS is iOS-only and fails
+ * SILENTLY elsewhere, so every menu routed through here — and the several that
+ * used to call ActionSheetIOS directly — did nothing at all on Android. The
+ * sheet it opens is drawn by `SheetHost`, which Providers mounts once; see
+ * ui/sheet.tsx for why Alert.alert couldn't stand in.
+ *
+ * `title` is optional because some menus are a bare list of verbs and a heading
+ * would just be the word the user already long-pressed.
+ */
+export function pickSheet(
+  title: string | undefined,
+  labels: string[],
+  onPick: (i: number) => void,
+): void {
   if (IS_DESKTOP) {
-    Alert.alert(title, undefined, [
+    Alert.alert(title ?? "", undefined, [
       ...labels.map((text, i) => ({ text, onPress: () => onPick(i) })),
       { text: "Cancel", style: "cancel" as const },
     ]);
+    return;
+  }
+  if (Platform.OS === "android") {
+    openSheet({
+      title,
+      labels,
+      onPick: (i) => {
+        if (i >= 0 && i < labels.length) onPick(i);
+      },
+    });
     return;
   }
   ActionSheetIOS.showActionSheetWithOptions(

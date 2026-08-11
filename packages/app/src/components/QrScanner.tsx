@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
 
 /**
@@ -16,7 +15,6 @@ export default function QrScanner({
   onScan: (data: string) => void;
   onCancel: () => void;
 }) {
-  const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
 
   useEffect(() => {
@@ -25,7 +23,7 @@ export default function QrScanner({
 
   if (!permission?.granted) {
     return (
-      <View style={[s.permission, { paddingTop: insets.top }]}>
+      <View style={[s.permission, s.permissionPad]}>
         <Text style={s.permissionTitle}>Camera access needed</Text>
         <Text style={s.permissionBody}>Allow the camera to scan a pairing code.</Text>
         <Pressable
@@ -52,16 +50,12 @@ export default function QrScanner({
         barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
         onBarcodeScanned={({ data }) => onScan(data)}
       />
-      <View style={[s.hint, { paddingTop: insets.top + 8 }]}>
+      <View style={[s.hint, s.hintPad]}>
         <Text style={s.hintText}>Point at the pairing code</Text>
       </View>
       <Pressable
         onPress={onCancel}
-        style={({ pressed }) => [
-          s.cancelBtn,
-          { bottom: insets.bottom + 28 },
-          pressed && s.pressed80,
-        ]}
+        style={({ pressed }) => [s.cancelBtn, s.actionsPad, pressed && s.pressed80]}
       >
         <Text style={s.cancelBtnText}>Cancel</Text>
       </Pressable>
@@ -71,7 +65,11 @@ export default function QrScanner({
 
 // Overlay text/chrome sits on live camera video, so it stays literal white/black
 // regardless of the system appearance.
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  permissionPad: { paddingTop: rt.insets.top },
+  hintPad: { paddingTop: rt.insets.top + 8 },
+  actionsPad: { bottom: rt.insets.bottom + 28 },
   permission: {
     flex: 1,
     alignItems: "center",

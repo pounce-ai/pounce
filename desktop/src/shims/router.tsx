@@ -261,6 +261,22 @@ export const useGlobalSearchParams = useLocalSearchParams;
 function Noop(_props: Record<string, unknown>) {
   return null;
 }
-export const Stack = Object.assign(Noop, { Screen: Noop });
+/**
+ * `Stack.Toolbar` — the native header toolbar, which this shell has no header
+ * to hang off. Shimmed rather than omitted because the shared screens declare
+ * their toolbars unconditionally in the tree (guarded by IS_DESKTOP at runtime,
+ * but still typechecked here), and a missing property is a build error rather
+ * than the no-op it should be.
+ */
+const Toolbar = Object.assign(Noop, {
+  Button: Noop,
+  Icon: Noop,
+  Label: Noop,
+  Badge: Noop,
+  Menu: Object.assign(Noop, { Action: Noop }),
+  Spacer: Noop,
+  View: Noop,
+});
+export const Stack = Object.assign(Noop, { Screen: Noop, Toolbar });
 export const Tabs = Object.assign(Noop, { Screen: Noop });
 export const Link = Noop;

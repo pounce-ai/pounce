@@ -11,7 +11,6 @@ import {
 } from "react-native";
 import { KeyboardAvoidingView, Platform } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { PounceIcon } from "../ui/native/Icon";
 import type { IoniconName } from "../ui/native/icon-map";
@@ -52,7 +51,6 @@ export interface ChangesScreenProps {
 export default function ChangesScreen({ embedded, threadId, onClose }: ChangesScreenProps = {}) {
   const { id: routeId } = useLocalSearchParams<{ id: string }>();
   const id = threadId ?? routeId;
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { theme } = useUnistyles();
   const session = useThread(id);
@@ -250,7 +248,7 @@ export default function ChangesScreen({ embedded, threadId, onClose }: ChangesSc
       // Sheet presentation on mobile: the sheet's top edge already clears the
       // status bar, so window insets would just paint a blank band. The docked
       // pane sits inside the shell's chrome and needs neither.
-      style={[s.root, { paddingTop: embedded ? 6 : IS_DESKTOP ? insets.top + 6 : 6 }]}
+      style={[s.root, embedded ? s.rootPadEmbedded : s.rootPad]}
     >
       {/* Header. Docked, this is a single line: title and counts side by side,
           dismissal on the right where macOS puts it, and no branch — the shell's
@@ -383,7 +381,7 @@ export default function ChangesScreen({ embedded, threadId, onClose }: ChangesSc
 
       {/* Actions */}
       {fileCount > 0 ? (
-        <View style={[s.footer, { paddingBottom: embedded ? 10 : insets.bottom + 8 }]}>
+        <View style={[s.footer, embedded ? s.footerPadEmbedded : s.footerPad]}>
           {/* AppKit draws its focus ring as a square-cornered rect, which leaves
               four gaps around a rounded field — every input in the app turns it
               off (INPUT_TWEAKS) and draws its own focus edge instead. */}
@@ -484,7 +482,14 @@ function SecondaryButton({
   );
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  /* `embedded` is a prop, so the CHOICE stays at the call site — only the
+     values move into the sheet. */
+  rootPad: { paddingTop: IS_DESKTOP ? rt.insets.top + 6 : 6 },
+  rootPadEmbedded: { paddingTop: 6 },
+  footerPad: { paddingBottom: rt.insets.bottom + 8 },
+  footerPadEmbedded: { paddingBottom: 10 },
   root: { flex: 1, backgroundColor: theme.colors.bg },
   header: {
     flexDirection: "row",

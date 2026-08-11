@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
-import { StyleSheet, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { TrueSheet } from "@lodev09/react-native-true-sheet";
 import { useThemeHex } from "../ui/useThemeHex";
 import type { NativeSheetProps } from "./NativeSheet";
@@ -23,7 +23,6 @@ export function NativeSheet({ visible, onClose, children }: NativeSheetProps) {
   // against the presented VC's traits, which ignore the forced light/dark
   // toggle (same trap as navigation-bar colors).
   const hex = useThemeHex();
-  const insets = useSafeAreaInsets();
   return (
     <TrueSheet
       ref={ref}
@@ -35,11 +34,13 @@ export function NativeSheet({ visible, onClose, children }: NativeSheetProps) {
         if (visibleRef.current) onClose();
       }}
     >
-      <View style={[s.content, { paddingBottom: insets.bottom + 16 }]}>{children}</View>
+      <View style={[s.content, s.contentPad]}>{children}</View>
     </TrueSheet>
   );
 }
 
-const s = StyleSheet.create({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  contentPad: { paddingBottom: rt.insets.bottom + 16 },
   content: { paddingHorizontal: 16, paddingTop: 16 },
-});
+}));
