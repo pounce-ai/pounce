@@ -123,11 +123,27 @@ function nameFromUrl(url: string): string {
   }
 }
 
-/** Ask a bridge who it is, before it's a configured device. Best-effort: an
- *  unreachable or older bridge just yields null and we fall back to the URL. */
-async function probeBridgeId(url: string, token: string): Promise<string | null> {
+/**
+ * Ask a bridge who it is, before it's a configured device. Best-effort: an
+ * unreachable or older bridge just yields null and we fall back to the URL.
+ *
+ * The extras come along because a machine added over SSH is one we can only
+ * reach through its tunnel — its `url` is an address on its own network, so
+ * probing without the node id would always fail and every remote machine would
+ * land with no bridgeId, which is what keys its threads. Dialling costs a QUIC
+ * handshake, hence the longer wait when there's an identity to dial.
+ */
+async function probeBridgeId(
+  url: string,
+  token: string,
+  extras: Partial<DeviceExtras> = {},
+): Promise<string | null> {
   try {
-    const { status } = await get<{ status: BridgeStatus }>({ url, token }, "/v1/status", 6_000);
+    const { status } = await get<{ status: BridgeStatus }>(
+      { url, token, ...extras } as BridgeConfig,
+      "/v1/status",
+      extras.nodeId ? 25_000 : 6_000,
+    );
     return status?.bridgeId || null;
   } catch {
     return null;
@@ -149,8 +165,10 @@ async function writeDeviceConfigs(list: DeviceConfig[]): Promise<void> {
   await SecureStore.setItemAsync(DEVICES_KEY, JSON.stringify(list));
 }
 /** Extras a granted peer carries that a QR pairing does not: how to reach it
- *  off-LAN, and the terms the access was given on. */
-type DeviceExtras = Pick<DeviceConfig, "nodeId" | "relay" | "tunnelToken" | "grant">;
+ *  off-LAN, the terms the access was given on, and — for a machine added over
+ *  SSH — the name it calls itself, which we learn on the far side before the
+ *  machine is reachable at all and which beats naming a server after its IP. */
+type DeviceExtras = Pick<DeviceConfig, "nodeId" | "relay" | "tunnelToken" | "grant" | "name">;
 
 export async function addDeviceConfig(
   url: string,
@@ -159,7 +177,7 @@ export async function addDeviceConfig(
 ): Promise<DeviceConfig> {
   url = url.replace(/\/$/, "");
   const list = await listDeviceConfigs();
-  const bridgeId = await probeBridgeId(url, token);
+  const bridgeId = await probeBridgeId(url, token, extras);
   const { configs, device } = resolvePairing<DeviceConfig>(
     list,
     { url, token, bridgeId, name: nameFromUrl(url) },

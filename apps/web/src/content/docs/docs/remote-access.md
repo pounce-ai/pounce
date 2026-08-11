@@ -35,6 +35,18 @@ npx use-pounce
 The QR prints right in your terminal. Scan it, and that server's agents are in
 your pocket — even though your phone and the server share no network at all.
 
+### Or let the desktop app do it
+
+On the Mac app, **Connect → Add a machine over SSH** does all of the above for
+you. Give it a host — an `~/.ssh/config` alias works, jump hosts and keys
+included — and it connects, runs the CLI over there, and adds the machine. If
+the server asks for a password, a key passphrase, or whether you trust its host
+key, it asks you right in the window.
+
+SSH is only used to set the server up. After that the machine is reached the
+same way a scanned QR would reach it, which is why a server you add on your Mac
+also turns up on your phone.
+
 ## Staying LAN-only
 
 Prefer to keep a machine reachable only on your own Wi-Fi? Start the CLI with:

@@ -1,1 +1,5 @@
+# Built by apps/tunnel/build-ios.sh and apps/tunnel/build-android.sh — large
+# binaries, regenerated from the Rust crate rather than committed. .easignore
+# has matching carve-outs so EAS_NO_VCS=1 cloud builds still upload them.
 ios/PounceTunnelCore.xcframework
+android/src/main/jniLibs

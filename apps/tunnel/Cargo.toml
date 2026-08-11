@@ -6,8 +6,9 @@ description = "Iroh p2p tunnel for the Pounce bridge: `serve` accepts authed QUI
 
 [lib]
 name = "pounce_tunnel"
-# staticlib for iOS linking; rlib for the CLI binary and host builds.
-crate-type = ["staticlib", "rlib"]
+# staticlib for iOS linking; cdylib for Android, which loads a .so through
+# System.loadLibrary; rlib for the CLI binary and host builds.
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 # iroh p2p — proven to hole-punch from the user's real networks.
@@ -24,6 +25,11 @@ anyhow = "1"
 serde_json = "1"
 n0-watcher = "0.6"
 rand = "0.9"
+
+# Android reaches the same core through JNI rather than the C ABI (Kotlin can't
+# call plain C without it). Target-gated so no other platform pays for it.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
 
 [profile.release]
 opt-level = "s"

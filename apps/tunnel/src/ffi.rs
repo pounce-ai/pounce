@@ -1,4 +1,13 @@
-//! C ABI for the phone: start/stop an in-app loopback proxy over Iroh.
+//! FFI for the phone: start/stop an in-app loopback proxy over Iroh.
+//!
+//! Two callers, one implementation. iOS links the staticlib and calls the C ABI
+//! below; Android loads the cdylib and calls the JNI entry points in
+//! `android.rs`, which wrap the very same [`start`]/[`stop`]/[`last_error`].
+//! Keeping the runtime and the ACTIVE slot here — rather than one copy per
+//! platform — is what makes "start while running returns the existing port"
+//! mean the same thing on both.
+//!
+//! The C ABI:
 //!
 //!   int  pounce_tunnel_start(const char* node_id, const char* relay, const char* token);
 //!     → local TCP port (bind 127.0.0.1:0), or -1 (see pounce_tunnel_last_error)
@@ -37,6 +46,72 @@ fn set_error(e: impl std::fmt::Display) {
     *LAST_ERROR.lock().unwrap() = e.to_string();
 }
 
+/// Start (or reuse) the loopback proxy. Returns the local port.
+///
+/// The platform wrappers below add nothing but marshalling — all the behaviour
+/// worth agreeing on lives here: same peer while running is a no-op that hands
+/// back the port it already has, a different peer aborts and rebinds.
+/// Recording the failure is part of starting, not something each platform
+/// wrapper has to remember to do — they'd drift, and a wrapper that forgot
+/// would leave `last_error` reporting the previous run's problem.
+pub(crate) fn start(node: &str, relay: Option<&str>, token: &str) -> Result<u16, String> {
+    let started = start_inner(node, relay, token);
+    if let Err(e) = &started {
+        set_error(e);
+    }
+    started
+}
+
+fn start_inner(node: &str, relay: Option<&str>, token: &str) -> Result<u16, String> {
+    if node.is_empty() || token.is_empty() {
+        return Err("node_id and token are required".to_string());
+    }
+    let relay = relay.filter(|r| !r.is_empty());
+    let key = format!("{node}|{}|{token}", relay.unwrap_or_default());
+
+    let mut active = ACTIVE.lock().unwrap();
+    if let Some(a) = active.as_ref() {
+        if a.key == key && !a.task.is_finished() {
+            return Ok(a.port); // already proxying this peer
+        }
+        a.task.abort();
+        *active = None;
+    }
+
+    let rt = runtime();
+    let listener = rt
+        .block_on(async { tokio::net::TcpListener::bind("127.0.0.1:0").await })
+        .map_err(|e| format!("bind failed: {e}"))?;
+    let port = listener
+        .local_addr()
+        .map_err(|e| format!("local_addr failed: {e}"))?
+        .port();
+
+    let task = rt.spawn({
+        let node = node.to_owned();
+        let token = token.to_owned();
+        let relay = relay.map(str::to_owned);
+        async move {
+            if let Err(e) = crate::client_listener(listener, &node, relay.as_deref(), &token).await {
+                set_error(format!("tunnel stopped: {e}"));
+            }
+        }
+    });
+
+    *active = Some(Active { port, key, task });
+    Ok(port)
+}
+
+pub(crate) fn stop() {
+    if let Some(a) = ACTIVE.lock().unwrap().take() {
+        a.task.abort();
+    }
+}
+
+pub(crate) fn last_error() -> String {
+    LAST_ERROR.lock().unwrap().clone()
+}
+
 fn cstr(p: *const c_char) -> Option<String> {
     if p.is_null() {
         return None;
@@ -56,63 +131,19 @@ pub unsafe extern "C" fn pounce_tunnel_start(
         set_error("node_id and token are required");
         return -1;
     };
-    let relay = cstr(relay).unwrap_or_default();
-    let key = format!("{node}|{relay}|{token}");
-
-    let mut active = ACTIVE.lock().unwrap();
-    if let Some(a) = active.as_ref() {
-        if a.key == key && !a.task.is_finished() {
-            return a.port as i32; // already proxying this peer
-        }
-        a.task.abort();
-        *active = None;
-    }
-
-    let rt = runtime();
-    let bound = rt.block_on(async { tokio::net::TcpListener::bind("127.0.0.1:0").await });
-    let listener = match bound {
-        Ok(l) => l,
-        Err(e) => {
-            set_error(format!("bind failed: {e}"));
-            return -1;
-        }
-    };
-    let port = match listener.local_addr() {
-        Ok(a) => a.port(),
-        Err(e) => {
-            set_error(format!("local_addr failed: {e}"));
-            return -1;
-        }
-    };
-
-    let relay_opt = (!relay.is_empty()).then_some(relay);
-    let task = rt.spawn({
-        let node = node.clone();
-        let token = token.clone();
-        async move {
-            if let Err(e) = crate::client_listener(listener, &node, relay_opt.as_deref(), &token).await {
-                set_error(format!("tunnel stopped: {e}"));
-            }
-        }
-    });
-
-    *active = Some(Active { port, key, task });
-    port as i32
+    start(&node, cstr(relay).as_deref(), &token).map_or(-1, |port| port as i32)
 }
 
 #[no_mangle]
 pub extern "C" fn pounce_tunnel_stop() {
-    if let Some(a) = ACTIVE.lock().unwrap().take() {
-        a.task.abort();
-    }
+    stop();
 }
 
 /// Returned pointer is valid until the next FFI call.
 #[no_mangle]
 pub extern "C" fn pounce_tunnel_last_error() -> *const c_char {
     static BUF: Mutex<Option<CString>> = Mutex::new(None);
-    let msg = LAST_ERROR.lock().unwrap().clone();
-    let c = CString::new(msg).unwrap_or_default();
+    let c = CString::new(last_error()).unwrap_or_default();
     let mut buf = BUF.lock().unwrap();
     *buf = Some(c);
     buf.as_ref().unwrap().as_ptr()

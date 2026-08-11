@@ -1,0 +1,588 @@
+/**
+ * Add a machine over SSH.
+ *
+ * The manual version of this has always worked and is in the docs: ssh to the
+ * box, run `npx use-pounce`, scan the QR it prints. Every step of that is
+ * something the computer can do, so here it does — you give it a host, it does
+ * the rest, and the machine is in your list.
+ *
+ * What the screen is really showing is a wait, so it shows the wait honestly:
+ * the phase in words, and underneath it the session's own output, because when
+ * a first run takes two minutes the difference between "stuck" and "npm is
+ * downloading" is the only thing you want to know. The QR the CLI prints is
+ * filtered out — scanning it is precisely the chore we came here to remove.
+ *
+ * SSH gets used once, to get the far side running and learn its tunnel
+ * identity. After that the machine is an ordinary device dialled over iroh,
+ * which is why it also turns up on your phone, where there is no SSH.
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
+import { Ionicons } from "@expo/vector-icons";
+import {
+  answerSsh,
+  cancelSsh,
+  listSshHosts,
+  saveSshDevice,
+  sshStatus,
+  startSsh,
+  streamSsh,
+  type SshFrame,
+  type SshHost,
+  type SshState,
+} from "@pounce/app/services/ssh";
+import { syncLiveDataStreaming } from "@pounce/app/services/bridge";
+import { COLOR } from "@pounce/app/ui";
+
+/** Terminal control sequences, and the block characters the CLI's QR is drawn
+ *  from. Both are noise in a log rendered as text. */
+// eslint-disable-next-line no-control-regex -- escape sequences are exactly what we're stripping
+const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\r/g;
+const QR_CHARS = /[█▀▄ ]{12,}/;
+const MARKER = /@@POUNCE[^@]*@@|@@END@@/g;
+
+/** The session's output, made readable: no escape codes, no QR, no markers of
+ *  our own, no runs of blank lines. */
+function cleanLines(text: string): string[] {
+  const out: string[] = [];
+  for (const raw of text.replace(ANSI, "").replace(MARKER, "").split("\n")) {
+    const line = raw.trimEnd();
+    if (QR_CHARS.test(line)) continue;
+    if (!line && !out.at(-1)) continue;
+    out.push(line);
+  }
+  return out;
+}
+
+/** What we're waiting on, in words. Phases come from the remote script itself,
+ *  so these stay true even if the CLI rewrites its own output. */
+function phaseLabel(state: SshState): string {
+  switch (state.phase) {
+    case "connecting":
+      return `Connecting to ${state.host}…`;
+    case "starting":
+      return "Starting Pounce over there…";
+    case "pairing":
+      return "Reading its pairing details…";
+    case "prompt":
+      return "Waiting for you";
+    case "done":
+      return "Connected";
+    case "failed":
+      return "Couldn't add it";
+  }
+}
+
+/** known_hosts can run to hundreds of lines; a wall of them is not a
+ *  suggestion. Typing narrows, so the cap only ever hides the tail. */
+const MAX_SUGGESTIONS = 12;
+
+/** The second line of a suggestion — what picking it would actually do. */
+function describeHost(h: SshHost): string {
+  if (h.source !== "config") return "Previously connected";
+  const parts = [h.hostName, h.user && `as ${h.user}`, h.port && `port ${h.port}`].filter(Boolean);
+  return parts.length ? `SSH config · ${parts.join(" · ")}` : "SSH config";
+}
+
+const PROMPT_TITLE: Record<string, string> = {
+  "host-key": "Is this the right machine?",
+  passphrase: "Unlock your SSH key",
+  password: "Password",
+  verification: "Verification code",
+};
+
+export default function AddMachineScreen() {
+  const [host, setHost] = useState("");
+  const [user, setUser] = useState("");
+  const [sshPort, setSshPort] = useState("");
+  const [state, setState] = useState<SshState | null>(null);
+  const [log, setLog] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [added, setAdded] = useState<string | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [hosts, setHosts] = useState<SshHost[] | null>(null);
+  const scroller = useRef<ScrollView>(null);
+  const stopStream = useRef<(() => void) | null>(null);
+  const poll = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopWatching = useCallback(() => {
+    stopStream.current?.();
+    stopStream.current = null;
+    if (poll.current) clearInterval(poll.current);
+    poll.current = null;
+  }, []);
+
+  // Closing the window mid-run must not leave a poll ticking against a bridge
+  // nobody is listening to.
+  useEffect(() => stopWatching, [stopWatching]);
+
+  const refreshHosts = useCallback(async () => {
+    // null means "haven't looked yet" and drives the spinner; an empty array is
+    // a real answer and says so on screen.
+    setHosts(null);
+    try {
+      setHosts((await listSshHosts()).hosts);
+    } catch {
+      setHosts([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshHosts();
+  }, [refreshHosts]);
+
+  /** `pick` is a suggestion being used directly; otherwise the typed form. */
+  const begin = useCallback(
+    async (pick?: SshHost) => {
+      setStartError(null);
+      setLog("");
+      setAdded(null);
+      // "user@host" is how everybody writes it, so accept it in the host field
+      // rather than insisting the parts go in separate boxes.
+      const typed = pick ? pick.name : host;
+      const [typedUser, typedHost] = typed.includes("@") ? typed.split("@") : [null, typed];
+      // A config alias already carries its own user and port; what's in the
+      // form wins only when the person put it there themselves.
+      const chosenUser = pick ? pick.user || user : user || typedUser;
+      const chosenPort = pick ? pick.port || Number(sshPort) || null : Number(sshPort) || null;
+      try {
+        const started = await startSsh({
+          host: typedHost,
+          user: chosenUser,
+          sshPort: chosenPort,
+        });
+        setState(started);
+        stopStream.current = streamSsh(started.id, (frame: SshFrame) => {
+          setState(frame);
+          if (frame.output) setLog((prev) => prev + frame.output);
+        });
+        // The stream is the fast path, not the only one: if it never connects,
+        // this still lands on the outcome.
+        poll.current = setInterval(async () => {
+          try {
+            const s = await sshStatus(started.id);
+            setState(s);
+            if (s.phase === "done" || s.phase === "failed") stopWatching();
+          } catch {
+            stopWatching();
+          }
+        }, 3_000);
+      } catch (e) {
+        setStartError(String((e as Error)?.message || e));
+      }
+    },
+    [host, user, sshPort, stopWatching],
+  );
+
+  const send = useCallback(
+    async (value: string) => {
+      if (!state) return;
+      setAnswer("");
+      await answerSsh(state.id, value).catch(() => {});
+    },
+    [state],
+  );
+
+  // Saving is a separate, explicit step. The bridge finds out how to reach the
+  // machine; putting it in the list is this side's job, and doing it silently
+  // would mean a machine appearing in the sidebar with no moment that said so.
+  const save = useCallback(async () => {
+    if (!state?.device) return;
+    setSaving(true);
+    try {
+      const dev = await saveSshDevice(state.device);
+      setAdded(dev.name);
+      // Pull its threads in now, so the machine isn't an empty row until the
+      // next sync tick.
+      void syncLiveDataStreaming().catch(() => {});
+    } catch (e) {
+      setStartError(String((e as Error)?.message || e));
+    } finally {
+      setSaving(false);
+    }
+  }, [state]);
+
+  const reset = useCallback(() => {
+    stopWatching();
+    if (state && state.phase !== "done") void cancelSsh(state.id).catch(() => {});
+    setState(null);
+    setLog("");
+    setAnswer("");
+    setAdded(null);
+    setStartError(null);
+  }, [state, stopWatching]);
+
+  const lines = cleanLines(log);
+  const running = state !== null && state.phase !== "done" && state.phase !== "failed";
+  // The host field doubles as the filter — one control, and typing narrows the
+  // list rather than sitting beside it doing nothing.
+  const query = host.trim().toLowerCase();
+  const suggestions = (hosts ?? [])
+    .filter((h) => !query || h.name.toLowerCase().includes(query))
+    .slice(0, MAX_SUGGESTIONS);
+
+  return (
+    <View style={s.root}>
+      <View style={s.header}>
+        <Text style={s.headerTitle}>Add a machine</Text>
+        {state ? (
+          <Pressable onPress={reset}>
+            <Text style={s.link}>Start over</Text>
+          </Pressable>
+        ) : null}
+      </View>
+
+      <ScrollView contentContainerStyle={s.list}>
+        {!state ? (
+          <>
+            <Text style={s.lede}>
+              Any machine you can reach over SSH. Pounce connects, sets itself up there, and adds it
+              — no need to go and run anything yourself.
+            </Text>
+            <View style={s.card}>
+              <Field
+                label="Host"
+                value={host}
+                onChange={setHost}
+                placeholder="Search hosts, or type one"
+                autoFocus
+                onSubmit={() => begin()}
+              />
+              {/* Username and port share a row: they're both small, both
+                  optional, and both qualify the host above them. */}
+              <View style={[s.pairRow, s.rowDivided]}>
+                <Field label="Username" value={user} onChange={setUser} placeholder="optional" />
+                <View style={s.pairDivider} />
+                <Field label="Port" value={sshPort} onChange={setSshPort} placeholder="22" narrow />
+              </View>
+            </View>
+            {startError ? <Text style={s.error}>{startError}</Text> : null}
+            <Pressable
+              style={[s.primary, !host.trim() && s.primaryOff]}
+              disabled={!host.trim()}
+              onPress={() => begin()}
+            >
+              <Text style={s.primaryLabel}>Add machine</Text>
+            </Pressable>
+
+            {/* The machines this Mac already knows how to reach. Telling
+                someone their ssh_config aliases work is a fact they have to act
+                on; showing them the list is that fact with the work done. */}
+            <View style={s.suggestHeader}>
+              <View style={s.grow}>
+                <Text style={s.suggestTitle}>Suggested hosts</Text>
+                <Text style={s.hint}>From your SSH config and known hosts</Text>
+              </View>
+              <Pressable onPress={refreshHosts} style={s.refresh}>
+                <Ionicons name="refresh" size={13} color={COLOR.accent} />
+                <Text style={s.link}>Refresh</Text>
+              </Pressable>
+            </View>
+            <View style={s.card}>
+              {hosts === null ? (
+                <View style={s.suggestEmpty}>
+                  <ActivityIndicator size="small" />
+                </View>
+              ) : suggestions.length ? (
+                suggestions.map((h, i) => (
+                  <View key={`${h.source}:${h.name}`} style={[s.row, i > 0 && s.rowDivided]}>
+                    <View style={h.source === "config" ? s.badge : s.badgeQuiet}>
+                      <Ionicons
+                        name={h.source === "config" ? "bookmark-outline" : "time-outline"}
+                        size={15}
+                        color={h.source === "config" ? COLOR.accent : COLOR.fgFaint}
+                      />
+                    </View>
+                    <View style={s.grow}>
+                      <Text style={s.rowName}>{h.name}</Text>
+                      <Text style={s.rowMeta}>{describeHost(h)}</Text>
+                    </View>
+                    <Pressable onPress={() => begin(h)} style={s.ghost}>
+                      <Text style={s.ghostLabel}>Add</Text>
+                    </Pressable>
+                  </View>
+                ))
+              ) : (
+                <View style={s.suggestEmpty}>
+                  <Text style={s.hint}>
+                    {hosts.length
+                      ? `Nothing matching “${host.trim()}”.`
+                      : "No hosts found in ~/.ssh. Type one above."}
+                  </Text>
+                </View>
+              )}
+            </View>
+          </>
+        ) : (
+          <>
+            <View style={s.statusRow}>
+              {running ? (
+                <ActivityIndicator size="small" />
+              ) : (
+                <Ionicons
+                  name={state.phase === "done" ? "checkmark-circle" : "alert-circle"}
+                  size={20}
+                  color={state.phase === "done" ? COLOR.success : COLOR.danger}
+                />
+              )}
+              <Text style={s.statusText}>{phaseLabel(state)}</Text>
+            </View>
+
+            {state.prompt ? (
+              <View style={s.promptCard}>
+                <Text style={s.promptTitle}>
+                  {PROMPT_TITLE[state.prompt.kind] ?? "The server is asking"}
+                </Text>
+                <Text style={s.promptText}>{state.prompt.text}</Text>
+                {state.prompt.kind === "host-key" ? (
+                  // A fingerprint is a decision, not a form field. Two buttons,
+                  // and the text above them is what you're agreeing to.
+                  <View style={s.promptButtons}>
+                    <Pressable style={s.primary} onPress={() => send("yes")}>
+                      <Text style={s.primaryLabel}>Yes, continue</Text>
+                    </Pressable>
+                    <Pressable style={s.ghost} onPress={() => send("no")}>
+                      <Text style={s.ghostLabel}>No</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <TextInput
+                    style={s.promptInput}
+                    value={answer}
+                    onChangeText={setAnswer}
+                    secureTextEntry={state.prompt.secret}
+                    autoFocus
+                    onSubmitEditing={() => send(answer)}
+                    placeholder="…and press return"
+                    placeholderTextColor={COLOR.fgFaint}
+                  />
+                )}
+              </View>
+            ) : null}
+
+            {state.phase === "done" && state.device ? (
+              <View style={s.doneCard}>
+                <Text style={s.doneName}>{state.device.hostName}</Text>
+                <Text style={s.doneBody}>
+                  {added
+                    ? "Added. Its threads are syncing now, and it's on your phone too — the connection doesn't go through this Mac."
+                    : "Ready to add. It'll be reachable from anywhere, including your phone."}
+                </Text>
+                {!added ? (
+                  <Pressable style={s.primary} disabled={saving} onPress={save}>
+                    <Text style={s.primaryLabel}>{saving ? "Adding…" : "Add this machine"}</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
+
+            {state.error ? <Text style={s.error}>{state.error}</Text> : null}
+            {startError ? <Text style={s.error}>{startError}</Text> : null}
+
+            {lines.length ? (
+              <View style={s.logCard}>
+                <ScrollView
+                  ref={scroller}
+                  style={s.logScroll}
+                  onContentSizeChange={() => scroller.current?.scrollToEnd({ animated: false })}
+                >
+                  <Text style={s.logText}>{lines.join("\n")}</Text>
+                </ScrollView>
+              </View>
+            ) : null}
+          </>
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+  placeholder,
+  divided,
+  narrow,
+  autoFocus,
+  onSubmit,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  divided?: boolean;
+  /** For the port, which is four characters and shouldn't claim half a row. */
+  narrow?: boolean;
+  autoFocus?: boolean;
+  onSubmit?: () => void;
+}) {
+  return (
+    <View style={[s.field, divided && s.rowDivided, narrow && s.fieldNarrow]}>
+      <Text style={[s.fieldLabel, narrow && s.fieldLabelNarrow]}>{label}</Text>
+      <TextInput
+        style={s.fieldInput}
+        value={value}
+        onChangeText={onChange}
+        placeholder={placeholder}
+        placeholderTextColor={COLOR.fgFaint}
+        autoCapitalize="none"
+        autoCorrect={false}
+        autoFocus={autoFocus}
+        onSubmitEditing={onSubmit}
+      />
+    </View>
+  );
+}
+
+const s = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.bg },
+  header: {
+    height: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    borderColor: theme.colors.border,
+    paddingLeft: 16,
+    // Clear of the shell's floating close button (24pt at top:10/right:10).
+    paddingRight: 42,
+  },
+  headerTitle: { fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  link: { fontSize: 13, color: theme.colors.accent },
+
+  list: { padding: 20, paddingBottom: 28, gap: 14 },
+  lede: { fontSize: 13, lineHeight: 19, color: theme.colors.fgMuted },
+  hint: { fontSize: 11.5, color: theme.colors.fgFaint },
+  error: { fontSize: 12.5, lineHeight: 18, color: theme.colors.danger },
+
+  card: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceAlt,
+    overflow: "hidden",
+  },
+  rowDivided: { borderTopWidth: 1, borderTopColor: theme.colors.border },
+  field: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, height: 44 },
+  fieldLabel: { width: 78, fontSize: 12.5, color: theme.colors.fgMuted },
+  fieldLabelNarrow: { width: "auto" },
+  fieldInput: { flex: 1, fontSize: 13.5, color: theme.colors.fg },
+  // Username takes the room it needs; the port is four characters and sits at
+  // the end rather than claiming an equal half.
+  pairRow: { flexDirection: "row", alignItems: "center" },
+  pairDivider: { width: 1, height: 22, backgroundColor: theme.colors.border },
+  fieldNarrow: { flex: 0, width: 118 },
+
+  grow: { flex: 1 },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  rowName: { fontSize: 13, fontWeight: "600", color: theme.colors.fg },
+  rowMeta: { marginTop: 1, fontSize: 11, color: theme.colors.fgFaint },
+  badge: {
+    height: 28,
+    width: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+    backgroundColor: theme.colors.accentSoft,
+  },
+  // A known_hosts entry is a memory, not a choice someone made — it shouldn't
+  // wear the accent an ssh_config alias earns.
+  badgeQuiet: {
+    height: 28,
+    width: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  suggestHeader: { flexDirection: "row", alignItems: "flex-end", gap: 12, marginTop: 4 },
+  suggestTitle: { fontSize: 12.5, fontWeight: "600", color: theme.colors.fg },
+  refresh: { flexDirection: "row", alignItems: "center", gap: 4 },
+  suggestEmpty: { alignItems: "center", justifyContent: "center", paddingVertical: 20 },
+
+  statusRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  statusText: { fontSize: 13.5, fontWeight: "500", color: theme.colors.fg },
+
+  promptCard: {
+    gap: 10,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: theme.colors.accent,
+    backgroundColor: theme.colors.accentSoft,
+  },
+  promptTitle: { fontSize: 13.5, fontWeight: "600", color: theme.colors.fg },
+  promptText: { fontSize: 12, lineHeight: 17, color: theme.colors.fgMuted },
+  promptButtons: { flexDirection: "row", gap: 8 },
+  promptInput: {
+    height: 34,
+    paddingHorizontal: 10,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    fontSize: 13.5,
+    color: theme.colors.fg,
+  },
+
+  doneCard: {
+    gap: 8,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.successSoft,
+  },
+  doneName: { fontSize: 14.5, fontWeight: "600", color: theme.colors.fg },
+  doneBody: { fontSize: 12.5, lineHeight: 18, color: theme.colors.fgMuted },
+
+  // Fixed height rather than growing: the log is reference while you wait, and
+  // a box that grows to 200 lines would push the prompt off the screen.
+  logCard: {
+    height: 190,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    overflow: "hidden",
+  },
+  logScroll: { flex: 1, padding: 10 },
+  logText: {
+    fontFamily: "Menlo",
+    fontSize: 10.5,
+    lineHeight: 15,
+    color: theme.colors.fgMuted,
+  },
+
+  primary: {
+    height: 34,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 9,
+    backgroundColor: theme.colors.accent,
+  },
+  primaryOff: { opacity: 0.4 },
+  primaryLabel: { fontSize: 13, fontWeight: "600", color: theme.colors.onAccent },
+  ghost: {
+    height: 34,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  ghostLabel: { fontSize: 13, fontWeight: "500", color: theme.colors.fg },
+}));
