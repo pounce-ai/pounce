@@ -925,14 +925,17 @@ const s = StyleSheet.create((theme, rt) => ({
   },
   attentionText: { fontSize: 11, fontWeight: "600", color: theme.colors.warning },
   addBtn: { marginLeft: 2, height: 28, width: 28, alignItems: "center", justifyContent: "center" },
-  /* A SHELF row — a draft. One line, no card, aligned to the same 16pt gutter
-     as the headers above it so the shelf reads as part of the list rather than
-     a separate widget dropped into it. */
+  /* A SHELF row — a draft. One line, no card, indented to start under its
+     header's LABEL rather than at the gutter: 16 + chevron 13 + 8 + icon 13 + 8.
+     Without the leading glyph the row used to carry, hugging the gutter put the
+     title further left than the "Drafts" it belongs to, so the shelf read as
+     two unrelated things stacked. */
   shelfRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    paddingHorizontal: 16,
+    paddingLeft: 58,
+    paddingRight: 16,
     minHeight: 38,
   },
   draftTitle: { flex: 1, fontSize: 14, color: theme.colors.fgMuted },
