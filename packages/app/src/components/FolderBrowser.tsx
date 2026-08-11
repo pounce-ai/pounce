@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Modal } from "./AppModal";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PounceIcon } from "../ui/native/Icon";
 import type { IoniconName } from "../ui/native/icon-map";
 import { browseDirs, type DirEntry, type DirListing } from "../services/bridge";
@@ -30,7 +29,6 @@ export function FolderBrowser({
   onClose: () => void;
   onPick: (path: string) => void;
 }) {
-  const insets = useSafeAreaInsets();
   const { theme } = useUnistyles();
   const [listing, setListing] = useState<DirListing | null>(null);
   const [loading, setLoading] = useState(false);
@@ -62,7 +60,7 @@ export function FolderBrowser({
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <View style={[s.root, { paddingTop: insets.top + 8 }]}>
+      <View style={[s.root, s.rootPad]}>
         <View style={s.headerRow}>
           <Text style={s.headerTitle}>Choose a folder</Text>
           <Pressable onPress={onClose} style={({ pressed }) => pressed && s.pressed60}>
@@ -112,7 +110,7 @@ export function FolderBrowser({
         </ScrollView>
 
         {/* Pick the current folder */}
-        <View style={[s.footer, { paddingBottom: insets.bottom + 8 }]}>
+        <View style={[s.footer, s.footerPad]}>
           <Pressable
             disabled={!listing}
             onPress={() => listing && onPick(listing.path)}
@@ -163,7 +161,10 @@ function Row({
   );
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  rootPad: { paddingTop: rt.insets.top + 8 },
+  footerPad: { paddingBottom: rt.insets.bottom + 8 },
   root: { flex: 1, backgroundColor: theme.colors.bg },
   headerRow: {
     flexDirection: "row",

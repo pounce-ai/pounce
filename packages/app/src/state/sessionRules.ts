@@ -26,3 +26,49 @@ export function rankSession(s: Session): number {
   if (s.isLive) return 2;
   return 3;
 }
+
+/**
+ * The three buckets every thread falls into, exactly one each.
+ *
+ * DISJOINT is the whole design. These used to be a two-way switch — "Needs you"
+ * vs "Everything" — where the first was a SUBSET of the second, so the two could
+ * never be on together and picking one always meant losing the other. Splitting
+ * "active" to mean "live, but not waiting on you" makes the three a partition,
+ * and a partition is something you can multi-select: each chip adds its own
+ * slice and nothing overlaps.
+ *
+ *   needs   — blocked on you: a question, a failure, a turn that stopped
+ *   active  — everything else that is live
+ *   settled — the archive, filed by hand or by the quiet-days rule
+ */
+export type ShowBucket = "needs" | "active" | "settled";
+
+/**
+ * Both live buckets on, the archive off.
+ *
+ * The archive is off by DEFAULT and not by accident: a machine with a year of
+ * history carries hundreds of settled threads against a couple of dozen live
+ * ones, so including them would bury the work you opened the app for under the
+ * work you already finished.
+ */
+export const DEFAULT_SHOW: readonly ShowBucket[] = ["needs", "active"];
+
+/**
+ * Which bucket a thread is in.
+ *
+ * `settled` is passed in rather than computed, because that rule needs the
+ * override map and a clock (see ./settled) — everything else is a property of
+ * the thread itself. Settledness is checked FIRST so this agrees with
+ * `partitionSettled` by construction: that function already refuses to settle
+ * anything blocked on you, so a thread can never be both filed away and
+ * reported as needing you.
+ */
+export function showBucket(s: Session, settled: boolean): ShowBucket {
+  return settled ? "settled" : needsYou(s) ? "needs" : "active";
+}
+
+/** Whether the Show buckets differ from the default pair — the one filter whose
+ *  "off" state is a non-empty set, so it can't be tested for emptiness. */
+export function showNarrowed(show: readonly ShowBucket[]): boolean {
+  return show.length !== DEFAULT_SHOW.length || !DEFAULT_SHOW.every((b) => show.includes(b));
+}

@@ -10,7 +10,6 @@
 import type { ReactNode } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { PounceIcon } from "../../ui/native/Icon";
 import type { IoniconName } from "../../ui/native/icon-map";
@@ -20,20 +19,12 @@ import { IS_DESKTOP } from "../../ui";
  *  mobile: the native large title only collapses against the first child scroll
  *  view. Desktop wraps it in its own chrome instead. */
 export function SettingsScroll({ children }: { children: ReactNode }) {
-  const insets = useSafeAreaInsets();
   return (
     <ScrollView
       style={s.scroll}
       contentInsetAdjustmentBehavior="automatic"
       showsVerticalScrollIndicator={false}
-      contentContainerStyle={{
-        gap: 24,
-        // contentInsetAdjustmentBehavior is iOS-only: Android's toolbar is
-        // in-flow with no automatic inset, and desktop has no bar at all, so
-        // both need the top padding spelled out.
-        paddingTop: IS_DESKTOP ? 4 : 16,
-        paddingBottom: Math.max(insets.bottom, 18) + 18,
-      }}
+      contentContainerStyle={s.scrollPad}
     >
       {children}
     </ScrollView>
@@ -181,11 +172,9 @@ export function SettingsPage({
   chrome?: "modal" | "pane";
   children: ReactNode;
 }) {
-  const insets = useSafeAreaInsets();
-
   if (!IS_DESKTOP || chrome === "modal") return <SettingsScroll>{children}</SettingsScroll>;
   return (
-    <View style={[s.desktopRoot, { paddingTop: insets.top + 8 }]}>
+    <View style={[s.desktopRoot, s.desktopRootPad]}>
       <View style={s.headerRow}>
         <Text style={s.headerTitle}>{title}</Text>
       </View>
@@ -194,7 +183,17 @@ export function SettingsPage({
   );
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  scrollPad: {
+    gap: 24,
+    // contentInsetAdjustmentBehavior is iOS-only: Android's toolbar is in-flow
+    // with no automatic inset, and desktop has no bar at all, so both need the
+    // top padding spelled out.
+    paddingTop: IS_DESKTOP ? 4 : 16,
+    paddingBottom: Math.max(rt.insets.bottom, 18) + 18,
+  },
+  desktopRootPad: { paddingTop: rt.insets.top + 8 },
   scroll: { flex: 1, paddingHorizontal: 20, backgroundColor: theme.colors.bg },
   desktopRoot: { flex: 1, backgroundColor: theme.colors.bg },
   headerRow: {

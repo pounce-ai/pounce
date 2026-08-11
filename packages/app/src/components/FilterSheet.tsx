@@ -11,7 +11,6 @@ import {
   View,
 } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSelector } from "@legendapp/state/react";
 import { PounceIcon } from "../ui/native/Icon";
 import {
@@ -27,6 +26,7 @@ import {
   isRepoIgnored,
   reposByActivity,
   sortAgents,
+  type ShowBucket,
   type StatusBucket,
   toggleRepoIgnore,
 } from "../state/stores";
@@ -92,6 +92,14 @@ function FilterChip({
   );
 }
 
+/** The Show buckets, in the order a day runs: what's blocked on you, what's
+ *  still moving, what you're done with. */
+const SHOW_CHIPS: { bucket: ShowBucket; label: string }[] = [
+  { bucket: "needs", label: "Needs you" },
+  { bucket: "active", label: "Active" },
+  { bucket: "settled", label: "Settled" },
+];
+
 /** The three coarse status buckets, each with the dot colour ActivityDot uses.
  *  Theme token keys — resolved against the live theme at render time. */
 const STATUS_CHIPS: { bucket: StatusBucket; label: string; dot: "success" | "fgFaint" | "info" }[] =
@@ -107,7 +115,6 @@ const STATUS_CHIPS: { bucket: StatusBucket; label: string; dot: "success" | "fgF
  * only appear when there's a real choice to make (>1 project / device / agent).
  */
 export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -115,12 +122,7 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
           RN Modal window; lifts the sheet so the folder search isn't covered. */}
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={s.kav}>
         <Pressable style={s.backdrop} onPress={onClose} />
-        <View
-          style={[
-            s.sheet,
-            { paddingBottom: insets.bottom + 16, maxHeight: Math.round(height * 0.92) },
-          ]}
-        >
+        <View style={[s.sheet, s.sheetPad, { maxHeight: Math.round(height * 0.92) }]}>
           <FilterSheetContent onClose={onClose} />
         </View>
       </KeyboardAvoidingView>
@@ -174,15 +176,31 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
   useDeviceOverrides(); // re-render on rename/emoji
   useIgnoredSet(); // re-render on ignore toggle
   const [repoQuery, setRepoQuery] = useState("");
-  // Tap the grabber to expand — gives the (potentially long) folder list far more
-  // room without pushing the sheet off-screen by default.
-  const [expanded, setExpanded] = useState(false);
-  const folderMax = expanded ? Math.round(height * 0.5) : 220;
+  /** How tall the folder list may get before it scrolls itself.
+   *
+   *  A fraction of the screen rather than a toggle: the sheet's own `auto`
+   *  detent grows to fit this, and dragging it up to the full detent is the
+   *  native way to ask for more room. */
+  const folderMax = Math.round(height * 0.42);
   const hasFilter = hasActiveFilter();
   const shownRepos = useMemo(() => {
     const q = repoQuery.trim().toLowerCase();
     return q ? repos.filter((r) => r.name.toLowerCase().includes(q)) : repos;
   }, [repos, repoQuery]);
+  /**
+   * Add or remove one Show bucket.
+   *
+   * Removing the LAST one is refused rather than allowed-and-explained: an
+   * empty Show is a Home screen with nothing on it, reachable by two taps and
+   * escapable only by finding your way back to this sheet. Every other filter
+   * here can be emptied safely because empty means "all"; this one is the
+   * exception, so it gets the guard rather than a new empty state.
+   */
+  const toggleShow = (b: ShowBucket) => {
+    const has = f.show.includes(b);
+    if (has && f.show.length === 1) return;
+    filters$.show.set(has ? f.show.filter((x) => x !== b) : [...f.show, b]);
+  };
   const toggleStatus = (b: StatusBucket) =>
     filters$.statuses.set(
       f.statuses.includes(b) ? f.statuses.filter((x) => x !== b) : [...f.statuses, b],
@@ -203,18 +221,11 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      {/* Grabber doubles as an expand/collapse toggle — phone sheets only;
-          the desktop modal card has a fixed height. */}
-      {IS_DESKTOP ? null : (
-        <Pressable onPress={() => setExpanded((v) => !v)} hitSlop={12} style={s.grabber}>
-          <View style={s.grabberBar} />
-          <PounceIcon
-            name={expanded ? "chevron-down" : "chevron-up"}
-            size={12}
-            color={theme.colors.fgFaint}
-          />
-        </Pressable>
-      )}
+      {/* No grabber of our own. This content is presented in a REAL native
+          sheet (see the root layout's TrueSheet navigator), which draws its own
+          handle and, with `detents: ["auto", 1]`, already drags to full height —
+          so the hand-rolled bar was a second handle stacked under the system
+          one, doing a job the system one does better. */}
       <View style={s.rowBetween}>
         <Text style={s.title}>Filter</Text>
         {hasFilter ? (
@@ -228,19 +239,26 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
         ) : null}
       </View>
 
+      {/* Show — three DISJOINT buckets, so this multi-selects like Status does.
+          The default is both live ones on and the archive off, which is the
+          ordinary "my work" view; drop one to narrow, add Settled to bring the
+          archive in alongside rather than instead.
+
+          "Active" was called "Everything" while this was a two-way switch. It
+          had to change twice over: it excluded settled threads (so the word was
+          a lie), and it was a SUPERSET of "Needs you" (so the two could never
+          both be on, which is the thing this group now does). */}
       <View style={s.section}>
         <Text style={s.sectionLabel}>Show</Text>
         <View style={s.chipsWrap}>
-          <FilterChip
-            label="Needs you"
-            active={f.needsOnly}
-            onPress={() => filters$.needsOnly.set(true)}
-          />
-          <FilterChip
-            label="Everything"
-            active={!f.needsOnly}
-            onPress={() => filters$.needsOnly.set(false)}
-          />
+          {SHOW_CHIPS.map((c) => (
+            <FilterChip
+              key={c.bucket}
+              label={c.label}
+              active={f.show.includes(c.bucket)}
+              onPress={() => toggleShow(c.bucket)}
+            />
+          ))}
         </View>
       </View>
 
@@ -463,7 +481,9 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
   );
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  sheetPad: { paddingBottom: rt.insets.bottom + 16 },
   filterBtn: {
     height: 36,
     width: 36,
@@ -520,8 +540,6 @@ const s = StyleSheet.create((theme) => ({
     paddingHorizontal: 16,
     paddingTop: 12,
   },
-  grabber: { alignItems: "center", gap: 4, paddingBottom: 2, paddingTop: 2 },
-  grabberBar: { height: 4, width: 40, borderRadius: 999, backgroundColor: theme.colors.border },
   rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   title: { fontSize: 18, fontWeight: "700", color: theme.colors.fg },
   clearRow: { flexDirection: "row", alignItems: "center", gap: 6 },

@@ -14,7 +14,8 @@ import { PounceIcon } from "../ui/native/Icon";
 import { warmModels, type ModelInfo } from "../services/bridge";
 import { shortModel } from "../components/ThreadStatusBar";
 import { useAgentModels } from "../state/db/hooks";
-import { IS_DESKTOP } from "../ui";
+import { AgentLogo, agentLabel, IS_DESKTOP } from "../ui";
+import type { AgentId } from "@pounce/shared";
 
 /**
  * Searchable model picker. Renders instantly from the warmed cache
@@ -37,6 +38,7 @@ export function ModelSheet({
   onSelect,
   effort,
   mode,
+  agents,
   onClose,
 }: {
   visible: boolean;
@@ -53,6 +55,16 @@ export function ModelSheet({
   effort?: { label: string; onPress: () => void } | null;
   /** Permission-mode control, shown as a row below Effort (null to hide). */
   mode?: { label: string; onPress: () => void } | null;
+  /**
+   * Agent chips above the model list — the NEW-task case, where the agent is
+   * still being chosen.
+   *
+   * Omitted everywhere else on purpose: a thread's agent is fixed once it
+   * exists (its transcript and its worktree belong to that agent), so mid-
+   * thread this sheet offers models only. Selecting here re-lists, because the
+   * catalog below is keyed off the `agent` prop the caller then changes.
+   */
+  agents?: { available: AgentId[]; current: AgentId; onSelect: (a: AgentId) => void } | null;
   onClose: () => void;
 }) {
   const { theme } = useUnistyles();
@@ -97,6 +109,29 @@ export function ModelSheet({
   return (
     <NativeSheet visible={visible} onClose={onClose}>
       <Text style={s.title}>Model</Text>
+
+      {/* The agent, when it is still open to change. Above the list rather than
+          a row beneath it, because it DECIDES that list — picking Codex under a
+          list of Claude models would read as though the two were unrelated. */}
+      {agents && agents.available.length > 1 ? (
+        <View style={s.agentRow}>
+          {agents.available.map((a) => {
+            const on = a === agents.current;
+            return (
+              <Pressable
+                key={a}
+                onPress={() => agents.onSelect(a)}
+                style={[s.agentChip, on ? s.agentChipOn : s.agentChipOff]}
+              >
+                <AgentLogo agent={a} size={14} />
+                <Text style={[s.agentChipLabel, on ? s.agentChipLabelOn : null]}>
+                  {agentLabel(a)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
 
       <View style={s.searchRow}>
         <PounceIcon name="search" size={15} color={theme.colors.fgFaint} />
@@ -263,6 +298,20 @@ const s = StyleSheet.create((theme) => ({
     fontSize: 13,
     color: theme.colors.fgMuted,
   },
+  agentRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 4 },
+  agentChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+  },
+  agentChipOn: { borderColor: theme.colors.accentLine, backgroundColor: theme.colors.accentSoft },
+  agentChipOff: { borderColor: theme.colors.border, backgroundColor: theme.colors.surface },
+  agentChipLabel: { fontSize: 13, fontWeight: "600", color: theme.colors.fgMuted },
+  agentChipLabelOn: { color: theme.colors.accent },
   effortRow: {
     marginTop: 8,
     flexDirection: "row",

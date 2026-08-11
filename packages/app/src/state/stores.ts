@@ -23,7 +23,7 @@ import type { Device, Host } from "@pounce/shared";
 import { parseUserMessage } from "@pounce/transcript";
 import type { ModelInfo } from "../services/bridge";
 import { persist } from "../services/persistence";
-import { isDotName, needsYou, rankSession } from "./sessionRules";
+import { DEFAULT_SHOW, isDotName, showNarrowed, type ShowBucket } from "./sessionRules";
 import {
   agentCaps,
   agentModels,
@@ -56,6 +56,17 @@ export interface PendingTurn {
   images: RunImage[];
   permissionMode?: PermissionMode;
   reasoningEffort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  /**
+   * The model picked on the New screen, carried on the turn itself.
+   *
+   * It is ALSO written to `threadModels` (which is what every later turn in the
+   * thread reads, and what survives the new_ -> real id rekey). But that write
+   * is a collection commit and the first turn fires a frame later, before it is
+   * readable — so the thread's own pill showed the right model while the turn
+   * had already gone out on the agent's default. The first turn is the one
+   * moment the store can't answer for, so the turn carries the answer.
+   */
+  model?: string | null;
 }
 export const pendingTurns$ = observable<Record<string, PendingTurn>>({});
 
@@ -71,16 +82,17 @@ export const filters$ = observable<{
   repos: string[]; // multi-select folders; empty = all
   statuses: StatusBucket[]; // multi-select status buckets; empty = all
   branchQuery: string; // substring match over branch + worktree; "" = all
-  needsOnly: boolean;
   favOnly: boolean;
+  /** Which of the three thread buckets to include — see {@link ShowBucket}. */
+  show: ShowBucket[];
 }>({
   device: null,
   agent: null,
   repos: [],
   statuses: [],
   branchQuery: "",
-  needsOnly: true,
   favOnly: false,
+  show: [...DEFAULT_SHOW],
 });
 
 /** The zero state for every filter — a single source for "Clear all". */
@@ -90,8 +102,8 @@ export const CLEARED_FILTERS = {
   repos: [],
   statuses: [],
   branchQuery: "",
-  needsOnly: false,
   favOnly: false,
+  show: [...DEFAULT_SHOW],
 };
 
 export const user$ = observable<UserProfile>({
@@ -221,12 +233,38 @@ export function clearPendingPrompt(threadId: string): void {
 }
 
 persist(filters$, "filters"); // remember the user's last filter selection
+/**
+ * Repair `show` after hydration.
+ *
+ * Every installed copy of the app persisted this object BEFORE `show` existed
+ * (it held a `needsOnly` boolean instead), and a hydrated value that predates a
+ * field leaves it undefined rather than falling back to the initial value.
+ * Undefined here is not a cosmetic bug: every screen reads `show` to decide
+ * which threads exist, so the first launch after upgrading would render an
+ * empty list with no filter badge and nothing to click.
+ *
+ * An EMPTY array gets the same repair. The sheet stops you removing the last
+ * bucket, so empty can only arrive from old or corrupted state — and "the user
+ * asked to see nothing at all" is never the likelier reading.
+ *
+ * Deliberately does NOT carry the old `needsOnly: true` across: that flag meant
+ * "show me only what needs you", which was the default nobody chose, and the
+ * new default shows strictly more.
+ */
+{
+  const show = filters$.show.peek();
+  if (!Array.isArray(show) || show.length === 0) filters$.show.set([...DEFAULT_SHOW]);
+}
 persist(user$, "user");
 persist(sources$, "sources");
 persist(seenFiles$, "seenFiles");
 persist(interactiveThreads$, "interactiveThreads");
 
-/** Count of *narrowing* filters (device/agent/status/branch/favourites) for the badge. */
+/** Count of *narrowing* filters (device/agent/status/branch/favourites/show) for
+ *  the badge. Show counts whenever it isn't the default pair: it is the filter
+ *  that changes WHICH THREADS EXIST for the screen rather than trimming the ones
+ *  already there, so a user who left the archive on — or dropped a bucket — and
+ *  later wonders where their work went has a badge pointing at the answer. */
 export function activeFilterCount(): number {
   const f = filters$.get();
   return (
@@ -235,7 +273,8 @@ export function activeFilterCount(): number {
     (f.repos.length ? 1 : 0) +
     (f.statuses.length ? 1 : 0) +
     (f.branchQuery.trim() ? 1 : 0) +
-    (f.favOnly ? 1 : 0)
+    (f.favOnly ? 1 : 0) +
+    (showNarrowed(f.show) ? 1 : 0)
   );
 }
 
@@ -248,8 +287,8 @@ export function hasActiveFilter(): boolean {
     f.repos.length ||
     f.statuses.length ||
     f.branchQuery.trim() ||
-    f.needsOnly ||
-    f.favOnly
+    f.favOnly ||
+    showNarrowed(f.show)
   );
 }
 
@@ -260,7 +299,15 @@ export function hasActiveFilter(): boolean {
 // source, as two statements: `export { x }` over an imported binding compiles to
 // a getter over a local that doesn't exist once Metro rewrites the module, which
 // typechecks cleanly and then throws at runtime.
-export { isDotName, needsYou, rankSession } from "./sessionRules";
+export {
+  DEFAULT_SHOW,
+  isDotName,
+  needsYou,
+  rankSession,
+  showBucket,
+  showNarrowed,
+  type ShowBucket,
+} from "./sessionRules";
 
 /** Every activity collapses into one coarse bucket for the status filter. */
 const STATUS_BUCKET: Record<ActivityStatus, StatusBucket> = {

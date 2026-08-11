@@ -6,40 +6,81 @@
  * them. Stacking puts whichever agent is drawn last permanently above the
  * others, which reads as "that one is bigger" even on days when it isn't.
  */
-import type { ActivityDay, Period } from "../services/activity";
-
-export type UsageMetric = "cost" | "tokens";
-
-/** One bar of a trend chart. */
-export interface Bar {
-  readonly key: string;
-  readonly value: number;
-}
+import type { ActivityDay, AgentActivity } from "../services/activity";
 
 /**
- * A window as chart bars: one per day, or one per MONTH for a year.
- *
- * 365 bars would be a pixel wide and unreadable, so a year is bucketed — and
- * because every screen showing this has the same problem, they each grew their
- * own copy of the fold. Three copies asserting by comment that they agree about
- * a period is exactly what a shared function is for.
- *
- * Safe to pass the window for both branches: a year window IS the whole series
- * (both are 365 days, and `PERIOD_DAYS.year` is 365), which is why the callers
- * that used to bucket their full series can pass the same array here.
+ * What a chart plots. Every one of these is a field the bridge already reports
+ * PER AGENT (see AgentActivity), which is what lets every chart in the app be
+ * an agent chart rather than a single anonymous total.
  */
-export function trendBars(
-  days: readonly ActivityDay[],
-  period: Period,
-  value: (day: ActivityDay) => number,
-): Bar[] {
-  if (period !== "year") return days.map((d) => ({ key: d.date, value: value(d) }));
-  const byMonth = new Map<string, number>();
+export type UsageMetric = "cost" | "tokens" | "messages" | "sessions";
+
+/**
+ * A year, folded to one row per MONTH — with the per-agent split preserved.
+ *
+ * 365 points is a fine line chart but a terrible thing to read a single day
+ * off, so a year is charted at month resolution. The fold has to carry
+ * `byAgent` through: summing to a bare monthly total is exactly how these
+ * screens ended up with a count-based chart for the year and an agent-based one
+ * for every other period, which is the inconsistency this replaces.
+ *
+ * Rows come back in date order with the date set to the FIRST of the month —
+ * callers label them with `granularity: "month"`, which renders "Mar" rather
+ * than "Mar 1".
+ */
+export function bucketByMonth(days: readonly ActivityDay[]): ActivityDay[] {
+  const byMonth = new Map<string, ActivityDay & { byAgent: Record<string, AgentActivity> }>();
   for (const d of days) {
-    const k = d.date.slice(0, 7);
-    byMonth.set(k, (byMonth.get(k) ?? 0) + value(d));
+    const key = d.date.slice(0, 7);
+    const cur = byMonth.get(key);
+    if (!cur) {
+      byMonth.set(key, {
+        date: `${key}-01`,
+        sessions: d.sessions ?? 0,
+        messages: d.messages ?? 0,
+        tokens: d.tokens ?? 0,
+        // null (unknown) and 0 (known-zero) are different claims: a month is
+        // only "no cost data" if EVERY day in it was.
+        cost: d.cost ?? null,
+        byAgent: cloneAgents(d.byAgent),
+      });
+      continue;
+    }
+    byMonth.set(key, {
+      ...cur,
+      sessions: cur.sessions + (d.sessions ?? 0),
+      messages: cur.messages + (d.messages ?? 0),
+      tokens: cur.tokens + (d.tokens ?? 0),
+      cost: d.cost == null ? cur.cost : (cur.cost ?? 0) + d.cost,
+      byAgent: mergeAgents(cur.byAgent, d.byAgent),
+    });
   }
-  return [...byMonth].map(([key, value]) => ({ key, value }));
+  return [...byMonth.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, v]) => v);
+}
+
+function cloneAgents(
+  src: Readonly<Record<string, AgentActivity>> | undefined,
+): Record<string, AgentActivity> {
+  const out: Record<string, AgentActivity> = {};
+  for (const [agent, v] of Object.entries(src ?? {})) out[agent] = { ...v };
+  return out;
+}
+
+function mergeAgents(
+  into: Record<string, AgentActivity>,
+  src: Readonly<Record<string, AgentActivity>> | undefined,
+): Record<string, AgentActivity> {
+  const out = cloneAgents(into);
+  for (const [agent, v] of Object.entries(src ?? {})) {
+    const cur = out[agent];
+    out[agent] = {
+      sessions: (cur?.sessions ?? 0) + (v.sessions ?? 0),
+      messages: (cur?.messages ?? 0) + (v.messages ?? 0),
+      tokens: (cur?.tokens ?? 0) + (v.tokens ?? 0),
+      cost: v.cost == null ? (cur?.cost ?? null) : (cur?.cost ?? 0) + v.cost,
+    };
+  }
+  return out;
 }
 
 export interface Series {
@@ -64,7 +105,14 @@ export interface Plot {
 function valueOf(day: ActivityDay, agent: string, metric: UsageMetric): number {
   const a = day.byAgent?.[agent];
   if (!a) return 0;
-  const v = metric === "cost" ? a.cost : a.tokens;
+  const v =
+    metric === "cost"
+      ? a.cost
+      : metric === "tokens"
+        ? a.tokens
+        : metric === "messages"
+          ? a.messages
+          : a.sessions;
   return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0;
 }
 

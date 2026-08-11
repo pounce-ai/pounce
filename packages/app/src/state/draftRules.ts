@@ -14,6 +14,10 @@ export interface Draft {
   readonly cwd: string | null;
   readonly repoId: string | null;
   readonly agent: AgentId | null;
+  /** The model id chosen alongside the agent, or null for the agent's default.
+   *  Agent and model are ONE decision on the New screen (they share a sheet),
+   *  so parking a draft has to keep both or it comes back half-answered. */
+  readonly model: string | null;
   readonly text: string;
   readonly createdAt: string;
   readonly updatedAt: string;

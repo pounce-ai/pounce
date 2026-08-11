@@ -6,7 +6,6 @@ import type { ComponentType, ReactNode } from "react";
 import { Component, useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Modal } from "../../components/AppModal";
 import { PounceIcon } from "../../ui/native/Icon";
@@ -424,7 +423,6 @@ const DEVICE_EMOJI = [
 
 /** Bottom-sheet editor: rename a device and optionally pick an emoji icon. */
 function DeviceEditModal({ device, onClose }: { device: Device | null; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
   const { theme } = useUnistyles();
   const [name, setName] = useState("");
   const [emoji, setEmoji] = useState("");
@@ -448,7 +446,7 @@ function DeviceEditModal({ device, onClose }: { device: Device | null; onClose: 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={s.scrim} onPress={onClose} />
-      <View style={[s.sheet, { paddingBottom: insets.bottom + 16 }]}>
+      <View style={[s.sheet, s.sheetPad]}>
         <View style={s.grabber} />
         <Text style={s.sheetTitle}>Edit device</Text>
 
@@ -521,7 +519,9 @@ class ScannerBoundary extends Component<BoundaryProps, { failed: boolean }> {
   }
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  sheetPad: { paddingBottom: rt.insets.bottom + 16 },
   rowActions: { flexDirection: "row", alignItems: "center", gap: 12 },
   dot: { height: 8, width: 8, borderRadius: 999 },
   // Accent, not green — accent already means "live" everywhere else.

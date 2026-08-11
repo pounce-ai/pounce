@@ -11,17 +11,15 @@
  */
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View, type LayoutChangeEvent } from "react-native";
-import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { StyleSheet } from "react-native-unistyles";
 import { useQuery } from "@tanstack/react-query";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import { fetchActivity } from "../services/bridge";
 import {
   type ActivityDay,
   type UsageRow,
   addCost,
   PERIOD_DAYS,
-  PERIOD_LABEL,
   type Period,
   byAgentTotals,
   byRepoTotals,
@@ -32,16 +30,16 @@ import {
   zeroFill,
 } from "../services/activity";
 import { useProjectNames } from "../state/db/hooks";
-import { MiniBarChart } from "../components/MiniBarChart";
-import { trendBars } from "../components/usageSeries";
-import { UsageChart } from "../components/UsageChart";
+import { bucketByMonth } from "../components/usageSeries";
+import { CHART_GUTTER, UsageChart } from "../components/UsageChart";
 import { ActivitySkeleton } from "../components/Skeleton";
-import { PounceIcon } from "../ui/native/Icon";
+import { PeriodPicker } from "../components/PeriodPicker";
 import { AgentLogo, IS_DESKTOP } from "../ui";
 import { agentLabel } from "../ui/tokens";
 import { fmtCost, fmtCount, fmtDayLabel, fmtDelta, fmtTokens } from "../ui/format";
 
 const YEAR = 365;
+const PERIODS: readonly Period[] = ["week", "month", "year"];
 
 /** The metrics a tile can open, in one place: the type, the runtime validation
  *  of a route param, and the desktop tab strip's list all derive from this, so
@@ -86,7 +84,7 @@ function pct(part: number, whole: number): string {
  * row from `byAgentTotals`, or a model row. They already share this shape, so
  * one accessor serves them all — this used to be four separate ternary ladders
  * (day, window total, previous total, agent row) that had to agree by hand,
- * and a page whose bars disagree with its own headline is a silent failure.
+ * and a page whose chart disagrees with its own headline is a silent failure.
  */
 type Countable = {
   /** Absent on a model row, which is counted but never held a session. The two
@@ -193,9 +191,6 @@ function Section({
 
 export default function MetricScreen() {
   const params = useLocalSearchParams<{ key?: string; period?: string }>();
-  const router = useRouter();
-  const insets = useSafeAreaInsets();
-  const { theme } = useUnistyles();
   const projectNames = useProjectNames();
   const key = METRIC_KEYS.includes(params.key as MetricKey) ? (params.key as MetricKey) : "tokens";
   const [period, setPeriod] = useState<Period>(
@@ -227,9 +222,12 @@ export default function MetricScreen() {
    *  messages have none of that behind them. */
   const isUsage = key === "tokens" || key === "spend";
 
-  const bars = useMemo(
-    () => trendBars(window, period, (d) => valueOf(d, key)),
-    [window, period, key],
+  /** A year is charted at MONTH resolution — 365 points is a fine curve and a
+   *  hopeless thing to read one bucket off. The fold keeps the per-agent split,
+   *  so the year chart is the same agent chart as every other period. */
+  const chartDays = useMemo(
+    () => (period === "year" ? bucketByMonth(window) : window),
+    [window, period],
   );
 
   const agents = useMemo(() => byAgentTotals(window), [window]);
@@ -288,48 +286,27 @@ export default function MetricScreen() {
   return (
     <ScrollView
       style={s.root}
-      contentContainerStyle={[
-        s.content,
-        { paddingTop: IS_DESKTOP ? 14 : insets.top + 8, paddingBottom: insets.bottom + 32 },
-      ]}
+      // iOS ties the large title to this scroll view, and insets it for the bar
+      // — so no top padding of our own on mobile. See ScreenRoot for the rule
+      // about it having to be the screen's first child (it is: this IS the root).
+      contentInsetAdjustmentBehavior="automatic"
+      contentContainerStyle={[s.content, s.contentPad]}
     >
+      {/* The title belongs to the header the STACK draws, and only this screen
+          knows which metric it is. A no-op on desktop, where the router is
+          shimmed and the pane has its own tab chrome. */}
       <View style={s.header}>
-        {/* Desktop opens this as a pane with its own tab chrome, so a back
-            control there would be a second, competing way out. */}
-        {!IS_DESKTOP ? (
-          <Pressable
-            onPress={() => router.back()}
-            hitSlop={12}
-            accessibilityRole="button"
-            accessibilityLabel="Back"
-            style={({ pressed }) => [s.back, pressed && s.pressed]}
-          >
-            <PounceIcon name="chevron-back" size={20} color={theme.colors.accent} />
-          </Pressable>
-        ) : null}
         <View style={s.shrink}>
-          <Text style={s.title}>{METRIC_TITLE[key]}</Text>
+          {/* Desktop has no stack header, so it still draws its own title. On
+              mobile that would be the same word twice, one above the other. */}
+          {IS_DESKTOP ? <Text style={s.title}>{METRIC_TITLE[key]}</Text> : null}
           <Text style={s.subtitle}>{range}</Text>
         </View>
       </View>
 
       {/* No period picker over a failed read: it would narrow numbers we never
           got, three ways. */}
-      {q.isError ? null : (
-        <View style={s.periods}>
-          {(["week", "month", "year"] as const).map((p) => (
-            <Pressable
-              key={p}
-              onPress={() => setPeriod(p)}
-              style={({ pressed }) => [s.period, period === p && s.periodOn, pressed && s.pressed]}
-            >
-              <Text style={[s.periodLabel, period === p && s.periodLabelOn]}>
-                {PERIOD_LABEL[p]}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      )}
+      {q.isError ? null : <PeriodPicker value={period} onChange={setPeriod} periods={PERIODS} />}
 
       {q.isPending ? (
         <ActivitySkeleton />
@@ -384,19 +361,17 @@ export default function MetricScreen() {
               style={[s.card, s.chartCard]}
               onLayout={(e: LayoutChangeEvent) => setChartWidth(e.nativeEvent.layout.width - 28)}
             >
-              {chartWidth <= 0 ? null : isUsage && period !== "year" ? (
-                // Per agent, because "who spent it" and "when" is one question.
-                // Only for day-resolution windows: a year is charted by month
-                // below, and monthly buckets have no per-agent series behind
-                // them.
+              {chartWidth <= 0 ? null : (
+                // Per agent for every metric, because "who did this" and "when"
+                // is one question — sessions and messages are reported per agent
+                // exactly as spend and tokens are.
                 <UsageChart
-                  days={window}
+                  days={chartDays}
                   agents={chartAgents}
-                  metric={key === "spend" ? "cost" : "tokens"}
-                  width={chartWidth - 50}
+                  metric={key === "spend" ? "cost" : key}
+                  granularity={period === "year" ? "month" : "day"}
+                  width={chartWidth - CHART_GUTTER}
                 />
-              ) : (
-                <MiniBarChart bars={bars} width={chartWidth} />
               )}
             </View>
             <Text style={s.sectionNote}>
@@ -745,7 +720,9 @@ function MetricInsight({
   );
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  contentPad: { paddingTop: IS_DESKTOP ? 14 : 0, paddingBottom: rt.insets.bottom + 32 },
   root: { flex: 1, backgroundColor: theme.colors.bg },
   content: { paddingHorizontal: 16, gap: 14 },
   header: { flexDirection: "row", alignItems: "center", gap: 6 },

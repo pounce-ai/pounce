@@ -15,6 +15,7 @@ const draft = (over: Partial<Draft> = {}): Draft => ({
   cwd: null,
   repoId: null,
   agent: null,
+  model: null,
   text: "",
   createdAt: "2026-08-10T10:00:00.000Z",
   updatedAt: "2026-08-10T10:00:00.000Z",

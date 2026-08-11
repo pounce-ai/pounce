@@ -18,11 +18,10 @@
  * months saying "not then".
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, View, type LayoutChangeEvent } from "react-native";
+import { Platform, Pressable, ScrollView, Text, View, type LayoutChangeEvent } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import type { Session } from "@pounce/shared";
 import { applyFilters, needsYou } from "../state/stores";
 import { useIgnoredSet, useProjectNames, useThreads } from "../state/db/hooks";
@@ -43,9 +42,10 @@ import {
   type ActivityDay,
   type Period,
 } from "../services/activity";
-import { MiniBarChart } from "../components/MiniBarChart";
-import { trendBars } from "../components/usageSeries";
+import { CHART_GUTTER, UsageChart } from "../components/UsageChart";
+import { bucketByMonth } from "../components/usageSeries";
 import { ContextEditor } from "../components/ContextEditor";
+import { PeriodPicker } from "../components/PeriodPicker";
 import { PounceIcon } from "../ui/native/Icon";
 import type { IoniconName } from "../ui/native/icon-map";
 import { AgentLogo, AgentStatusIcon, IS_DESKTOP, SELECT_TEXT, timeAgo } from "../ui";
@@ -61,11 +61,7 @@ import { fmtCost, fmtCount, fmtDayLabel, fmtTokens } from "../ui/format";
  */
 const SERIES_DAYS = 365;
 
-/** Taller than the phone default — this chart is the block's centrepiece. */
-const CHART_HEIGHT = IS_DESKTOP ? 132 : 108;
-
 const PERIODS: Period[] = ["week", "month", "year"];
-const PERIOD_LABEL: Record<Period, string> = { week: "Week", month: "Month", year: "Year" };
 
 export default function SpaceScreen() {
   const params = useLocalSearchParams<{ key?: string }>();
@@ -127,7 +123,6 @@ export default function SpaceScreen() {
 
 function SpaceDetail({ space, sessions }: { space: Space; sessions: Session[] }) {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const { theme } = useUnistyles();
   const [period, setPeriod] = useState<Period>("month");
   const [day, setDay] = useState<string | null>(null);
@@ -206,7 +201,22 @@ function SpaceDetail({ space, sessions }: { space: Space; sessions: Session[] })
 
   const run = useMemo(() => streaks(series), [series]);
   const agents = useMemo(() => byAgentTotals(window, [...space.agents]), [window, space.agents]);
-  const bars = useMemo(() => trendBars(window, period, (d) => d.messages), [window, period]);
+  /** Colour order for the chart: busiest first, so the series that dominates the
+   *  space keeps the same hue whatever period is showing. */
+  const chartAgents = useMemo(
+    () =>
+      agents
+        .filter((a) => (a.messages ?? 0) > 0)
+        .sort((x, y) => (y.messages ?? 0) - (x.messages ?? 0))
+        .map((a) => a.agent),
+    [agents],
+  );
+  /** A year is charted at MONTH resolution, with the per-agent split carried
+   *  through the fold — same chart, same colours, coarser buckets. */
+  const chartDays = useMemo(
+    () => (period === "year" ? bucketByMonth(window) : window),
+    [window, period],
+  );
   const detailDay = useMemo(
     () => (day ? (series.find((d) => d.date === day) ?? null) : null),
     [day, series],
@@ -214,57 +224,117 @@ function SpaceDetail({ space, sessions }: { space: Space; sessions: Session[] })
 
   const attention = sessions.filter(needsYou);
 
+  /**
+   * This screen's two verbs, in one definition.
+   *
+   * Context is a property of the PROJECT, not of a thread — the same AGENTS.md
+   * governs every session in this checkout. It used to hang off a thread's
+   * environment menu, which put one project's setup behind whichever thread you
+   * happened to have open.
+   *
+   * Rendered into the native header on mobile and inline on desktop, which has
+   * no native header to put them in.
+   */
+  const openContext = () =>
+    cwd &&
+    router.push({
+      pathname: "/context",
+      params: { cwd, hostId: space.hostId, repoId: space.repoId },
+    });
+  const openNewTask = () =>
+    router.push({
+      pathname: "/new",
+      params: cwd ? { cwd, hostId: space.hostId, repoId: space.repoId } : { repoId: space.repoId },
+    });
+
+  /** Desktop has no header bar to put them in, so it keeps the labelled pills
+   *  inline — where a bordered button is the right shape. */
+  const inlineActions = (
+    <>
+      {cwd ? (
+        <Pressable
+          onPress={openContext}
+          style={({ pressed }) => [s.headerBtn, pressed && s.pressed]}
+        >
+          <PounceIcon name="document-text-outline" size={14} color={theme.colors.fgMuted} />
+          <Text style={s.headerBtnLabel}>Project context</Text>
+        </Pressable>
+      ) : null}
+      <Pressable onPress={openNewTask} style={({ pressed }) => [s.headerBtn, pressed && s.pressed]}>
+        <PounceIcon name="add-circle" size={14} color={theme.colors.fgMuted} />
+        <Text style={s.headerBtnLabel}>New task</Text>
+      </Pressable>
+    </>
+  );
+
   return (
     <ScrollView
       style={s.root}
-      contentContainerStyle={[
-        s.content,
-        { paddingTop: IS_DESKTOP ? 14 : insets.top + 8, paddingBottom: insets.bottom + 32 },
-      ]}
+      // iOS ties the large title to this scroll view, and insets it for the bar
+      // — so no top padding of our own on mobile. See ScreenRoot for the rule
+      // about it having to be the screen's first child (it is: this IS the root).
+      contentInsetAdjustmentBehavior="automatic"
+      contentContainerStyle={[s.content, s.contentPad]}
     >
+      {/* The space's name titles the header the STACK draws — which also gives
+          this page the back control it never had: it used to be reachable only
+          by the swipe gesture.
+
+          The two ACTIONS ride in that header too. They used to sit beside the
+          metadata line, which left neither enough room: the line truncated at
+          "Dirghas-Mac-mini · 73 thread…" while the buttons spelled themselves
+          out in full. A header bar is where a screen's verbs belong, and moving
+          them there gives the line below the whole width.
+
+          A no-op on desktop, where the router is shimmed — hence the fork
+          below, which keeps drawing the name and the buttons inline. */}
+      {/* The real toolbar API, not `headerRight`.
+          `headerRight` is ONE toolbar item, so iOS 26 drew a single glass
+          capsule around whatever it held — two icons jammed into one button.
+          `Stack.Toolbar` declares each child as its own item, which is what
+          gives them a capsule each, matching the back chevron beside them.
+          Android renders the same children through Compose (no capsules there
+          — it has no glass), which is why the icons are platform-forked below:
+          `sf` is iOS-only, and an Android button with an unresolvable icon
+          would be an empty tap target. */}
+      {IS_DESKTOP ? null : (
+        <Stack.Toolbar placement="right">
+          {cwd ? (
+            <Stack.Toolbar.Button onPress={openContext} accessibilityLabel="Project context">
+              {Platform.OS === "ios" ? (
+                <Stack.Toolbar.Icon sf="doc.text" />
+              ) : (
+                <Stack.Toolbar.Label>Context</Stack.Toolbar.Label>
+              )}
+            </Stack.Toolbar.Button>
+          ) : null}
+          <Stack.Toolbar.Button onPress={openNewTask} accessibilityLabel="New task">
+            {Platform.OS === "ios" ? (
+              <Stack.Toolbar.Icon sf="square.and.pencil" />
+            ) : (
+              <Stack.Toolbar.Label>New</Stack.Toolbar.Label>
+            )}
+          </Stack.Toolbar.Button>
+        </Stack.Toolbar>
+      )}
       <View style={s.header}>
         <View style={s.shrink}>
-          <Text selectable={SELECT_TEXT} numberOfLines={1} style={s.title}>
-            {space.name}
-          </Text>
+          {IS_DESKTOP ? (
+            <Text selectable={SELECT_TEXT} numberOfLines={1} style={s.title}>
+              {space.name}
+            </Text>
+          ) : null}
           <Text numberOfLines={1} style={s.subtitle}>
             {space.host} · {space.sessionCount} {space.sessionCount === 1 ? "thread" : "threads"} ·{" "}
             {space.liveCount} live · {`active ${timeAgo(space.lastActivityAt)}`}
           </Text>
         </View>
-        <View style={s.flex1} />
-        {/* Context is a property of the PROJECT, not of a thread — the same
-            AGENTS.md governs every session in this checkout. It used to hang off
-            a thread's environment menu, which put one project's setup behind
-            whichever thread you happened to have open. */}
-        {cwd ? (
-          <Pressable
-            onPress={() =>
-              router.push({
-                pathname: "/context",
-                params: { cwd, hostId: space.hostId, repoId: space.repoId },
-              })
-            }
-            style={({ pressed }) => [s.headerBtn, pressed && s.pressed]}
-          >
-            <PounceIcon name="document-text-outline" size={14} color={theme.colors.fgMuted} />
-            <Text style={s.headerBtnLabel}>Project context</Text>
-          </Pressable>
+        {IS_DESKTOP ? (
+          <>
+            <View style={s.flex1} />
+            {inlineActions}
+          </>
         ) : null}
-        <Pressable
-          onPress={() =>
-            router.push({
-              pathname: "/new",
-              params: cwd
-                ? { cwd, hostId: space.hostId, repoId: space.repoId }
-                : { repoId: space.repoId },
-            })
-          }
-          style={({ pressed }) => [s.headerBtn, pressed && s.pressed]}
-        >
-          <PounceIcon name="add-circle" size={14} color={theme.colors.fgMuted} />
-          <Text style={s.headerBtnLabel}>New task</Text>
-        </Pressable>
       </View>
 
       {cwd ? (
@@ -273,19 +343,7 @@ function SpaceDetail({ space, sessions }: { space: Space; sessions: Session[] })
         </Text>
       ) : null}
 
-      <View style={s.segment}>
-        {PERIODS.map((p) => (
-          <Pressable
-            key={p}
-            onPress={() => setPeriod(p)}
-            style={[s.segmentItem, p === period && s.segmentItemOn]}
-          >
-            <Text style={[s.segmentLabel, p === period && s.segmentLabelOn]}>
-              {PERIOD_LABEL[p]}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      <PeriodPicker value={period} onChange={setPeriod} periods={PERIODS} />
 
       {/* The note goes ABOVE the tiles it qualifies. Below them the page
           contradicted itself top-to-bottom: four tiles asserting 0 tokens, 0
@@ -334,8 +392,11 @@ function SpaceDetail({ space, sessions }: { space: Space; sessions: Session[] })
         />
       </View>
 
-      {/* One block, three questions: WHEN the work happened, HOW MUCH OF YOU it
-          took, and HOW it gets worked. */}
+      {/* One card per question, like every other section on this page. These
+          three used to share a card divided by hairlines, which made the page
+          read in two different grouping idioms at once — hairline-separated
+          sections above, separate cards below — for no reason either side of
+          the boundary could explain. */}
       <View
         style={s.card}
         onLayout={(e: LayoutChangeEvent) => setChartWidth(e.nativeEvent.layout.width - 28)}
@@ -344,28 +405,33 @@ function SpaceDetail({ space, sessions }: { space: Space; sessions: Session[] })
           {period === "year" ? "Messages by month" : `Messages · last ${PERIOD_DAYS[period]} days`}
         </Text>
         {chartWidth > 0 ? (
-          <MiniBarChart
-            bars={bars}
-            width={chartWidth}
-            height={CHART_HEIGHT}
-            selected={period === "year" ? null : day}
-            onSelect={period === "year" ? undefined : setDay}
+          <UsageChart
+            days={chartDays}
+            agents={chartAgents}
+            metric="messages"
+            granularity={period === "year" ? "month" : "day"}
+            width={chartWidth - CHART_GUTTER}
+            // Controlled, because the footer below reads the same selection —
+            // the chart's own readout names the agents, the footer gives the
+            // space's totals for that bucket.
+            selected={day}
+            onSelect={setDay}
           />
         ) : null}
         <Text numberOfLines={1} style={s.cardFoot}>
           {detailDay
             ? `${fmtDayLabel(detailDay.date)} — ${fmtCount(detailDay.messages)} messages · ${fmtTokens(detailDay.tokens)}`
-            : period === "year"
-              ? "A bar per month."
-              : IS_DESKTOP
-                ? "Click a day for its detail"
-                : "Tap a day for its detail"}
+            : IS_DESKTOP
+              ? "Click a point for its detail"
+              : "Tap a point for its detail"}
         </Text>
+      </View>
 
-        <View style={s.rule} />
+      <View style={s.card}>
         <ShareOfWork share={share} space={space} mine={now.tokens} total={allNow?.tokens ?? null} />
+      </View>
 
-        <View style={s.rule} />
+      <View style={s.card}>
         <Cadence series={series} run={run} space={space} loading={activityQ.isLoading} />
       </View>
 
@@ -618,7 +684,11 @@ function Metric({
   );
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding lives in the SHEET, not a hook: unistyles applies it
+   *  natively, so a rotation or a keyboard no longer re-renders the screen to
+   *  move some padding. */
+  contentPad: { paddingTop: IS_DESKTOP ? 14 : 0, paddingBottom: rt.insets.bottom + 32 },
   root: { flex: 1, backgroundColor: theme.colors.bg },
   flex1: { flex: 1 },
   shrink: { flexShrink: 1 },
@@ -644,6 +714,9 @@ const s = StyleSheet.create((theme) => ({
     ...(IS_DESKTOP ? { maxWidth: 1120, width: "100%", alignSelf: "center" } : null),
   },
   header: { flexDirection: "row", alignItems: "flex-end", gap: 10 },
+  /** The pair inside the native header bar — glyph spacing, not button spacing,
+   *  and a right margin because iOS runs the bar to the screen edge. */
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 18, marginRight: 4 },
   title: { fontSize: IS_DESKTOP ? 22 : 26, fontWeight: "700", color: theme.colors.fg },
   subtitle: { marginTop: 2, fontSize: 12.5, color: theme.colors.fgMuted },
   headerBtn: {
@@ -660,8 +733,12 @@ const s = StyleSheet.create((theme) => ({
   headerBtnLabel: { fontSize: 12, fontWeight: "500", color: theme.colors.fgMuted },
   path: { marginTop: -6, fontFamily: "JetBrainsMono", fontSize: 11, color: theme.colors.fgFaint },
 
+  /* Full width, thirds. It used to hug its labels (`alignSelf: "flex-start"`
+     with a 68pt minimum), which left it floating short of the cards below it
+     and made "Year" a smaller target than "Month" for no reason. Stretched, it
+     lines up with the content it filters and every period is the same size. */
   segment: {
-    alignSelf: "flex-start",
+    alignSelf: "stretch",
     flexDirection: "row",
     gap: 2,
     borderRadius: 9,
@@ -669,7 +746,7 @@ const s = StyleSheet.create((theme) => ({
     borderColor: theme.colors.border,
     padding: 2,
   },
-  segmentItem: { minWidth: 68, alignItems: "center", borderRadius: 7, paddingVertical: 5 },
+  segmentItem: { flex: 1, alignItems: "center", borderRadius: 7, paddingVertical: 5 },
   segmentItemOn: { backgroundColor: theme.colors.accent },
   segmentLabel: { fontSize: 12.5, fontWeight: "600", color: theme.colors.fgMuted },
   segmentLabelOn: { color: theme.colors.onAccent },
@@ -718,7 +795,6 @@ const s = StyleSheet.create((theme) => ({
     color: theme.colors.fgFaint,
   },
   cardFoot: { fontSize: 12, color: theme.colors.fgMuted },
-  rule: { height: 1, backgroundColor: theme.colors.border, marginVertical: 3 },
 
   shareRow: { marginTop: 7, flexDirection: "row", alignItems: "baseline", gap: 8 },
   sharePct: {

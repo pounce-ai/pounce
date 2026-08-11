@@ -5,7 +5,7 @@
     "": {
       "name": "litter-next",
       "devDependencies": {
-        "@swmansion/argent": "^0.19.0",
+        "@swmansion/argent": "0.20.0",
         "@types/node": "^22.7.0",
         "oxfmt": "^0.59.0",
         "oxlint": "^1.74.0",
@@ -37,7 +37,7 @@
     },
     "apps/cli": {
       "name": "use-pounce",
-      "version": "0.4.2",
+      "version": "0.5.1",
       "bin": {
         "pounce": "bin/pounce.mjs",
       },
@@ -196,6 +196,7 @@
   },
   "patchedDependencies": {
     "metro@0.84.4": "patches/metro@0.84.4.patch",
+    "zigpty@0.2.1": "patches/zigpty@0.2.1.patch",
     "metro-runtime@0.84.4": "patches/metro-runtime@0.84.4.patch",
   },
   "overrides": {
@@ -1242,7 +1243,7 @@
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
-    "@swmansion/argent": ["@swmansion/argent@0.19.0", "", { "dependencies": { "@fails-components/webtransport": "^1.6.3", "@fails-components/webtransport-transport-http3-quiche": "^1.6.3", "@modelcontextprotocol/sdk": "^1.20.0", "tree-sitter": "^0.21.1", "tree-sitter-typescript": "^0.23.2" }, "optionalDependencies": { "electron": "^42.5.0", "node-pty": "^1.1.0" }, "bin": { "argent": "dist/cli.js", "argent-simulator-server": "bin/argent-simulator-server.cjs" } }, "sha512-mk0C7I8zTYkBQ3851KAJbJhvahYYVq2RXUnYjkKvbFAmLQwUrzK+Zf1OB3HFOmx2SXPSdWUOlyO8c1IU8NWJbQ=="],
+    "@swmansion/argent": ["@swmansion/argent@0.20.0", "", { "dependencies": { "@fails-components/webtransport": "^1.6.3", "@fails-components/webtransport-transport-http3-quiche": "^1.6.3", "@modelcontextprotocol/sdk": "^1.20.0", "tree-sitter": "^0.21.1", "tree-sitter-typescript": "^0.23.2" }, "optionalDependencies": { "electron": "^42.5.0", "node-pty": "^1.1.0" }, "bin": { "argent": "dist/cli.js", "argent-simulator-server": "bin/argent-simulator-server.cjs" } }, "sha512-MQMmfCKufi2MPZHsBuQ9hRiLVhtbt2G9SRBEprVFNceCCb1UeNNLKwNAdsjOXR0lX21CCs18xb6ICYJKekD//A=="],
 
     "@tanstack/db": ["@tanstack/db@0.6.14", "", { "dependencies": { "@standard-schema/spec": "^1.1.0", "@tanstack/db-ivm": "0.1.18", "@tanstack/pacer-lite": "^0.2.1" }, "peerDependencies": { "typescript": ">=4.7" } }, "sha512-Kqma/PcWhn2e21iJPM/FMKwdMuJUYII9zkKPUsD42/ceEOYRtimbBSe+xll7EY805xE2HuQ3NGSSU8UiYXpHUw=="],
 

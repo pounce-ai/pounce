@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { KeyboardAvoidingView } from "../components/kav";
-import { Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { PounceIcon } from "../ui/native/Icon";
 import type { AgentId } from "@pounce/shared";
@@ -12,16 +10,20 @@ import {
   markInteractive,
   pendingTurns$,
   reposByActivity,
+  setThreadModel,
   sortAgents,
 } from "../state/stores";
 import { useAgentCaps, useDevices, useProjects, useThreads } from "../state/db/hooks";
+import { ChatKeyboardSticky } from "../components/ChatList";
 import { Composer, type ComposerHandle, type ComposerSubmit } from "../components/Composer";
 import { FolderBrowser } from "../components/FolderBrowser";
+import { ModelSheet } from "../components/ModelSheet";
+import { shortModel } from "../components/ThreadStatusBar";
 import { ConnectFlow } from "../components/ConnectFlow";
 import { contextDraft$ } from "../state/contextComments";
-import { drafts$, newDraft, removeDraft, updateDraft } from "../state/drafts";
+import { drafts$, ensureDraft, nextDraftId, removeDraft, updateDraft } from "../state/drafts";
 import { startInteractive } from "../services/bridge";
-import { AgentLogo, agentLabel } from "../ui";
+import { agentLabel } from "../ui";
 import { effectiveCaps } from "../ui/agent-meta";
 
 // Fallback order when the selected device hasn't reported its agents yet
@@ -37,7 +39,6 @@ function repoIdForCwd(cwd: string | null): string {
 
 /** Start a new task: pick device + folder + agent, then compose. */
 export default function NewTaskScreen() {
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { theme } = useUnistyles();
   // `cwd`/`hostId` seed an exact folder (from the Project context screen);
@@ -75,6 +76,24 @@ export default function NewTaskScreen() {
   );
   const [selectedRepoId, setSelectedRepoId] = useState<string | null>(resumed?.repoId ?? null);
   const [agent, setAgent] = useState<AgentId>(resumed?.agent ?? "claude");
+  /** null = the agent's own default, which is what the pill says until you
+   *  choose. Restored with the agent, since the two are one decision. */
+  const [model, setModel] = useState<string | null>(resumed?.model ?? null);
+  const [modelSheet, setModelSheet] = useState(false);
+  /**
+   * Did whoever opened this screen already answer "where"?
+   *
+   * From a Space or a folder row's "+", the folder and the machine are decided
+   * before you arrive — the space IS a repo on a host — so asking again is
+   * three controls of chrome between you and the prompt. Only the global "+"
+   * has a real question to ask.
+   *
+   * A RESUMED draft counts: one carrying a folder was started somewhere that
+   * knew it, and re-asking on resume would undo the point. Read once at mount
+   * (from the params/draft, not from live state) so picking a folder in the
+   * unseeded case doesn't make the picker vanish under your finger.
+   */
+  const [seeded] = useState(() => !!(cwdParam || repoId || resumed?.cwd || resumed?.repoId));
   const [browsing, setBrowsing] = useState(false);
   // Interactive = the bridge hosts claude's real TUI in a PTY, so its prompts
   // (AskUserQuestion, …) are answerable from the app. Claude-only for now.
@@ -99,6 +118,15 @@ export default function NewTaskScreen() {
   useEffect(() => {
     if (availAgents.length && !availAgents.includes(agent)) setAgent(availAgents[0]);
   }, [availAgents, agent]);
+
+  /** Switching agent drops the model: model ids belong to one agent, and
+   *  carrying "opus-5" over to Codex would ask for something that isn't there.
+   *  Cleared rather than remapped — the sheet re-lists, and the daemon's own
+   *  default is the honest starting point for the new agent. */
+  const pickAgent = (a: AgentId) => {
+    setAgent(a);
+    setModel(null);
+  };
 
   const folderLabel = useMemo(() => (cwd ? cwd.split("/").pop() || cwd : null), [cwd]);
 
@@ -155,7 +183,15 @@ export default function NewTaskScreen() {
    * changing your mind leaves no trace — but the moment there is a prompt or a
    * folder, closing the screen parks the task instead of discarding it.
    */
-  const draftId = useRef<string>(resumed?.id ?? newDraft().id).current;
+  const [draftId] = useState(() => resumed?.id ?? nextDraftId());
+  // The WRITE happens here, not in render. `useRef(newDraft().id)` used to do
+  // both — and because useRef evaluates its argument every render, it minted a
+  // fresh throwaway draft each time and mutated the store mid-render, which
+  // React flags the moment any other screen subscribes to drafts (Home now
+  // does, for its Drafts shelf).
+  useEffect(() => {
+    ensureDraft(draftId);
+  }, [draftId]);
   useEffect(() => {
     if (resumed?.text) composerRef.current?.insert(resumed.text);
     // Once, on mount: re-inserting on every change would fight the input.
@@ -163,8 +199,8 @@ export default function NewTaskScreen() {
   }, []);
   // Every choice is part of the parked task, not just the words.
   useEffect(() => {
-    updateDraft(draftId, { hostId: hostId ?? null, cwd, repoId: selectedRepoId, agent });
-  }, [draftId, hostId, cwd, selectedRepoId, agent]);
+    updateDraft(draftId, { hostId: hostId ?? null, cwd, repoId: selectedRepoId, agent, model });
+  }, [draftId, hostId, cwd, selectedRepoId, agent, model]);
 
   const launch = async (s: ComposerSubmit) => {
     const nowIso = new Date().toISOString();
@@ -174,12 +210,16 @@ export default function NewTaskScreen() {
     // real threadId — open it directly (no pending headless turn). Its questions
     // then surface as answerable cards. Falls through to the normal path on error.
     if (interactive && agent === "claude" && device) {
-      const realId = await startInteractive(device.id, s.text, cwd);
+      // The PTY is spawned once and keeps its model, so it has to be told here
+      // — there is no later turn to carry it.
+      const realId = await startInteractive(device.id, s.text, cwd, undefined, model);
       if (realId) {
         // Route this thread's future follow-ups back through the interactive
         // path so they reuse/resume this one session (answerable prompts) rather
         // than spawning fresh sessions — see isThreadInteractive in Session.
         markInteractive(realId);
+        // The chosen model, against the id this thread will keep.
+        if (model) setThreadModel(realId, model);
         insertThread({
           id: realId,
           repoId: selectedRepoId ?? repoIdForCwd(cwd),
@@ -223,8 +263,13 @@ export default function NewTaskScreen() {
       createdAt: nowIso,
       updatedAt: nowIso,
     });
+    // The model goes BOTH ways on purpose. The store is what every later turn
+    // reads, and `rekeyThread` carries it across the new_ -> real id swap; the
+    // turn carries it too because the store write isn't readable yet when the
+    // session screen fires this first turn (see PendingTurn.model).
+    if (model) setThreadModel(id, model);
     // Hand the first turn (prompt + mode/effort/images) to the session screen.
-    pendingTurns$[id].set(s);
+    pendingTurns$[id].set({ ...s, model });
     removeDraft(draftId);
     router.replace(`/session/${id}`);
   };
@@ -244,12 +289,15 @@ export default function NewTaskScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      style={[s.root, { paddingTop: 8 }]}
-    >
+    // NOT a KeyboardAvoidingView. This screen is a modal WITH a native header,
+    // and a KAV measures its own frame against the window: the header and the
+    // sheet's top inset are missing from that sum, so it lifted the composer
+    // ~85pt short and the keyboard covered the send button. The composer rides
+    // the keyboard directly instead — the same UI-thread sticky view Session
+    // uses, which has no offset to get wrong.
+    <View style={[s.root, s.rootPad]}>
       <ScrollView style={s.scroll} contentContainerStyle={{ gap: 16, paddingBottom: 16 }}>
-        {devices.length > 1 ? (
+        {devices.length > 1 && !seeded ? (
           <Field label="Device">
             <View style={s.chipRow}>
               {devices.map((d) => (
@@ -264,98 +312,113 @@ export default function NewTaskScreen() {
           </Field>
         ) : null}
 
-        <Field label="Folder">
-          <Pressable
-            onPress={() => setBrowsing(true)}
-            style={({ pressed }) => [s.folderBtn, pressed && s.pressed80]}
-          >
-            <PounceIcon
-              name="folder-outline"
-              size={17}
-              color={cwd ? theme.colors.accent : theme.colors.fgFaint}
-            />
-            <View style={s.flex1}>
-              <Text numberOfLines={1} style={[s.folderLabel, cwd ? s.fgText : s.faintText]}>
-                {folderLabel ?? "Choose a folder…"}
-              </Text>
-              {cwd ? (
-                <Text numberOfLines={1} style={s.folderPath}>
-                  {cwd}
+        {seeded ? null : (
+          <Field label="Folder">
+            <Pressable
+              onPress={() => setBrowsing(true)}
+              style={({ pressed }) => [s.folderBtn, pressed && s.pressed80]}
+            >
+              <PounceIcon
+                name="folder-outline"
+                size={17}
+                color={cwd ? theme.colors.accent : theme.colors.fgFaint}
+              />
+              <View style={s.flex1}>
+                <Text numberOfLines={1} style={[s.folderLabel, cwd ? s.fgText : s.faintText]}>
+                  {folderLabel ?? "Choose a folder…"}
                 </Text>
-              ) : null}
-            </View>
-            <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} />
-          </Pressable>
+                {cwd ? (
+                  <Text numberOfLines={1} style={s.folderPath}>
+                    {cwd}
+                  </Text>
+                ) : null}
+              </View>
+              <PounceIcon name="chevron-forward" size={15} color={theme.colors.fgFaint} />
+            </Pressable>
 
-          {repos.length ? (
-            <View style={[s.chipRow, s.mt2]}>
-              {/* Quick-picks only — the 3 most recently active; the browser
+            {repos.length ? (
+              <View style={[s.chipRow, s.mt2]}>
+                {/* Quick-picks only — the 3 most recently active; the browser
                   above covers everything else. A selected repo outside the top
                   3 still shows so the choice stays visible. */}
-              {repos
-                .filter((r, i) => i < 3 || activeRepoId === r.id)
-                .map((r) => (
-                  <Chip
-                    key={r.id}
-                    active={activeRepoId === r.id}
-                    onPress={() => pickRepo(r.id)}
-                    label={r.name}
-                  />
-                ))}
-            </View>
-          ) : null}
-        </Field>
-
-        <Field label="Agent">
-          <View style={s.chipRow}>
-            {availAgents.map((a) => (
-              <Pressable
-                key={a}
-                onPress={() => setAgent(a)}
-                style={[s.agentPill, agent === a ? s.pillActive : s.pillIdle]}
-              >
-                <AgentLogo agent={a} size={14} />
-                <Text style={[s.pillText, agent === a ? s.accentText : s.mutedText]}>
-                  {agentLabel(a)}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </Field>
+                {repos
+                  .filter((r, i) => i < 3 || activeRepoId === r.id)
+                  .map((r) => (
+                    <Chip
+                      key={r.id}
+                      active={activeRepoId === r.id}
+                      onPress={() => pickRepo(r.id)}
+                      label={r.name}
+                    />
+                  ))}
+              </View>
+            ) : null}
+          </Field>
+        )}
+        {/* No Agent field. It moved into the composer's model sheet — an agent
+            and its model are one decision, and the rest of the app already
+            makes it there. */}
       </ScrollView>
 
-      {/* Same composer as the session view — mode / effort / image / slash */}
-      <View style={[s.footer, { paddingBottom: insets.bottom + 8 }]}>
-        {agent === "claude" ? (
-          <Pressable
-            onPress={() => setInteractive((v) => !v)}
-            style={({ pressed }) => [
-              s.interactiveBtn,
-              interactive ? s.interactiveActive : s.interactiveIdle,
-              pressed && s.pressed80,
-            ]}
-          >
-            <PounceIcon
-              name={interactive ? "flash" : "flash-outline"}
-              size={13}
-              color={interactive ? theme.colors.accent : theme.colors.fgMuted}
-            />
-            <Text style={[s.interactiveText, interactive ? s.accentText : s.mutedText]}>
-              Interactive{interactive ? " · answerable prompts" : ""}
-            </Text>
-          </Pressable>
-        ) : null}
-        <Composer
-          ref={composerRef}
-          onDraftChange={(text) => updateDraft(draftId, { text })}
-          agent={agent}
-          caps={caps}
-          hostId={hostId}
-          cwd={cwd}
-          placeholder="Describe the task… e.g. Add idempotent retry to the webhook handler"
-          onSubmit={launch}
-        />
-      </View>
+      {/* Same composer as the session view — mode / effort / image / slash.
+          `ChatKeyboardSticky` cancels the bottom safe-area inset once the
+          keyboard covers it, which is exactly what `footerPad` adds.
+
+          The padding goes on an inner View, not on the sticky itself: the
+          sticky is a Reanimated animated view and a unistyles style proxy
+          reaches it unresolved ("Invalid value for unistyles_…: an empty
+          object is not a valid style value"). Same trap kav.ios.ts documents. */}
+      <ChatKeyboardSticky>
+        <View style={[s.footer, s.footerPad]}>
+          {agent === "claude" ? (
+            <Pressable
+              onPress={() => setInteractive((v) => !v)}
+              style={({ pressed }) => [
+                s.interactiveBtn,
+                interactive ? s.interactiveActive : s.interactiveIdle,
+                pressed && s.pressed80,
+              ]}
+            >
+              <PounceIcon
+                name={interactive ? "flash" : "flash-outline"}
+                size={13}
+                color={interactive ? theme.colors.accent : theme.colors.fgMuted}
+              />
+              <Text style={[s.interactiveText, interactive ? s.accentText : s.mutedText]}>
+                Interactive{interactive ? " · answerable prompts" : ""}
+              </Text>
+            </Pressable>
+          ) : null}
+          <Composer
+            ref={composerRef}
+            // The same control Session uses — and here it carries the agent too.
+            model={{
+              label: model ? shortModel(model) : agentLabel(agent),
+              onPress: () => setModelSheet(true),
+            }}
+            onDraftChange={(text) => updateDraft(draftId, { text })}
+            agent={agent}
+            caps={caps}
+            hostId={hostId}
+            cwd={cwd}
+            placeholder="Describe the task… e.g. Add idempotent retry to the webhook handler"
+            onSubmit={launch}
+          />
+        </View>
+      </ChatKeyboardSticky>
+
+      <ModelSheet
+        visible={modelSheet}
+        hostId={hostId ?? ""}
+        agent={agent}
+        current={model}
+        agents={{ available: availAgents, current: agent, onSelect: pickAgent }}
+        onSelect={(id) => {
+          setModel(id);
+          setModelSheet(false);
+        }}
+        onClose={() => setModelSheet(false)}
+      />
 
       <FolderBrowser
         hostId={hostId}
@@ -368,7 +431,7 @@ export default function NewTaskScreen() {
           setBrowsing(false);
         }}
       />
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -389,9 +452,12 @@ function Chip({ label, active, onPress }: { label: string; active: boolean; onPr
   );
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  footerPad: { paddingBottom: rt.insets.bottom + 8 },
   emptyTitle: { fontSize: 17, fontWeight: "600", color: theme.colors.fg },
   root: { flex: 1, backgroundColor: theme.colors.bg },
+  rootPad: { paddingTop: 8 },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",

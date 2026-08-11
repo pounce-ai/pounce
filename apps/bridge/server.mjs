@@ -52,6 +52,7 @@ import {
   isInteractive,
   sendInput,
 } from "./agents/pty-turn.mjs";
+import { ptyNative } from "./agents/pty.mjs";
 import { agentEnv, binPath, binVersion, primaryLanIp } from "./agents/env.mjs";
 import { publicConfig, readConfig, writeConfig } from "./agents/config.mjs";
 import { LEGACY_TOKEN, bridgeToken, legacyAllows, tokenMatches } from "./agents/token.mjs";
@@ -3057,6 +3058,15 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
         console.log(`Pounce Bridge listening on ${pairUrl}`);
         console.log(`  token: ${TOKEN}`);
         console.log("  agents: native host");
+        // Say out loud whether we got a real TTY. The pipe fallback is a silent
+        // downgrade — interactive/answerable sessions still "work" but TUIs
+        // don't render and SSH add-machine refuses to run — and it once shipped
+        // undetected in the packaged app for want of exactly this line.
+        console.log(
+          ptyNative
+            ? "  pty: native (real TTY)"
+            : "  pty: pipe fallback — no native addon, interactive sessions degrade",
+        );
         console.log("\n  📲 Scan with your iPhone Camera to pair Pounce:\n");
         qrcode.generate(deepLink, { small: true });
         console.log(`\n  …or open this link on the device:\n  ${deepLink}\n`);

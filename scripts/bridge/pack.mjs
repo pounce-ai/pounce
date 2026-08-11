@@ -87,13 +87,21 @@ if (existsSync(sdkSrc)) {
 // 3b. zigpty — the PTY host for interactive (answerable) sessions. Statically
 //     imported by the launcher but kept external (native N-API .node prebuilds),
 //     so ship it as a sibling package the launcher's `import "zigpty"` resolves.
+//     The whole package is copied, prebuilds/ included, so zigpty's own
+//     `../prebuilds/` lookup keeps working from the packed location — this
+//     bundle is interpreted, not `bun --compile`d, so it never hit the missing-
+//     addon bug that bit the desktop app.
 const zigptySrc = path.join(REPO, "node_modules/zigpty");
-if (existsSync(zigptySrc)) {
-  step("Copying zigpty (native PTY)");
-  cpSync(zigptySrc, path.join(OUT, "node_modules/zigpty"), { recursive: true });
-} else {
-  console.warn(`  ! zigpty not found — interactive PTY sessions will be unavailable`);
+if (!existsSync(zigptySrc)) {
+  // Fail, don't warn. Without zigpty the bridge boots fine and quietly runs
+  // every interactive session through a pipe; a warning in a build log is not
+  // how anyone should find that out.
+  console.error(`  ✗ zigpty not found at ${zigptySrc} — run \`bun install\` first.`);
+  console.error(`    Refusing to pack a bridge with no real PTY.`);
+  process.exit(1);
 }
+step("Copying zigpty (native PTY)");
+cpSync(zigptySrc, path.join(OUT, "node_modules/zigpty"), { recursive: true });
 
 // 4. Install/uninstall scripts + README.
 step("Adding install scripts");

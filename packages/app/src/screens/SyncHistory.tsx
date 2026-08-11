@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PounceIcon } from "../ui/native/Icon";
 import type { SyncLogEntry } from "../state/stores";
 import { useDevices, useSyncLog } from "../state/db/hooks";
@@ -56,7 +55,6 @@ function groupByDay(log: SyncLogEntry[]): DaySection[] {
 }
 
 export default function SyncHistoryScreen() {
-  const insets = useSafeAreaInsets();
   const { theme } = useUnistyles();
   const rows = useSyncLog();
   const devices = useDevices();
@@ -77,10 +75,7 @@ export default function SyncHistoryScreen() {
           </Text>
         </View>
       ) : (
-        <ScrollView
-          style={s.scroll}
-          contentContainerStyle={{ paddingTop: 4, paddingBottom: insets.bottom + 24, gap: 18 }}
-        >
+        <ScrollView style={s.scroll} contentContainerStyle={s.listPad}>
           {sections.map((section) => (
             <View key={section.label} style={s.section}>
               <Text style={s.sectionLabel}>{section.label}</Text>
@@ -123,7 +118,9 @@ export default function SyncHistoryScreen() {
   );
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  listPad: { paddingTop: 4, paddingBottom: rt.insets.bottom + 24, gap: 18 },
   root: { flex: 1, backgroundColor: theme.colors.bg },
   headerRow: {
     flexDirection: "row",

@@ -196,6 +196,14 @@ export function startAcpTurn(
     const found = binOverride("codex") || resolveBin("codex", env);
     if (found) env.CODEX_PATH = found;
   }
+  // The requested model. `model` was accepted on the wire and then dropped on
+  // the floor here, so every LIVE turn ran on the agent's default however the
+  // app's picker was set — the stream-json path pushes `--model`, but nothing
+  // in ACP did the same. There is no CLI flag to push: the adapter is a
+  // long-lived child speaking JSON-RPC, so the model goes in its environment,
+  // which is what the SDK behind it reads. `session/set_model` below covers
+  // adapters that support choosing per session.
+  if (model && agent === "claude") env.ANTHROPIC_MODEL = model;
   // Track whether anything streamed to the app: a failure BEFORE any output
   // means the adapter itself is broken (missing runtime dep, bad install) —
   // that class rejects `done` so the host falls back to the agent's classic
@@ -373,6 +381,16 @@ export function startAcpTurn(
           modeId: ACP_MODE[permissionMode] || "default",
         });
       } catch {}
+      // Same shape for the model, and best-effort for the same reason: adapters
+      // that predate session/set_model reject it, and those are exactly the ones
+      // the ANTHROPIC_MODEL env above already covers. Belt and braces on purpose
+      // — this is the setting a user can SEE on the pill, so it must not be a
+      // silent no-op again.
+      if (model) {
+        try {
+          await ctx.request("session/set_model", { sessionId: realThreadId, modelId: model });
+        } catch {}
+      }
       const content = [{ type: "text", text }];
       for (const img of images || []) {
         if (img?.data)

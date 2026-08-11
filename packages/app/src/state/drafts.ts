@@ -30,7 +30,37 @@ persist(drafts$, "pounce.drafts");
 /** `draft_` rather than `new_`: the optimistic-send placeholder in ./stores
  *  already owns that prefix, and these two must never be confused — one is a
  *  thread being born, the other is a thread that may never exist. */
-const nextId = () => `draft_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+export const nextDraftId = () =>
+  `draft_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+const nextId = nextDraftId;
+
+/**
+ * Create a draft under an id you already chose, unless it's already there.
+ *
+ * Exists so a screen can decide its draft id during render — which has to be
+ * pure — and do the actual WRITE in an effect. Calling `newDraft()` inline was
+ * both: it minted the id and touched the store on every render, which orphaned
+ * a draft per render and, once another screen subscribed to `drafts$`, made
+ * React complain about updating one component while rendering another.
+ */
+export function ensureDraft(
+  id: string,
+  seed: Partial<Omit<Draft, "id" | "createdAt" | "updatedAt">> = {},
+): void {
+  if (drafts$[id].peek()) return;
+  const now = new Date().toISOString();
+  drafts$[id].set({
+    id,
+    hostId: seed.hostId ?? null,
+    cwd: seed.cwd ?? null,
+    repoId: seed.repoId ?? null,
+    agent: seed.agent ?? null,
+    model: seed.model ?? null,
+    text: seed.text ?? "",
+    createdAt: now,
+    updatedAt: now,
+  });
+}
 
 /** Start one. Everything is optional — a draft's whole job is to hold an
  *  incomplete answer. */
@@ -42,6 +72,7 @@ export function newDraft(seed: Partial<Omit<Draft, "id" | "createdAt" | "updated
     cwd: seed.cwd ?? null,
     repoId: seed.repoId ?? null,
     agent: seed.agent ?? null,
+    model: seed.model ?? null,
     text: seed.text ?? "",
     createdAt: now,
     updatedAt: now,

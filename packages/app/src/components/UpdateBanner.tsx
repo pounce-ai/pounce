@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, AppState, Pressable, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PounceIcon } from "../ui/native/Icon";
 import * as Updates from "expo-updates";
 
@@ -18,7 +17,6 @@ const FOREGROUND_CHECK_MS = 15 * 60 * 1000;
 export function UpdateBanner() {
   const { theme } = useUnistyles();
   const { isUpdatePending } = Updates.useUpdates();
-  const insets = useSafeAreaInsets();
   const [dismissed, setDismissed] = useState(false);
   const slide = useRef(new Animated.Value(0)).current;
 
@@ -52,17 +50,19 @@ export function UpdateBanner() {
   return (
     <Animated.View
       pointerEvents="box-none"
-      style={{
-        position: "absolute",
-        left: 0,
-        right: 0,
-        bottom: insets.bottom + 60, // clear the system tab bar
-        alignItems: "center",
-        opacity: slide,
-        transform: [
-          { translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) },
-        ],
-      }}
+      // ARRAY, not a spread: a unistyles style is a proxy whose values are
+      // applied natively, and spreading it flattens that back into a plain JS
+      // object — the animation would work and the safe-area inset would stop
+      // updating itself.
+      style={[
+        s.host,
+        {
+          opacity: slide,
+          transform: [
+            { translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) },
+          ],
+        },
+      ]}
     >
       <View style={s.pill}>
         <PounceIcon name="sparkles" size={14} color={theme.colors.accent} />
@@ -85,7 +85,16 @@ export function UpdateBanner() {
   );
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Floats above the system tab bar. The offset is safe-area padding, so it
+   *  belongs in the sheet — applied natively, no re-render. */
+  host: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: rt.insets.bottom + 60,
+    alignItems: "center",
+  },
   pill: {
     flexDirection: "row",
     alignItems: "center",

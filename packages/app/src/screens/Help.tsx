@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { Linking, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PounceIcon } from "../ui/native/Icon";
 import { INPUT_TWEAKS, IS_DESKTOP } from "../ui";
 
@@ -62,7 +61,6 @@ const FAQS: Faq[] = [
 ];
 
 export default function HelpScreen() {
-  const insets = useSafeAreaInsets();
   const { theme } = useUnistyles();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<Set<number>>(new Set());
@@ -107,11 +105,7 @@ export default function HelpScreen() {
         ) : null}
       </View>
 
-      <ScrollView
-        style={s.scroll}
-        contentContainerStyle={{ paddingTop: 4, paddingBottom: insets.bottom + 24, gap: 8 }}
-        keyboardDismissMode="on-drag"
-      >
+      <ScrollView style={s.scroll} contentContainerStyle={s.listPad} keyboardDismissMode="on-drag">
         {results.length ? (
           results.map((f) => {
             const isOpen = open.has(f.i);
@@ -153,7 +147,9 @@ export default function HelpScreen() {
   );
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  listPad: { paddingTop: 4, paddingBottom: rt.insets.bottom + 24, gap: 8 },
   root: { flex: 1, backgroundColor: theme.colors.bg },
   headerRow: {
     flexDirection: "row",

@@ -1,0 +1,85 @@
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 8272f163ff3554fed4763aa2141b1f12ddf46615..fda04517b71cde1125dcdcae99341169806ff836 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -2,22 +2,73 @@ import { createRequire } from "node:module";
+ import * as os from "node:os";
+ import { arch, platform } from "node:os";
+ import { fileURLToPath } from "node:url";
++import * as nodePath from "node:path";
+ import * as fs from "node:fs";
+ import * as tty from "node:tty";
+ import { spawn as spawn$1 } from "node:child_process";
+ const isWindows = platform() === "win32";
+ const osPlatform = platform() === "android" ? "linux" : platform();
++/**
++ * POUNCE PATCH — find the addon when this module has been bundled into a
++ * single-file executable (`bun build --compile`).
++ *
++ * Upstream computes the addon path at RUNTIME from os.platform()/os.arch()
++ * inside a template literal. Bun's bundler can only embed assets it resolves
++ * STATICALLY, so it embeds none of them; at runtime `import.meta.url` points
++ * into the virtual `$bunfs`, `../prebuilds/<name>.node` resolves to a path with
++ * no file, require() throws, and the catch below turns that into `hasNative =
++ * false`. Nothing errors — every hosted PTY silently degrades to zigpty's pure
++ * JS PipePty (no real TTY), and callers that require a TTY (the SSH
++ * add-machine flow) fail with a confusing "this machine has no PTY support".
++ *
++ * So look in more places, in this order:
++ *   1. $ZIGPTY_ADDON_DIR          — explicit override, wins over everything.
++ *   2. <dirname(process.execPath)>/prebuilds  — the addon shipped BESIDE a
++ *      compiled executable (scripts/bridge/compile.mjs puts it there).
++ *   3. ../prebuilds/ relative to this module  — upstream behaviour, i.e. a
++ *      normal interpreted install out of node_modules. Unchanged.
++ *
++ * Set ZIGPTY_DEBUG=1 to print why each candidate was rejected. Failing to load
++ * the addon stays non-fatal (pipe fallback is a legitimate outcome on an
++ * unsupported platform), but it must no longer be INVISIBLE — silent
++ * degradation is exactly what let the bundling bug ship.
++ */
+ function loadNative() {
+ 	try {
+ 		const require = createRequire(import.meta.url);
+ 		const base = `zigpty.${osPlatform}-${arch()}`;
+-		const resolve = (name) => fileURLToPath(new URL(`../prebuilds/${name}.node`, import.meta.url));
+-		if (isWindows) return require(resolve(base));
+-		try {
+-			return require(resolve(base));
+-		} catch {}
+-		return require(resolve(`${base}-musl`));
+-	} catch {
++		const dirs = [];
++		if (process.env.ZIGPTY_ADDON_DIR) dirs.push(process.env.ZIGPTY_ADDON_DIR);
++		// process.execPath is the compiled binary itself under `bun --compile`
++		// (and the node/bun binary otherwise, where this dir simply won't exist).
++		if (process.execPath) dirs.push(nodePath.join(nodePath.dirname(process.execPath), "prebuilds"));
++		dirs.push(fileURLToPath(new URL("../prebuilds/", import.meta.url)));
++		const failures = [];
++		const attempt = (dir, name) => {
++			const file = nodePath.join(dir, `${name}.node`);
++			try {
++				return require(file);
++			} catch (err) {
++				failures.push(`${file}: ${err && err.message ? err.message : err}`);
++				return null;
++			}
++		};
++		for (const dir of dirs) {
++			const hit = attempt(dir, base);
++			if (hit) return hit;
++			// glibc build first, then the musl one — same order as upstream, and
++			// still skipped on Windows where no -musl prebuild exists.
++			if (isWindows) continue;
++			const musl = attempt(dir, `${base}-musl`);
++			if (musl) return musl;
++		}
++		if (process.env.ZIGPTY_DEBUG) {
++			console.error(`[zigpty] no native addon for ${base}; falling back to pipes:`);
++			for (const f of failures) console.error(`[zigpty]   ${f}`);
++		}
++		return null;
++	} catch (err) {
++		if (process.env.ZIGPTY_DEBUG) console.error(`[zigpty] addon load failed:`, err);
+ 		return null;
+ 	}
+ }

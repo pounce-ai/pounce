@@ -1,18 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // eslint-disable-next-line @react-native/no-deprecated-api -- core Clipboard is
 // the only clipboard already inside shipped binaries (OTA-safe).
-import {
-  ActionSheetIOS,
-  ActivityIndicator,
-  Clipboard,
-  Pressable,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { ActivityIndicator, Clipboard, Pressable, Text, TextInput, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Platform } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeIn, FadeOut, ZoomIn, ZoomOut } from "../components/animation";
 import {
   ChatKeyboardSticky,
@@ -217,7 +208,6 @@ export default function SessionScreen() {
   // and visibly blank the timeline right as the reply finishes.
   const rekeyedId = useSelector(() => rekeyedThreadIds$[routeId!].get());
   const id = rekeyedId ?? routeId;
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { theme } = useUnistyles();
   const [sending, setSending] = useState(false);
@@ -713,7 +703,9 @@ export default function SessionScreen() {
         const next = toggleMarker(id!, ev, session?.agent);
         if (host) void pushMarker(host, id!, ev.id, next);
       };
-      // Desktop has no ActionSheetIOS — long-press toggles the marker directly.
+      // Desktop skips the menu entirely — long-press toggles the marker
+      // directly, since a two-item NSAlert for one verb is more chrome than
+      // choice.
       if (DESKTOP) {
         toggle();
         return;
@@ -722,14 +714,12 @@ export default function SessionScreen() {
       const text = "text" in ev ? (ev as { text?: string }).text : undefined;
       const options = [marked ? "Remove marker" : "Add marker"];
       if (text) options.push("Copy text");
-      options.push("Cancel");
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options, cancelButtonIndex: options.length - 1 },
-        (i) => {
-          if (i === 0) toggle();
-          else if (i === 1 && text) Clipboard.setString(text);
-        },
-      );
+      // pickSheet, not ActionSheetIOS: the latter is iOS-only and this menu
+      // simply never opened on Android. It appends its own cancel affordance.
+      pickSheet(undefined, options, (i) => {
+        if (i === 0) toggle();
+        else if (i === 1 && text) Clipboard.setString(text);
+      });
     },
     [id, host, session?.agent],
   );
@@ -738,7 +728,9 @@ export default function SessionScreen() {
   // Composer restores the user's draft); once the host has the turn, failures
   // in streaming/refetching are swallowed and sync catches up.
   const runTurn = useCallback(
-    async (s: ComposerSubmit) => {
+    // `model` only ever arrives on the FIRST turn, handed over by the New
+    // screen — see PendingTurn.model for why it can't come from the store yet.
+    async (s: ComposerSubmit & { model?: string | null }) => {
       if (!session) return;
       if (live) {
         const optimistic: TimelineEvent = {
@@ -814,7 +806,7 @@ export default function SessionScreen() {
               reasoningEffort: effectiveCaps(session.agent, capsFor(session.agent)).thinking
                 ? effort
                 : undefined,
-              model: modelForThread(session.id),
+              model: s.model ?? modelForThread(session.id),
             },
           ));
         } catch (err) {
@@ -1123,7 +1115,7 @@ export default function SessionScreen() {
             tab strip carries search and "…". A header here would just say all
             of it a second time. Only the find-in-thread bar remains, and only
             while it's open. */}
-        <View style={[s.header, DESKTOP ? s.headerDesktop : { paddingTop: insets.top }]}>
+        <View style={[s.header, DESKTOP ? s.headerDesktop : s.headerPad]}>
           {!DESKTOP ? (
             <View style={s.headerRow}>
               {/* Desktop's sidebar is always visible — a back button has nothing
@@ -1517,7 +1509,7 @@ export default function SessionScreen() {
             {/* Fades the transcript out as it slides under the composer,
                 instead of it being cut off against the opaque bar. */}
             {COMPOSER_OVERLAYS_LIST ? <ComposerScrim /> : null}
-            <View style={[s.composerBar, { paddingBottom: insets.bottom + 8 }]}>
+            <View style={[s.composerBar, s.composerBarPad]}>
               <View style={DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }}>
                 {!canSteer ? (
                   <Text style={s.archivedNote}>
@@ -1640,7 +1632,10 @@ const ANIM = {
   },
 } as const;
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  headerPad: { paddingTop: rt.insets.top },
+  composerBarPad: { paddingBottom: rt.insets.bottom + 8 },
   /** The transcript and the turn rail side by side. The wrapper above this is a
    *  column (it also holds the absolutely-positioned loading overlay), so
    *  without its own row the rail stacked under a flex-1 list and got no

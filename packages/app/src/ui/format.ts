@@ -4,8 +4,16 @@
  * identically wherever they appear.
  */
 
-/** 165_000_000 → "165M", 1_200_000 → "1.2M", 845_000 → "845K", 900 → "900". */
-export function fmtTokens(n: number): string {
+/**
+ * 165_000_000 → "165M", 1_200_000 → "1.2M", 845_000 → "845K", 900 → "900".
+ *
+ * Not tokens-specific despite the name every call site knows it by — it is the
+ * app's compact number, and `fmtTokens` is the alias the usage surfaces read
+ * better with. Chart axes use it for counts too: a tick reading "40,000" is
+ * three characters of precision nobody reads off an axis, and it was wide
+ * enough to push the plot away from its own card.
+ */
+export function fmtCompact(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0";
   if (n >= 1_000_000_000) {
     const b = n / 1_000_000_000;
@@ -17,6 +25,14 @@ export function fmtTokens(n: number): string {
   }
   if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
   return `${Math.round(n)}`;
+}
+
+export const fmtTokens = fmtCompact;
+
+/** A dollar figure for an AXIS: "$7K" where the readout would say "$7,027". */
+export function fmtCostCompact(cost: number): string {
+  if (!Number.isFinite(cost) || cost <= 0) return "$0";
+  return cost >= 1_000 ? `$${fmtCompact(cost)}` : fmtCost(cost);
 }
 
 /** "$6.20", "$0.05", or "<$0.01" for tiny non-zero costs. Large figures lose
@@ -66,4 +82,16 @@ export function fmtDayLabel(date: string): string {
 /** Month abbreviation for a `YYYY-MM-DD` key — the heatmap's column labels. */
 export function monthOf(date: string): string {
   return fmtDayLabel(date).split(" ")[0];
+}
+
+/**
+ * "2026-08-01" → "Aug '26" — a month bucket on the year chart.
+ *
+ * Carries the year, which `monthOf` doesn't need to: the heatmap's columns are
+ * one year read left to right, but a 12-month window runs Aug→Aug, and an axis
+ * labelled "Aug" at both ends says nothing about which is which.
+ */
+export function fmtMonthLabel(date: string): string {
+  const year = date.slice(2, 4);
+  return year ? `${monthOf(date)} '${year}` : monthOf(date);
 }

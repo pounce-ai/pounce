@@ -48,6 +48,7 @@ import SettingsScreen from "@pounce/app/screens/Settings";
 import SettingsDevicesScreen from "@pounce/app/screens/settings/Devices";
 import SettingsAppearanceScreen from "@pounce/app/screens/settings/Appearance";
 import SettingsSpendScreen from "@pounce/app/screens/settings/Spend";
+import SettingsInboxScreen from "@pounce/app/screens/settings/Inbox";
 import DashboardScreen from "@pounce/app/screens/Dashboard";
 import NewTaskScreen from "@pounce/app/screens/New";
 import ContextScreen from "@pounce/app/screens/Context";
@@ -63,14 +64,25 @@ import AccessScreen from "../screens/Access";
 import SpaceScreen from "@pounce/app/screens/Space";
 import MetricScreen from "@pounce/app/screens/Metric";
 import { FilterSheetContent } from "@pounce/app/components/FilterSheet";
-import { SETTINGS_ROUTES, settingsHref } from "@pounce/app/screens/settings/routes";
+import {
+  SETTINGS_ROUTES,
+  settingsHref,
+  type SettingsRoute,
+} from "@pounce/app/screens/settings/routes";
 
 /** The settings sub-screens as modal entries — titles and sizes come from the
- *  manifest the mobile stack also reads, so the two can't disagree. */
-const SETTINGS_SCREENS: Record<string, ComponentType> = {
+ *  manifest the mobile stack also reads, so the two can't disagree.
+ *
+ *  Keyed by the route name rather than `string`: this map was missing `inbox`
+ *  for a while, and because a `Record<string, …>` lookup just returns undefined,
+ *  `/settings/inbox` opened an empty card instead of failing anywhere a type
+ *  checker or a test could see it. Now a new route without a screen is a build
+ *  error. */
+const SETTINGS_SCREENS: Record<SettingsRoute["name"], ComponentType> = {
   devices: SettingsDevicesScreen,
   appearance: SettingsAppearanceScreen,
   spend: SettingsSpendScreen,
+  inbox: SettingsInboxScreen,
 };
 
 function settingsModals(): Record<string, ModalEntry> {

@@ -9,7 +9,6 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import { PounceIcon } from "../ui/native/Icon";
@@ -65,7 +64,6 @@ type Draft =
  */
 export default function ContextScreen() {
   const params = useLocalSearchParams<{ repoId?: string; hostId?: string; cwd?: string }>();
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { theme } = useUnistyles();
   const { height } = useWindowDimensions();
@@ -290,10 +288,7 @@ export default function ContextScreen() {
         </View>
       ) : null}
 
-      <ScrollView
-        style={s.scroll}
-        contentContainerStyle={[s.scrollContent, { paddingBottom: insets.bottom + 110 }]}
-      >
+      <ScrollView style={s.scroll} contentContainerStyle={[s.scrollContent, s.scrollPad]}>
         {loading ? (
           <ActivityIndicator style={s.spinner} color={theme.colors.fgMuted} />
         ) : !target ? (
@@ -377,7 +372,7 @@ export default function ContextScreen() {
       </ScrollView>
 
       {comments.length ? (
-        <View style={[s.footer, { paddingBottom: insets.bottom + 12 }]}>
+        <View style={[s.footer, s.footerPad]}>
           <Pressable onPress={() => setShowNotes((v) => !v)} style={s.notesToggle} hitSlop={6}>
             <PounceIcon
               name={showNotes ? "chevron-down" : "chevron-up"}
@@ -428,7 +423,7 @@ export default function ContextScreen() {
           </Text>
         </View>
       ) : file && !searching ? (
-        <Text style={[s.selectHint, { paddingBottom: insets.bottom + 10 }]}>
+        <Text style={[s.selectHint, s.selectHintPad]}>
           {IS_DESKTOP
             ? "Tap the speech bubble to leave a note for the agent."
             : "Select any text to comment on it."}
@@ -515,7 +510,11 @@ function Empty({
   );
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  scrollPad: { paddingBottom: rt.insets.bottom + 110 },
+  footerPad: { paddingBottom: rt.insets.bottom + 12 },
+  selectHintPad: { paddingBottom: rt.insets.bottom + 10 },
   root: { flex: 1, backgroundColor: theme.colors.bg },
   flex1: { flex: 1 },
   headerRow: {

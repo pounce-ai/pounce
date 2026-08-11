@@ -94,10 +94,15 @@ export function Sidebar() {
     device: filters$.device.get(),
     agent: filters$.agent.get(),
     repos: filters$.repos.get(),
-    needsOnly: filters$.needsOnly.get(),
+    show: filters$.show.get(),
     favOnly: filters$.favOnly.get(),
   }));
-  const filtersActive = !!(f.device || f.agent || f.repos.length || f.needsOnly || f.favOnly);
+  /** The sidebar has its own Needs-you and Settled shelves, so it reads only
+   *  one thing from the Show buckets: whether the user asked to see NOTHING but
+   *  what's waiting on them. The archive bucket is the phone's way of reaching
+   *  something the sidebar always shows. */
+  const needsOnly = f.show.length === 1 && f.show[0] === "needs";
+  const filtersActive = !!(f.device || f.agent || f.repos.length || needsOnly || f.favOnly);
   const deviceList = useDevices();
   const threads = useThreads();
   const projectNames = useProjectNames();
@@ -117,9 +122,9 @@ export function Sidebar() {
       ignored,
       repoName: (id) => projectNames[id] ?? id,
     });
-    if (f.needsOnly && list.some(needsYou)) list = list.filter(needsYou);
+    if (needsOnly && list.some(needsYou)) list = list.filter(needsYou);
     return list;
-  }, [threads, projectNames, ignored, f]);
+  }, [threads, projectNames, ignored, f, needsOnly]);
 
   // Spaces are derived from every visible session, not the space-narrowed list —
   // otherwise selecting one would delete the others from the sidebar.

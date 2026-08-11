@@ -1,17 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  Platform,
-  Pressable,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useDevices } from "../state/db/hooks";
 import { ConnectFlow } from "../components/ConnectFlow";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import { PounceIcon } from "../ui/native/Icon";
@@ -21,6 +12,8 @@ import { applyFilters, filters$, rankSession } from "../state/stores";
 import { useFavThreadSet, useIgnoredSet, useProjectNames, useThreads } from "../state/db/hooks";
 import { SessionCard } from "../components/SessionCard";
 import { FilterButton, FilterSheet } from "../components/FilterSheet";
+import { ScreenRoot } from "../components/ScreenRoot";
+import { TabHeaderIcon } from "../components/TabHeaderIcon";
 import { IS_DESKTOP } from "../ui";
 import { searchQuery$ } from "../state/search";
 
@@ -34,7 +27,6 @@ const FILL = { flex: 1 } as const;
 
 /** Full-screen thread search — matches title, branch, host, agent, repo. */
 export default function SearchScreen() {
-  const insets = useSafeAreaInsets();
   const devices = useDevices();
   const { theme } = useUnistyles();
   // Desktop's sidebar seeds the modal via /search?q=… — start searching
@@ -158,16 +150,10 @@ export default function SearchScreen() {
     ),
     [],
   );
-  const listContentStyle = useMemo(
-    () => ({
-      paddingTop: Platform.OS === "android" ? 16 : 4,
-      paddingBottom: insets.bottom + 16,
-    }),
-    [insets.bottom],
-  );
 
   return (
-    <View style={[s.root, IS_DESKTOP ? { paddingTop: insets.top } : undefined]}>
+    <ScreenRoot style={[s.root, s.rootPad]}>
+      <TabHeaderIcon sf="magnifyingglass" md="search" />
       {/* Mobile's filter button lives in the navigation bar (search/_layout
           headerRight) — a row here would hide under the transparent
           large-title header, which only insets the FlatList below. Desktop
@@ -281,13 +267,13 @@ export default function SearchScreen() {
         }
         // Android ignores contentInsetAdjustmentBehavior (iOS-only), so the
         // list needs real top padding below the in-flow toolbar + search bar.
-        contentContainerStyle={listContentStyle}
+        contentContainerStyle={s.listPad}
       />
 
       {IS_DESKTOP ? (
         <FilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
       ) : null}
-    </View>
+    </ScreenRoot>
   );
 }
 
@@ -333,7 +319,11 @@ function MessageHitRow({
   );
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  listPad: { paddingTop: 4, paddingBottom: rt.insets.bottom + 16 },
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  rootPad: { paddingTop: rt.insets.top },
   root: { flex: 1, backgroundColor: theme.colors.bg },
   desktopHeader: {
     flexDirection: "row",

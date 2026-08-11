@@ -1964,6 +1964,9 @@ export async function startInteractive(
   text: string,
   cwd: string | null,
   threadId?: string,
+  /** Only on the FIRST call, which spawns the PTY — the model is fixed for the
+   *  life of that session, so follow-ups into an existing thread omit it. */
+  model?: string | null,
 ): Promise<string | null> {
   const cfg = await deviceForHost(hostId);
   if (!cfg) return null;
@@ -1971,7 +1974,7 @@ export async function startInteractive(
     const res = await fetch(`${await bridgeBase(cfg)}/v1/session/interactive`, {
       method: "POST",
       headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
-      body: JSON.stringify({ text, cwd, threadId }),
+      body: JSON.stringify({ text, cwd, threadId, model }),
     });
     const j = (await res.json()) as { threadId?: string };
     return j.threadId ?? null;

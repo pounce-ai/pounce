@@ -1,6 +1,5 @@
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LegendList } from "@legendapp/list/react-native";
 import { useRouter } from "expo-router";
 import { useSessionsByLastActive } from "../state/db/hooks";
@@ -13,12 +12,11 @@ import { IS_DESKTOP } from "../ui";
  * strip's header; the counterpart to Home's folder-grouped view.
  */
 export default function SessionsScreen() {
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const sessions = useSessionsByLastActive();
 
   return (
-    <View style={[s.root, IS_DESKTOP ? { paddingTop: insets.top + 8 } : { paddingTop: 8 }]}>
+    <View style={[s.root, s.rootPad]}>
       {/* Mobile shows the native modal navigation bar; this row is desktop chrome. */}
       {IS_DESKTOP ? (
         <View style={s.headerRow}>
@@ -50,14 +48,17 @@ export default function SessionsScreen() {
           )}
           estimatedItemSize={104}
           keyboardDismissMode="on-drag"
-          contentContainerStyle={{ paddingTop: 4, paddingBottom: insets.bottom + 24 }}
+          contentContainerStyle={s.listPad}
         />
       )}
     </View>
   );
 }
 
-const s = StyleSheet.create((theme) => ({
+const s = StyleSheet.create((theme, rt) => ({
+  /** Safe-area padding in the sheet — applied natively, no re-render. */
+  rootPad: { paddingTop: IS_DESKTOP ? rt.insets.top + 8 : 8 },
+  listPad: { paddingTop: 4, paddingBottom: rt.insets.bottom + 24 },
   root: { flex: 1, backgroundColor: theme.colors.bg },
   headerRow: {
     flexDirection: "row",

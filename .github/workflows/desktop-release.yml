@@ -51,9 +51,12 @@ jobs:
 
   # Self-contained bridge (bun --compile), Apple Silicon only. The desktop app is
   # arm64-only (ARCHS = arm64 in the Xcode project) — Intel Macs are not
-  # supported, so there is no x64 slice and nothing to lipo-fuse. `bun --compile
-  # --target=bun-darwin-arm64` bakes the target's platform/arch so the correct
-  # zigpty prebuild is embedded.
+  # supported, so there is no x64 slice and nothing to lipo-fuse.
+  #
+  # The artifact is TWO things: the executable and the prebuilds/ directory
+  # holding zigpty's native PTY addon. `bun --compile` cannot embed that addon
+  # (see scripts/bridge/compile.mjs), so it travels beside the binary and both
+  # must reach the Xcode bundling phase together.
   bridge-macos:
     runs-on: macos-15
     steps:
@@ -65,7 +68,7 @@ jobs:
       - name: Compile bridge (arm64)
         run: |
           bun run scripts/bridge/compile.mjs --target bun-darwin-arm64 --outfile "$RUNNER_TEMP/pounce-bridge-arm64"
-      - name: Smoke-test arm64 — boots with no Node
+      - name: Smoke-test arm64 — boots with no Node, and has a REAL pty
         run: |
           POUNCE_NO_CTX_INSTALL=1 BRIDGE_PORT=8137 "$RUNNER_TEMP/pounce-bridge-arm64" > /tmp/bridge-smoke.log 2>&1 &
           BP=$!
@@ -75,12 +78,23 @@ jobs:
           else
             echo "::error::bridge did not boot"; cat /tmp/bridge-smoke.log; kill $BP 2>/dev/null; exit 1
           fi
+          # The compiled binary cannot embed zigpty's addon, so this asserts the
+          # prebuilds/ sibling was found. Booting proves nothing here: without it
+          # the bridge starts perfectly happily and every PTY is a pipe.
+          if grep -q "pty: native" /tmp/bridge-smoke.log; then
+            echo "✓ native pty"
+          else
+            echo "::error::bridge has no native PTY (pipe fallback)"; cat /tmp/bridge-smoke.log; kill $BP 2>/dev/null; exit 1
+          fi
           kill $BP 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         with:
           name: bridge-macos
+          # Both paths live under runner.temp, so the artifact keeps the layout
+          # (pounce-bridge-arm64 + prebuilds/) the staging step below expects.
           path: |
             ${{ runner.temp }}/pounce-bridge-arm64
+            ${{ runner.temp }}/prebuilds
           if-no-files-found: error
 
   # Signed + notarized macOS app → DMG + Sparkle appcast.
@@ -159,7 +173,8 @@ jobs:
 
       # Hand the prebuilt arm64 bridge to the Xcode "Bundle Pounce Bridge" phase
       # via POUNCE_BRIDGE_BIN, so the phase ships the smoke-tested binary from
-      # the bridge-macos job rather than recompiling one here.
+      # the bridge-macos job rather than recompiling one here. The phase also
+      # copies the prebuilds/ sibling, so stage that beside the binary.
       - uses: actions/download-artifact@v4
         with:
           name: bridge-macos
@@ -170,6 +185,10 @@ jobs:
           mkdir -p "$(dirname "$OUT")"
           cp bridge-artifacts/pounce-bridge-arm64 "$OUT"
           chmod +x "$OUT"
+          [ -f bridge-artifacts/prebuilds/zigpty.darwin-arm64.node ] || {
+            echo "::error::bridge artifact has no zigpty prebuild — the app would have no real PTY"; exit 1
+          }
+          cp -R bridge-artifacts/prebuilds "$(dirname "$OUT")/prebuilds"
           ARCHS_FOUND="$(lipo -archs "$OUT")"
           echo "bridge archs: $ARCHS_FOUND"
           # Apple Silicon only — fail loudly if an x86_64 slice ever creeps back in.

@@ -33,7 +33,9 @@ export default function TabsLayout() {
           }
         : null)}
     >
-      <NativeTabs.Trigger name="index">
+      {/* `(home)` is a route GROUP, not a path segment: Home keeps `/`, and
+          gets its own stack for a native large title. */}
+      <NativeTabs.Trigger name="(home)">
         <NativeTabs.Trigger.Icon sf={{ default: "house", selected: "house.fill" }} md="home" />
         <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
