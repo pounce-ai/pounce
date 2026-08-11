@@ -34,7 +34,6 @@ export default function SessionsScreen() {
 
       {sessions.length === 0 ? (
         <View style={s.empty}>
-          <Text style={s.emptyEmoji}>🐾</Text>
           <Text style={s.emptyTitle}>No sessions yet</Text>
           <Text style={s.emptyBody}>
             Start a task and your sessions will show up here, most recently active first.
@@ -72,7 +71,6 @@ const s = StyleSheet.create((theme) => ({
   doneLabel: { fontSize: 15, color: theme.colors.fgMuted },
   pressed60: { opacity: 0.6 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
-  emptyEmoji: { fontSize: 40 },
   emptyTitle: {
     marginTop: 12,
     textAlign: "center",

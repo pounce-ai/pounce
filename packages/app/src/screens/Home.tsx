@@ -3,7 +3,6 @@ import {
   ActionSheetIOS,
   Animated as RNAnimated,
   Easing,
-  Modal,
   Pressable,
   RefreshControl,
   Text,
@@ -43,6 +42,7 @@ import {
 import { spaceKeyOf } from "../state/spaces";
 import { SessionCard } from "../components/SessionCard";
 import { LiveStrip } from "../components/LiveStrip";
+import { ConnectFlow } from "../components/ConnectFlow";
 import { SessionListSkeleton } from "../components/Skeleton";
 import { FilterButton, FilterSheet } from "../components/FilterSheet";
 import { DeviceIcon, IS_DESKTOP } from "../ui";
@@ -324,7 +324,7 @@ export default function HomeScreen() {
   const subtitle =
     !connected && !loading ? (
       <Text numberOfLines={1} style={s.subFaint}>
-        Tap to sync a device
+        Not connected yet
       </Text>
     ) : attentionCount > 0 ? (
       <>
@@ -357,7 +357,7 @@ export default function HomeScreen() {
           </View>
           {subtitle || filterCount ? (
             <Pressable
-              onPress={() => router.push("/settings")}
+              onPress={() => router.push(connected ? "/settings" : "/settings/devices")}
               style={({ pressed }) => [s.subtitleRow, pressed && s.pressed60]}
             >
               {subtitle}
@@ -365,19 +365,26 @@ export default function HomeScreen() {
             </Pressable>
           ) : null}
         </View>
-        <View style={s.headerActions}>
-          <FilterButton
-            active={showFilters}
-            onPress={() => (IS_DESKTOP ? setShowFilters(true) : router.push("/filters"))}
-          />
-          <Pressable
-            onPress={() => router.push("/new")}
-            style={({ pressed }) => [s.newBtn, pressed && s.pressed80]}
-          >
-            <PounceIcon name="add" size={17} color="#fff" />
-            <Text style={s.newBtnLabel}>New</Text>
-          </Pressable>
-        </View>
+        {/* Both actions need a machine: a new task has nothing to run on, and a
+            filter narrows a list that doesn't exist yet. Hidden rather than
+            disabled — a greyed control still reads as "this app is broken",
+            while their absence leaves one thing on screen to do. They return
+            the moment a device is connected. */}
+        {connected ? (
+          <View style={s.headerActions}>
+            <FilterButton
+              active={showFilters}
+              onPress={() => (IS_DESKTOP ? setShowFilters(true) : router.push("/filters"))}
+            />
+            <Pressable
+              onPress={() => router.push("/new")}
+              style={({ pressed }) => [s.newBtn, pressed && s.pressed80]}
+            >
+              <PounceIcon name="add" size={17} color="#fff" />
+              <Text style={s.newBtnLabel}>New</Text>
+            </Pressable>
+          </View>
+        ) : null}
       </View>
 
       {IS_DESKTOP ? (
@@ -416,21 +423,21 @@ export default function HomeScreen() {
             <SessionListSkeleton />
           ) : !connected ? (
             <View style={s.empty}>
-              <Text style={s.emptyEmoji}>🐾</Text>
-              <Text style={s.emptyTitle}>Connect your computer</Text>
-              <Text style={s.emptyBody}>
-                Run Pounce Bridge on your Mac and scan the code to see your agents here.
+              {/* The desktop app ships the bridge and adopts it on launch, so
+                  its only not-connected state is "that hasn't happened yet" —
+                  which fixes itself. The phone is the one with setting up to
+                  do, and ConnectFlow walks it from nothing to connected. */}
+              <Text style={s.emptyTitle}>
+                {IS_DESKTOP ? "Starting on this Mac…" : "Your agents, on your phone"}
               </Text>
-              <Pressable
-                onPress={() => router.push("/settings")}
-                style={({ pressed }) => [s.emptyCta, pressed && s.pressed80]}
-              >
-                <Text style={s.newBtnLabel}>Sync a device</Text>
-              </Pressable>
+              {IS_DESKTOP ? (
+                <Text style={s.emptyBody}>Pounce runs the agent host here. Give it a moment.</Text>
+              ) : (
+                <ConnectFlow />
+              )}
             </View>
           ) : (
             <View style={s.empty}>
-              <Text style={s.emptyEmoji}>🐾</Text>
               <Text style={s.emptyTitle}>All caught up</Text>
               <Text style={s.emptyBody}>Nothing needs you right now.</Text>
             </View>
@@ -608,9 +615,8 @@ const s = StyleSheet.create((theme) => ({
   newBtnLabel: { fontSize: 14, fontWeight: "600", color: theme.colors.onAccent },
   sessionRow: { paddingHorizontal: 16, paddingBottom: 10 },
   empty: { alignItems: "center", paddingHorizontal: 32, paddingVertical: 80 },
-  emptyEmoji: { fontSize: 40 },
   emptyTitle: {
-    marginTop: 12,
+    marginBottom: 18,
     textAlign: "center",
     fontSize: 15,
     fontWeight: "600",

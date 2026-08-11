@@ -91,12 +91,28 @@ let checking = false;
 let usageLabel = "Today — …";
 let quotaLabel = ""; // empty → the row is omitted, as on macOS
 
-/** 1_200_000 → "1.2M". Mirrors the app's fmtTokens. */
+/**
+ * 165_000_000 → "165M". Kept byte-identical to `fmtTokens` in
+ * packages/app/src/ui/format.ts — NOT imported from it, because this file is
+ * compiled into a standalone tray binary that must not pull in the React Native
+ * package's module graph.
+ *
+ * It had drifted: the old copy rendered 1M as "1.0M" and 165M as "165.0M" while
+ * every in-app surface said "1M" and "165M", so the same number read differently
+ * in the menu bar and in the window.
+ */
 function fmtTokens(n: number) {
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (n >= 1e3) return `${(n / 1e3).toFixed(0)}K`;
-  return `${n.toFixed(0)}`;
+  if (!Number.isFinite(n) || n <= 0) return "0";
+  if (n >= 1_000_000_000) {
+    const b = n / 1_000_000_000;
+    return `${b >= 100 ? Math.round(b) : b.toFixed(1).replace(/\.0$/, "")}B`;
+  }
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return `${m >= 100 ? Math.round(m) : m.toFixed(1).replace(/\.0$/, "")}M`;
+  }
+  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
+  return `${Math.round(n)}`;
 }
 
 function renderMenu() {
@@ -175,7 +191,14 @@ async function refreshReadouts() {
   token ??= (await bridgeJson("/ui", false))?.token ?? null;
   if (!token) return;
 
-  const totals = (await bridgeJson("/v1/activity?days=1"))?.totals;
+  // Two independent reads of the same loopback bridge — serialising them
+  // doubled the window in which the tray showed stale numbers.
+  const [activity, quotaRes] = await Promise.all([
+    bridgeJson("/v1/activity?days=1"),
+    bridgeJson("/v1/quota"),
+  ]);
+
+  const totals = activity?.totals;
   if (!totals) {
     token = null; // token went stale (bridge restarted) — re-fetch next tick
     return;
@@ -189,7 +212,7 @@ async function refreshReadouts() {
     line += ` · ${totals.costComplete ? "" : "~"}$${totals.cost.toFixed(2)}`;
   }
 
-  const quota = (await bridgeJson("/v1/quota"))?.quota ?? {};
+  const quota = quotaRes?.quota ?? {};
   const parts: string[] = [];
   for (const agent of Object.values<any>(quota)) {
     for (const w of agent?.windows ?? []) {

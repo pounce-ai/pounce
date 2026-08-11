@@ -3,11 +3,7 @@ import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import Svg, { Rect } from "react-native-svg";
 import { useThemeHex } from "../ui/useThemeHex";
-
-export interface Bar {
-  readonly key: string;
-  readonly value: number;
-}
+import type { Bar } from "./usageSeries";
 
 /**
  * A compact trend chart — bars only, no axes or gridlines. The point is the

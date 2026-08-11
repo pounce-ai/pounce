@@ -1,5 +1,5 @@
 import { requireNativeComponent, UIManager, View, type ViewProps } from "react-native";
-import { COLOR } from "../tokens";
+import { useColors } from "../tokens";
 import type { GlassMaterial, GlassSurfaceProps } from "./glass";
 
 export type { GlassMaterial, GlassSurfaceProps } from "./glass";
@@ -32,6 +32,7 @@ export function GlassSurface({
   cornerRadius,
   fallbackColor,
 }: GlassSurfaceProps) {
+  const COLOR = useColors();
   if (!NativeGlass) {
     return (
       <View

@@ -63,6 +63,7 @@ import {
 } from "@pounce/app/services/bridge";
 import { Toggle } from "@pounce/app/components/Toggle";
 import { COLOR } from "@pounce/app/ui";
+import { CheckGlyph } from "../shell/icons";
 
 type Step =
   | { name: "browse-peers" }
@@ -810,13 +811,7 @@ function Catalog({
 
 // --- bits ----------------------------------------------------------------------
 
-function Check({ on }: { on: boolean }) {
-  return (
-    <View style={[s.check, on && s.checkOn]}>
-      {on ? <Ionicons name="checkmark" size={13} color={COLOR.bg} /> : null}
-    </View>
-  );
-}
+const Check = ({ on }: { on: boolean }) => <CheckGlyph on={on} size={18} />;
 
 function Centered({
   icon,
@@ -1016,16 +1011,6 @@ const s = StyleSheet.create((theme) => ({
   },
   pickName: { fontSize: 13, color: theme.colors.fg },
   pickMeta: { fontSize: 11, color: theme.colors.fgFaint },
-  check: {
-    height: 18,
-    width: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  checkOn: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
 
   footer: {
     flexDirection: "row",

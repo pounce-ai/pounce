@@ -123,7 +123,9 @@ describe("our own bridge being down", () => {
   it("renders as nothing nearby, not as a thrown error", async () => {
     process.env.EXPO_PUBLIC_BRIDGE_PORT = "1"; // nothing listens here
     await expect(listPeers()).resolves.toEqual([]);
-    await expect(listAccess()).resolves.toEqual({ pending: [], grants: [] });
+    // `devices` (phones paired over the LAN) is part of the answer now, and an
+    // unreachable bridge means none of all three — not a throw.
+    await expect(listAccess()).resolves.toEqual({ pending: [], grants: [], devices: [] });
   });
 });
 

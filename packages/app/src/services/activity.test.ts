@@ -13,6 +13,7 @@ import {
   quantize,
   streaks,
   sumDays,
+  usageBreakdown,
   zeroFill,
 } from "./activity";
 
@@ -356,5 +357,71 @@ describe("costEstimated propagation", () => {
     ]);
     expect(merged.days[0].costEstimated).toBe(true);
     expect(merged.totals.costEstimated).toBe(true);
+  });
+});
+
+/**
+ * Agent and model are two axes, and a model name is not a row.
+ *
+ * Codex and opencode both run `gpt-5.5`. Flattening the per-agent model lists
+ * on the name alone collided those into one React key and rendered them as
+ * duplicates — measured on a real year of history, which had it twice.
+ */
+describe("usageBreakdown model rows", () => {
+  const usage = (total: number, models: { model: string; tokens: number; cost: number }[]) => ({
+    input: 0,
+    output: total,
+    cacheCreate: 0,
+    cacheRead: 0,
+    total,
+    models: models.map((m) => ({
+      ...m,
+      input: 0,
+      output: m.tokens,
+      cacheCreate: 0,
+      cacheRead: 0,
+      total: m.tokens,
+    })),
+  });
+
+  const sharedModel: ActivityDay = {
+    date: "2026-07-24",
+    sessions: 0,
+    messages: 0,
+    tokens: 300,
+    cost: 3,
+    byAgent: {
+      codex: {
+        tokens: 100,
+        cost: 1,
+        usage: usage(100, [{ model: "gpt-5.5", tokens: 100, cost: 1 }]),
+      },
+      opencode: {
+        tokens: 200,
+        cost: 2,
+        usage: usage(200, [{ model: "gpt-5.5", tokens: 200, cost: 2 }]),
+      },
+    },
+  };
+
+  it("keeps one row per agent for a model both of them ran", () => {
+    const out = usageBreakdown([sharedModel]);
+    const rows = out!.agents.flatMap((a) => a.models);
+    expect(rows).toHaveLength(2);
+    // The pair is the identity — the key the UI builds must be unique.
+    expect(new Set(rows.map((m) => `${m.agent}:${m.model}`)).size).toBe(2);
+  });
+
+  it("stamps the agent that ran each model", () => {
+    const rows = usageBreakdown([sharedModel])!.agents.flatMap((a) => a.models);
+    expect(rows.find((m) => m.agent === "codex")?.tokens).toBe(100);
+    expect(rows.find((m) => m.agent === "opencode")?.tokens).toBe(200);
+  });
+
+  it("still merges one agent's own model across days", () => {
+    const second: ActivityDay = { ...sharedModel, date: "2026-07-25" };
+    const rows = usageBreakdown([sharedModel, second])!.agents.flatMap((a) => a.models);
+    expect(rows).toHaveLength(2);
+    expect(rows.find((m) => m.agent === "codex")?.tokens).toBe(200);
   });
 });

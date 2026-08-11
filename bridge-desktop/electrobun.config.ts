@@ -66,18 +66,17 @@ export default {
     exitOnLastWindowClosed: false,
   },
   build: {
+    // No `views`: the window loads the BRIDGE's own pairing page over http
+    // (see src/bun/index.ts), so there is no webview bundle to build. The copy
+    // table below still populates views/ with the binaries and icons the bun
+    // process resolves at runtime.
     bun: { entrypoint: "src/bun/index.ts" },
-    views: {
-      mainview: { entrypoint: "src/mainview/index.ts" },
-    },
     copy: {
       // pounce-tunnel (iroh p2p, off-LAN access) — built per-platform by CI
       // into assets/; absent in plain local dev builds, hence the guard.
       ...(existsSync("assets/pounce-tunnel") ? { "assets/pounce-tunnel": "views/pounce-tunnel" } : {}),
       // zigpty's native PTY addon for this host — see zigptyPrebuilds() above.
       ...zigptyPrebuilds(),
-      "src/mainview/index.html": "views/mainview/index.html",
-      "src/mainview/index.css": "views/mainview/index.css",
       "assets/tray.png": "views/tray.png",
       // Full-color tray icon for Windows/Linux, where macOS template rendering
       // doesn't exist and the dark template glyph would disappear.

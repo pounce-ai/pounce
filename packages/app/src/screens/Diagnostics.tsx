@@ -203,9 +203,13 @@ export default function DiagnosticsScreen() {
       <View style={s.headerRow}>
         <Text style={s.headerTitle}>Diagnostics</Text>
         <View style={s.headerActions}>
-          <Pressable onPress={load} style={({ pressed }) => pressed && s.pressed60}>
-            <PounceIcon name="refresh" size={18} color={theme.colors.fgMuted} />
-          </Pressable>
+          {/* Nothing to re-read with no machine paired — the button would
+              return instantly having done nothing. */}
+          {devices.length ? (
+            <Pressable onPress={load} style={({ pressed }) => pressed && s.pressed60}>
+              <PounceIcon name="refresh" size={18} color={theme.colors.fgMuted} />
+            </Pressable>
+          ) : null}
           <Pressable onPress={() => router.back()} style={({ pressed }) => pressed && s.pressed60}>
             <Text style={s.doneLabel}>Done</Text>
           </Pressable>
@@ -215,6 +219,17 @@ export default function DiagnosticsScreen() {
       {loading ? (
         <View style={s.center}>
           <ActivityIndicator color={theme.colors.accent} />
+        </View>
+      ) : !devices.length ? (
+        // A diagnosis of a machine that was never paired would be fiction — and
+        // the Node.js advice below sent first-run users to install Node for a
+        // host that doesn't exist yet.
+        <View style={s.empty}>
+          <PounceIcon name="medkit-outline" size={34} color={theme.colors.fgFaint} />
+          <Text style={s.emptyTitle}>No machine to check</Text>
+          <Text style={s.emptyBody}>
+            Pair a computer and this shows what&apos;s installed on it.
+          </Text>
         </View>
       ) : !report ? (
         <View style={s.empty}>

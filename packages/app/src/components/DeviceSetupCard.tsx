@@ -9,6 +9,7 @@
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { PounceIcon } from "../ui/native/Icon";
+import { SettingsCard } from "./settings/primitives";
 import { INPUT_TWEAKS } from "../ui";
 
 export interface DeviceSetupCardProps {
@@ -38,83 +39,79 @@ export function DeviceSetupCard({
 }: DeviceSetupCardProps) {
   const { theme } = useUnistyles();
   return (
-    <View style={s.card}>
-      <Text style={s.cardTitle}>Pair a device</Text>
-      <Text style={s.cardBody}>
-        On your computer, show its pairing code, then scan it here. Once paired, your sessions sync
-        automatically.
-      </Text>
-      <Pressable
-        onPress={onScan}
-        disabled={busy}
-        style={({ pressed }) => [s.scanBtn, busy && s.disabled50, pressed && s.pressed90]}
-      >
-        <PounceIcon name="qr-code-outline" size={18} color={theme.colors.onAccent} />
-        <Text style={s.scanText}>Scan pairing code</Text>
-      </Pressable>
-      <Pressable
-        onPress={() => setManual((m) => !m)}
-        style={({ pressed }) => [s.manualToggle, pressed && s.pressed60]}
-      >
-        <Text style={s.manualToggleText}>
-          {manual ? "Hide manual entry" : "Enter code manually"}
+    <SettingsCard>
+      <View style={s.body}>
+        <Text style={s.cardTitle}>Pair a device</Text>
+        <Text style={s.cardBody}>
+          On your computer, show its pairing code, then scan it here. Once paired, your sessions
+          sync automatically.
         </Text>
-      </Pressable>
+        <Pressable
+          onPress={onScan}
+          disabled={busy}
+          style={({ pressed }) => [s.scanBtn, busy && s.disabled50, pressed && s.pressed90]}
+        >
+          <PounceIcon name="qr-code-outline" size={18} color={theme.colors.onAccent} />
+          <Text style={s.scanText}>Scan pairing code</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setManual((m) => !m)}
+          style={({ pressed }) => [s.manualToggle, pressed && s.pressed60]}
+        >
+          <Text style={s.manualToggleText}>
+            {manual ? "Hide manual entry" : "Enter code manually"}
+          </Text>
+        </Pressable>
 
-      {manual ? (
-        <View style={s.manualSection}>
-          <Text style={s.fieldLabel}>Address</Text>
-          <TextInput
-            {...INPUT_TWEAKS}
-            value={url}
-            onChangeText={setUrl}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-            placeholder="http://192.168.1.6:8099"
-            placeholderTextColor={theme.colors.fgFaint}
-            style={s.input}
-          />
-          <Text style={s.fieldLabel}>Code</Text>
-          <TextInput
-            {...INPUT_TWEAKS}
-            value={token}
-            onChangeText={setToken}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="pairing code"
-            placeholderTextColor={theme.colors.fgFaint}
-            style={s.input}
-          />
-          <Pressable
-            onPress={() => onSync({ url, token })}
-            disabled={busy || !url.trim() || !token.trim()}
-            style={({ pressed }) => [
-              s.syncBtn,
-              (busy || !url.trim() || !token.trim()) && s.disabled40,
-              pressed && s.pressed90,
-            ]}
-          >
-            {busy ? <ActivityIndicator size="small" color={theme.colors.fgMuted} /> : null}
-            <Text style={s.syncText}>{busy ? "Connecting…" : "Sync"}</Text>
-          </Pressable>
-        </View>
-      ) : null}
-    </View>
+        {manual ? (
+          <View style={s.manualSection}>
+            <Text style={s.fieldLabel}>Address</Text>
+            <TextInput
+              {...INPUT_TWEAKS}
+              value={url}
+              onChangeText={setUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              placeholder="http://192.168.1.6:8099"
+              placeholderTextColor={theme.colors.fgFaint}
+              style={s.input}
+            />
+            <Text style={s.fieldLabel}>Code</Text>
+            <TextInput
+              {...INPUT_TWEAKS}
+              value={token}
+              onChangeText={setToken}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="pairing code"
+              placeholderTextColor={theme.colors.fgFaint}
+              style={s.input}
+            />
+            <Pressable
+              onPress={() => onSync({ url, token })}
+              disabled={busy || !url.trim() || !token.trim()}
+              style={({ pressed }) => [
+                s.syncBtn,
+                (busy || !url.trim() || !token.trim()) && s.disabled40,
+                pressed && s.pressed90,
+              ]}
+            >
+              {busy ? <ActivityIndicator size="small" color={theme.colors.fgMuted} /> : null}
+              <Text style={s.syncText}>{busy ? "Connecting…" : "Sync"}</Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </View>
+    </SettingsCard>
   );
 }
 
 const s = StyleSheet.create((theme) => ({
-  card: {
-    gap: 12,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    padding: 16,
-  },
-  cardTitle: { fontSize: 17, fontWeight: "600", color: theme.colors.fg },
-  cardBody: { fontSize: 13, lineHeight: 19, color: theme.colors.fgMuted },
+  // The card itself is SettingsCard — this is only what goes inside it.
+  body: { gap: 12, padding: 16 },
+  cardTitle: { fontSize: 18, fontWeight: "600", color: theme.colors.fg },
+  cardBody: { fontSize: 14, lineHeight: 20, color: theme.colors.fgMuted },
   scanBtn: {
     marginTop: 4,
     height: 48,

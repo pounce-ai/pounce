@@ -7,13 +7,13 @@
  * cached threads) — the heartbeat re-adopts the local bridge within seconds.
  * Adding ANOTHER machine's bridge stays available via manual entry.
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { Ionicons } from "@expo/vector-icons";
 import { addDeviceConfig, clearBridgeConfig, syncLiveData } from "../services/bridge";
 import { allCollections, clearCollection } from "../state/db/collections";
-import { Toggle } from "./Toggle";
+import { SettingsCard } from "./settings/primitives";
 
 /** This Mac's own bridge (same convention as the desktop shell's localBridge). */
 const LOCAL_URL = `http://127.0.0.1:${process.env.EXPO_PUBLIC_BRIDGE_PORT ?? "8099"}`;
@@ -39,13 +39,8 @@ async function readoptLocalBridge(): Promise<boolean> {
     return false;
   }
 }
-import {
-  checkForUpdatesNow,
-  isAutoUpdateEnabled,
-  isUpdaterSupported,
-  setAutoUpdateEnabled,
-} from "../services/updater";
-import { COLOR, INPUT_TWEAKS } from "../ui";
+import { INPUT_TWEAKS } from "../ui";
+import { useColors } from "../ui/tokens";
 
 // Kept in sync with the mobile implementation's props (importing the type from
 // "./DeviceSetupCard" would resolve back to this platform fork — circular).
@@ -73,29 +68,9 @@ export function DeviceSetupCard({
   setToken,
   onSync,
 }: DeviceSetupCardProps) {
+  const COLOR = useColors();
   const [resyncing, setResyncing] = useState(false);
   const [resyncDone, setResyncDone] = useState(false);
-
-  // Auto-update (Sparkle) — shown only where supported (macOS). The toggle
-  // reflects and drives the native updater's automatic-check setting.
-  const [updaterOn, setUpdaterOn] = useState(false);
-  const [autoUpdate, setAutoUpdate] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      const ok = await isUpdaterSupported();
-      if (!alive) return;
-      setUpdaterOn(ok);
-      if (ok) setAutoUpdate(await isAutoUpdateEnabled());
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-  const toggleAutoUpdate = (v: boolean) => {
-    setAutoUpdate(v);
-    setAutoUpdateEnabled(v);
-  };
 
   const resync = async () => {
     setResyncing(true);
@@ -146,133 +121,105 @@ export function DeviceSetupCard({
   };
 
   return (
-    <View style={s.card}>
-      <Text style={s.cardTitle}>This Mac</Text>
-      <Text style={s.cardBody}>
-        Pounce runs the agent host on this machine and connects to it automatically — no pairing
-        needed here.
-      </Text>
-      <View style={s.actionsRow}>
-        <Pressable
-          onPress={() => void resync()}
-          disabled={busy || resyncing}
-          style={({ pressed }) => [
-            s.resyncBtn,
-            (busy || resyncing) && s.disabled50,
-            pressed && s.pressed90,
-          ]}
-        >
-          {resyncing ? (
-            <ActivityIndicator size="small" color={COLOR.onAccent} />
-          ) : (
-            <Ionicons
-              name={resyncDone ? "checkmark" : "refresh"}
-              size={14}
-              color={COLOR.onAccent}
-            />
-          )}
-          <Text style={s.resyncText}>
-            {resyncing ? "Resyncing…" : resyncDone ? "Up to date" : "Resync now"}
-          </Text>
-        </Pressable>
-        <View style={s.grow} />
-        <Pressable
-          onPress={reset}
-          disabled={busy || resyncing}
-          style={({ pressed }) => [
-            s.resetBtn,
-            (busy || resyncing) && s.disabled50,
-            pressed && s.pressed90,
-          ]}
-        >
-          <Ionicons name="trash-outline" size={14} color={COLOR.danger} />
-          <Text style={s.resetText}>Reset app data</Text>
-        </Pressable>
-      </View>
-      {updaterOn ? (
-        <View style={s.section}>
-          <View style={s.rowBetween}>
-            <View style={s.updateCopy}>
-              <Text style={s.updateTitle}>Automatic updates</Text>
-              <Text style={s.updateBody}>
-                Download and install new versions in the background (signature-verified).
-              </Text>
-            </View>
-            <Toggle
-              value={autoUpdate}
-              onValueChange={toggleAutoUpdate}
-              accessibilityLabel="Automatic updates"
-            />
-          </View>
+    <SettingsCard>
+      <View style={s.body}>
+        <Text style={s.cardTitle}>This Mac</Text>
+        <Text style={s.cardBody}>
+          Pounce runs the agent host on this machine and connects to it automatically — no pairing
+          needed here.
+        </Text>
+        <View style={s.actionsRow}>
           <Pressable
-            onPress={() => checkForUpdatesNow()}
-            style={({ pressed }) => [s.checkNow, pressed && s.pressed60]}
-          >
-            <Text style={s.checkNowText}>Check for updates now</Text>
-          </Pressable>
-        </View>
-      ) : null}
-
-      <Pressable
-        onPress={() => setManual((m) => !m)}
-        style={({ pressed }) => [s.manualToggle, pressed && s.pressed60]}
-      >
-        <Text style={s.manualToggleText}>{manual ? "Hide" : "Add another machine…"}</Text>
-      </Pressable>
-
-      {manual ? (
-        <View style={s.section}>
-          <Text style={s.fieldLabel}>Address</Text>
-          <TextInput
-            {...INPUT_TWEAKS}
-            value={url}
-            onChangeText={setUrl}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="http://192.168.1.6:8099"
-            placeholderTextColor={COLOR.fgFaint}
-            style={s.input}
-          />
-          <Text style={s.fieldLabel}>Code</Text>
-          <TextInput
-            {...INPUT_TWEAKS}
-            value={token}
-            onChangeText={setToken}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="pairing code"
-            placeholderTextColor={COLOR.fgFaint}
-            style={s.input}
-          />
-          <Pressable
-            onPress={() => onSync({ url, token })}
-            disabled={busy || !url.trim() || !token.trim()}
+            onPress={() => void resync()}
+            disabled={busy || resyncing}
             style={({ pressed }) => [
-              s.syncBtn,
-              (busy || !url.trim() || !token.trim()) && s.disabled40,
+              s.resyncBtn,
+              (busy || resyncing) && s.disabled50,
               pressed && s.pressed90,
             ]}
           >
-            {busy ? <ActivityIndicator size="small" color={COLOR.fgMuted} /> : null}
-            <Text style={s.syncText}>{busy ? "Connecting…" : "Sync"}</Text>
+            {resyncing ? (
+              <ActivityIndicator size="small" color={COLOR.onAccent} />
+            ) : (
+              <Ionicons
+                name={resyncDone ? "checkmark" : "refresh"}
+                size={14}
+                color={COLOR.onAccent}
+              />
+            )}
+            <Text style={s.resyncText}>
+              {resyncing ? "Resyncing…" : resyncDone ? "Up to date" : "Resync now"}
+            </Text>
+          </Pressable>
+          <View style={s.grow} />
+          <Pressable
+            onPress={reset}
+            disabled={busy || resyncing}
+            style={({ pressed }) => [
+              s.resetBtn,
+              (busy || resyncing) && s.disabled50,
+              pressed && s.pressed90,
+            ]}
+          >
+            <Ionicons name="trash-outline" size={14} color={COLOR.danger} />
+            <Text style={s.resetText}>Reset app data</Text>
           </Pressable>
         </View>
-      ) : null}
-    </View>
+        <Pressable
+          onPress={() => setManual((m) => !m)}
+          style={({ pressed }) => [s.manualToggle, pressed && s.pressed60]}
+        >
+          <Text style={s.manualToggleText}>{manual ? "Hide" : "Add another machine…"}</Text>
+        </Pressable>
+
+        {manual ? (
+          <View style={s.section}>
+            <Text style={s.fieldLabel}>Address</Text>
+            <TextInput
+              {...INPUT_TWEAKS}
+              value={url}
+              onChangeText={setUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="http://192.168.1.6:8099"
+              placeholderTextColor={COLOR.fgFaint}
+              style={s.input}
+            />
+            <Text style={s.fieldLabel}>Code</Text>
+            <TextInput
+              {...INPUT_TWEAKS}
+              value={token}
+              onChangeText={setToken}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="pairing code"
+              placeholderTextColor={COLOR.fgFaint}
+              style={s.input}
+            />
+            <Pressable
+              onPress={() => onSync({ url, token })}
+              disabled={busy || !url.trim() || !token.trim()}
+              style={({ pressed }) => [
+                s.syncBtn,
+                (busy || !url.trim() || !token.trim()) && s.disabled40,
+                pressed && s.pressed90,
+              ]}
+            >
+              {busy ? <ActivityIndicator size="small" color={COLOR.fgMuted} /> : null}
+              <Text style={s.syncText}>{busy ? "Connecting…" : "Sync"}</Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </View>
+    </SettingsCard>
   );
 }
 
 const s = StyleSheet.create((theme) => ({
-  card: {
-    gap: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    padding: 16,
-  },
-  cardTitle: { fontSize: 15, fontWeight: "600", color: theme.colors.fg },
-  cardBody: { fontSize: 12.5, lineHeight: 18, color: theme.colors.fgMuted },
+  // The card itself is SettingsCard — this is only what goes inside it.
+  body: { gap: 10, padding: 16 },
+  cardTitle: { fontSize: 17, fontWeight: "600", color: theme.colors.fg },
+  cardBody: { fontSize: 13, lineHeight: 19, color: theme.colors.fgMuted },
   // Desktop buttons, not phone buttons. These were two 44pt full-width slabs
   // splitting the card in half, which gave "Reset app data" — a destructive
   // action you use once, if ever — exactly the same weight as the routine one.

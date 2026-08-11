@@ -10,7 +10,7 @@
  * uninterrupted.
  */
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { LegendList } from "@legendapp/list/react-native";
 import { useSelector } from "@legendapp/state/react";
@@ -18,6 +18,14 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@pounce/shared";
 import { applyFilters, connection$, filters$, needsYou } from "@pounce/app/state/stores";
+import { canSettle, partitionSettled } from "@pounce/app/state/settled";
+import { draftTitle, drafts$, listDrafts, newDraft, removeDraft } from "@pounce/app/state/drafts";
+import {
+  autoSettleDays$,
+  loadSettled,
+  settled$,
+  toggleSettled,
+} from "@pounce/app/state/settledStore";
 import { useDevices, useIgnoredSet, useProjectNames, useThreads } from "@pounce/app/state/db/hooks";
 import { SidebarSessionsSkeleton, SidebarSpacesSkeleton } from "./SidebarSkeleton";
 import { Entrance } from "./Motion";
@@ -28,7 +36,7 @@ import { useTrafficLightInset } from "./fullscreen";
 import { appearance$, setAppearance, type AppearanceMode } from "@pounce/app/state/appearance";
 import { useAccessRequests } from "./accessRequests";
 import { nav$, selectSpace } from "../shims/router";
-import { deriveSpaces, spaceKeyOf, type Space } from "./Spaces";
+import { deriveSpaces, spaceKeyFor, spaceKeyOf, type Space } from "./Spaces";
 import { SidebarGlyph } from "./icons";
 import { ThemeButton } from "./ThemeMenu";
 
@@ -132,18 +140,62 @@ export function Sidebar() {
     );
   }, [visible, space, q]);
 
+  // The inbox split. `partitionSettled` owns the rule — including that busy or
+  // blocked work is never hidden, whatever the user settled earlier.
+  const overrides = useSelector(() => ({ ...settled$.get() }));
+  // Passed in rather than read inside `settleOptions`, so the policy is a real
+  // dependency: turning auto-settle off has to re-partition, and a dep the
+  // linter can't see is one a later edit will drop.
+  const autoSettleAfterDays = useSelector(() => autoSettleDays$.get());
+  const { active, settled: done } = useMemo(
+    () =>
+      partitionSettled(sessions, overrides, {
+        now: new Date().toISOString(),
+        autoSettleAfterDays,
+      }),
+    [sessions, overrides, autoSettleAfterDays],
+  );
+  const [showSettled, setShowSettled] = useState(false);
+  // Drafts and Needs you open by default — they are short, and hiding the two
+  // groups that are waiting on the user would defeat pulling them out at all.
+  // Settled stays closed: it is the archive, and it is long.
+  const [showDrafts, setShowDrafts] = useState(true);
+  const [showBlocked, setShowBlocked] = useState(true);
+  // Threads blocked on the user get their own section rather than just sorting
+  // first: "at the top" and "a place of its own" read differently once the list
+  // is long, and this is the one group you must not scroll past.
+  const { blocked, rest } = useMemo(() => {
+    const blocked: Session[] = [];
+    const rest: Session[] = [];
+    for (const t of active) (needsYou(t) ? blocked : rest).push(t);
+    return { blocked, rest };
+  }, [active]);
+  // Parked tasks, above the threads: a draft is the newest thing you touched
+  // and the only row here that is waiting on YOU rather than on an agent.
+  // Narrowed with the space, like everything else in this list.
+  const allDrafts = useSelector(() => listDrafts(drafts$.get()));
+  const drafts = useMemo(
+    () => (space ? allDrafts.filter((d) => spaceKeyFor(d.hostId, d.repoId) === space) : allDrafts),
+    [allDrafts, space],
+  );
+  // One read per connect: the map is small, and the bridge owns it.
+  useEffect(() => {
+    if (connected) void loadSettled();
+  }, [connected]);
+
   // The entrance is a first-impression, not a permanent behaviour: it plays
   // once when the first sync lands, then switches off so scrolling a recycled
   // list doesn't re-animate rows under the cursor.
-  const [settled, setSettled] = useState(false);
+  // `pristine` in the form-field sense: the list as first rendered, before the
+  // user has had a chance to touch it. The entrance plays once while it holds.
+  const [pristine, setPristine] = useState(true);
   const hasRows = visible.length > 0;
   useEffect(() => {
-    if (!hasRows || settled) return;
-    const id = setTimeout(() => setSettled(true), 900);
+    if (!hasRows || !pristine) return;
+    const id = setTimeout(() => setPristine(false), 900);
     return () => clearTimeout(id);
-  }, [hasRows, settled]);
+  }, [hasRows, pristine]);
 
-  const attention = useMemo(() => visible.filter(needsYou).length, [visible]);
   const online = deviceList.filter((d) => d.online);
 
   // "@ machine" only earns its place when there's more than one machine —
@@ -270,7 +322,7 @@ export function Sidebar() {
 
       <LegendList
         style={s.flex1}
-        data={sessions}
+        data={rest}
         keyExtractor={(item) => item.id}
         // No entrance animation on these rows. LegendList recycles and
         // repositions row containers itself; wrapping each one in an extra
@@ -284,6 +336,7 @@ export function Sidebar() {
             showHost={showHost}
             selected={item.id === selectedId}
             onPress={() => router.push(`/session/${item.id}`)}
+            onSettle={canSettle(item) ? () => void toggleSettled(item) : undefined}
           />
         )}
         estimatedItemSize={54}
@@ -300,7 +353,7 @@ export function Sidebar() {
               <Text style={s.sectionEmpty}>No projects synced yet.</Text>
             ) : (
               shownSpaces.map((sp, i) => (
-                <Entrance key={sp.key} index={i} animate={!settled}>
+                <Entrance key={sp.key} index={i} animate={pristine}>
                   <SpaceRow
                     space={sp}
                     showHost={showHost}
@@ -309,6 +362,11 @@ export function Sidebar() {
                     // opens its page. Second click leaves — a Space is
                     // somewhere you step into, not a mode you have to escape.
                     onPress={() => selectSpace(space === sp.key ? null : sp.key)}
+                    onCompose={() =>
+                      router.push(
+                        `/new?draft=${newDraft({ hostId: sp.hostId, repoId: sp.repoId }).id}`,
+                      )
+                    }
                   />
                 </Entrance>
               ))
@@ -328,12 +386,64 @@ export function Sidebar() {
                 </Text>
               </Pressable>
             ) : null}
-            <SectionHeader
-              label="Sessions"
-              trailing={
-                attention > 0 ? `${attention} need${attention === 1 ? "s" : ""} you` : undefined
-              }
-            />
+            {/* SESSIONS is the heading; everything below is a cut of it.
+                The order is who is waiting on whom: your unsent drafts, then
+                what the agents need from you, then everything still running.
+                Settled is the fourth cut and lives pinned at the bottom. */}
+            <SectionHeader label="Sessions" strong />
+
+            <Shelf
+              label="Drafts"
+              count={drafts.length}
+              open={showDrafts}
+              onToggle={() => setShowDrafts((v) => !v)}
+            >
+              {drafts.map((d) => (
+                <Pressable
+                  key={d.id}
+                  onPress={() => router.push(`/new?draft=${d.id}`)}
+                  style={({ pressed }) => [s.draftRow, pressed && s.rowHover]}
+                >
+                  <Ionicons name="create-outline" size={12} color={COLOR.accent} />
+                  <Text numberOfLines={1} style={s.draftTitle}>
+                    {draftTitle(d)}
+                  </Text>
+                  <Pressable
+                    onPress={() => removeDraft(d.id)}
+                    hitSlop={6}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Discard ${draftTitle(d)}`}
+                    style={({ pressed }) => pressed && s.pressed60}
+                  >
+                    <Ionicons name="close" size={12} color={COLOR.fgFaint} />
+                  </Pressable>
+                </Pressable>
+              ))}
+            </Shelf>
+
+            <Shelf
+              label="Needs you"
+              count={blocked.length}
+              open={showBlocked}
+              onToggle={() => setShowBlocked((v) => !v)}
+              empty="Nothing is waiting on you."
+            >
+              {blocked.map((item) => (
+                <SessionRow
+                  key={item.id}
+                  session={item}
+                  project={projectNames[item.repoId] ?? item.repoId.replace(/^repo:/, "")}
+                  showHost={showHost}
+                  selected={item.id === selectedId}
+                  onPress={() => router.push(`/session/${item.id}`)}
+                  onSettle={canSettle(item) ? () => void toggleSettled(item) : undefined}
+                />
+              ))}
+            </Shelf>
+
+            {/* Everything else follows with no label of its own: it is the
+                list, not a fourth shelf, and heading it would imply a group you
+                can act on the way you can act on the other three. */}
           </View>
         }
         ListEmptyComponent={
@@ -360,6 +470,43 @@ export function Sidebar() {
         }
         contentContainerStyle={s.listContent}
       />
+
+      {/* Settled — the fourth cut of Sessions, pinned rather than scrolling
+          with the list. As a footer it sat below every thread, so reaching it
+          meant scrolling past 177 of them: a drawer you have to hunt for is not
+          a drawer. Same Shelf as Drafts and Needs you, so the three behave
+          identically. */}
+      <Shelf
+        label="Settled"
+        count={done.length}
+        open={showSettled}
+        onToggle={() => setShowSettled((v) => !v)}
+        pinned
+      >
+        {done.map((item) => (
+          <Pressable
+            key={item.id}
+            onPress={() => router.push(`/session/${item.id}`)}
+            style={({ pressed }) => [
+              s.settledRow,
+              item.id === selectedId ? s.rowSelected : pressed && s.rowHover,
+            ]}
+          >
+            <Text numberOfLines={1} style={s.settledTitle}>
+              {item.title}
+            </Text>
+            <Pressable
+              onPress={() => void toggleSettled(item)}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={`Bring back ${item.title}`}
+              style={({ pressed }) => pressed && s.pressed60}
+            >
+              <Ionicons name="arrow-up-circle-outline" size={13} color={COLOR.fgFaint} />
+            </Pressable>
+          </Pressable>
+        ))}
+      </Shelf>
 
       {/* Account row — who you are and what's reachable, one click from
           Settings. Takes the place of mobile's Settings tab. */}
@@ -419,13 +566,74 @@ export function Sidebar() {
   );
 }
 
+/**
+ * A collapsible group inside the Sessions list.
+ *
+ * Drafts, Needs you and Settled are the same shape — three shelves around the
+ * plain list of everything else — so they share one component. Written out
+ * three times they would drift, and a sidebar whose groups behave differently
+ * from each other is harder to read than one with no groups at all.
+ */
+function Shelf({
+  label,
+  count,
+  open,
+  onToggle,
+  children,
+  pinned,
+  empty,
+}: {
+  label: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+  /** Settled sits below the list rather than scrolling with it, so it needs the
+   *  hairline and its own bounded scroll. */
+  pinned?: boolean;
+  /** Keep the shelf even at zero, with `empty` in place of its rows. "Nothing
+   *  needs you" is an answer; a section that vanishes is a question about
+   *  whether it was ever there. */
+  empty?: string;
+}) {
+  if (!count && !empty) return null;
+  return (
+    <View style={pinned ? s.shelf : undefined}>
+      <Pressable onPress={onToggle} style={({ pressed }) => [s.shelfHeader, pressed && s.rowHover]}>
+        <Ionicons
+          name={open ? "chevron-down" : "chevron-forward"}
+          size={11}
+          color={COLOR.fgFaint}
+        />
+        <Text style={s.shelfLabel}>{label}</Text>
+        <Text style={s.shelfCount}>{count}</Text>
+      </Pressable>
+      {open ? (
+        !count && empty ? (
+          <Text style={s.shelfEmpty}>{empty}</Text>
+        ) : pinned ? (
+          <ScrollView style={s.shelfScroll} contentContainerStyle={s.shelfList}>
+            {children}
+          </ScrollView>
+        ) : (
+          <View style={s.shelfList}>{children}</View>
+        )
+      ) : null}
+    </View>
+  );
+}
+
 function SectionHeader({
   label,
   trailing,
   action,
+  strong,
 }: {
   label: string;
   trailing?: string;
+  /** A top-level heading rather than a group label — "Sessions" over its own
+   *  cuts, which would otherwise read as a fourth sibling of them. */
+  strong?: boolean;
   action?: {
     icon: React.ComponentProps<typeof Ionicons>["name"];
     hint: string;
@@ -434,7 +642,7 @@ function SectionHeader({
 }) {
   return (
     <View style={s.sectionHeader}>
-      <Text style={s.sectionLabel}>{label}</Text>
+      <Text style={strong ? s.headingLabel : s.sectionLabel}>{label}</Text>
       <View style={s.flex1} />
       {trailing ? <Text style={s.sectionTrailing}>{trailing}</Text> : null}
       {action ? (
@@ -455,31 +663,54 @@ function SpaceRow({
   showHost,
   selected,
   onPress,
+  onCompose,
 }: {
   space: Space;
   showHost: boolean;
   selected: boolean;
   onPress: () => void;
+  /** Start a task already scoped to this project. */
+  onCompose: () => void;
 }) {
+  const [hover, setHover] = useState(false);
   return (
     <Pressable
       onPress={onPress}
+      onHoverIn={() => setHover(true)}
+      onHoverOut={() => setHover(false)}
       style={({ pressed }) => [s.spaceRow, selected ? s.rowSelected : pressed && s.rowHover]}
     >
-      <View
-        style={[
-          s.spaceDot,
-          space.attention > 0 ? s.dotWarning : space.live ? s.dotAccent : s.dotIdle,
-        ]}
+      {/* The folder IS the status light. A dot beside it said the same thing
+          twice, and two marks competing at the leading edge is what made the
+          row read as busy. Filled when the project wants you, hollow otherwise
+          — shape carries the state as well as colour, so it survives a
+          colourblind reader and a greyscale screenshot. */}
+      <Ionicons
+        name={space.attention > 0 ? "folder-open-outline" : "folder-outline"}
+        size={13}
+        color={space.attention > 0 ? COLOR.warning : space.live ? COLOR.accent : COLOR.fgFaint}
       />
-      <Ionicons name="folder-outline" size={13} color={COLOR.fgMuted} />
       <Text numberOfLines={1} style={s.spaceName}>
         {space.name}
       </Text>
-      {showHost ? (
+      {showHost && !hover ? (
         <Text numberOfLines={1} style={s.spaceHost}>
           @ {space.host}
         </Text>
+      ) : null}
+      {/* Compose at the TRAILING edge, where an action belongs — the leading
+          icon is identity, not a button. It takes the host label's place on
+          hover so the row keeps its width and the names stay aligned. */}
+      {hover ? (
+        <Pressable
+          onPress={onCompose}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel={`New task in ${space.name}`}
+          style={({ pressed }) => pressed && s.pressed60}
+        >
+          <Ionicons name="create-outline" size={13} color={COLOR.accent} />
+        </Pressable>
       ) : null}
     </Pressable>
   );
@@ -491,26 +722,46 @@ function SessionRow({
   showHost,
   selected,
   onPress,
+  onSettle,
 }: {
   session: Session;
   project: string;
   showHost: boolean;
   selected: boolean;
   onPress: () => void;
+  /** Absent when the thread is busy or blocked — those can't be settled. */
+  onSettle?: () => void;
 }) {
   // Archived threads (worktree gone) are history — they stay readable but drop
   // back so the live list reads first.
   const dim = !session.isLive;
+  const [hover, setHover] = useState(false);
   return (
     <Pressable
       onPress={onPress}
+      onHoverIn={() => setHover(true)}
+      onHoverOut={() => setHover(false)}
       style={({ pressed }) => [s.sessionRow, selected ? s.rowSelected : pressed && s.rowHover]}
     >
       <View style={s.sessionCaptionRow}>
         <Text numberOfLines={1} style={[s.sessionCaption, dim && s.dimmed]}>
           {showHost ? `${project} · ${session.host}` : project}
         </Text>
-        <Text style={s.sessionTime}>{timeAgo(session.updatedAt)}</Text>
+        {/* The timestamp gives up its place on hover rather than the row growing
+            a column that is empty most of the time. */}
+        {hover && onSettle ? (
+          <Pressable
+            onPress={onSettle}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={`Settle ${session.title}`}
+            style={({ pressed }) => pressed && s.pressed60}
+          >
+            <Ionicons name="checkmark-circle-outline" size={13} color={COLOR.accent} />
+          </Pressable>
+        ) : (
+          <Text style={s.sessionTime}>{timeAgo(session.updatedAt)}</Text>
+        )}
       </View>
       <Text numberOfLines={1} style={[s.sessionTitle, dim && s.dimmed]}>
         {session.title}
@@ -551,7 +802,6 @@ function Empty({
 }) {
   return (
     <View style={s.emptyBox}>
-      <Text style={s.emptyEmoji}>🐾</Text>
       <Text style={s.emptyTitle}>{title}</Text>
       {body ? <Text style={s.emptyBody}>{body}</Text> : null}
       {action ? (
@@ -708,6 +958,10 @@ const s = StyleSheet.create((theme) => ({
     paddingTop: 12,
   },
   sectionLabel: { fontSize: 11, fontWeight: "500", color: theme.colors.fgFaint },
+  /* The heading the shelves sit under. Bigger, brighter and in sentence case —
+     the group labels stay small and faint so the hierarchy is visible without
+     a rule or an indent. */
+  headingLabel: { fontSize: 13, fontWeight: "700", color: theme.colors.fg },
   sectionTrailing: { fontSize: 10.5, color: theme.colors.warning },
   sectionAction: {
     height: 20,
@@ -735,9 +989,6 @@ const s = StyleSheet.create((theme) => ({
     borderRadius: 6,
     paddingHorizontal: 8,
   },
-  spaceDot: { height: 6, width: 6, borderRadius: 999 },
-  dotAccent: { backgroundColor: theme.colors.accent },
-  dotIdle: { backgroundColor: theme.colors.fgFaint, opacity: 0.5 },
   spaceName: { flexShrink: 1, fontSize: 12.5, color: theme.colors.fg },
   moreSpaces: {
     marginHorizontal: 6,
@@ -771,8 +1022,65 @@ const s = StyleSheet.create((theme) => ({
   },
   dimmed: { opacity: 0.55 },
 
+  /* Quieter than a session row and visibly unstarted: a draft carries no agent
+     mark and no time, because nothing has happened to it yet. Its section
+     header already says "Drafts", so the row doesn't repeat the word. */
+  draftRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  draftTitle: { flex: 1, fontSize: 12.5, color: COLOR.fgMuted },
+  /* A SHELF: Drafts and Settled are the same shape — the two ends of the live
+     list, pinned so neither has to be hunted for. One vocabulary rather than
+     two, so they cannot drift apart. */
+  shelf: {
+    gap: 1,
+    borderTopWidth: 1,
+    borderTopColor: COLOR.border,
+    paddingTop: 6,
+    paddingBottom: 2,
+  },
+  /* Bounded: a hundred settled threads must not turn a shelf into the sidebar.
+     Past this it scrolls on its own. */
+  shelfScroll: { maxHeight: 220 },
+  shelfList: { gap: 1, paddingBottom: 4 },
+  shelfHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  shelfLabel: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: COLOR.fgFaint,
+  },
+  /* Destructive, so it reads as a word rather than hiding behind a glyph. */
+  shelfAction: { fontSize: 11, fontWeight: "600", color: COLOR.fgMuted },
+  shelfEmpty: { paddingHorizontal: 14, paddingVertical: 4, fontSize: 11.5, color: COLOR.fgFaint },
+  shelfCount: { fontFamily: "JetBrainsMono", fontSize: 11, color: COLOR.fgFaint },
+  /* Compact and quiet: settled rows are a record, not a feed. One line, no
+     agent mark, no branch — everything that made the active row scannable is
+     what would make this list compete with it. */
+  settledRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  settledTitle: { flex: 1, fontSize: 12, color: COLOR.fgMuted },
   emptyBox: { alignItems: "center", paddingHorizontal: 20, paddingVertical: 40 },
-  emptyEmoji: { fontSize: 24 },
   emptyTitle: {
     marginTop: 8,
     textAlign: "center",
@@ -857,7 +1165,6 @@ const s = StyleSheet.create((theme) => ({
   bellCountText: { fontSize: 8, fontWeight: "700", color: theme.colors.onAccent },
   accountName: { fontSize: 12, fontWeight: "500", color: theme.colors.fg },
   accountSub: { fontSize: 10.5, color: theme.colors.fgFaint },
-  dotWarning: { backgroundColor: theme.colors.warning },
 
   pressed60: { opacity: 0.6 },
   pressed70: { opacity: 0.7 },

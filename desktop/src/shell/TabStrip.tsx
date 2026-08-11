@@ -40,6 +40,7 @@ const PANE_ICON: Record<string, React.ComponentProps<typeof Ionicons>["name"]> =
   "/space": "folder-outline",
   "/metric": "stats-chart-outline",
   "/settings": "settings-outline",
+  "/new": "create-outline",
 };
 
 /** Display name for a `/metric` tab. Deliberately terser than the page's own
@@ -116,7 +117,9 @@ export function TabStrip() {
             ? (METRIC_LABEL[tab.params.key as MetricKey] ?? "Metric")
             : tab.path === "/settings"
               ? "Settings"
-              : spaceLabel(tab.params.key, projectNames);
+              : tab.path === "/new"
+                ? "New task"
+                : spaceLabel(tab.params.key, projectNames);
         return (
           <Pressable
             key={tabKey(tab)}

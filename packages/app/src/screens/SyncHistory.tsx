@@ -1,12 +1,11 @@
 import { useMemo } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { ScrollView, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
 import { PounceIcon } from "../ui/native/Icon";
 import type { SyncLogEntry } from "../state/stores";
-import { useSyncLog } from "../state/db/hooks";
-import { IS_DESKTOP, timeAgo } from "../ui";
+import { useDevices, useSyncLog } from "../state/db/hooks";
+import { timeAgo } from "../ui";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -58,32 +57,23 @@ function groupByDay(log: SyncLogEntry[]): DaySection[] {
 
 export default function SyncHistoryScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const { theme } = useUnistyles();
   const rows = useSyncLog();
+  const devices = useDevices();
   // The collection isn't intrinsically ordered — present newest-first.
   const log = useMemo(() => [...rows].sort((a, b) => Date.parse(b.at) - Date.parse(a.at)), [rows]);
   const sections = useMemo(() => groupByDay(log), [log]);
 
   return (
-    <View style={[s.root, IS_DESKTOP ? { paddingTop: insets.top + 8 } : { paddingTop: 8 }]}>
-      {/* Mobile shows the native modal navigation bar; this row is desktop chrome. */}
-      {IS_DESKTOP ? (
-        <View style={s.headerRow}>
-          <Text style={s.headerTitle}>Sync history</Text>
-          <Pressable onPress={() => router.back()} style={({ pressed }) => pressed && s.pressed60}>
-            <Text style={s.doneLabel}>Done</Text>
-          </Pressable>
-        </View>
-      ) : null}
-
+    <View style={[s.root, { paddingTop: 8 }]}>
       {log.length === 0 ? (
         <View style={s.empty}>
           <Text style={s.emptyEmoji}>🕓</Text>
           <Text style={s.emptyTitle}>Nothing synced yet</Text>
           <Text style={s.emptyBody}>
-            Each time new agent activity reaches this device, it'll show up here — grouped by
-            folder.
+            {devices.length
+              ? "Each time new agent activity reaches this device, it'll show up here — grouped by folder."
+              : "Connect a computer and its agent activity shows up here."}
           </Text>
         </View>
       ) : (

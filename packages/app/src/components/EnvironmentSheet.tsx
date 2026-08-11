@@ -196,12 +196,7 @@ export function EnvironmentSheet({
    *  exceptional (a failing check, a conflict), since everything routine lives
    *  on screen already. */
   const hasEnvironment =
-    !session.cwd ||
-    !!checkRow ||
-    conflicts > 0 ||
-    !IS_DESKTOP ||
-    (running && !IS_DESKTOP);
-
+    !session.cwd || !!checkRow || conflicts > 0 || !IS_DESKTOP || (running && !IS_DESKTOP);
 
   const shownSources = allSources ? sources : sources.slice(0, SOURCES_COLLAPSED);
 

@@ -18,6 +18,8 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { fetchActivity } from "../services/bridge";
 import {
   type ActivityDay,
+  type UsageRow,
+  addCost,
   PERIOD_DAYS,
   PERIOD_LABEL,
   type Period,
@@ -31,11 +33,13 @@ import {
 } from "../services/activity";
 import { useProjectNames } from "../state/db/hooks";
 import { MiniBarChart } from "../components/MiniBarChart";
+import { trendBars } from "../components/usageSeries";
+import { UsageChart } from "../components/UsageChart";
 import { ActivitySkeleton } from "../components/Skeleton";
 import { PounceIcon } from "../ui/native/Icon";
 import { AgentLogo, IS_DESKTOP } from "../ui";
 import { agentLabel } from "../ui/tokens";
-import { fmtCost, fmtCount, fmtDelta, fmtTokens } from "../ui/format";
+import { fmtCost, fmtCount, fmtDayLabel, fmtDelta, fmtTokens } from "../ui/format";
 
 const YEAR = 365;
 
@@ -61,23 +65,34 @@ function repoLabel(repo: string, names: Record<string, string>): string {
   return names[repo] ?? repo.replace(/^(repo:|ws:)/, "");
 }
 
-/** A share as a percentage, never rounding a real quantity down to "0%". */
+/**
+ * A share as a percentage, never rounding away the thing it is describing.
+ *
+ * Both ends matter and for the same reason. Fresh input is a real 0.006% of the
+ * tokens here, and "0%" says it didn't happen; cache reads are 99.993%, and
+ * "100%" says nothing else did. A reader who sees 100% next to a non-zero
+ * figure below it concludes one of the two is wrong.
+ */
 function pct(part: number, whole: number): string {
   if (whole <= 0 || part <= 0) return "0%";
   const p = (part / whole) * 100;
-  return p < 1 ? "<1%" : `${Math.round(p)}%`;
+  if (p < 1) return "<1%";
+  if (p > 99 && p < 100) return ">99%";
+  return `${Math.round(p)}%`;
 }
 
 /**
- * Anything carrying the four metrics: a day, a window total from `sumDays`, or
- * an agent row from `byAgentTotals`. They already share this shape, so one
- * accessor serves all three — this used to be four separate ternary ladders
+ * Anything carrying the metrics: a day, a window total from `sumDays`, an agent
+ * row from `byAgentTotals`, or a model row. They already share this shape, so
+ * one accessor serves them all — this used to be four separate ternary ladders
  * (day, window total, previous total, agent row) that had to agree by hand,
  * and a page whose bars disagree with its own headline is a silent failure.
  */
 type Countable = {
-  readonly sessions: number;
-  readonly messages: number;
+  /** Absent on a model row, which is counted but never held a session. The two
+   *  metrics that read these are the two a model row is never shown for. */
+  readonly sessions?: number;
+  readonly messages?: number;
   readonly tokens: number;
   readonly cost: number | null;
 };
@@ -94,6 +109,36 @@ function format(n: number, key: MetricKey): string {
   if (key === "tokens") return fmtTokens(n);
   if (key === "spend") return fmtCost(n);
   return fmtCount(n);
+}
+
+/**
+ * The line under an agent's bar.
+ *
+ * Each metric has a different useful second fact, so this is a list of rules
+ * rather than one template. Returns null when there is nothing true to say —
+ * Cursor publishes neither tokens nor dollars, and "0% of cost · 0 tokens"
+ * states as fact the very thing we could not read.
+ */
+function agentSub(
+  a: { sessions: number; messages: number; tokens: number; cost: number | null },
+  key: MetricKey,
+  agentTotal: number,
+): string | null {
+  // The share PLUS the other metric — an agent can be 3% of the tokens and 40%
+  // of the bill, and only seeing both at once makes that visible.
+  if (key === "spend") {
+    if (a.cost == null && !a.tokens) return null;
+    return `${pct(a.cost ?? 0, agentTotal)} of cost · ${fmtTokens(a.tokens)} tokens`;
+  }
+  if (key === "tokens") {
+    if (a.cost == null && !a.tokens) return null;
+    return `${pct(a.tokens, agentTotal)} of tokens${a.cost == null ? "" : ` · ${fmtCost(a.cost)}`}`;
+  }
+  if (key === "sessions") {
+    if (!a.sessions || !a.messages) return null;
+    return `${fmtCount(Math.round(a.messages / a.sessions))} messages per session`;
+  }
+  return a.sessions > 0 ? `across ${fmtCount(a.sessions)} sessions` : null;
 }
 
 /** A labelled row with a bar showing its share — the shape every breakdown
@@ -177,31 +222,23 @@ export default function MetricScreen() {
   const total = valueOf(now, key);
   const prior = valueOf(before, key);
 
-  // A year is charted by month; shorter windows by day. Same rule as the
-  // dashboard's chart, so the two never disagree about a period.
-  const bars = useMemo(() => {
-    if (period !== "year") return window.map((d) => ({ key: d.date, value: valueOf(d, key) }));
-    const byMonth = new Map<string, number>();
-    for (const d of window) {
-      const k = d.date.slice(0, 7);
-      byMonth.set(k, (byMonth.get(k) ?? 0) + valueOf(d, key));
-    }
-    return [...byMonth].map(([k, value]) => ({ key: k, value }));
-  }, [period, window, key]);
+  /** The two metrics ccusage can break down — they get the usage treatment
+   *  (layered per-agent chart, token strip, model/day breakdown). Sessions and
+   *  messages have none of that behind them. */
+  const isUsage = key === "tokens" || key === "spend";
+
+  const bars = useMemo(
+    () => trendBars(window, period, (d) => valueOf(d, key)),
+    [window, period, key],
+  );
 
   const agents = useMemo(() => byAgentTotals(window), [window]);
   // Both folds walk the whole window, and each is read by only two of the four
   // metrics — models/composition come from `usage`, the space rows from
   // `repos`. Gating them keeps a Sessions page from paying for a breakdown it
   // never renders.
-  const repos = useMemo(
-    () => (key === "sessions" || key === "messages" ? byRepoTotals(window) : null),
-    [window, key],
-  );
-  const usage = useMemo(
-    () => (key === "tokens" || key === "spend" ? usageBreakdown(window) : null),
-    [window, key],
-  );
+  const repos = useMemo(() => (isUsage ? null : byRepoTotals(window)), [window, isUsage]);
+  const usage = useMemo(() => (isUsage ? usageBreakdown(window) : null), [window, isUsage]);
 
   /** Days in the window that saw any of this metric — the denominator for
    *  "per active day", which is a fairer average than dividing by 30. */
@@ -221,23 +258,32 @@ export default function MetricScreen() {
     key === "sessions" ? r.sessions : r.messages;
   const repoTotal = (repos ?? []).reduce((n, r) => n + repoValue(r), 0);
 
-  // Sorted and totalled once per (usage, key) rather than on every render —
-  // onLayout alone guarantees at least one extra render per mount.
-  const models = useMemo(() => {
-    if (!usage) return [];
-    const rows = usage.agents
-      .flatMap((a) => a.models)
-      .slice()
-      .sort((x, y) => (key === "spend" ? (y.cost ?? 0) - (x.cost ?? 0) : y.tokens - x.tokens));
-    const sum = rows.reduce((n, m) => n + (key === "spend" ? (m.cost ?? 0) : m.tokens), 0);
-    return rows.map((m) => ({
-      model: m,
-      share: sum > 0 ? (key === "spend" ? (m.cost ?? 0) : m.tokens) / sum : 0,
-    }));
-  }, [usage, key]);
+  /**
+   * Agents with something to show for THIS metric, biggest first.
+   *
+   * Ranked by the metric on screen rather than by `byAgentTotals`' token order:
+   * the day table only has room for the first two columns, and on the spend
+   * page those should be the two that cost the most. Codex outspends opencode
+   * while using a fraction of its tokens, so the token ranking picks the wrong
+   * pair here.
+   */
+  const chartAgents = useMemo(
+    () =>
+      agents
+        .filter((a) => valueOf(a, key) > 0)
+        .sort((x, y) => valueOf(y, key) - valueOf(x, key))
+        .map((a) => a.agent),
+    [agents, key],
+  );
 
-  const periodWord =
-    period === "year" ? "in the last 12 months" : `in the last ${PERIOD_DAYS[period]} days`;
+  // The window's actual extent, which is what a reader checks a total against —
+  // "in the last 30 days" doesn't say WHICH 30.
+  const range =
+    window.length > 1
+      ? `${fmtDayLabel(window[0].date)} to ${fmtDayLabel(window[window.length - 1].date)}`
+      : period === "year"
+        ? "in the last 12 months"
+        : `in the last ${PERIOD_DAYS[period]} days`;
 
   return (
     <ScrollView
@@ -263,29 +309,63 @@ export default function MetricScreen() {
         ) : null}
         <View style={s.shrink}>
           <Text style={s.title}>{METRIC_TITLE[key]}</Text>
-          <Text style={s.subtitle}>{periodWord}</Text>
+          <Text style={s.subtitle}>{range}</Text>
         </View>
       </View>
 
-      <View style={s.periods}>
-        {(["week", "month", "year"] as const).map((p) => (
-          <Pressable
-            key={p}
-            onPress={() => setPeriod(p)}
-            style={({ pressed }) => [s.period, period === p && s.periodOn, pressed && s.pressed]}
-          >
-            <Text style={[s.periodLabel, period === p && s.periodLabelOn]}>{PERIOD_LABEL[p]}</Text>
-          </Pressable>
-        ))}
-      </View>
+      {/* No period picker over a failed read: it would narrow numbers we never
+          got, three ways. */}
+      {q.isError ? null : (
+        <View style={s.periods}>
+          {(["week", "month", "year"] as const).map((p) => (
+            <Pressable
+              key={p}
+              onPress={() => setPeriod(p)}
+              style={({ pressed }) => [s.period, period === p && s.periodOn, pressed && s.pressed]}
+            >
+              <Text style={[s.periodLabel, period === p && s.periodLabelOn]}>
+                {PERIOD_LABEL[p]}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
 
       {q.isPending ? (
         <ActivitySkeleton />
+      ) : q.isError ? (
+        // `fetchActivity` THROWS when every paired host fails — deliberately, so
+        // callers can say "couldn't read" instead of asserting a zero. Without
+        // this branch `zeroFill` manufactured a clean year and the page rendered
+        // a confident 0 hero, "no earlier month to compare against" and "Nothing
+        // in this period" — for someone with months of history whose Mac is
+        // asleep. Same words the dashboard uses for the same failure.
+        <View style={s.errorBox}>
+          <Text style={s.errorTitle}>Couldn&apos;t read your history</Text>
+          <Text style={s.errorBody}>
+            The machine didn&apos;t answer in time. If it&apos;s been a while since you opened
+            Pounce there, it may still be reading through your transcripts.
+          </Text>
+          <Pressable
+            onPress={() => void q.refetch()}
+            style={({ pressed }) => [s.retryBtn, pressed && s.pressed]}
+          >
+            <Text style={s.retryLabel}>Try again</Text>
+          </Pressable>
+        </View>
       ) : (
         <>
           <View style={s.hero}>
-            <Text style={s.heroValue}>{key === "spend" ? fmtCost(total) : fmtCount(total)}</Text>
+            <Text style={s.heroValue}>
+              {key === "spend" ? `${fmtCost(total)}*` : fmtCount(total)}
+            </Text>
             <View style={s.heroMeta}>
+              {/* The asterisk's other half. These are list prices, and on a
+                  subscription seat the marginal cost of the same tokens is
+                  zero — the shortest true sentence about the number above. */}
+              {key === "spend" ? (
+                <Text style={s.heroDelta}>* if billed at full API rate</Text>
+              ) : null}
               {fmtDelta(delta(total, prior)) ? (
                 <Text style={s.heroDelta}>
                   {fmtDelta(delta(total, prior))} vs the previous {period}
@@ -301,47 +381,40 @@ export default function MetricScreen() {
           <View style={s.section}>
             <Text style={s.sectionTitle}>{period === "year" ? "By month" : "By day"}</Text>
             <View
-              style={s.chartCard}
+              style={[s.card, s.chartCard]}
               onLayout={(e: LayoutChangeEvent) => setChartWidth(e.nativeEvent.layout.width - 28)}
             >
-              {chartWidth > 0 ? <MiniBarChart bars={bars} width={chartWidth} /> : null}
+              {chartWidth <= 0 ? null : isUsage && period !== "year" ? (
+                // Per agent, because "who spent it" and "when" is one question.
+                // Only for day-resolution windows: a year is charted by month
+                // below, and monthly buckets have no per-agent series behind
+                // them.
+                <UsageChart
+                  days={window}
+                  agents={chartAgents}
+                  metric={key === "spend" ? "cost" : "tokens"}
+                  width={chartWidth - 50}
+                />
+              ) : (
+                <MiniBarChart bars={bars} width={chartWidth} />
+              )}
             </View>
             <Text style={s.sectionNote}>
               {activeDays} active {activeDays === 1 ? "day" : "days"}
               {activeDays > 0 ? ` · ${format(total / activeDays, key)} per active day` : ""}
               {busiest && valueOf(busiest, key) > 0
-                ? ` · busiest ${busiest.date} at ${format(valueOf(busiest, key), key)}`
+                ? ` · busiest ${fmtDayLabel(busiest.date)} at ${format(valueOf(busiest, key), key)}`
                 : ""}
             </Text>
           </View>
 
-          <MetricInsight metricKey={key} window={window} totals={now} usage={usage} />
+          {/* What the tokens WERE, for both metrics: on the spend page it is
+              what the money bought, and on the tokens page it is the thing
+              itself. Most of the total is usually re-sent context rather than
+              anything newly written, which the headline alone never says. */}
+          {isUsage && usage ? <TokenStrip usage={usage.total} activeDays={activeDays} /> : null}
 
-          {/* What the total is MADE OF. Only tokens has this: it's the metric
-              whose headline is most often misread, because most of it is
-              usually re-sent context rather than anything newly written. */}
-          {key === "tokens" && usage ? (
-            <Section title="Composition">
-              {(
-                [
-                  ["Fresh input", usage.total.input],
-                  ["Output", usage.total.output],
-                  ["Cache write", usage.total.cacheCreate],
-                  ["Cache read", usage.total.cacheRead],
-                ] as const
-              ).map(([label, v]) => (
-                <ShareRow
-                  key={label}
-                  label={label}
-                  value={fmtCount(v)}
-                  share={usage.total.total > 0 ? v / usage.total.total : 0}
-                  // "<1%", never "0%": fresh input is a real 0.06% here, and
-                  // rounding it to zero says it didn't happen.
-                  sub={usage.total.total > 0 ? `${pct(v, usage.total.total)} of the total` : null}
-                />
-              ))}
-            </Section>
-          ) : null}
+          <MetricInsight metricKey={key} window={window} totals={now} usage={usage} />
 
           <Section
             title="By agent"
@@ -353,7 +426,7 @@ export default function MetricScreen() {
           >
             {agents.length ? (
               agents.map((a) => {
-                const v = metricOfAgent(a, key);
+                const v = valueOf(a, key);
                 return (
                   <ShareRow
                     key={a.agent}
@@ -369,13 +442,7 @@ export default function MetricScreen() {
                     // Cursor keep no dated message counts, so "0 messages per
                     // session" would assert something false about an agent that
                     // simply doesn't report them.
-                    sub={
-                      key === "sessions" && a.sessions > 0 && a.messages > 0
-                        ? `${fmtCount(Math.round(a.messages / a.sessions))} messages per session`
-                        : key === "messages" && a.sessions > 0
-                          ? `across ${fmtCount(a.sessions)} sessions`
-                          : null
-                    }
+                    sub={agentSub(a, key, agentTotal)}
                   />
                 );
               })
@@ -384,43 +451,10 @@ export default function MetricScreen() {
             )}
           </Section>
 
-          {/* Models only exist for the two money/token metrics, and only when
-              ccusage could read them. */}
-          {(key === "tokens" || key === "spend") && usage ? (
-            <Section
-              title="By model"
-              note={
-                key === "spend"
-                  ? "Where the money actually went. A model can cost more than a bigger one — worth checking before assuming the largest number is the expensive one."
-                  : null
-              }
-            >
-              {models.length ? (
-                models.map(({ model: m, share }) => (
-                  <ShareRow
-                    key={m.model}
-                    label={m.model}
-                    value={
-                      key === "spend"
-                        ? m.cost == null
-                          ? "—"
-                          : fmtCost(m.cost)
-                        : fmtCount(m.tokens)
-                    }
-                    share={share}
-                    sub={
-                      key === "spend"
-                        ? `${fmtTokens(m.tokens)} tokens`
-                        : m.cost == null
-                          ? null
-                          : `${fmtCost(m.cost)} at list price`
-                    }
-                  />
-                ))
-              ) : (
-                <Text style={s.empty}>No model detail reported.</Text>
-              )}
-            </Section>
+          {/* Models and days only exist for the two money/token metrics, and
+              only when ccusage could read them. */}
+          {isUsage && usage ? (
+            <Breakdown metricKey={key} usage={usage} window={window} agents={chartAgents} />
           ) : null}
 
           {/* Spaces answer "where", which neither agent nor model can. Only for
@@ -428,7 +462,7 @@ export default function MetricScreen() {
           {(key === "sessions" || key === "messages") && repos?.length ? (
             <Section title="By space">
               {repos.map((r) => {
-                const v = key === "sessions" ? r.sessions : r.messages;
+                const v = repoValue(r);
                 if (!v) return null;
                 return (
                   <ShareRow
@@ -452,14 +486,210 @@ export default function MetricScreen() {
   );
 }
 
-function metricOfAgent(
-  a: { sessions: number; messages: number; tokens: number; cost: number | null },
-  key: MetricKey,
-): number {
-  if (key === "tokens") return a.tokens;
-  if (key === "spend") return a.cost ?? 0;
-  if (key === "sessions") return a.sessions;
-  return a.messages;
+/**
+ * What the window's tokens actually were, in four figures.
+ *
+ * These sit under the chart on BOTH usage pages because they answer the same
+ * question from either side: on Tokens they break the headline down, and on
+ * Spend they say what the money bought. The split that matters is cached versus
+ * fresh — cache reads run from ~78% to ~98% of a total, so a reader who assumes
+ * the headline is all new input is badly wrong about what it means.
+ */
+function TokenStrip({ usage, activeDays }: { usage: UsageRow; activeDays: number }) {
+  const observed = usage.input + usage.cacheRead;
+  const tiles: { label: string; value: string; detail: string }[] = [
+    {
+      label: "Processed tokens",
+      value: fmtTokens(usage.total),
+      detail: activeDays > 0 ? `${fmtTokens(usage.total / activeDays)} per active day` : "—",
+    },
+    {
+      label: "Cached input",
+      value: fmtTokens(usage.cacheRead),
+      detail: `${pct(usage.cacheRead, observed)} of input read`,
+    },
+    {
+      label: "Fresh input",
+      value: fmtTokens(usage.input),
+      detail: `${fmtTokens(usage.cacheCreate)} written to cache`,
+    },
+    {
+      label: "Output",
+      value: fmtTokens(usage.output),
+      detail: `${pct(usage.output, usage.total)} of the total`,
+    },
+  ];
+  return (
+    <View style={[s.card, s.strip]}>
+      {tiles.map((t) => (
+        <View key={t.label} style={s.tile}>
+          <Text style={s.tileLabel}>{t.label}</Text>
+          <Text style={s.tileValue}>{t.value}</Text>
+          <Text style={s.tileDetail}>{t.detail}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/**
+ * One numeric column of the by-day table.
+ *
+ * `agents` is what the column sums, which is why "Other" needs no special case
+ * downstream: a named agent is simply a group of one.
+ */
+interface DayColumn {
+  readonly key: string;
+  readonly label: string;
+  readonly agents: readonly string[];
+}
+
+/**
+ * The same window, cut two ways: by model and by day.
+ *
+ * A toggle rather than two sections because they answer the same question —
+ * "where did this go" — and stacking both makes the page a scroll well. Model
+ * leads: it's the cut that most often surprises, since a smaller model can
+ * outspend a bigger one.
+ */
+function Breakdown({
+  metricKey,
+  usage,
+  window,
+  agents,
+}: {
+  metricKey: MetricKey;
+  usage: ReturnType<typeof usageBreakdown>;
+  window: readonly ActivityDay[];
+  agents: readonly string[];
+}) {
+  const [cut, setCut] = useState<"model" | "day">("model");
+  const spend = metricKey === "spend";
+
+  /**
+   * Every model used in the window, biggest first.
+   *
+   * A row is (agent, model), never model alone — `usage.agents` holds a model
+   * list per agent and the same model name appears under more than one of them.
+   * Measured on a year of real history: `gpt-5.4` and `gpt-5.5` were each run by
+   * both Codex and opencode, so flattening on the name collided two real rows
+   * onto one React key.
+   */
+  const models = useMemo(() => {
+    const rows = (usage?.agents ?? [])
+      .flatMap((a) => a.models)
+      .sort((x, y) => valueOf(y, metricKey) - valueOf(x, metricKey));
+    const sum = rows.reduce((n, m) => n + valueOf(m, metricKey), 0);
+    return rows.map((m) => ({ model: m, share: sum > 0 ? valueOf(m, metricKey) / sum : 0 }));
+  }, [usage, metricKey]);
+  /**
+   * Four columns is what a phone holds: Day, two more, and the total.
+   *
+   * With more contributors than fit, the second column becomes "Other" rather
+   * than the third-largest agent. Naming two and silently dropping the rest
+   * left rows whose visible figures didn't add up to the Total beside them,
+   * which reads as an arithmetic bug rather than as an omission.
+   */
+  const columns: DayColumn[] =
+    agents.length <= 2
+      ? agents.map((agent) => ({ key: agent, label: agentLabel(agent), agents: [agent] }))
+      : [
+          { key: agents[0], label: agentLabel(agents[0]), agents: [agents[0]] },
+          // Everything the named column doesn't carry, so a row adds up to the
+          // Total beside it.
+          { key: "other", label: "Other", agents: agents.slice(1) },
+        ];
+  // Newest first, and only the days that saw anything — a table of empty rows
+  // is scrolling with nothing at the end of it.
+  const days = useMemo(
+    () => window.filter((d) => valueOf(d, metricKey) > 0).reverse(),
+    [window, metricKey],
+  );
+
+  return (
+    <View style={s.section}>
+      <View style={s.breakdownHead}>
+        <Text style={s.sectionTitle}>Breakdown</Text>
+        <View style={s.segments}>
+          {(["model", "day"] as const).map((c) => (
+            <Pressable
+              key={c}
+              onPress={() => setCut(c)}
+              style={({ pressed }) => [s.segment, cut === c && s.segmentOn, pressed && s.pressed]}
+            >
+              <Text style={[s.segmentLabel, cut === c && s.segmentLabelOn]}>
+                {c === "model" ? "Model" : "Day"}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+
+      <View style={s.card}>
+        {cut === "model" ? (
+          models.length ? (
+            models.map(({ model: m, share }) => (
+              <ShareRow
+                key={`${m.agent}:${m.model}`}
+                label={m.model}
+                // The agent that ran it. Two agents offer the same model, so
+                // without this the rows are indistinguishable — named in the sub
+                // line as well as marked, since a 14pt logo is not a label.
+                icon={<AgentLogo agent={m.agent} size={14} />}
+                // "—", not "$0.00": a model nothing could price was not free.
+                value={spend ? (m.cost == null ? "—" : fmtCost(m.cost)) : fmtCount(m.tokens)}
+                share={share}
+                sub={
+                  spend
+                    ? `via ${agentLabel(m.agent)} · ${pct(share, 1)} of cost · ${fmtTokens(m.tokens)} tokens`
+                    : `via ${agentLabel(m.agent)}${
+                        m.cost == null ? "" : ` · ${fmtCost(m.cost)} at list price`
+                      }`
+                }
+              />
+            ))
+          ) : (
+            <Text style={s.empty}>No model detail reported.</Text>
+          )
+        ) : days.length ? (
+          <>
+            <View style={s.tr}>
+              <Text style={[s.th, s.colDay]}>Day</Text>
+              {columns.map((c) => (
+                <Text key={c.key} style={[s.th, s.colNum]} numberOfLines={1}>
+                  {c.label}
+                </Text>
+              ))}
+              <Text style={[s.th, s.colNum]}>Total</Text>
+            </View>
+            {days.map((d) => (
+              <View key={d.date} style={s.tr}>
+                <Text style={[s.td, s.colDay]}>{fmtDayLabel(d.date)}</Text>
+                {columns.map((c) => {
+                  // One path for both kinds of column: a named agent is just a
+                  // group of one, so "Other" needs no special case.
+                  const v = c.agents.reduce<number | null>(
+                    (n, a) => addCost(n, spend ? d.byAgent?.[a]?.cost : d.byAgent?.[a]?.tokens),
+                    null,
+                  );
+                  return (
+                    <Text key={c.key} style={[s.td, s.colNum, s.tdMuted]}>
+                      {v == null ? "—" : spend ? fmtCost(v) : fmtTokens(v)}
+                    </Text>
+                  );
+                })}
+                <Text style={[s.td, s.colNum]}>
+                  {spend ? fmtCost(d.cost ?? 0) : fmtTokens(d.tokens)}
+                </Text>
+              </View>
+            ))}
+          </>
+        ) : (
+          <Text style={s.empty}>Nothing in this period.</Text>
+        )}
+      </View>
+    </View>
+  );
 }
 
 /**
@@ -487,9 +717,8 @@ function MetricInsight({
     if (metricKey === "tokens") {
       if (!usage?.total.total) return null;
       const t = usage.total;
-      const pct = Math.round((t.cacheRead / t.total) * 100);
       const fresh = t.input + t.output + t.cacheCreate;
-      return `${pct}% of this — ${fmtCount(t.cacheRead)} tokens — was context re-read from cache rather than new input. Only ${fmtCount(fresh)} was fresh. Cache reads are billed far cheaper than new input, so a large share here is efficient, not wasteful.`;
+      return `${pct(t.cacheRead, t.total)} of this — ${fmtCount(t.cacheRead)} tokens — was context re-read from cache rather than new input. Only ${fmtCount(fresh)} was fresh. Cache reads are billed far cheaper than new input, so a large share here is efficient, not wasteful.`;
     }
     if (metricKey === "spend") {
       if (!totals.cost) return null;
@@ -498,7 +727,8 @@ function MetricInsight({
         days ? `, spread over ${days} ${days === 1 ? "day" : "days"}` : ""
       }. If you're on a subscription, you paid a flat fee instead — so read this as the value delivered, not money spent.`;
     }
-    const { sessions, messages } = totals;
+    // Both absent on a shape that never held sessions; the guard covers it.
+    const { sessions = 0, messages = 0 } = totals;
     if (!sessions) return null;
     const per = Math.round(messages / sessions);
     if (metricKey === "sessions") {
@@ -555,13 +785,8 @@ const s = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.surfaceAlt,
     padding: 14,
   },
-  chartCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surfaceAlt,
-    padding: 14,
-  },
+  /** `card` without its row gap — one child, which sets its own spacing. */
+  chartCard: { gap: 0 },
   // The takeaway, styled as a remark rather than a card: it's prose, and boxing
   // it like the data would give it equal weight to the data.
   insight: {
@@ -579,4 +804,46 @@ const s = StyleSheet.create((theme) => ({
   track: { height: 4, borderRadius: 999, backgroundColor: theme.colors.border, overflow: "hidden" },
   fill: { height: 4, borderRadius: 999, backgroundColor: theme.colors.accent },
   empty: { fontSize: 12, color: theme.colors.fgFaint },
+  // Four figures in a hairline grid. Deliberately not four cards: they are one
+  // reading of one total, and boxing each would make them four findings.
+  /** `card` laid out as a grid, and unpadded — each tile pads itself. */
+  strip: { flexDirection: "row", flexWrap: "wrap", gap: 0, padding: 0, overflow: "hidden" },
+  tile: { flexBasis: "50%", flexGrow: 1, gap: 1, padding: 12 },
+  tileLabel: { fontSize: 11, color: theme.colors.fgFaint },
+  tileValue: { fontFamily: "JetBrainsMono", fontSize: 17, color: theme.colors.fg },
+  tileDetail: { fontSize: 10.5, color: theme.colors.fgFaint },
+  breakdownHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  segments: { flexDirection: "row", gap: 2 },
+  segment: { borderRadius: 7, paddingHorizontal: 10, paddingVertical: 4 },
+  segmentOn: { backgroundColor: theme.colors.surfaceAlt },
+  segmentLabel: { fontSize: 11.5, fontWeight: "600", color: theme.colors.fgFaint },
+  segmentLabelOn: { color: theme.colors.fg },
+  tr: { flexDirection: "row", alignItems: "center", gap: 8 },
+  th: {
+    fontSize: 10.5,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    color: theme.colors.fgFaint,
+  },
+  td: { fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fg },
+  tdMuted: { color: theme.colors.fgMuted },
+  colDay: { flex: 1, textAlign: "left" },
+  colNum: { width: 72, textAlign: "right" },
+  errorBox: { alignItems: "center", gap: 8, paddingHorizontal: 24, paddingVertical: 48 },
+  errorTitle: { textAlign: "center", fontSize: 15, fontWeight: "600", color: theme.colors.fg },
+  errorBody: {
+    textAlign: "center",
+    fontSize: 13,
+    lineHeight: 18,
+    color: theme.colors.fgMuted,
+  },
+  retryBtn: {
+    marginTop: 4,
+    borderRadius: 999,
+    backgroundColor: theme.colors.surfaceAlt,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  retryLabel: { fontSize: 13, fontWeight: "600", color: theme.colors.accent },
 }));

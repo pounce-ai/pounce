@@ -18,13 +18,14 @@ import {
 } from "./animation";
 import { GlassCard } from "../ui/native/GlassCard";
 import { PounceIcon } from "../ui/native/Icon";
+import { TurnMeter } from "./TurnMeter";
 import type { IoniconName } from "../ui/native/icon-map";
 import type { AgentCapabilities, RunImage } from "@pounce/shared";
 import { SLASH_COMMANDS } from "../ui/agent-meta";
 import { fetchFiles, type RepoEntry, type ThreadUsage } from "../services/bridge";
 import { ContextRing } from "./ContextRing";
 import { isVoiceAvailable, startDictation, type Dictation } from "../services/voice";
-import { AgentLogo, COLOR, IS_DESKTOP } from "../ui";
+import { AgentStatusIcon, COLOR, IS_DESKTOP } from "../ui";
 import { useThemeHex } from "../ui/useThemeHex";
 
 const MENTION_RE = /((?:^|\s))@([^\s@]*)$/;
@@ -124,12 +125,12 @@ export function Composer({
   agent,
   caps,
   disabled = false,
-  sending = false,
   running = false,
   placeholder = "Message or steer the agent…",
   hostId,
   cwd,
   onSubmit,
+  onDraftChange,
   onStop,
   onViewChanges,
   diffStat,
@@ -137,6 +138,8 @@ export function Composer({
   mode,
   tasks,
   markers,
+  turnStartedAt,
+  turnTokens,
   usage,
   readOnly,
   ref,
@@ -144,7 +147,6 @@ export function Composer({
   agent: string;
   caps: AgentCapabilities;
   disabled?: boolean;
-  sending?: boolean;
   /** A turn is in flight — swaps the send button for a stop button (when the
    *  input is empty) and lets the user type/queue a follow-up meanwhile. */
   running?: boolean;
@@ -152,6 +154,10 @@ export function Composer({
   hostId?: string;
   cwd?: string | null;
   onSubmit: (s: ComposerSubmit) => Promise<void> | void;
+  /** Every keystroke, for callers that persist what is typed (the New screen
+   *  saves it into a draft). Deliberately not a controlled `value` prop: the
+   *  native rich input owns its buffer, and driving it from outside fights it. */
+  onDraftChange?: (text: string) => void;
   /** Interrupt the running turn (from the stop button). */
   onStop?: () => void;
   /** Open the session's diff review — shows a diff shortcut in the control row. */
@@ -168,6 +174,10 @@ export function Composer({
    *  watching, whereas markers are about the history behind it. */
   tasks?: { done: number; total: number; open: boolean; onPress: () => void } | null;
   markers?: { count: number; onPress: () => void } | null;
+  /** ISO time this turn's user message was sent — drives the elapsed readout. */
+  turnStartedAt?: string;
+  /** Estimated output tokens streamed so far this turn. */
+  turnTokens?: number;
   /** Thread usage — drives the context-fill ring (hidden unless the agent
    *  reports both a window and a recent request size). */
   usage?: ThreadUsage | null;
@@ -183,6 +193,11 @@ export function Composer({
   // slash/mention menus + canSend), `markdownRef` mirrors the markdown we send,
   // and we push text back through the imperative ref (not a `value` prop).
   const [draft, setDraft] = useState("");
+  // One place the text moves, so a caller persisting it can't miss an edit.
+  const onDraftChangeAndSet = (t: string) => {
+    setDraft(t);
+    onDraftChange?.(t);
+  };
   const inputRef = useRef<EnrichedMarkdownTextInputInstance>(null);
   const markdownRef = useRef("");
   // The native rich input requires STRING colors — pick literal hexes for the
@@ -594,7 +609,18 @@ export function Composer({
           one look unrelated to either neighbour. */}
       {model || mode || tasks || markers ? (
         <View style={s.pillRow}>
-          {model ? <ControlPill agent={agent} label={model.label} onPress={model.onPress} /> : null}
+          {model ? (
+            <ControlPill
+              agent={agent}
+              working={running}
+              label={model.label}
+              onPress={model.onPress}
+            />
+          ) : null}
+          {/* Beside the pill whose mark is animating, not adrift in the middle
+              of the row: the two halves of one statement — who is working, and
+              for how long — read as one thing when they're adjacent. */}
+          {running ? <TurnMeter since={turnStartedAt} tokens={turnTokens} /> : null}
           {mode ? (
             <ControlPill
               icon="git-branch-outline"
@@ -628,7 +654,7 @@ export function Composer({
         <GlassCard radius={24} shadow style={s.card}>
           <EnrichedMarkdownTextInput
             ref={inputRef}
-            onChangeText={setDraft}
+            onChangeText={onDraftChangeAndSet}
             onChangeMarkdown={(md) => {
               markdownRef.current = md;
             }}
@@ -660,7 +686,7 @@ export function Composer({
                 onPress={onViewChanges}
                 style={({ pressed }) => [s.diffBtn, pressed && s.pressed70]}
               >
-                <PounceIcon name="git-compare-outline" size={19} color={theme.colors.fgMuted} />
+                <PounceIcon name="git-compare-outline" size={20} color={theme.colors.fgMuted} />
                 {diffStat && (diffStat.add > 0 || diffStat.del > 0) ? (
                   <Text style={s.diffStatText}>
                     <Text style={s.diffAdd}>+{diffStat.add}</Text>{" "}
@@ -708,7 +734,7 @@ function RoundButton({ icon, onPress }: { icon: IoniconName; onPress: () => void
   const { theme } = useUnistyles();
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [s.roundBtn, pressed && s.pressed70]}>
-      <PounceIcon name={icon} size={19} color={theme.colors.fgMuted} />
+      <PounceIcon name={icon} size={20} color={theme.colors.fgMuted} />
     </Pressable>
   );
 }
@@ -717,12 +743,17 @@ function RoundButton({ icon, onPress }: { icon: IoniconName; onPress: () => void
  *  Shows the agent logo (model) or an icon (mode) + a trailing chevron. */
 function ControlPill({
   agent,
+  working,
   icon,
   label,
   active,
   onPress,
 }: {
   agent?: string;
+  /** Morph the agent's mark into its thinking animation. This pill names the
+   *  agent you're about to send to, so it is the honest place to say that agent
+   *  is busy — and it says WHO, which a neutral spinner can't. */
+  working?: boolean;
   icon?: IoniconName;
   label: string;
   active?: boolean;
@@ -738,7 +769,9 @@ function ControlPill({
       // buttons off-screen instead of truncating.
       style={({ pressed }) => [s.pill, active ? s.pillActive : s.pillIdle, pressed && s.pressed70]}
     >
-      {agent ? <AgentLogo agent={agent} size={13} /> : null}
+      {agent ? (
+        <AgentStatusIcon agent={agent} activity={working ? "running" : "idle"} size={13} />
+      ) : null}
       {icon ? (
         <PounceIcon
           name={icon}
@@ -788,10 +821,10 @@ function MicButton({ listening, onPress }: { listening: boolean; onPress: () => 
             { width: 28, height: 28, borderRadius: 14, backgroundColor: COLOR.danger },
           ]}
         >
-          <PounceIcon name="mic" size={16} color="#fff" />
+          <PounceIcon name="mic" size={20} color="#fff" />
         </Animated.View>
       ) : (
-        <PounceIcon name="mic-outline" size={22} color={theme.colors.fgMuted} />
+        <PounceIcon name="mic-outline" size={20} color={theme.colors.fgMuted} />
       )}
     </Pressable>
   );

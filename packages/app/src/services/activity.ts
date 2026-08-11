@@ -82,6 +82,20 @@ export interface ModelUsage extends TokenUsage {
   readonly cost: number | null;
 }
 
+/**
+ * One model, and the AGENT that ran it.
+ *
+ * Agent and model are two different axes: Claude Code, Codex, opencode and
+ * Cursor are agents; `claude-opus-5` and `gpt-5.5` are models. An agent is not
+ * tied to one vendor's models — Codex and opencode both run `gpt-5.5` — so a
+ * model NAME is not a unique row. Only the pair is, which is why this type
+ * exists rather than a bare ModelUsage: flattening on the name alone silently
+ * merged two real rows onto one.
+ */
+export interface ModelRow extends ModelUsage {
+  readonly agent: string;
+}
+
 export interface ActivityTotals {
   readonly sessions: number;
   readonly messages: number;
@@ -497,7 +511,7 @@ const ZERO_USAGE: UsageRow = {
  */
 export function usageBreakdown(days: readonly ActivityDay[]): {
   total: UsageRow;
-  agents: { agent: string; tokens: number; usage: UsageRow; models: readonly ModelUsage[] }[];
+  agents: { agent: string; tokens: number; usage: UsageRow; models: readonly ModelRow[] }[];
 } | null {
   const add = (a: UsageRow, b: TokenUsage, tokens: number, cost?: number | null): UsageRow => ({
     tokens: a.tokens + tokens,
@@ -517,7 +531,7 @@ export function usageBreakdown(days: readonly ActivityDay[]): {
   // last discarded — and this runs in render on every period change.
   const byAgent = new Map<
     string,
-    { tokens: number; usage: UsageRow; models: Map<string, ModelUsage> }
+    { tokens: number; usage: UsageRow; models: Map<string, ModelRow> }
   >();
   for (const d of days) {
     if (d.usage) {
@@ -549,7 +563,10 @@ export function usageBreakdown(days: readonly ActivityDay[]): {
                 total: prev.total + m.total,
                 cost: addCost(prev.cost, m.cost),
               }
-            : m,
+            : // Stamped here, where the agent is still in hand. Callers flatten
+              // these lists into one table, and by then the only thing telling
+              // Codex's gpt-5.5 from opencode's is this field.
+              { ...m, agent },
         );
       }
     }
