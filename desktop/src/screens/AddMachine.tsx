@@ -20,6 +20,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { Ionicons } from "@expo/vector-icons";
+import { PounceIcon } from "@pounce/app/ui/native/Icon";
+import {
+  SettingsCaption,
+  SettingsCard,
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+} from "@pounce/app/components/settings/primitives";
 import {
   answerSsh,
   cancelSsh,
@@ -33,7 +41,7 @@ import {
   type SshState,
 } from "@pounce/app/services/ssh";
 import { syncLiveDataStreaming } from "@pounce/app/services/bridge";
-import { COLOR } from "@pounce/app/ui";
+import { COLOR, INPUT_TWEAKS } from "@pounce/app/ui";
 
 /** Terminal control sequences, and the block characters the CLI's QR is drawn
  *  from. Both are noise in a log rendered as text. */
@@ -78,11 +86,20 @@ function phaseLabel(state: SshState): string {
  *  suggestion. Typing narrows, so the cap only ever hides the tail. */
 const MAX_SUGGESTIONS = 12;
 
-/** The second line of a suggestion — what picking it would actually do. */
+/**
+ * The detail beside a suggestion — what picking it would actually do.
+ *
+ * The row's value column is ~20 characters (maxWidth 180 at 16pt) and truncates
+ * in the MIDDLE, so a prose list of every setting came out as "127.0.0.1 ·
+ * a…port 32222" — the half that mattered elided. So: the ssh target, written
+ * the way ssh writes it, and no prefix, because the bookmark glyph already says
+ * this came from your config. The port is the one thing left out — the alias
+ * carries it either way, and it is what you'd drop to keep the rest legible.
+ */
 function describeHost(h: SshHost): string {
   if (h.source !== "config") return "Previously connected";
-  const parts = [h.hostName, h.user && `as ${h.user}`, h.port && `port ${h.port}`].filter(Boolean);
-  return parts.length ? `SSH config · ${parts.join(" · ")}` : "SSH config";
+  if (!h.hostName) return h.user ? `as ${h.user}` : "From your SSH config";
+  return h.user ? `${h.user}@${h.hostName}` : h.hostName;
 }
 
 const PROMPT_TITLE: Record<string, string> = {
@@ -225,23 +242,14 @@ export default function AddMachineScreen() {
 
   return (
     <View style={s.root}>
-      <View style={s.header}>
-        <Text style={s.headerTitle}>Add a machine</Text>
-        {state ? (
-          <Pressable onPress={reset}>
-            <Text style={s.link}>Start over</Text>
-          </Pressable>
-        ) : null}
-      </View>
-
-      <ScrollView contentContainerStyle={s.list}>
+      <SettingsPage title="Add a machine">
         {!state ? (
           <>
-            <Text style={s.lede}>
+            <SettingsCaption>
               Any machine you can reach over SSH. Pounce connects, sets itself up there, and adds it
               — no need to go and run anything yourself.
-            </Text>
-            <View style={s.card}>
+            </SettingsCaption>
+            <SettingsCard>
               <Field
                 label="Host"
                 value={host}
@@ -253,11 +261,17 @@ export default function AddMachineScreen() {
               {/* Username and port share a row: they're both small, both
                   optional, and both qualify the host above them. */}
               <View style={[s.pairRow, s.rowDivided]}>
-                <Field label="Username" value={user} onChange={setUser} placeholder="optional" />
+                <Field
+                  label="Username"
+                  value={user}
+                  onChange={setUser}
+                  placeholder="optional"
+                  grow
+                />
                 <View style={s.pairDivider} />
                 <Field label="Port" value={sshPort} onChange={setSshPort} placeholder="22" narrow />
               </View>
-            </View>
+            </SettingsCard>
             {startError ? <Text style={s.error}>{startError}</Text> : null}
             <Pressable
               style={[s.primary, !host.trim() && s.primaryOff]}
@@ -270,39 +284,33 @@ export default function AddMachineScreen() {
             {/* The machines this Mac already knows how to reach. Telling
                 someone their ssh_config aliases work is a fact they have to act
                 on; showing them the list is that fact with the work done. */}
-            <View style={s.suggestHeader}>
-              <View style={s.grow}>
-                <Text style={s.suggestTitle}>Suggested hosts</Text>
-                <Text style={s.hint}>From your SSH config and known hosts</Text>
-              </View>
-              <Pressable onPress={refreshHosts} style={s.refresh}>
-                <Ionicons name="refresh" size={13} color={COLOR.accent} />
-                <Text style={s.link}>Refresh</Text>
-              </Pressable>
-            </View>
-            <View style={s.card}>
+            <SettingsSection
+              title="Suggested hosts"
+              action={
+                <Pressable onPress={refreshHosts} style={s.refresh}>
+                  <PounceIcon name="refresh" size={13} color={COLOR.accent} />
+                  <Text style={s.link}>Refresh</Text>
+                </Pressable>
+              }
+            >
               {hosts === null ? (
                 <View style={s.suggestEmpty}>
                   <ActivityIndicator size="small" />
                 </View>
               ) : suggestions.length ? (
                 suggestions.map((h, i) => (
-                  <View key={`${h.source}:${h.name}`} style={[s.row, i > 0 && s.rowDivided]}>
-                    <View style={h.source === "config" ? s.badge : s.badgeQuiet}>
-                      <Ionicons
-                        name={h.source === "config" ? "bookmark-outline" : "time-outline"}
-                        size={15}
-                        color={h.source === "config" ? COLOR.accent : COLOR.fgFaint}
-                      />
-                    </View>
-                    <View style={s.grow}>
-                      <Text style={s.rowName}>{h.name}</Text>
-                      <Text style={s.rowMeta}>{describeHost(h)}</Text>
-                    </View>
-                    <Pressable onPress={() => begin(h)} style={s.ghost}>
-                      <Text style={s.ghostLabel}>Add</Text>
-                    </Pressable>
-                  </View>
+                  <SettingsRow
+                    key={`${h.source}:${h.name}`}
+                    // A config alias is a machine you named; a known_hosts entry
+                    // is only somewhere you've been. Same row, different glyph —
+                    // the list stays one list.
+                    icon={h.source === "config" ? "bookmark-outline" : "time-outline"}
+                    label={h.name}
+                    value={describeHost(h)}
+                    divided={i > 0}
+                    onPress={() => begin(h)}
+                    accessory={<Text style={s.ghostLabel}>Add</Text>}
+                  />
                 ))
               ) : (
                 <View style={s.suggestEmpty}>
@@ -313,7 +321,7 @@ export default function AddMachineScreen() {
                   </Text>
                 </View>
               )}
-            </View>
+            </SettingsSection>
           </>
         ) : (
           <>
@@ -392,9 +400,18 @@ export default function AddMachineScreen() {
                 </ScrollView>
               </View>
             ) : null}
+
+            {/* The way back to the form. It used to live beside the title, but
+                the shell draws that now — and a run you've finished reading is
+                the only time you want it anyway. */}
+            {running ? null : (
+              <Pressable onPress={reset} style={s.startOver}>
+                <Text style={s.link}>Start over</Text>
+              </Pressable>
+            )}
           </>
         )}
-      </ScrollView>
+      </SettingsPage>
     </View>
   );
 }
@@ -406,6 +423,7 @@ function Field({
   placeholder,
   divided,
   narrow,
+  grow,
   autoFocus,
   onSubmit,
 }: {
@@ -416,13 +434,20 @@ function Field({
   divided?: boolean;
   /** For the port, which is four characters and shouldn't claim half a row. */
   narrow?: boolean;
+  /** Take the rest of a ROW. A field is content-sized by default because in the
+   *  card's column that is what you want — `flex: 1` there stretches it
+   *  vertically instead. Side by side, one of them has to claim the slack, and
+   *  without this the username input collapsed to zero width: label, then
+   *  nothing to type into. */
+  grow?: boolean;
   autoFocus?: boolean;
   onSubmit?: () => void;
 }) {
   return (
-    <View style={[s.field, divided && s.rowDivided, narrow && s.fieldNarrow]}>
+    <View style={[s.field, divided && s.rowDivided, narrow && s.fieldNarrow, grow && s.fieldGrow]}>
       <Text style={[s.fieldLabel, narrow && s.fieldLabelNarrow]}>{label}</Text>
       <TextInput
+        {...INPUT_TWEAKS}
         style={s.fieldInput}
         value={value}
         onChangeText={onChange}
@@ -439,32 +464,12 @@ function Field({
 
 const s = StyleSheet.create((theme) => ({
   root: { flex: 1, backgroundColor: theme.colors.bg },
-  header: {
-    height: 48,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottomWidth: 1,
-    borderColor: theme.colors.border,
-    paddingLeft: 16,
-    // Clear of the shell's floating close button (24pt at top:10/right:10).
-    paddingRight: 42,
-  },
-  headerTitle: { fontSize: 15, fontWeight: "600", color: theme.colors.fg },
   link: { fontSize: 13, color: theme.colors.accent },
+  startOver: { alignSelf: "center", paddingTop: 4 },
 
-  list: { padding: 20, paddingBottom: 28, gap: 14 },
-  lede: { fontSize: 13, lineHeight: 19, color: theme.colors.fgMuted },
   hint: { fontSize: 11.5, color: theme.colors.fgFaint },
   error: { fontSize: 12.5, lineHeight: 18, color: theme.colors.danger },
 
-  card: {
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surfaceAlt,
-    overflow: "hidden",
-  },
   rowDivided: { borderTopWidth: 1, borderTopColor: theme.colors.border },
   field: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, height: 44 },
   fieldLabel: { width: 78, fontSize: 12.5, color: theme.colors.fgMuted },
@@ -475,39 +480,8 @@ const s = StyleSheet.create((theme) => ({
   pairRow: { flexDirection: "row", alignItems: "center" },
   pairDivider: { width: 1, height: 22, backgroundColor: theme.colors.border },
   fieldNarrow: { flex: 0, width: 118 },
+  fieldGrow: { flex: 1 },
 
-  grow: { flex: 1 },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  rowName: { fontSize: 13, fontWeight: "600", color: theme.colors.fg },
-  rowMeta: { marginTop: 1, fontSize: 11, color: theme.colors.fgFaint },
-  badge: {
-    height: 28,
-    width: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 8,
-    backgroundColor: theme.colors.accentSoft,
-  },
-  // A known_hosts entry is a memory, not a choice someone made — it shouldn't
-  // wear the accent an ssh_config alias earns.
-  badgeQuiet: {
-    height: 28,
-    width: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 8,
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  suggestHeader: { flexDirection: "row", alignItems: "flex-end", gap: 12, marginTop: 4 },
-  suggestTitle: { fontSize: 12.5, fontWeight: "600", color: theme.colors.fg },
   refresh: { flexDirection: "row", alignItems: "center", gap: 4 },
   suggestEmpty: { alignItems: "center", justifyContent: "center", paddingVertical: 20 },
 

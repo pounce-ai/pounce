@@ -163,8 +163,13 @@ const MODALS: Record<string, ModalEntry> = {
   // Taller than /pair: both are step-by-step and the catalog picker needs room
   // for a space list and a search result list at the same time.
   "/peers": { component: PeersScreen, width: 600, height: 680 },
-  // Shorter than /peers: a form, a status line and a log — no lists to browse.
-  "/add-machine": { component: AddMachineScreen, width: 600, height: 620 },
+  // Matches /settings/devices, which is where you come from and go back to.
+  "/add-machine": {
+    component: AddMachineScreen,
+    width: 600,
+    height: 640,
+    title: "Add a machine",
+  },
   "/access": { component: AccessScreen, width: 600, height: 680 },
   "/filters": { component: FiltersModal, width: 560, height: 660 },
 };

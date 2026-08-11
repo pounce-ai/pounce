@@ -31,7 +31,6 @@ import {
   type ColorValue,
 } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import {
   grantDevice,
@@ -435,8 +434,6 @@ function PeerList({
   onRevoke: (grantId: string) => void;
   onForget: (deviceId: string) => void;
 }) {
-  // Above the early return: hooks can't live under a conditional.
-  const router = useRouter();
   if (peers === null) {
     return <Centered spinner title="Looking for machines on this network…" />;
   }
@@ -520,27 +517,6 @@ function PeerList({
             <Text style={s.emptyHint}>Other computers need Pounce running and discoverable.</Text>
           </View>
         )}
-      </Section>
-
-      {/* Discovery only ever finds what's on this network, which leaves out the
-          machines people most want: a server somewhere else. If you can SSH to
-          it, that's enough — so offer it here, next to the list that can't. */}
-      <Section title="Somewhere else">
-        <Pressable
-          onPress={() => router.push("/add-machine")}
-          style={({ pressed }) => [s.row, pressed && s.pressed]}
-        >
-          <View style={s.badge}>
-            <Ionicons name="terminal-outline" size={17} color={COLOR.accent} />
-          </View>
-          <View style={s.grow}>
-            <Text style={s.rowName}>Add a machine over SSH</Text>
-            <Text style={s.rowMeta}>
-              A server you can already ssh into. Sets itself up and works from your phone too.
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={16} color={COLOR.fgFaint} />
-        </Pressable>
       </Section>
 
       <Standing
