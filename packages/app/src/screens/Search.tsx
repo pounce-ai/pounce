@@ -9,6 +9,8 @@ import {
   View,
 } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import { useDevices } from "../state/db/hooks";
+import { ConnectFlow } from "../components/ConnectFlow";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
@@ -33,6 +35,7 @@ const FILL = { flex: 1 } as const;
 /** Full-screen thread search — matches title, branch, host, agent, repo. */
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
+  const devices = useDevices();
   const { theme } = useUnistyles();
   // Desktop's sidebar seeds the modal via /search?q=… — start searching
   // immediately instead of making the user retype.
@@ -253,11 +256,26 @@ export default function SearchScreen() {
           // headers already say "0 matches", so show nothing extra.
           !showAll && (msgSearching || msgHits.length > 0) ? null : (
             <View style={s.empty}>
-              <Text style={s.emptyEmoji}>{showAll ? "🐾" : "🔍"}</Text>
-              <Text style={s.emptyTitle}>{showAll ? "No threads yet" : "No matches"}</Text>
-              <Text style={s.emptyBody}>
-                {showAll ? "Start a task to see it here." : "Try another word."}
-              </Text>
+              {showAll && !devices.length ? (
+                // "Start a task to see it here" is an instruction the reader
+                // cannot follow: there is no machine to start one on. Offer the
+                // thing that unblocks them instead.
+                <>
+                  <Text style={s.emptyTitle}>Nothing to search yet</Text>
+                  <Text style={s.emptyBody}>
+                    Connect a computer — its threads are what you&apos;d search.
+                  </Text>
+                  <ConnectFlow />
+                </>
+              ) : (
+                <>
+                  {showAll ? null : <Text style={s.emptyEmoji}>🔍</Text>}
+                  <Text style={s.emptyTitle}>{showAll ? "No threads yet" : "No matches"}</Text>
+                  <Text style={s.emptyBody}>
+                    {showAll ? "Start a task to see it here." : "Try another word."}
+                  </Text>
+                </>
+              )}
             </View>
           )
         }

@@ -4,6 +4,8 @@ import { useThemeHex } from "@pounce/app/ui/useThemeHex";
 import { router } from "expo-router";
 import { FilterButton } from "@pounce/app/components/FilterSheet";
 import { searchQuery$ } from "@pounce/app/state/search";
+import { connection$ } from "@pounce/app/state/stores";
+import { useSelector } from "@legendapp/state/react";
 
 /** Per-tab stack: native UISearchBar in the navigation bar drives the shared
  *  Search screen through searchQuery$ (the screen has no input of its own on
@@ -13,6 +15,10 @@ import { searchQuery$ } from "@pounce/app/state/search";
  *  light/dark toggle. */
 export default function SearchLayout() {
   const hex = useThemeHex();
+  // Nothing paired means nothing to search: a UISearchBar that can only ever
+  // return zero results, and a filter that narrows an empty set. Hidden rather
+  // than disabled, same as Home's New button.
+  const connected = useSelector(() => connection$.status.get()) === "connected";
   return (
     <Stack
       screenOptions={{
@@ -30,18 +36,20 @@ export default function SearchLayout() {
         name="index"
         options={{
           title: "Search",
-          headerRight: () => (
-            <FilterButton active={false} onPress={() => router.push("/filters")} />
-          ),
-          headerSearchBarOptions: {
-            placeholder: "Find a thread…",
-            autoCapitalize: "none",
-            textColor: hex.fg,
-            hintTextColor: hex.fgMuted,
-            headerIconColor: hex.fgMuted,
-            hideWhenScrolling: false,
-            onChangeText: (e) => searchQuery$.set(e.nativeEvent.text),
-          },
+          headerRight: connected
+            ? () => <FilterButton active={false} onPress={() => router.push("/filters")} />
+            : undefined,
+          headerSearchBarOptions: !connected
+            ? undefined
+            : {
+                placeholder: "Find a thread…",
+                autoCapitalize: "none",
+                textColor: hex.fg,
+                hintTextColor: hex.fgMuted,
+                headerIconColor: hex.fgMuted,
+                hideWhenScrolling: false,
+                onChangeText: (e) => searchQuery$.set(e.nativeEvent.text),
+              },
         }}
       />
     </Stack>

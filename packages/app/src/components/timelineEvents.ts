@@ -23,36 +23,55 @@ function toolCallIds(events: TimelineEvent[]): Set<string> {
  * onto) — in stable order.
  */
 /**
- * Wall-clock a run of tool calls took: earliest call started → latest result
- * landed. Reads the RAW event list because `collapseToolResults` folds results
- * into their call and drops the rows that carry the finishing timestamp.
+ * Wall-clock every run took: earliest call started → latest result landed, per
+ * run. Reads the RAW event list because `collapseToolResults` folds results into
+ * their call and drops the rows carrying the finishing timestamp.
  *
- * Null when the run is still open (no results yet) or spans under a second —
- * "Worked for 0s" is worse than saying nothing.
+ * ALL runs in two passes, not two passes per run. This runs again on every
+ * streamed token, and per-run scanning made it O(runs × events) — quadratic in
+ * thread length, on the one path that has to keep up with a live turn.
+ *
+ * A run is absent from the result when it's still open (no results yet), when no
+ * call carried a usable timestamp, or when it spans under a second — "Worked for
+ * 0s" is worse than saying nothing.
  */
-export function runElapsedMs(events: TimelineEvent[], runIds: readonly string[]): number | null {
-  const inRun = new Set(runIds);
-  const callKeys = new Set<string>();
-  let start = Number.POSITIVE_INFINITY;
-  let end = Number.NEGATIVE_INFINITY;
+export function runElapsedByRun(
+  events: TimelineEvent[],
+  runs: readonly { id: string; ids: readonly string[] }[],
+): Map<string, number> {
+  const runOfCall = new Map<string, string>();
+  for (const run of runs) for (const id of run.ids) runOfCall.set(id, run.id);
+
+  const span = new Map<string, { start: number; end: number }>();
+  // A result names its call, not its run — so the first pass records which run
+  // each call key belongs to and the second folds the results in.
+  const runOfCallKey = new Map<string, string>();
   for (const e of events) {
-    if (e.type !== "tool_call" || !inRun.has(e.id)) continue;
+    if (e.type !== "tool_call") continue;
+    const runId = runOfCall.get(e.id);
+    if (!runId) continue;
+    runOfCallKey.set(e.call.id || e.id, runId);
     const t = Date.parse(e.ts);
-    if (!Number.isNaN(t)) {
-      start = Math.min(start, t);
-      end = Math.max(end, t);
+    if (Number.isNaN(t)) continue;
+    const seen = span.get(runId);
+    if (!seen) span.set(runId, { start: t, end: t });
+    else {
+      if (t < seen.start) seen.start = t;
+      if (t > seen.end) seen.end = t;
     }
-    callKeys.add(e.call.id || e.id);
   }
-  if (!Number.isFinite(start)) return null;
   for (const e of events) {
     if (e.type !== "tool_result") continue;
-    if (!callKeys.has(e.result.toolCallId || e.id.replace(/:o$/, ""))) continue;
+    const runId = runOfCallKey.get(e.result.toolCallId || e.id.replace(/:o$/, ""));
+    const seen = runId ? span.get(runId) : undefined;
+    if (!seen) continue;
     const t = Date.parse(e.ts);
-    if (!Number.isNaN(t)) end = Math.max(end, t);
+    if (!Number.isNaN(t) && t > seen.end) seen.end = t;
   }
-  const ms = end - start;
-  return ms >= 1000 ? ms : null;
+
+  const out = new Map<string, number>();
+  for (const [runId, { start, end }] of span) if (end - start >= 1000) out.set(runId, end - start);
+  return out;
 }
 
 /** "22s", "1m 30s", "2m" — the shape t3code's working timer uses. */

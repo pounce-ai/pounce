@@ -12,6 +12,8 @@
  * an SVG would.
  */
 import { View, type ColorValue } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useColors } from "@pounce/app/ui/tokens";
 
 export function SidebarGlyph({
   color,
@@ -48,6 +50,33 @@ export function SidebarGlyph({
           opacity: filled ? 0.5 : 1,
         }}
       />
+    </View>
+  );
+}
+
+/**
+ * A checkbox tick, for the multi-select rows in Peers and Access.
+ *
+ * Both screens had drawn their own — same two Views, same accent-fill-when-on,
+ * differing only in a point of size. `size` keeps that difference without
+ * keeping two components.
+ */
+export function CheckGlyph({ on, size = 16 }: { on: boolean; size?: number }) {
+  const COLOR = useColors();
+  return (
+    <View
+      style={{
+        height: size,
+        width: size,
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: Math.round(size / 3.5),
+        borderWidth: 1,
+        borderColor: on ? COLOR.accent : COLOR.border,
+        backgroundColor: on ? COLOR.accent : "transparent",
+      }}
+    >
+      {on ? <Ionicons name="checkmark" size={Math.round(size * 0.78)} color={COLOR.bg} /> : null}
     </View>
   );
 }

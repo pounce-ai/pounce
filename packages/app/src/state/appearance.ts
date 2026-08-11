@@ -73,15 +73,9 @@ export function applyAppearance(mode: AppearanceMode = appearance$.get()) {
     } catch {
       /* keep system appearance */
     }
-    // Unistyles drives the runtime palette (whole-theme swap, no activity
-    // recreate). Adaptive themes are OFF and stay off: they only understand
-    // themes literally named light/dark, and a named theme registers as
-    // "<id>-<scheme>" — so the scheme is resolved here instead, and the OS
-    // listener below stands in for what adaptive mode used to do.
-    //
-    // Every theme is explicit hex, so this repaints on every platform. The
-    // `light`/`dark` entries (the platform semantic palettes) stay registered
-    // as the pre-hydration fallback but are no longer selected.
+    // Adaptive themes only understand themes named light/dark, and ours
+    // register as "<id>-<scheme>" — so resolve the scheme here and drive
+    // setTheme (the OS listener below stands in for adaptive mode).
     try {
       UnistylesRuntime.setAdaptiveThemes(false);
       UnistylesRuntime.setTheme(

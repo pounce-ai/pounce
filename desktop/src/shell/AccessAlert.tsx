@@ -74,6 +74,9 @@ export function AccessAlert() {
   if (!request) return null;
 
   const isPreview = request.kind === "preview";
+  // A phone pairing, not a peer machine reading: full access, and un-pairing is
+  // how it ends. Saying "wants access" for that would understate it.
+  const isDevice = request.kind === "device";
   const existing = request.existing ?? null;
   return (
     // box-none, not "none": the card below must stay clickable while every
@@ -97,24 +100,28 @@ export function AccessAlert() {
             response to someone widening what they can read. */}
         <View style={existing ? s.badgeMore : s.badge}>
           <Ionicons
-            name={existing ? "add-circle" : "hand-left"}
+            name={isDevice ? "phone-portrait-outline" : existing ? "add-circle" : "hand-left"}
             size={16}
             color={existing ? COLOR.warning : COLOR.accent}
           />
         </View>
         <View style={s.grow}>
           <Text style={s.title} numberOfLines={1}>
-            {existing
-              ? `${request.requester.hostName} wants more access`
-              : `${request.requester.hostName} wants ${isPreview ? "a look at what's here" : "access"}`}
+            {isDevice
+              ? `Pair ${request.requester.hostName} with this Mac?`
+              : existing
+                ? `${request.requester.hostName} wants more access`
+                : `${request.requester.hostName} wants ${isPreview ? "a look at what's here" : "access"}`}
           </Text>
           <Text style={s.meta} numberOfLines={1}>
             {/* Short enough to survive the card's width — the earlier "— this
                 would widen it" was true and got ellipsed away, which is worse
                 than not saying it: the title already implies it. */}
-            {existing
-              ? `Already reads ${existing.summary}`
-              : "Nothing is shared until you approve it"}
+            {isDevice
+              ? "Full access, like scanning the pairing code"
+              : existing
+                ? `Already reads ${existing.summary}`
+                : "Nothing is shared until you approve it"}
           </Text>
         </View>
         {/* The verification code rides along so a glance is often the whole

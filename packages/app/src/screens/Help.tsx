@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { Linking, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
 import { PounceIcon } from "../ui/native/Icon";
 import { INPUT_TWEAKS, IS_DESKTOP } from "../ui";
 
@@ -22,7 +21,7 @@ const FAQS: Faq[] = [
   },
   {
     q: "How do I connect my Mac?",
-    a: "Install the free, notarized Pounce Bridge on your Mac and run it — it shows a QR pairing code. In the app go to Settings → Pair a device → Scan pairing code (or enter it manually). Your sessions then sync automatically.",
+    a: "Run `npx use-pounce` on your Mac. This app finds it on the same Wi‑Fi and offers Connect — approve it on the Mac and your sessions sync. Off that network, use the pairing code: Settings → Devices.",
   },
   {
     q: "Can I use it away from home, off Wi‑Fi?",
@@ -54,7 +53,7 @@ const FAQS: Faq[] = [
   },
   {
     q: "Nothing is syncing / I can't connect",
-    a: "Make sure the Pounce Bridge is running on your Mac and both are on the same Wi‑Fi (or your tunnel is up). Pull to refresh on Home, or tap Refresh in Settings. If the Bridge's code changed, pair again.",
+    a: "Make sure Pounce is running on your Mac and both are on the same Wi‑Fi (or your tunnel is up). Pull to refresh on Home, or Settings → Devices → Sync now. If the pairing code changed, pair again.",
   },
   {
     q: "Is my code private?",
@@ -64,7 +63,6 @@ const FAQS: Faq[] = [
 
 export default function HelpScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const { theme } = useUnistyles();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<Set<number>>(new Set());
@@ -72,7 +70,8 @@ export default function HelpScreen() {
   const toggle = (i: number) =>
     setOpen((prev) => {
       const next = new Set(prev);
-      next.has(i) ? next.delete(i) : next.add(i);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
       return next;
     });
 
@@ -84,17 +83,7 @@ export default function HelpScreen() {
   }, [query]);
 
   return (
-    <View style={[s.root, IS_DESKTOP ? { paddingTop: insets.top + 8 } : { paddingTop: 8 }]}>
-      {/* Mobile shows the native modal navigation bar; this row is desktop chrome. */}
-      {IS_DESKTOP ? (
-        <View style={s.headerRow}>
-          <Text style={s.headerTitle}>Help</Text>
-          <Pressable onPress={() => router.back()} style={({ pressed }) => pressed && s.pressed60}>
-            <Text style={s.doneLabel}>Done</Text>
-          </Pressable>
-        </View>
-      ) : null}
-
+    <View style={[s.root, { paddingTop: 8 }]}>
       {/* Search */}
       <View style={s.searchRow}>
         <PounceIcon name="search" size={16} color={theme.colors.fgFaint} />

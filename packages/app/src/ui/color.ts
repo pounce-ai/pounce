@@ -30,7 +30,7 @@ export function hexToRgb(hex: string): Rgb {
   };
 }
 
-export function rgbToHex({ r, g, b }: Rgb): string {
+function rgbToHex({ r, g, b }: Rgb): string {
   return `#${[r, g, b].map((n) => clamp255(n).toString(16).padStart(2, "0")).join("")}`;
 }
 

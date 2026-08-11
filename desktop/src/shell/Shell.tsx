@@ -45,6 +45,9 @@ import SessionScreen from "@pounce/app/screens/Session";
 import SessionsScreen from "@pounce/app/screens/Sessions";
 import SearchScreen from "@pounce/app/screens/Search";
 import SettingsScreen from "@pounce/app/screens/Settings";
+import SettingsDevicesScreen from "@pounce/app/screens/settings/Devices";
+import SettingsAppearanceScreen from "@pounce/app/screens/settings/Appearance";
+import SettingsSpendScreen from "@pounce/app/screens/settings/Spend";
 import DashboardScreen from "@pounce/app/screens/Dashboard";
 import NewTaskScreen from "@pounce/app/screens/New";
 import ContextScreen from "@pounce/app/screens/Context";
@@ -60,6 +63,24 @@ import AccessScreen from "../screens/Access";
 import SpaceScreen from "@pounce/app/screens/Space";
 import MetricScreen from "@pounce/app/screens/Metric";
 import { FilterSheetContent } from "@pounce/app/components/FilterSheet";
+import { SETTINGS_ROUTES, settingsHref } from "@pounce/app/screens/settings/routes";
+
+/** The settings sub-screens as modal entries — titles and sizes come from the
+ *  manifest the mobile stack also reads, so the two can't disagree. */
+const SETTINGS_SCREENS: Record<string, ComponentType> = {
+  devices: SettingsDevicesScreen,
+  appearance: SettingsAppearanceScreen,
+  spend: SettingsSpendScreen,
+};
+
+function settingsModals(): Record<string, ModalEntry> {
+  return Object.fromEntries(
+    SETTINGS_ROUTES.map((r) => [
+      settingsHref(r.name),
+      { component: SETTINGS_SCREENS[r.name], width: r.width, height: r.height, title: r.title },
+    ]),
+  );
+}
 
 /** Filters as a routed modal card (same href as mobile) — the shared sheet
  *  body with the shell's standard scrim/card instead of a phone bottom sheet. */
@@ -88,19 +109,55 @@ const PANE_SCREENS: Record<string, ComponentType> = {
   "/space": SpaceScreen,
   "/metric": MetricScreen,
   "/settings": SettingsScreen,
+  "/new": NewTaskScreen,
 };
 
-const MODALS: Record<string, { component: ComponentType; width: number; height: number }> = {
+/**
+ * A modal card: the screen, its size, and — when the HOST should draw the
+ * chrome — a title and the word its dismiss control uses.
+ *
+ * `title` is what makes the header the host's job. Every screen used to draw
+ * its own `IS_DESKTOP` title row, so the same header existed five times over and
+ * a sixth control (a floating ✕) had to float above them all because they
+ * disagreed. Screens that own their header deliberately (Diagnostics carries a
+ * Refresh action in it) simply have no title here and keep drawing it.
+ *
+ * The dismiss WORD is per modal, not a constant: abandoning a half-written task
+ * is "Cancel", closing something you were only reading is "Done".
+ */
+interface ModalEntry {
+  component: ComponentType;
+  width: number;
+  height: number;
+  title?: string;
+  dismissLabel?: string;
+}
+
+const MODALS: Record<string, ModalEntry> = {
   "/search": { component: SearchScreen, width: 620, height: 560 },
   "/sessions": { component: SessionsScreen, width: 620, height: 660 },
   // Wider than the list modals: the heatmap is ~700px of grid at its cell size.
   "/activity": { component: DashboardScreen, width: 760, height: 700 },
-  "/new": { component: NewTaskScreen, width: 640, height: 660 },
-  "/context": { component: ContextScreen, width: 720, height: 700 },
+  "/context": {
+    component: ContextScreen,
+    width: 720,
+    height: 700,
+    title: "Project context",
+    dismissLabel: "Close",
+  },
   "/terminal": { component: TerminalScreen, width: 860, height: 660 },
   "/connect": { component: ConnectScreen, width: 560, height: 460 },
-  "/help": { component: HelpScreen, width: 620, height: 640 },
-  "/sync-history": { component: SyncHistoryScreen, width: 620, height: 600 },
+  "/help": { component: HelpScreen, width: 620, height: 640, title: "Help" },
+  "/sync-history": {
+    component: SyncHistoryScreen,
+    width: 620,
+    height: 600,
+    title: "Sync history",
+  },
+  // Settings' sub-screens, from the shared manifest — the Settings pane stays a
+  // tab you sit in; each of these is one job you finish and dismiss, which is
+  // what a card is for.
+  ...settingsModals(),
   "/diagnostics": { component: DiagnosticsScreen, width: 620, height: 620 },
   "/pair": { component: PairScreen, width: 560, height: 640 },
   // Taller than /pair: both are step-by-step and the catalog picker needs room
@@ -300,23 +357,35 @@ export function Shell() {
           <View
             style={[s.modalCard, { width: entry.width, height: entry.height, maxHeight: "88%" }]}
           >
+            {entry.title ? (
+              <View style={s.modalHeader}>
+                <Text style={s.modalTitle}>{entry.title}</Text>
+                <Pressable
+                  onPress={() => nav$.modal.set(null)}
+                  style={({ pressed }) => pressed && s.pressed60}
+                >
+                  <Text style={s.modalDismiss}>{entry.dismissLabel ?? "Done"}</Text>
+                </Pressable>
+              </View>
+            ) : null}
             <RouteParamsProvider
               key={`${modal.path}:${JSON.stringify(modal.params)}`}
               params={modal.params}
             >
               <entry.component />
             </RouteParamsProvider>
-            {/* One close affordance for every modal, floated over the screen's
-                own header — the reused mobile screens each draw their titles
-                differently, and several have no dismiss control at all because
-                on a phone you swipe the sheet away. */}
-            <Pressable
-              onPress={() => nav$.modal.set(null)}
-              accessibilityLabel="Close"
-              style={({ pressed }) => [s.modalClose, pressed && s.modalClosePressed]}
-            >
-              <Ionicons name="close" size={14} color={COLOR.fgMuted} />
-            </Pressable>
+            {/* Screens that draw their own header (see ModalEntry) get the
+                floating ✕ instead — several have no dismiss control of their
+                own, because on a phone you swipe the sheet away. */}
+            {entry.title ? null : (
+              <Pressable
+                onPress={() => nav$.modal.set(null)}
+                accessibilityLabel="Close"
+                style={({ pressed }) => [s.modalClose, pressed && s.modalClosePressed]}
+              >
+                <Ionicons name="close" size={14} color={COLOR.fgMuted} />
+              </Pressable>
+            )}
           </View>
         </View>
       ) : null}
@@ -396,6 +465,18 @@ const s = StyleSheet.create((theme) => ({
     shadowRadius: 30,
     shadowOffset: { width: 0, height: 12 },
   },
+  // The host's title row — one header for every modal that doesn't insist on
+  // drawing its own. Metrics match what the five screens each used to repeat.
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 10,
+  },
+  modalTitle: { fontSize: 22, fontWeight: "700", color: theme.colors.fg },
+  modalDismiss: { fontSize: 15, color: theme.colors.fgMuted },
   modalClose: {
     position: "absolute",
     top: 10,
@@ -407,6 +488,7 @@ const s = StyleSheet.create((theme) => ({
     borderRadius: 999,
   },
   modalClosePressed: { backgroundColor: theme.colors.surfaceHover },
+  pressed60: { opacity: 0.6 },
   // Inherits the card's surface: a second fill here made the body a grey slab
   // sitting inside a white card.
   // paddingTop clears the close button this shell floats over every modal

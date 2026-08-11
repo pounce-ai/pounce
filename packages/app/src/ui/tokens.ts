@@ -4,19 +4,22 @@
  */
 
 import type { ColorValue } from "react-native";
-import { UnistylesRuntime } from "react-native-unistyles";
+import { UnistylesRuntime, useUnistyles } from "react-native-unistyles";
 import { T, type ThemeColor } from "./theme";
 
 /**
- * The ACTIVE theme's colours, for the places a themed StyleSheet can't reach:
- * inline style objects on Reanimated-managed views, and props that take a
- * colour rather than a style (`color=`, `placeholderTextColor=`, an icon tint).
+ * The ACTIVE theme's colours for code that is NOT rendering — a worklet, an
+ * event handler, a module-level helper.
  *
- * Reads through to unistyles on every property access, so a call site picks up
- * the current theme the next time its component renders — which is what
- * happens anyway, because unistyles re-renders anything holding a themed
- * sheet. Do NOT hoist a value out of it into a module constant or a worklet:
- * that freezes the boot palette, which is exactly the bug this replaced.
+ * It reads through to unistyles on every access but does NOT subscribe, so a
+ * component that reads it during render repaints only when something ELSE
+ * re-renders it. That is the trap: a tab bar built from `COLOR.accent` kept the
+ * palette it mounted with until the app was relaunched. **Inside a component,
+ * use `useColors()` below** (or a themed StyleSheet, or `useThemeHex()` for a
+ * literal-hex consumer).
+ *
+ * Never hoist a value out of it into a module constant or a worklet: that
+ * freezes the boot palette, which is the bug this replaced.
  *
  * Falls back to the platform's own palette (`T`) before unistyles is
  * configured — tests, and the frame before the entry file runs.
@@ -33,6 +36,18 @@ export const COLOR = new Proxy({} as Record<ThemeColor, ColorValue>, {
     return (T as Record<string, ColorValue>)[prop];
   },
 });
+
+/**
+ * The active theme's colours, SUBSCRIBED — the sanctioned way to read a colour
+ * during render when it goes to a prop rather than into a StyleSheet
+ * (`color=`, `tintColor=`, `placeholderTextColor=`).
+ *
+ * Same values as `COLOR`; the difference is that this re-renders the caller
+ * when the theme changes, so the painted colour can't fall behind the picker.
+ */
+export function useColors(): Record<ThemeColor, ColorValue> {
+  return useUnistyles().theme.colors as Record<ThemeColor, ColorValue>;
+}
 
 /** Human-facing agent names (brands keep their own casing). */
 export const AGENT_LABEL: Record<string, string> = {
@@ -90,7 +105,15 @@ const AGENT_HEX_LIGHT: Record<string, string> = {
   hermes: "#5B4FD6",
 };
 
-/** Brand hue for an agent on the given ground. Pass `useColorScheme()`. */
+/**
+ * Brand hue for an agent on the given ground.
+ *
+ * Prefer `useAgentHex()` in ui/useThemeHex — it binds the ground for you. The
+ * ground here is the APP's, never `useColorScheme()`'s system trait: this doc
+ * used to say the opposite, and every caller that believed it painted a mark
+ * tuned for white onto a dark window whenever the app was forced Dark on a
+ * light Mac.
+ */
 // `scheme` is widened to a plain string: RN's ColorSchemeName differs between
 // the mobile and macOS type packages, and this file is shared by both.
 export function agentHex(agent: string, scheme: string | null | undefined): string | undefined {

@@ -1,5 +1,6 @@
 import { memo, useMemo } from "react";
-import { Text, useColorScheme, View } from "react-native";
+import { Text, View } from "react-native";
+import { useGround } from "../ui/useThemeHex";
 import { StyleSheet } from "react-native-unistyles";
 import { highlightLines, themeFor } from "./highlight";
 import { classifyLine, extOf, splitPatch } from "./diffPatch";
@@ -28,7 +29,7 @@ export const HlText = memo(function HlText({
   size?: number;
   numberOfLines?: number;
 }) {
-  const light = useColorScheme() === "light";
+  const light = useGround() === "light";
   const hlTheme = themeFor(light);
   const lines = useMemo(() => highlightLines(code, language, light), [code, language, light]);
   return (
@@ -67,7 +68,7 @@ export const DiffBlock = memo(function DiffBlock({
   maxLines?: number;
   nested?: boolean;
 }) {
-  const light = useColorScheme() === "light";
+  const light = useGround() === "light";
   const files = splitPatch(patch);
   // Not a `diff --git` multi-file patch (e.g. a bare hunk) — render it as one.
   if (!files.length) files.push({ path: path ?? "diff", text: patch, adds: 0, dels: 0 });

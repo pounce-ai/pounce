@@ -37,6 +37,7 @@ import {
 } from "../state/stores";
 import { type ActivityPage, mergeActivity } from "./activity";
 import { applyBridgeToken, deviceId, resolveAdoption, resolvePairing } from "./deviceIdentity";
+import type { SettleOverrides } from "../state/settled";
 import { clearNotify, notifyOnce } from "./notify";
 import { alertAwaitingSessions } from "./promptAlerts";
 import { streamTurn } from "./streamTurn";
@@ -161,6 +162,35 @@ export async function listDeviceConfigs(): Promise<DeviceConfig[]> {
   }
   return [];
 }
+/**
+ * The paired machines to ASK, one entry per physical machine.
+ *
+ * A machine can appear in the stored list twice — paired by QR and then found
+ * again on the LAN, or reachable at two addresses — because `resolvePairing`
+ * only collapses that at ADD time, by bridgeId, which a bridge too old to
+ * report one doesn't supply. Anything that fans out and combines the answers
+ * has to defend itself: a duplicate silently doubled every figure on the
+ * dashboard (tokens, sessions, messages and dollars all exactly 2×), which
+ * reads as real growth rather than as a bug.
+ *
+ * Deliberately NOT folded into `listDeviceConfigs`, which stays the literal
+ * store read. The management paths depend on that: `reconcileDevices` is handed
+ * the full id list and would garbage-collect the surviving row's siblings, and
+ * add/remove/token paths read-modify-write the stored array, so a deduped read
+ * would delete configs on the next write and make a duplicate row invisible in
+ * Settings — and therefore undeletable.
+ *
+ * `deviceId` decides sameness, so this and pairing agree on what one machine is.
+ */
+export async function hostsToQuery(): Promise<DeviceConfig[]> {
+  const seen = new Map<string, DeviceConfig>();
+  for (const d of await listDeviceConfigs()) {
+    const key = deviceId(d.url, d.bridgeId);
+    if (!seen.has(key)) seen.set(key, d);
+  }
+  return [...seen.values()];
+}
+
 async function writeDeviceConfigs(list: DeviceConfig[]): Promise<void> {
   await SecureStore.setItemAsync(DEVICES_KEY, JSON.stringify(list));
 }
@@ -847,7 +877,7 @@ export async function syncLiveData(opts?: {
   // On an explicit pull-to-refresh we bypass the bridge's 20s cache so a
   // just-opened session shows up immediately.
   const q = opts?.fresh ? "?fresh=1" : "";
-  const configs = await dropLapsedGrants(await listDeviceConfigs());
+  const configs = await dropLapsedGrants(await hostsToQuery());
   const repos: Record<string, Repository> = {};
   const sessions: Record<string, Session> = {};
   const devices: Record<string, Device> = {};
@@ -1003,8 +1033,9 @@ export async function searchMessages(
   q: string,
   opts?: { limit?: number; thread?: string; agent?: string; workspace?: string; hostId?: string },
 ): Promise<MessageSearchHit[]> {
-  const all = await listDeviceConfigs();
-  const devices = opts?.hostId ? all.filter((d) => d.id === opts.hostId) : all;
+  const devices = opts?.hostId
+    ? (await listDeviceConfigs()).filter((d) => d.id === opts.hostId)
+    : await hostsToQuery();
   const params = new URLSearchParams({ q, limit: String(opts?.limit ?? 20) });
   if (opts?.thread) params.set("thread", opts.thread);
   if (opts?.agent) params.set("agent", opts.agent);
@@ -1173,7 +1204,7 @@ export async function fetchUsage(
  * stays unit-testable.
  */
 export async function fetchActivity(days = 365, opts?: { fresh?: boolean }): Promise<ActivityPage> {
-  const devices = await listDeviceConfigs();
+  const devices = await hostsToQuery();
   const qs = `days=${days}${opts?.fresh ? "&fresh=1" : ""}`;
   const pages = await Promise.all(
     devices.map(async (cfg) => {
@@ -1278,12 +1309,60 @@ export interface AgentQuota {
 }
 
 /**
+ * What the user has said about each thread, merged across machines.
+ *
+ * Bridge-owned rather than local, so settling on the phone settles on the
+ * desktop. Thread ids are unique per machine, so merging maps cannot collide;
+ * a host that fails to answer simply contributes nothing rather than making
+ * its threads look un-settled.
+ */
+export async function fetchSettled(): Promise<SettleOverrides> {
+  const devices = await hostsToQuery();
+  const pages = await Promise.all(
+    devices.map(async (cfg) => {
+      try {
+        const { settled } = await get<{ settled: SettleOverrides }>(cfg, "/v1/settled");
+        return settled ?? {};
+      } catch {
+        return {};
+      }
+    }),
+  );
+  return Object.assign({}, ...pages);
+}
+
+/**
+ * Settle a thread as of now, or un-settle it with `settledAt: null`.
+ *
+ * Returns the host's whole map so the caller replaces rather than patches — the
+ * machine is the authority on what it now believes, and a patch would drift if
+ * a write raced a sync.
+ */
+export async function setSettled(
+  hostId: string,
+  threadId: string,
+  state: "settled" | "active" | null,
+  at: string,
+): Promise<SettleOverrides> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) throw new Error("That machine isn't paired any more.");
+  const res = await fetch(`${await bridgeBase(cfg)}/v1/settled`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+    body: JSON.stringify({ threadId, state, at }),
+  });
+  if (!res.ok) throw new Error(`bridge /v1/settled -> ${res.status}`);
+  const { settled } = (await res.json()) as { settled: SettleOverrides };
+  return settled ?? {};
+}
+
+/**
  * Plan quota across every paired device. On a subscription this is the number
  * that actually means something — dollars don't exist to report. Agents with
  * nothing to say are simply absent.
  */
 export async function fetchQuota(): Promise<AgentQuota[]> {
-  const devices = await listDeviceConfigs();
+  const devices = await hostsToQuery();
   const pages = await Promise.all(
     devices.map(async (cfg) => {
       try {
@@ -1668,7 +1747,7 @@ export async function fetchPairing(cfg: BridgeConfig): Promise<PairPayload | nul
 
 /** Register an Expo push token with every configured device's bridge. */
 export async function registerPushToken(token: string): Promise<void> {
-  const configs = await listDeviceConfigs();
+  const configs = await hostsToQuery();
   await Promise.all(
     configs.map(async (cfg) => {
       try {

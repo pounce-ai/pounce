@@ -7,16 +7,20 @@
  * blocks, lists, quotes, and styled links. Same exported surface as the
  * mobile implementation, including shell "Run" cards via runnableBlocks.
  */
-import { Fragment, useMemo, type ReactNode } from "react";
-import { Pressable, Text, useColorScheme, View, type TextStyle } from "react-native";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Pressable, Text, View, type TextStyle } from "react-native";
+import { useGround } from "../ui/useThemeHex";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import type { AppThemeColors } from "../ui/unistyles-named";
+
+/** Executes a command on the thread's host and resolves with its result. Mirrors
+ *  the mobile fork's export so Timeline can import it from either. */
+export type RunCommand = (command: string) => Promise<{ code: number; output: string } | null>;
 import { Ionicons } from "@expo/vector-icons";
-import { COLOR } from "../ui";
-import { splitCodeBlocks } from "./runnableBlocks";
+import { isDestructive, splitCodeBlocks } from "./runnableBlocks";
 import { highlightLines, themeFor } from "./highlight";
 import { usePacedText } from "./pacedText";
-import { SECONDARY_SCALE } from "../ui/tokens";
+import { SECONDARY_SCALE, useColors } from "../ui/tokens";
 
 /**
  * Body type for a transcript.
@@ -59,7 +63,7 @@ export function MessageMarkdown({
   role: "user" | "assistant";
   streaming?: boolean;
   /** Present only for live assistant turns — enables shell "Run" cards. */
-  onRun?: (command: string) => void;
+  onRun?: RunCommand;
   /** Render as one document rather than lifting code blocks into cards. */
   singleBlock?: boolean;
   /** Accepted for API parity and ignored: the desktop renderer is plain RN
@@ -121,30 +125,66 @@ export function MessageMarkdown({
 }
 
 /** A lifted fenced block: mono body, language tag, optional Run affordance. */
-function CodeCard({
-  lang,
-  code,
-  onRun,
-}: {
-  lang: string;
-  code: string;
-  onRun?: (command: string) => void;
-}) {
+function CodeCard({ lang, code, onRun }: { lang: string; code: string; onRun?: RunCommand }) {
+  const COLOR = useColors();
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ code: number; output: string } | null>(null);
+  // Same bar as the phone: a command that is hard to take back needs a
+  // deliberate gesture. There is no long-press with a mouse, so desktop asks
+  // for a second click instead — one gesture either way, no dialog.
+  const risky = useMemo(() => isDestructive(code), [code]);
+  const [armed, setArmed] = useState(false);
+
+  const run = () => {
+    if (busy) return;
+    setArmed(false);
+    setBusy(true);
+    setResult(null);
+    void onRun?.(code)
+      .then(setResult)
+      .finally(() => setBusy(false));
+  };
+
   return (
     <View style={s.codeCard}>
       <View style={s.codeCardHeader}>
         <Text style={s.codeLang}>{lang || "code"}</Text>
         {onRun ? (
           <Pressable
-            onPress={() => onRun(code)}
+            onPress={() => {
+              if (!risky || armed) return run();
+              setArmed(true);
+              setTimeout(() => setArmed(false), 2500);
+            }}
+            disabled={busy}
             style={({ pressed }) => [s.runBtn, pressed && s.pressed70]}
           >
-            <Ionicons name="play" size={10} color={COLOR.success} />
-            <Text style={s.runLabel}>Run</Text>
+            <Ionicons
+              name={risky ? "alert-circle" : "play"}
+              size={10}
+              color={risky ? COLOR.warning : COLOR.success}
+            />
+            <Text style={[s.runLabel, risky ? { color: COLOR.warning } : null]}>
+              {busy ? "Running…" : armed ? "Click to confirm" : "Run"}
+            </Text>
           </Pressable>
         ) : null}
       </View>
       <HighlightedCode code={code} lang={lang} />
+      {result ? (
+        <View style={s.runResult}>
+          <Text
+            style={{
+              fontSize: 10,
+              fontWeight: "600",
+              color: result.code === 0 ? COLOR.success : COLOR.danger,
+            }}
+          >
+            {result.code === 0 ? "Ran · exit 0" : `Failed · exit ${result.code}`}
+          </Text>
+          {result.output.trim() ? <Text style={s.runOutput}>{result.output.trim()}</Text> : null}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -153,7 +193,7 @@ function CodeCard({
  *  same highlighting as mobile from the same module — this body used to render
  *  as flat unhighlighted text. */
 function HighlightedCode({ code, lang }: { code: string; lang: string }) {
-  const light = useColorScheme() === "light";
+  const light = useGround() === "light";
   const hlTheme = themeFor(light);
   const lines = useMemo(() => highlightLines(code, lang, light), [code, lang, light]);
   return (
@@ -356,6 +396,7 @@ function Blocks({
   baseStyle: TextStyle;
   onUser: boolean;
 }) {
+  const COLOR = useColors();
   const blocks = parseBlocks(text);
   return (
     <View style={s.gap2}>
@@ -426,6 +467,19 @@ const s = StyleSheet.create((theme) => ({
   // line height and the paragraphs stop being separate things.
   blocks: { gap: 12 },
   cursor: { color: theme.colors.accent },
+  runResult: {
+    gap: 3,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  runOutput: {
+    fontFamily: "JetBrainsMono",
+    fontSize: 11,
+    lineHeight: 15,
+    color: theme.colors.fgMuted,
+  },
   codeCard: {
     overflow: "hidden",
     borderRadius: 8,

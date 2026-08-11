@@ -41,7 +41,9 @@ export type Scope =
 
 export interface AccessRequest {
   readonly id: string;
-  readonly kind: "preview" | "read";
+  /** `device` is a phone asking to pair — approving it hands over the pairing
+   *  token and mints no grant, so it never appears in `Grant["kind"]`. */
+  readonly kind: "preview" | "read" | "device";
   readonly requester: {
     bridgeId: string;
     hostName: string;
@@ -147,12 +149,38 @@ export async function setDiscoverable(enabled: boolean): Promise<DiscoveryState 
   }
 }
 
+/**
+ * A phone or tablet paired with this machine through the LAN flow.
+ *
+ * Not a grant: it holds this machine's own pairing token, so it is neither
+ * scoped nor separately revocable — un-pairing means rotating that token, which
+ * ends every device. Listed anyway, because a screen answering "what can see
+ * this machine?" that omitted your phone would be answering it wrongly.
+ */
+export interface PairedDevice {
+  readonly bridgeId: string;
+  readonly hostName: string;
+  readonly platform: string;
+  readonly pairedAt: string;
+}
+
 /** Who is asking US for access, and what we have already given out. */
-export async function listAccess(): Promise<{ pending: AccessRequest[]; grants: Grant[] }> {
+export async function listAccess(): Promise<{
+  pending: AccessRequest[];
+  grants: Grant[];
+  devices: PairedDevice[];
+}> {
   try {
-    return await mine<{ pending: AccessRequest[]; grants: Grant[] }>("/v1/access", {}, 4_000);
+    const r = await mine<{
+      pending: AccessRequest[];
+      grants: Grant[];
+      devices?: PairedDevice[];
+    }>("/v1/access", {}, 4_000);
+    // `devices` is absent on an older bridge — an empty list is the truthful
+    // reading there, since that bridge can't pair a phone this way at all.
+    return { ...r, devices: r.devices ?? [] };
   } catch {
-    return { pending: [], grants: [] };
+    return { pending: [], grants: [], devices: [] };
   }
 }
 

@@ -10,6 +10,30 @@ export interface PounceIconProps {
   size?: number;
   color?: import("react-native").ColorValue;
   style?: ComponentProps<typeof Ionicons>["style"];
+  /**
+   * An SF Symbol animation (a pulse, a variable-colour sweep). iOS ONLY, and
+   * silently ignored elsewhere: no other platform here has animating glyphs, so
+   * a caller that wants motion everywhere has to draw its own — see
+   * components/WorkingDots.tsx, which does exactly that.
+   */
+  symbolAnimation?: SymbolAnimation;
+}
+
+/** Mirrors expo-symbols' AnimationSpec, minus the parts we don't use. Declared
+ *  here rather than imported so the non-iOS variants — which must never load
+ *  expo-symbols, an iOS-only native module — can still type this prop. */
+export interface SymbolAnimation {
+  repeating?: boolean;
+  repeatCount?: number;
+  speed?: number;
+  effect?: { type: "bounce" | "pulse" | "scale"; wholeSymbol?: boolean };
+  variableAnimationSpec?: {
+    reversing?: boolean;
+    nonReversing?: boolean;
+    cumulative?: boolean;
+    iterative?: boolean;
+    dimInactiveLayers?: boolean;
+  };
 }
 
 /** Ionicons vocabulary → SF Symbols. The Ionicons name stays the canonical
@@ -31,8 +55,11 @@ export const SF_SYMBOL: Partial<Record<IoniconName, SFSymbol>> = {
   checkmark: "checkmark",
   "checkmark-circle": "checkmark.circle.fill",
   "checkmark-circle-outline": "checkmark.circle",
+  "chevron-back": "chevron.left",
   "chevron-down": "chevron.down",
+  "chatbubble-ellipses-outline": "bubble.left",
   "code-slash-outline": "chevron.left.forwardslash.chevron.right",
+  "color-palette-outline": "paintbrush",
   "construct-outline": "wrench.and.screwdriver",
   "globe-outline": "globe",
   "list-outline": "list.bullet",
@@ -47,9 +74,13 @@ export const SF_SYMBOL: Partial<Record<IoniconName, SFSymbol>> = {
   "copy-outline": "doc.on.doc",
   "create-outline": "square.and.pencil",
   "desktop-outline": "desktopcomputer",
+  "document-outline": "doc",
   "document-text-outline": "doc.text",
   "ellipse-outline": "circle",
+  "ellipsis-horizontal": "ellipsis",
   filter: "line.3.horizontal.decrease",
+  flash: "bolt.fill",
+  "flash-outline": "bolt",
   "folder-outline": "folder",
   "folder-open-outline": "folder.fill",
   "git-branch-outline": "arrow.branch",
@@ -73,6 +104,7 @@ export const SF_SYMBOL: Partial<Record<IoniconName, SFSymbol>> = {
   "phone-portrait-outline": "iphone",
   play: "play.fill",
   "qr-code-outline": "qrcode",
+  "radio-button-off": "circle",
   "radio-button-on": "circle.inset.filled",
   refresh: "arrow.clockwise",
   search: "magnifyingglass",

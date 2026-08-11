@@ -463,3 +463,87 @@ describe("route allowlist", () => {
     expect(grantAllowsRoute(full, "GET", "/v1/something-added-next-year")).toBe(false);
   });
 });
+
+/**
+ * Pairing a phone found on the LAN. The handshake is the same; the outcome is
+ * not — a device gets this machine's pairing token and no grant, because a
+ * grant can only ever read (see the KINDS comment in access.mjs).
+ */
+describe("device pairing", () => {
+  const PHONE = { bridgeId: "phone-1", hostName: "iPhone", platform: "ios" };
+  const askDevice = () => access.submit({ kind: "device", requester: PHONE, ip: "192.168.1.22" });
+
+  it("mints no grant, and hands back the bridge token once approved", () => {
+    const r = askDevice();
+    expect(r.ok).toBe(true);
+    expect(access.poll(r.requestId, r.claim)).toMatchObject({ state: "pending" });
+
+    const a = access.approve(r.requestId, { deviceToken: "bridge-token", bridge: { id: "mac" } });
+    expect(a).toMatchObject({ ok: true, device: true });
+    // A device is a paired device, not a guest: nothing shows up in the grants
+    // list, so nothing expires or needs revoking there.
+    expect(access.listGrants()).toEqual([]);
+
+    const first = access.poll(r.requestId, r.claim);
+    expect(first).toMatchObject({ state: "approved", kind: "device", token: "bridge-token" });
+    expect(first.bridge).toEqual({ id: "mac" });
+  });
+
+  it("hands the token over exactly once", () => {
+    const r = askDevice();
+    access.approve(r.requestId, { deviceToken: "bridge-token" });
+    expect(access.poll(r.requestId, r.claim).token).toBe("bridge-token");
+    // A replayed poll still reports the verdict but carries no credential, so a
+    // claim intercepted after the fact buys nothing.
+    const again = access.poll(r.requestId, r.claim);
+    expect(again).toMatchObject({ state: "approved" });
+    expect(again.token).toBeUndefined();
+  });
+
+  it("refuses to approve without a token to hand over", () => {
+    const r = askDevice();
+    expect(access.approve(r.requestId, {})).toMatchObject({ ok: false });
+    // Still pending, so the owner can approve it properly.
+    expect(access.poll(r.requestId, r.claim)).toMatchObject({ state: "pending" });
+  });
+
+  it("answers a wrong claim the same way it answers an unknown request", () => {
+    const r = askDevice();
+    access.approve(r.requestId, { deviceToken: "bridge-token" });
+    expect(access.poll(r.requestId, "not-the-claim")).toMatchObject({ ok: false });
+  });
+
+  it("can be denied, and then carries no token", () => {
+    const r = askDevice();
+    expect(access.deny(r.requestId)).toMatchObject({ ok: true });
+    const p = access.poll(r.requestId, r.claim);
+    expect(p).toMatchObject({ state: "denied" });
+    expect(p.token).toBeUndefined();
+  });
+});
+
+/** The owner's "who can see this machine?" screen has to include the phones. */
+describe("paired devices are listed", () => {
+  it("records an approved device and reports it", () => {
+    const r = access.submit({
+      kind: "device",
+      requester: { bridgeId: "phone-9", hostName: "iPhone", platform: "ios" },
+      ip: "192.168.1.30",
+    });
+    expect(access.listDevices()).toEqual([]);
+    access.approve(r.requestId, { deviceToken: "bridge-token" });
+    expect(access.listDevices()).toMatchObject([{ bridgeId: "phone-9", hostName: "iPhone" }]);
+    // Still not a grant — the two lists answer different questions.
+    expect(access.listGrants()).toEqual([]);
+  });
+
+  it("re-pairing the same phone updates its row rather than adding a second", () => {
+    const phone = { bridgeId: "phone-9", hostName: "iPhone", platform: "ios" };
+    const a = access.submit({ kind: "device", requester: phone, ip: "192.168.1.30" });
+    access.approve(a.requestId, { deviceToken: "t1" });
+    at(clock + 60_000);
+    const b = access.submit({ kind: "device", requester: phone, ip: "192.168.1.31" });
+    access.approve(b.requestId, { deviceToken: "t2" });
+    expect(access.listDevices()).toHaveLength(1);
+  });
+});

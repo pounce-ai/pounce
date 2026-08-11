@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { Ionicons } from "@expo/vector-icons";
-import { COLOR } from "../ui";
+import { useColors } from "../ui/tokens";
 import type { DroppedFile, DropZoneProps } from "./DropZoneTypes";
 
 export type { DroppedFile, DropZoneProps } from "./DropZoneTypes";
@@ -27,6 +27,7 @@ function uriToPath(uri: string): string {
  * paths to `onDropFiles`.
  */
 export function DropZone({ children, style, onDropFiles }: DropZoneProps) {
+  const COLOR = useColors();
   const [hovering, setHovering] = useState(false);
 
   const onDrop = (e: MacDragEvent) => {

@@ -3,10 +3,11 @@
  * rebuild needed). Sources: Claude/OpenAI/OpenCode from Simple Icons (CC0),
  * Grok from svgl. Agents without a public mark fall back to a letter badge.
  */
-import { Text, useColorScheme, View } from "react-native";
+import { Text, View } from "react-native";
 import { useUnistyles } from "react-native-unistyles";
 import Svg, { Path } from "react-native-svg";
-import { agentHex, agentLabel } from "./tokens";
+import { agentLabel } from "./tokens";
+import { useAgentHex } from "./useThemeHex";
 
 type MarkProps = { size: number; color: string };
 
@@ -89,11 +90,12 @@ export function AgentLogo({
   color?: string;
 }) {
   const { theme } = useUnistyles();
-  // Brand hues can't adapt on their own (SVG fills need plain strings), so the
-  // ground has to be resolved here — Codex's mark is near-white and vanishes on
-  // a light window otherwise.
-  const scheme = useColorScheme();
-  const c = color ?? agentHex(agent, scheme) ?? (theme.colors.fgMuted as string);
+  // Brand hues can't adapt on their own — SVG fills need a plain string — so
+  // one has to be picked for the ground. `useAgentHex` owns which ground that
+  // is; unconditional, because a hook behind `color ??` would only run for
+  // some callers.
+  const hueOf = useAgentHex();
+  const c = color ?? hueOf(agent, theme.colors.fgMuted as string)!;
   switch (agent) {
     case "claude":
       return <ClaudeMark size={size} color={c} />;

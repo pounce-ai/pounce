@@ -76,6 +76,8 @@ import {
   SUPPORTED as ccusageReads,
   resetCcusageCache,
 } from "./agents/ccusage.mjs";
+import { listSettled, setSettled } from "./agents/settled.mjs";
+import { mergeBilledCost, mergeEstimatedCost, mergeTokens } from "./agents/series-overlay.mjs";
 import { listEditors, openIn } from "./agents/editors.mjs";
 import { closeShell, getShell, killAllShells, openShell, reapShells } from "./agents/term.mjs";
 import {
@@ -668,227 +670,33 @@ const activity = createActivityIndex({
 const ACTIVITY_POPULATE_MS = Number(process.env.ACTIVITY_POPULATE_MS || 10 * 60_000);
 
 /**
- * Replace our own token counts with ccusage's, and attach the breakdown behind
- * them.
+ * The three per-day overlays, each just a fetch now.
  *
- * Why hand this over: what counts as a token is a per-agent convention that
- * drifts (Anthropic reports cache reads beside the input, OpenAI reports them
- * inside it), and getting it wrong is invisible — a big number looks like a big
- * number. That is exactly how the dashboard came to report 327B where Codex's
- * own profile said 25.1B. ccusage tracks ~20 agents' formats as its whole job,
- * so it owns the reading — and the figure it reports is the one we publish,
- * unmodified. We add no arithmetic of our own on top (see agents/ccusage.mjs
- * for why subtracting cache reads was tried and abandoned); the cached portion
- * travels alongside under `usage` so the client can show the split.
- *
- * Authority is PER AGENT, not per day: an agent ccusage cannot read keeps
- * whatever the transcript scan produced, rather than being zeroed by a source
- * that never had an opinion about it. For the agents it DOES read, its silence
- * on a day is a real zero.
- *
- * Today that guard is belt-and-braces — the scan only counts tokens for claude
- * and codex (activity-index's TOKEN_AGENTS) and ccusage reads both — so nothing
- * currently takes the fallback branch. It earns its keep the moment either set
- * changes, and without it that change would silently zero an agent instead of
- * leaving it alone.
- *
- * Not applied to repo-scoped series: ccusage reports per day across everything
- * and carries no cwd, so it cannot say which repo a token belongs to. The
- * Spaces page therefore stays on the transcript scan — see the `repo` branch in
- * /v1/activity.
+ * The merges — and the precedence each one encodes — live in
+ * agents/series-overlay.mjs, where they are pure and tested. What stays here is
+ * only the I/O and the ORDER, which is itself a rule: estimate before billing,
+ * so the org's report sits on top of both.
  */
 async function withCcusageTokens(series, since) {
   const usage = await ccusageDailyUsage({ since }).catch(() => ({ available: false }));
   if (!usage.available) return series;
-  const byDay = usage.byDay || {};
-
-  /** Fold one ccusage day onto one series day. */
-  const merge = (d, u) => {
-    const out = { ...d, byAgent: { ...d.byAgent } };
-    // The day's own breakdown, for the Tokens card's detail view.
-    out.usage = {
-      input: u.input,
-      output: u.output,
-      cacheCreate: u.cacheCreate,
-      cacheRead: u.cacheRead,
-      total: u.total,
-    };
-    const seen = new Set();
-    for (const a of u.agents) {
-      seen.add(a.agent);
-      const cur = out.byAgent[a.agent];
-      out.byAgent[a.agent] = {
-        // An agent ccusage priced but we never saw still gets a row: it did
-        // work, we just had no dated tokens for it.
-        ...(cur ?? { sessions: 0, messages: 0, cost: null }),
-        tokens: a.tokens,
-        usage: {
-          input: a.input,
-          output: a.output,
-          cacheCreate: a.cacheCreate,
-          cacheRead: a.cacheRead,
-          total: a.total,
-          models: a.models,
-        },
-      };
-    }
-    // Supported agents ccusage stayed silent about did nothing priced that day.
-    for (const [agent, cur] of Object.entries(out.byAgent)) {
-      if (!seen.has(agent) && ccusageReads.has(agent)) out.byAgent[agent] = { ...cur, tokens: 0 };
-    }
-    // The day's headline is the sum of what we just wrote, so an unreadable
-    // agent (Cursor) still contributes its transcript figure.
-    out.tokens = Object.values(out.byAgent).reduce((n, a) => n + (a.tokens || 0), 0);
-    return out;
-  };
-
-  const daysOut = series.days.map((d) => (byDay[d.date] ? merge(d, byDay[d.date]) : d));
-  // Days ccusage saw that the transcript scan never did.
-  const known = new Set(daysOut.map((d) => d.date));
-  for (const [date, u] of Object.entries(byDay)) {
-    if (known.has(date)) continue;
-    daysOut.push(merge({ date, sessions: 0, messages: 0, tokens: 0, cost: null, byAgent: {} }, u));
-  }
-  daysOut.sort((a, b) => a.date.localeCompare(b.date));
-  return {
-    ...series,
-    days: daysOut,
-    totals: {
-      ...series.totals,
-      tokens: daysOut.reduce((n, d) => n + (d.tokens || 0), 0),
-    },
-    // So the client can say where the figure came from rather than implying
-    // every agent was measured the same way.
-    tokenSource: "ccusage",
-  };
+  return mergeTokens(series, usage.byDay || {}, ccusageReads);
 }
 
-/**
- * Fill days the official sources left blank with ccusage's list-price estimate.
- *
- * Runs BEFORE withAdminCost so the billing report still overwrites anything it
- * covers: the precedence is reported > billed > estimated, and this is the
- * bottom of it. A day that already has a dollar figure is never touched, so no
- * real number is ever replaced by a guess — the fill only reaches `cost: null`,
- * which is the state that used to render as "not knowable".
- *
- * Every estimated figure is flagged `costEstimated: true` at whatever level it
- * landed (day, agent, totals) so the app can mark it rather than passing list
- * prices off as billing. See agents/ccusage.mjs for why a zero never arrives
- * here as a zero.
- */
 async function withEstimatedCost(series, days, since) {
   // Same `since` the token read used, so both share one ccusage run.
   const est = await estimatedDailyCost({ days, since }).catch(() => ({ available: false }));
   if (!est.available) return series;
-  const byDay = est.byDay || {};
-  let estimated = false;
-  const daysOut = series.days.map((d) => {
-    const e = byDay[d.date];
-    if (!e) return d;
-    const out = { ...d, byAgent: { ...d.byAgent } };
-    if (out.cost == null) {
-      out.cost = e.total;
-      out.costEstimated = true;
-      estimated = true;
-    }
-    for (const [agent, cost] of Object.entries(e.byAgent)) {
-      const cur = out.byAgent[agent];
-      // An agent with no row at all still gets one: it did work that day, we
-      // just had no dated token counts for it (opencode and cursor keep none).
-      if (!cur) {
-        out.byAgent[agent] = { sessions: 0, messages: 0, tokens: 0, cost, costEstimated: true };
-        estimated = true;
-      } else if (cur.cost == null) {
-        out.byAgent[agent] = { ...cur, cost, costEstimated: true };
-        estimated = true;
-      }
-    }
-    return out;
-  });
-  // Days ccusage saw that the series never did — same reasoning as the billing
-  // overlay: a day with spend and no readable transcript still happened.
-  const known = new Set(daysOut.map((d) => d.date));
-  for (const [date, e] of Object.entries(byDay)) {
-    if (known.has(date)) continue;
-    const byAgent = {};
-    for (const [agent, cost] of Object.entries(e.byAgent)) {
-      byAgent[agent] = { sessions: 0, messages: 0, tokens: 0, cost, costEstimated: true };
-    }
-    daysOut.push({
-      date,
-      sessions: 0,
-      messages: 0,
-      tokens: 0,
-      cost: e.total,
-      costEstimated: true,
-      byAgent,
-    });
-    estimated = true;
-  }
-  if (!estimated) return series;
-  let total = null;
-  for (const d of daysOut) if (d.cost != null) total = (total ?? 0) + d.cost;
-  daysOut.sort((a, b) => a.date.localeCompare(b.date));
-  return {
-    ...series,
-    days: daysOut,
-    totals: {
-      ...series.totals,
-      cost: total == null ? null : Math.round(total * 100) / 100,
-      // `costComplete` keeps its meaning — whether every agent reported its own
-      // dollars — and stays false here. `costEstimated` is the separate fact
-      // that some of this total was priced rather than billed.
-      costEstimated: true,
-    },
-  };
+  return mergeEstimatedCost(series, est.byDay || {});
 }
 
-/**
- * Overlay the organization's official daily spend onto the activity series,
- * when the user has opted in with an Admin API key (~/.pounce/config.json).
- *
- * The org's billing report is authoritative for dollars, so where it has a day
- * it REPLACES the ledger's figure rather than adding to it — the ledger only
- * ever sees turns Pounce drove, which are a subset of the same spend. Days the
- * report doesn't cover keep whatever the ledger knew, and stay null if neither
- * source has a number.
- *
- * Cost here is org-wide, not per-agent: it's the billing account's spend, which
- * may include work done outside Pounce entirely. `costSource` says so.
- */
+/** Opt-in: needs an Admin API key in ~/.pounce/config.json. */
 async function withAdminCost(series, days) {
   const apiKey = readConfig().adminApiKey;
   if (!apiKey) return series;
   const report = await dailyCost(apiKey, { days }).catch(() => ({ available: false }));
   if (!report.available) return series;
-  const byDay = report.byDay || {};
-  let total = null;
-  const daysOut = series.days.map((d) =>
-    byDay[d.date] == null ? d : { ...d, cost: byDay[d.date] },
-  );
-  // Include reported days the transcripts never saw (spend from another machine
-  // on the same billing account) so the total isn't quietly short.
-  const known = new Set(daysOut.map((d) => d.date));
-  for (const [date, cost] of Object.entries(byDay)) {
-    if (!known.has(date)) {
-      daysOut.push({ date, sessions: 0, messages: 0, tokens: 0, cost, byAgent: {} });
-    }
-  }
-  for (const d of daysOut) if (d.cost != null) total = (total ?? 0) + d.cost;
-  daysOut.sort((a, b) => a.date.localeCompare(b.date));
-  return {
-    ...series,
-    days: daysOut,
-    totals: {
-      ...series.totals,
-      cost: total == null ? null : Math.round(total * 100) / 100,
-      // The billing report covers the whole org for the window, so what it
-      // returns is complete for the days it answered for.
-      costComplete: true,
-      costSource: "admin-api",
-    },
-  };
+  return mergeBilledCost(series, report.byDay || {});
 }
 
 /**
@@ -1812,6 +1620,10 @@ function renderDiscoveryToggle(){
 
 function renderRequest(r){
   var isPreview = r.kind === 'preview';
+  // A phone asking to pair. Full access, like the QR — so it gets a plain
+  // sentence and no scope picker rather than controls that would imply the
+  // access can be narrowed.
+  var isDevice = r.kind === 'device';
   var sel = {everything: !r.scope || r.scope.kind === 'full', picked:{}, hours:24, q:'', hits:[], timer:null};
   if(r.scope && r.scope.repoKeys) r.scope.repoKeys.forEach(function(k){ sel.picked[k] = true; });
   var loose = (r.scope && r.scope.threads) ? r.scope.threads.slice() : [];
@@ -1825,14 +1637,14 @@ function renderRequest(r){
     card.innerHTML = '';
     card.appendChild(h('div',{class:'row'},[
       h('div',{class:'grow'},[
-        h('div',{class:'name',text:r.requester.hostName + ' wants ' + (isPreview ? 'a look at what is here' : 'read access')}),
-        h('div',{class:'meta',text:isPreview ? 'Space and thread names only — no messages, for a few minutes.' : 'Asked for: ' + summarize(r.scope)})
+        h('div',{class:'name',text:r.requester.hostName + ' wants ' + (isDevice ? 'to pair with this Mac' : isPreview ? 'a look at what is here' : 'read access')}),
+        h('div',{class:'meta',text:isDevice ? 'Full access to your agents, the same as scanning the pairing code. Remove it later from Settings on that device.' : isPreview ? 'Space and thread names only — no messages, for a few minutes.' : 'Asked for: ' + summarize(r.scope)})
       ]),
       h('div',{class:'code',text:fmtCode(r.code)})
     ]));
     if(r.note) card.appendChild(h('p',{class:'note',text:'“' + r.note + '”'}));
 
-    if(!isPreview){
+    if(!isPreview && !isDevice){
       card.appendChild(h('div',{class:'field',text:'They can read'}));
       [['Everything on this machine', true], ['Only what I pick', false]].forEach(function(o){
         var input = h('input',{type:'radio',name:'sc' + r.id});
@@ -1887,11 +1699,11 @@ function renderRequest(r){
     var approve = h('button',{class:'p', onclick:function(){
       act('/v1/access/approve',{
         requestId:r.id,
-        scope: isPreview ? undefined : sc,
-        expiresAt: (isPreview || sel.hours === null) ? null : new Date(Date.now() + sel.hours*3600000).toISOString()
+        scope: (isPreview || isDevice) ? undefined : sc,
+        expiresAt: (isPreview || isDevice || sel.hours === null) ? null : new Date(Date.now() + sel.hours*3600000).toISOString()
       });
-    }, text: isPreview ? 'Let them look' : 'Approve · ' + summarize(sc)});
-    if(!isPreview && !sel.everything && !sc.repoKeys.length && !loose.length) approve.disabled = true;
+    }, text: isDevice ? 'Pair this device' : isPreview ? 'Let them look' : 'Approve · ' + summarize(sc)});
+    if(!isPreview && !isDevice && !sel.everything && !sc.repoKeys.length && !loose.length) approve.disabled = true;
     card.appendChild(h('div',{class:'actions'},[
       h('button',{onclick:function(){ act('/v1/access/deny',{requestId:r.id}); }, text:'Deny'}),
       approve
@@ -2000,6 +1812,30 @@ const server = http.createServer(async (req, res) => {
   if (req.headers.origin && !isOwnOrigin(req)) return send(res, 403, { error: "forbidden" });
 
   if (url.pathname === "/health") return send(res, 200, { ok: true });
+
+  /**
+   * "Who are you?" — for a phone sweeping the local subnet.
+   *
+   * Deliberately unauthenticated and LAN-reachable, carrying exactly what the
+   * discovery beacon already broadcasts to the whole network (agents/discovery.mjs):
+   * a name, a platform, a stable id. No token, no repo names, no thread titles.
+   * A phone can't join the beacon's multicast group without an entitlement Apple
+   * grants case by case, so it probes for this instead — same information, same
+   * exposure, reachable over plain HTTP.
+   *
+   * `bridgeId` is the machine id devices canonicalize on, so a machine found
+   * here and one paired by QR collapse onto a single row.
+   */
+  if (url.pathname === "/v1/hello") {
+    return send(res, 200, {
+      ok: true,
+      bridgeId: machineBridgeId(),
+      hostName: os.hostname().replace(/\.local$/, ""),
+      platform: process.platform,
+      port: PORT,
+      appVersion: APP_VERSION,
+    });
+  }
 
   // Localhost-only UI surface for the desktop app: pairing QR + live status.
   // Gated to loopback because it exposes the pairing token.
@@ -2350,7 +2186,14 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/v1/access" && req.method === "GET") {
       if (!isOwner(req)) return send(res, 403, { error: "local only" });
       sweepAccess();
-      return send(res, 200, { pending: access.listPending(), grants: access.listGrants() });
+      return send(res, 200, {
+        pending: access.listPending(),
+        grants: access.listGrants(),
+        // Phones paired through the LAN flow. Not grants — they hold this
+        // machine's own token — but they ARE things with access, and a screen
+        // that answers "who can see this?" has to say so.
+        devices: access.listDevices(),
+      });
     }
     if (url.pathname === "/v1/access/approve" && req.method === "POST") {
       if (!isOwner(req)) return send(res, 403, { error: "local only" });
@@ -2359,8 +2202,14 @@ const server = http.createServer(async (req, res) => {
         scope: scope === undefined ? undefined : (normalizeScope(scope) ?? { kind: "full" }),
         expiresAt: expiresAt ?? null,
         bridge: ownIdentity(),
+        // Only a `device` approval consumes this: it hands the asker this
+        // machine's pairing token instead of minting a grant (see access.mjs).
+        deviceToken: TOKEN,
       });
       if (!r.ok) return send(res, 400, r);
+      // A device is now paired, exactly as if it had scanned the code — there is
+      // no grant to tunnel or to show in the grants list.
+      if (r.device) return send(res, 200, { ok: true, device: true });
       // Give the guest a way back in from another network. Best-effort: no
       // tunnel binary just means the grant is LAN-only.
       const tunnel = startGrantTunnel(r.grant.id);
@@ -2996,6 +2845,26 @@ const server = http.createServer(async (req, res) => {
       if (token && pushTokens.delete(token)) savePushTokens();
       return send(res, 200, { ok: true });
     }
+    // Settled threads — the inbox gesture. The whole map comes back on every
+    // write so a client never has to guess what the machine now believes; it is
+    // one small string per settled thread (see agents/settled.mjs).
+    if (url.pathname === "/v1/settled" && req.method === "GET") {
+      return send(res, 200, { settled: listSettled() });
+    }
+    if (url.pathname === "/v1/settled" && req.method === "POST") {
+      const { threadId, state, at } = await readBody(req);
+      if (!threadId) return send(res, 400, { error: "threadId required" });
+      if (state != null && state !== "settled" && state !== "active") {
+        return send(res, 400, { error: "state must be settled, active or null" });
+      }
+      // `state: null` clears the override and hands the thread back to the
+      // automatic rule. The CLIENT's timestamp is stored, not ours: it has to
+      // be comparable with the thread's own updatedAt, and a server clock a
+      // second behind would settle a thread "before" its last message.
+      setSettled(threadId, state ?? null, at || undefined);
+      return send(res, 200, { ok: true, settled: listSettled() });
+    }
+
     // Markers — the user's jump-to points in a thread. Overrides only; the
     // client still computes the default for every event (see agents/markers.mjs).
     if (url.pathname === "/v1/markers" && req.method === "GET") {

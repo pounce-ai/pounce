@@ -15,9 +15,9 @@
  * while something is actually loading or running.
  */
 import { useEffect, useRef } from "react";
-import { Animated, Easing, useColorScheme, View } from "react-native";
+import { Animated, Easing, View } from "react-native";
 import Svg, { Defs, G, LinearGradient, Mask, Rect, Stop, Text as SvgText } from "react-native-svg";
-import { hexFor } from "../ui/theme-hex";
+import { useThemeHex } from "../ui/useThemeHex";
 
 const AnimatedRect = Animated.createAnimatedComponent(Rect);
 
@@ -35,8 +35,7 @@ export function ShimmerLabel({
   periodMs?: number;
   align?: "left" | "center";
 }) {
-  const scheme = useColorScheme();
-  const hex = hexFor(scheme);
+  const hex = useThemeHex();
   const height = Math.ceil(fontSize * 1.6);
   const band = Math.max(90, width * 0.45);
   const textX = align === "center" ? width / 2 : 0;

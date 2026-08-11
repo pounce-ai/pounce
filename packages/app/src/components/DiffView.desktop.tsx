@@ -11,7 +11,7 @@ import {
   type LineKind,
   type PatchFile,
 } from "./diffPatch";
-import { COLOR } from "../ui";
+import { useColors } from "../ui/tokens";
 import type { DiffViewProps } from "./DiffViewTypes";
 
 /** Style key per diff-line kind (replaces the old shared Tailwind LINE_CLASS
@@ -95,6 +95,7 @@ export const DiffView = memo(function DiffView({
   seenPaths = [],
   onToggleSeen,
 }: DiffViewProps) {
+  const COLOR = useColors();
   // "Viewed" state lives in the persisted store the parent syncs via
   // seenPaths/onToggleSeen; only the accordion collapse is local. Seen files
   // start collapsed.

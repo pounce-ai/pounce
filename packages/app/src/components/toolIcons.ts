@@ -1,26 +1,17 @@
 /**
  * Tool name → glyph. What a call DID, at a glance.
  *
- * Every non-shell tool used to render the same `⚙`, so a run of calls was a
- * wall of identical rows and you had to read each name to find the edit among
- * the reads.
- *
  * Matching is on substrings of a normalised name because the four agents spell
- * the same operation differently — Claude's `Edit`, codex's `apply_patch`,
- * opencode's `write`, cursor's `edit_file` — and MCP tools arrive wrapped as
- * `mcp__<server>__<tool>`, which the prefix strip unwraps so
- * `mcp__claude-in-chrome__navigate` still reads as a browser call.
+ * the same operation differently (Claude's `Edit`, codex's `apply_patch`,
+ * cursor's `edit_file`), and MCP tools arrive wrapped as `mcp__<server>__<tool>`.
  *
  * Lives apart from Timeline.tsx so it can be tested without mounting the list.
  */
 import type { IoniconName } from "../ui/native/icon-map";
 
-/**
- * Shell-ish names across the four agents — claude/opencode say `shell`, codex
- * `exec_command`, cursor `run_terminal_cmd`. Matched on underscore-delimited
- * words so `todowrite` and `cache_clear` can't sneak in.
- */
-export const SHELL_RE = /(^|_)(shell|bash|zsh|sh|exec|terminal|cmd)(_|$)/;
+/** Shell-ish names across the four agents. Matched on underscore-delimited
+ *  words so `todowrite` and `cache_clear` can't sneak in. */
+const SHELL_RE = /(^|_)(shell|bash|zsh|sh|exec|terminal|cmd)(_|$)/;
 
 /**
  * First hit wins, so narrow patterns precede broad ones — `todowrite` is a task
@@ -58,13 +49,33 @@ export function normalizeToolName(name: string): string {
     .replace(/[^a-z0-9]+/g, "_");
 }
 
+/**
+ * Both lookups memoised together: every tool row asks for both, on every render,
+ * and answering costs ~14 regex passes. The vocabulary is a handful of names per
+ * agent, so the cache is bounded in practice.
+ */
+const RESOLVED = new Map<string, { shell: boolean; icon: IoniconName }>();
+
+function resolve(name: string): { shell: boolean; icon: IoniconName } {
+  let hit = RESOLVED.get(name);
+  if (hit) return hit;
+  const norm = normalizeToolName(name);
+  let icon: IoniconName = "construct-outline";
+  for (const [re, candidate] of TOOL_ICONS)
+    if (re.test(norm)) {
+      icon = candidate;
+      break;
+    }
+  hit = { shell: SHELL_RE.test(norm), icon };
+  RESOLVED.set(name, hit);
+  return hit;
+}
+
 /** True when this tool is a shell command (rendered as `$ cmd`, not an icon). */
 export function isShellTool(name: string): boolean {
-  return SHELL_RE.test(normalizeToolName(name));
+  return resolve(name).shell;
 }
 
 export function toolIcon(name: string): IoniconName {
-  const norm = normalizeToolName(name);
-  for (const [re, icon] of TOOL_ICONS) if (re.test(norm)) return icon;
-  return "construct-outline";
+  return resolve(name).icon;
 }

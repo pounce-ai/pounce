@@ -54,8 +54,14 @@ function parse(href: Href): Route {
  * down, rename, resync and share from, not a question with an answer. As a card
  * it was a 620×660 box that clipped its own content and had to be dismissed
  * before you could look at anything it referred to.
+ *
+ * A new task joined them once it became a DRAFT rather than a dialog. It is a
+ * thing you set up, leave, and come back to — picking a folder means opening a
+ * browser over the top of it, and describing the work is writing, not answering
+ * a question. As a card it also had to be dismissed before you could look at
+ * the very threads you were about to describe work against.
  */
-const PANES = new Set(["/space", "/metric", "/settings"]);
+const PANES = new Set(["/space", "/metric", "/settings", "/new"]);
 
 /**
  * Identity of an open tab: what makes two hrefs "the same thing already open".

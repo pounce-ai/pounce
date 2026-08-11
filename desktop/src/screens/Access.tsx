@@ -21,6 +21,7 @@ import {
   DURATIONS,
   expiryFor,
   listAccess,
+  type PairedDevice,
   ownSpaces,
   ownThreads,
   revokeGrant,
@@ -33,17 +34,20 @@ import {
   type Scope,
 } from "@pounce/app/services/peers";
 import { COLOR } from "@pounce/app/ui";
+import { CheckGlyph } from "../shell/icons";
 
 export default function AccessScreen() {
   const [pending, setPending] = useState<AccessRequest[]>([]);
   const [grants, setGrants] = useState<Grant[]>([]);
+  const [devices, setDevices] = useState<PairedDevice[]>([]);
   const [spaces, setSpaces] = useState<CatalogSpace[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
-    const { pending: p, grants: g } = await listAccess();
+    const { pending: p, grants: g, devices: d } = await listAccess();
     setPending(p);
     setGrants(g);
+    setDevices(d);
     setLoaded(true);
   }, []);
 
@@ -84,9 +88,37 @@ export default function AccessScreen() {
           </View>
         ) : null}
 
-        <View style={[s.section, pending.length ? s.sectionGap : null]}>
+        {/* Your own phones, listed before other people's machines: they hold
+            this machine's pairing token, so they see everything, and a screen
+            that answered "who has access?" without them would be lying. */}
+        {devices.length ? (
+          <View style={[s.section, pending.length ? s.sectionGap : null]}>
+            <Text style={s.sectionTitle}>Your devices</Text>
+            <View style={s.card}>
+              {devices.map((d, i) => (
+                <View key={d.bridgeId} style={[s.deviceRow, i > 0 && s.deviceRowDivided]}>
+                  <Ionicons name="phone-portrait-outline" size={16} color={COLOR.fgMuted} />
+                  <View style={s.grow}>
+                    <Text style={s.deviceName}>{d.hostName}</Text>
+                    <Text style={s.deviceMeta}>
+                      Everything · paired {new Date(d.pairedAt).toLocaleDateString()}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+            {/* Said plainly rather than offering a Remove that couldn't keep
+                its promise: every paired device holds the same machine token. */}
+            <Text style={s.deviceNote}>
+              Remove one from Settings on that device. Ending access for all of them means changing
+              this machine's pairing code.
+            </Text>
+          </View>
+        ) : null}
+
+        <View style={[s.section, pending.length || devices.length ? s.sectionGap : null]}>
           <Text style={s.sectionTitle}>
-            {grants.length ? "Machines with access" : "Nobody has access"}
+            {grants.length ? "Machines with access" : "Nobody else has access"}
           </Text>
           <View style={s.card}>
             {grants.length ? (
@@ -101,9 +133,9 @@ export default function AccessScreen() {
             ) : (
               <View style={s.empty}>
                 <Ionicons name="key-outline" size={22} color={COLOR.fgFaint} />
-                <Text style={s.emptyText}>Nobody has access</Text>
+                <Text style={s.emptyText}>Nobody else has access</Text>
                 <Text style={s.emptyHint}>
-                  When another Mac asks to read this machine's threads, it shows up here.
+                  When another machine asks to read this one's threads, it shows up here.
                 </Text>
               </View>
             )}
@@ -138,6 +170,9 @@ function RequestCard({
   const [hits, setHits] = useState<CatalogThread[]>([]);
 
   const isPreview = request.kind === "preview";
+  // A phone pairing. Approval hands over this machine's token wholesale, so the
+  // scope and expiry controls below would be theatre — nothing reads them.
+  const isDevice = request.kind === "device";
   /** What this machine already granted them — null for a first-time asker. */
   const existing = request.existing ?? null;
   // Threads they picked by name from the catalog. Kept as a map so the approver
@@ -203,26 +238,36 @@ function RequestCard({
       <View style={s.cardHead}>
         <View style={existing ? s.badgeMore : s.badge}>
           <Ionicons
-            name={existing ? "add-circle-outline" : "laptop-outline"}
+            name={
+              isDevice
+                ? "phone-portrait-outline"
+                : existing
+                  ? "add-circle-outline"
+                  : "laptop-outline"
+            }
             size={17}
             color={existing ? COLOR.warning : COLOR.accent}
           />
         </View>
         <View style={s.grow}>
           <Text style={s.cardTitle}>
-            {existing
-              ? `${request.requester.hostName} wants more access`
-              : `${request.requester.hostName} wants ${isPreview ? "a look at what's here" : "read access"}`}
+            {isDevice
+              ? `Pair ${request.requester.hostName} with this Mac?`
+              : existing
+                ? `${request.requester.hostName} wants more access`
+                : `${request.requester.hostName} wants ${isPreview ? "a look at what's here" : "read access"}`}
           </Text>
           <Text style={s.cardMeta}>
-            {isPreview
-              ? "Space and thread names only — no messages, for a few minutes."
-              : existing
-                ? // Both halves, in order: what they have, then what they are
-                  // asking for. Approval REPLACES the old grant, so the second
-                  // number is the whole answer and not an increment.
-                  `Reads ${existing.summary} now · asking for ${summarize(suggested)}`
-                : `Asked for: ${summarize(suggested)}`}
+            {isDevice
+              ? "Full access to your agents, the same as scanning the pairing code."
+              : isPreview
+                ? "Space and thread names only — no messages, for a few minutes."
+                : existing
+                  ? // Both halves, in order: what they have, then what they are
+                    // asking for. Approval REPLACES the old grant, so the second
+                    // number is the whole answer and not an increment.
+                    `Reads ${existing.summary} now · asking for ${summarize(suggested)}`
+                  : `Asked for: ${summarize(suggested)}`}
           </Text>
         </View>
         {/* Shown on both machines. If these don't match, it isn't their laptop. */}
@@ -233,7 +278,7 @@ function RequestCard({
 
       {request.note ? <Text style={s.note}>“{request.note}”</Text> : null}
 
-      {!isPreview ? (
+      {!isPreview && !isDevice ? (
         <>
           <Text style={s.fieldLabel}>They can read</Text>
           <View style={s.optGroup}>
@@ -366,7 +411,11 @@ function RequestCard({
           ]}
         >
           <Text style={s.primaryLabel}>
-            {isPreview ? "Let them look" : `Approve · ${summarize(scope)}`}
+            {isDevice
+              ? "Pair device"
+              : isPreview
+                ? "Let them look"
+                : `Approve · ${summarize(scope)}`}
           </Text>
         </Pressable>
       </View>
@@ -482,17 +531,16 @@ function Radio({ on }: { on: boolean }) {
   return <View style={[s.radio, on && s.radioOn]}>{on ? <View style={s.radioDot} /> : null}</View>;
 }
 
-function Check({ on }: { on: boolean }) {
-  return (
-    <View style={[s.check, on && s.checkOn]}>
-      {on ? <Ionicons name="checkmark" size={12} color={COLOR.bg} /> : null}
-    </View>
-  );
-}
+const Check = ({ on }: { on: boolean }) => <CheckGlyph on={on} size={16} />;
 
 const s = StyleSheet.create((theme) => ({
   root: { flex: 1, backgroundColor: theme.colors.bg },
   grow: { flex: 1 },
+  deviceRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12 },
+  deviceRowDivided: { borderTopWidth: 1, borderTopColor: theme.colors.border },
+  deviceName: { fontSize: 13, color: theme.colors.fg },
+  deviceMeta: { marginTop: 1, fontSize: 11, color: theme.colors.fgFaint },
+  deviceNote: { marginTop: 6, fontSize: 11, lineHeight: 15, color: theme.colors.fgFaint },
   center: { alignItems: "center", justifyContent: "center" },
   header: {
     height: 48,
@@ -657,16 +705,6 @@ const s = StyleSheet.create((theme) => ({
     paddingHorizontal: 6,
   },
   spaceName: { flex: 1, fontSize: 12.5, color: theme.colors.fg },
-  check: {
-    height: 16,
-    width: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  checkOn: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
 
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
   chip: {

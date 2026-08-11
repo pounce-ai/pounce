@@ -23,6 +23,7 @@ import type { Device, Host } from "@pounce/shared";
 import { parseUserMessage } from "@pounce/transcript";
 import type { ModelInfo } from "../services/bridge";
 import { persist } from "../services/persistence";
+import { isDotName, needsYou, rankSession } from "./sessionRules";
 import {
   agentCaps,
   agentModels,
@@ -254,20 +255,12 @@ export function hasActiveFilter(): boolean {
 
 // --- pure helpers (operate on plain data, no store reads) ---
 
-/** Dotfolders (e.g. .deepsec) are treated as hidden — never surfaced anywhere. */
-export const isDotName = (name: string): boolean => name.startsWith(".");
-
-/** A session that wants the user's attention (failed / awaiting input). */
-export const needsYou = (s: Session): boolean =>
-  s.needsAttention || s.activity === "failed" || s.activity === "awaiting_input";
-
-/** Sort rank for a session list: attention → active → live → done. */
-export function rankSession(s: Session): number {
-  if (needsYou(s)) return 0;
-  if (s.activity === "running" || s.activity === "streaming") return 1;
-  if (s.isLive) return 2;
-  return 3;
-}
+// The session predicates live in ./sessionRules so they can be imported without
+// this module's persistence layer. Imported for use below AND re-exported from
+// source, as two statements: `export { x }` over an imported binding compiles to
+// a getter over a local that doesn't exist once Metro rewrites the module, which
+// typechecks cleanly and then throws at runtime.
+export { isDotName, needsYou, rankSession } from "./sessionRules";
 
 /** Every activity collapses into one coarse bucket for the status filter. */
 const STATUS_BUCKET: Record<ActivityStatus, StatusBucket> = {
