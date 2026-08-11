@@ -755,8 +755,10 @@ function DraftRow({
   const { theme } = useUnistyles();
   const title = draftTitle(draft);
   return (
+    // No leading pencil. The row sits under a "Drafts" header that already
+    // carries one, and a per-row edit glyph reads as a BUTTON — something to
+    // press to start editing — when the whole row is that button.
     <Pressable onPress={onPress} style={({ pressed }) => [s.shelfRow, pressed && s.pressed70]}>
-      <PounceIcon name="create-outline" size={15} color={theme.colors.fgFaint} />
       <Text numberOfLines={1} style={s.draftTitle}>
         {title}
       </Text>
