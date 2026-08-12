@@ -7,6 +7,7 @@
  * off-LAN, bridgeBase() swaps in a loopback proxy that carries the same HTTP
  * over an iroh p2p tunnel (github.com/n0-computer/iroh) to the paired machine.
  */
+import { Platform } from "react-native";
 import * as SecureStore from "./secureStore";
 import type {
   Agent,
@@ -112,6 +113,12 @@ export interface DeviceConfig extends BridgeConfig {
   readonly tunnelToken?: string;
   /** Present only on a device we reached by being granted access to it. */
   readonly grant?: DeviceGrant;
+  /**
+   * True once `token` is a credential this bridge issued to US specifically,
+   * rather than the shared one the QR hands out. From then on the bridge can
+   * rotate its own token — an update, a reinstall — without dropping us.
+   */
+  readonly adopted?: boolean;
 }
 
 const DEVICES_KEY = "pounce.devices";
@@ -246,6 +253,61 @@ export async function rotateLegacyToken(cfg: DeviceConfig): Promise<DeviceConfig
   if (!fresh) return cfg;
   const list = await listDeviceConfigs();
   const next = { ...cfg, token: fresh };
+  await writeDeviceConfigs(list.map((d) => (d.id === cfg.id ? next : d)));
+  return next;
+}
+
+/**
+ * Take out a credential of this device's own, so the bridge rotating its shared
+ * token can never drop us.
+ *
+ * The shared token is the one the QR hands out, and it is the same value for
+ * every phone paired to that machine. That made rotation one-way and fatal:
+ * `/v1/token` is the only way back and it needs the credential that just
+ * stopped working, so an upgrade whose window elapsed while the phone was off,
+ * a bridge reinstall, or a torn ~/.pounce left this app locked out for good —
+ * showing a device list that just said nothing was online. Only the desktop app
+ * could recover, by reading its own loopback /ui, because it IS the machine.
+ *
+ * Adopting costs one POST on the first sync after an update and nothing after
+ * that. It grants no new authority — it is called with a credential that
+ * already has it — it only stops us depending on a value the bridge may change.
+ *
+ * Best-effort throughout: an older bridge has no such route, an unreachable one
+ * gets another go next sync, and either way the existing pairing is untouched.
+ * A device we reached through a GRANT is skipped — that credential is the
+ * peer's to expire, read-only by construction, and not ours to replace.
+ */
+export async function adoptDeviceToken(cfg: DeviceConfig): Promise<DeviceConfig> {
+  if (cfg.adopted || cfg.grant) return cfg;
+  let fresh: string | null = null;
+  try {
+    const base = await bridgeBase(cfg);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10_000);
+    try {
+      const res = await fetch(`${base}/v1/device/adopt`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+        // `cfg.id` is this app's own stable row for that machine, so a re-adopt
+        // after a reinstall replaces one credential instead of stacking a
+        // second one the owner cannot attribute to anything.
+        body: JSON.stringify({ key: cfg.id, name: cfg.name, platform: Platform.OS }),
+        signal: ctrl.signal,
+      });
+      if (res.ok) {
+        const body = (await res.json()) as { token?: string };
+        fresh = typeof body?.token === "string" && body.token ? body.token : null;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    // Offline, or a bridge that predates the route. Try again next sync.
+  }
+  if (!fresh) return cfg;
+  const list = await listDeviceConfigs();
+  const next = { ...cfg, token: fresh, adopted: true };
   await writeDeviceConfigs(list.map((d) => (d.id === cfg.id ? next : d)));
   return next;
 }
@@ -788,9 +850,10 @@ export async function syncLiveDataStreaming(): Promise<{
 
   await Promise.all(
     configs.map(async (rawCfg) => {
-      // Before anything else this sync: retire a token that used to be public.
-      // No-op for every pairing made since bridges started minting their own.
-      const cfg = await rotateLegacyToken(rawCfg);
+      // Before anything else this sync: retire a token that used to be public,
+      // then take out one of our own so a future rotation can't drop us. Both
+      // are no-ops after they have happened once.
+      const cfg = await adoptDeviceToken(await rotateLegacyToken(rawCfg));
       threadsByDevice[cfg.id] = { name: cfg.name, threads: [] };
       let online = true;
       let deviceName = cfg.name;

@@ -57,6 +57,7 @@ import { agentEnv, binPath, binVersion, primaryLanIp } from "./agents/env.mjs";
 import { publicConfig, readConfig, writeConfig } from "./agents/config.mjs";
 import { LEGACY_TOKEN, bridgeToken, legacyAllows, tokenMatches } from "./agents/token.mjs";
 import { hostIsAddress } from "./agents/host-guard.mjs";
+import { createDevices } from "./agents/devices.mjs";
 import { bridgeId as machineBridgeId } from "./agents/identity.mjs";
 import { createDiscovery } from "./agents/discovery.mjs";
 import {
@@ -1039,6 +1040,38 @@ function pairDeepLink() {
 // for the handshake and agents/discovery.mjs for the beacon.
 
 const access = createAccess();
+// One credential per paired device, so rotating the shared token — or an
+// upgrade whose migration window elapsed — cannot drop a phone. See devices.mjs.
+const devices = createDevices();
+
+/**
+ * One row per device for the "who can see this?" screen, out of the two places
+ * a pairing can be recorded.
+ *
+ * A phone approved before this change has an access.mjs `device:` row and no
+ * credential of its own; one approved after has both, keyed the same way (the
+ * requester's bridgeId). Showing both would list it twice, and showing the old
+ * row would offer a Remove that cannot work — only the credential can be
+ * revoked. So the revocable row wins, and the legacy row survives only where
+ * nothing has adopted yet, carrying `revocable: false` to say why its removal
+ * still means re-pairing everything.
+ */
+function mergeDeviceRows(owned, legacy) {
+  const byId = new Map(owned.map((d) => [d.id, { ...d, revocable: true }]));
+  for (const d of legacy) {
+    if (!byId.has(d.bridgeId)) {
+      byId.set(d.bridgeId, {
+        id: d.bridgeId,
+        name: d.hostName,
+        platform: d.platform,
+        pairedAt: d.pairedAt,
+        lastSeenAt: null,
+        revocable: false,
+      });
+    }
+  }
+  return [...byId.values()];
+}
 
 /**
  * Announcing this machine to the network is OPT-IN. LOOKING is not.
@@ -1973,9 +2006,14 @@ const server = http.createServer(async (req, res) => {
     Date.now() < LEGACY_UNTIL &&
     tokenMatches(auth, LEGACY_TOKEN) &&
     legacyAllows(req.method, url.pathname);
-  if (!tokenMatches(auth, TOKEN) && !legacyOk) {
-    // Not the owner's token. It may still be a grant issued to a peer — a
-    // read-only capability, narrowed to a scope and stamped with an expiry.
+  // A device that has adopted its own credential (see agents/devices.mjs) is
+  // the SAME authority as the shared token — it is the phone you paired, not a
+  // guest — but it survives that token being rotated, which is the whole reason
+  // it exists. Checked before grants because it is the common case.
+  const device = tokenMatches(auth, TOKEN) || legacyOk ? null : devices.forToken(auth);
+  if (!tokenMatches(auth, TOKEN) && !legacyOk && !device) {
+    // Not the owner's token and not a device's. It may still be a grant issued
+    // to a peer — read-only, narrowed to a scope, stamped with an expiry.
     const hit = access.forToken(auth);
     if (!hit) return send(res, 401, { error: "unauthorized" });
     if (hit.ended) {
@@ -1993,11 +2031,39 @@ const server = http.createServer(async (req, res) => {
     // connected" in the pairing window, and a peer reading history is not that.
   } else {
     lastClientSeen = Date.now();
+    if (device) devices.touch(device.id);
   }
 
   // The migration itself: a client still holding the published default swaps it
   // for this install's real token, so the window closes on its next sync.
   if (url.pathname === "/v1/token") return send(res, 200, { token: TOKEN });
+
+  /**
+   * Take out a credential of this device's own, so an update can never drop it.
+   *
+   * Callable with the shared token (what the QR hands out) or with a device
+   * token already held — i.e. by something that ALREADY has this authority, so
+   * it grants nothing new. What it changes is durability: from here on the
+   * caller stops depending on a value the bridge may rotate out from under it.
+   *
+   * Deliberately NOT reachable with the legacy constant (see LEGACY_DENY): that
+   * password is in the git history, and letting it mint a credential which
+   * never expires would be strictly worse than the 24h window it arrives with.
+   * A grant can't reach it either — grantAllowsRoute refuses every non-GET.
+   */
+  if (url.pathname === "/v1/device/adopt" && req.method === "POST") {
+    const { key, name, platform } = await readBody(req);
+    const minted = devices.mint({ key, name, platform });
+    // If the caller was ALREADY a device, that older row is now nobody's — it
+    // authenticated this call and is being replaced by what we just minted.
+    // Leaving it would strand a working credential the owner cannot attribute
+    // to any phone. Only when the id actually changed: adopting under the same
+    // key replaces the row in place, and revoking then would delete the new one.
+    // (The two paths key differently — the app by its own row id, an approved
+    // peer by bridgeId — so a phone that did both would otherwise orphan one.)
+    if (device && device.id !== minted.id) devices.revoke(device.id);
+    return send(res, 200, { deviceId: minted.id, token: minted.token });
+  }
   if (process.env.BRIDGE_DEBUG) console.log(`[req] ${req.method} ${url.pathname}${url.search}`);
 
   // Everything below is inside the grant's scope or not served at all. Done
@@ -2234,22 +2300,42 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, {
         pending: access.listPending(),
         grants: access.listGrants(),
-        // Phones paired through the LAN flow. Not grants — they hold this
-        // machine's own token — but they ARE things with access, and a screen
-        // that answers "who can see this?" has to say so.
-        devices: access.listDevices(),
+        // Phones holding a credential of their own (devices.mjs). The old
+        // `access.listDevices()` rows are a RECORD of a pairing, not a
+        // credential, and could not be revoked individually — these can, so
+        // they win where a device appears in both.
+        devices: mergeDeviceRows(devices.list(), access.listDevices()),
       });
+    }
+    // Ending one device, without touching any other. The whole point of
+    // per-device credentials: this used to require rotating the shared token.
+    if (url.pathname === "/v1/devices/revoke" && req.method === "POST") {
+      if (!isOwner(req)) return send(res, 403, { error: "local only" });
+      const { id } = await readBody(req);
+      if (!id) return send(res, 400, { error: "id required" });
+      return send(res, 200, { ok: devices.revoke(id) });
     }
     if (url.pathname === "/v1/access/approve" && req.method === "POST") {
       if (!isOwner(req)) return send(res, 403, { error: "local only" });
       const { requestId, scope, expiresAt } = await readBody(req);
+      // Only a `device` approval consumes this. It used to be the shared TOKEN,
+      // which is what made "un-pair this phone" mean "rotate the credential and
+      // end every other device" (access.mjs says so in listDevices). Minting the
+      // approved phone its own credential makes that removal a single row.
+      const pending = access.listPending().find((p) => p.id === requestId);
+      const deviceToken =
+        pending?.kind === "device"
+          ? devices.mint({
+              key: pending.requester?.bridgeId,
+              name: pending.requester?.hostName,
+              platform: pending.requester?.platform,
+            }).token
+          : null;
       const r = access.approve(requestId, {
         scope: scope === undefined ? undefined : (normalizeScope(scope) ?? { kind: "full" }),
         expiresAt: expiresAt ?? null,
         bridge: ownIdentity(),
-        // Only a `device` approval consumes this: it hands the asker this
-        // machine's pairing token instead of minting a grant (see access.mjs).
-        deviceToken: TOKEN,
+        deviceToken,
       });
       if (!r.ok) return send(res, 400, r);
       // A device is now paired, exactly as if it had scanned the code — there is
