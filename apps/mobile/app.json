@@ -35,7 +35,7 @@
       "versionCode": 18,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#f5eafb"
+        "backgroundColor": "#FEF1E3"
       }
     },
     "plugins": [
@@ -55,7 +55,7 @@
           "image": "./assets/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#f5eafb"
+          "backgroundColor": "#FEF1E3"
         }
       ],
       [

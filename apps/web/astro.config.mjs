@@ -15,7 +15,10 @@ export default defineConfig({
         "Docs for Pounce — control Claude Code, Codex, Cursor & opencode from your phone.",
       favicon: "/assets/favicon.png",
       logo: { src: "./src/assets/icon.png", alt: "Pounce" },
-      social: [{ icon: "github", label: "GitHub", href: "https://github.com/pounce-ai/pounce" }],
+      social: [
+        { icon: "github", label: "GitHub", href: "https://github.com/pounce-ai/pounce" },
+        { icon: "discord", label: "Discord", href: "https://discord.gg/xK5MQ8KzQH" },
+      ],
       customCss: ["./src/styles/starlight.css"],
       sidebar: [
         {
