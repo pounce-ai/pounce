@@ -4,7 +4,7 @@
     "slug": "pounce",
     "owner": "peppyhop",
     "scheme": "pounce",
-    "version": "1.4.0",
+    "version": "1.4.1",
     "runtimeVersion": {
       "policy": "appVersion"
     },
@@ -19,7 +19,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.pounce.app",
-      "buildNumber": "27",
+      "buildNumber": "28",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSLocalNetworkUsageDescription": "Pounce connects to the Pounce Bridge running on your local network to load your projects and conversations.",
@@ -32,10 +32,10 @@
     },
     "android": {
       "package": "com.pounce.app",
-      "versionCode": 18,
+      "versionCode": 19,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#f5eafb"
+        "backgroundColor": "#FEF1E3"
       }
     },
     "plugins": [
@@ -55,7 +55,7 @@
           "image": "./assets/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#f5eafb"
+          "backgroundColor": "#FEF1E3"
         }
       ],
       [

@@ -3,7 +3,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Pounce — control your coding agents from your phone</title>
-<meta name="description" content="Pounce puts Claude, Codex, Cursor & opencode in your pocket. Run npx use-pounce, scan one QR, and watch every agent work in real time across all your machines — steer by voice, track tokens and spend, review the diff, and ship. Open source (MIT), built on Expo and Iroh. iOS live on the App Store." />
+<meta name="description" content="Pounce is the control plane for Claude Code, Codex, Cursor & opencode running on your own machines. Watch them work in real time from your phone, search every thread you have ever run across every agent and every computer, and give a colleague read-only access to exactly the projects you choose — scoped, expiring, revocable. Open source (MIT), built on Expo and Iroh. iOS live on the App Store." />
 <link rel="canonical" href="https://use-pounce.com/" />
 <meta name="robots" content="index, follow" />
 <!-- Open Graph -->
@@ -189,7 +189,6 @@
   .sec-lead{color:var(--ink-dim);font-size:18px;margin-top:16px}
 
   /* ---- npx cli band ---- */
-  #cli{padding:56px 0 0}
   .cli-band{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center;
     border:1px solid var(--line);border-radius:26px;padding:44px 42px;
     background:radial-gradient(120% 140% at 0% 0%,rgba(124,92,255,.10),transparent 55%),linear-gradient(180deg,var(--panel),var(--bg-2))}
@@ -241,6 +240,53 @@
   .feat .fn{font-family:var(--mono);font-size:12px;color:var(--violet-bright)}
   .feat h3{font-size:19px;font-weight:600;margin:14px 0 8px}
   .feat p{color:var(--ink-dim);font-size:14.5px}
+
+  /* ---- table stakes strip ----
+     Everything a control plane for agents is expected to do, landed fast and
+     in one block, so the page can spend its real estate on what follows. */
+  #stakes{padding-bottom:40px}
+  .stakes{margin-top:38px;display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+    background:var(--line);border:1px solid var(--line);border-radius:22px;overflow:hidden}
+  .stake{background:var(--bg-2);padding:22px 20px}
+  .stake b{display:block;font-family:var(--disp);font-size:16px;font-weight:600;margin-bottom:6px}
+  .stake b::before{content:"✓";color:var(--signal);font-family:var(--mono);font-size:13px;margin-right:9px}
+  .stake span{display:block;font-size:14px;color:var(--ink-dim);line-height:1.5}
+  .stakes-foot{margin-top:22px;font-family:var(--mono);font-size:13px;color:var(--ink-faint)}
+  .stakes-foot b{color:var(--violet-bright);font-weight:500}
+
+  /* ---- the three differentiators ---- */
+  .only{display:flex;align-items:baseline;gap:14px;font-family:var(--mono);font-size:12.5px;
+    letter-spacing:.06em;color:var(--violet-bright);text-transform:uppercase}
+  .only .n{font-family:var(--disp);font-size:34px;font-weight:800;line-height:1;color:var(--ink);
+    padding:2px 11px;border:1px solid rgba(124,92,255,.45);border-radius:12px;
+    background:rgba(124,92,255,.1)}
+  .facts{margin-top:26px;display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .fact{padding:16px 18px;border:1px solid var(--line);border-radius:15px;background:rgba(11,11,14,.45)}
+  .fact b{display:block;font-family:var(--disp);font-size:22px;font-weight:700;color:var(--ink)}
+  .fact span{display:block;font-family:var(--mono);font-size:11.5px;letter-spacing:.04em;
+    color:var(--ink-faint);margin-top:5px;text-transform:uppercase}
+
+  /* ---- measured metrics ----
+     Every figure here was measured on one machine on one day; the table
+     carries its own provenance column so it can never drift into folklore. */
+  /* overflow-x rather than hidden: if the row-stacking rule below ever fails
+     to apply, the table scrolls inside its own box instead of widening the page. */
+  .metrics{margin-top:44px;border:1px solid var(--line);border-radius:22px;overflow-x:auto;
+    background:linear-gradient(180deg,var(--panel),var(--bg-2))}
+  .metrics table{width:100%;border-collapse:collapse;font-size:15px}
+  .metrics caption{caption-side:top;text-align:left;padding:20px 24px 0;font-family:var(--mono);
+    font-size:12px;letter-spacing:.05em;color:var(--ink-faint);text-transform:uppercase}
+  .metrics th,.metrics td{padding:14px 24px;text-align:left;border-bottom:1px solid var(--line-2);vertical-align:top}
+  .metrics thead th{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--ink-faint);font-weight:500}
+  .metrics tbody tr:last-child th,.metrics tbody tr:last-child td{border-bottom:0}
+  .metrics tbody th{font-weight:500;color:var(--ink)}
+  .metrics td.num{font-family:var(--mono);font-weight:600;color:var(--violet-bright);white-space:nowrap}
+  .metrics td.how{font-family:var(--mono);font-size:12.5px;color:var(--ink-faint);line-height:1.5}
+  .metrics tr.ref th,.metrics tr.ref td{color:var(--ink-dim)}
+  .metrics tr.ref td.num{color:var(--ink-dim)}
+  .metrics-note{margin-top:18px;font-size:14.5px;color:var(--ink-faint);max-width:78ch}
+  .metrics-note code{font-family:var(--mono);font-size:13px;color:var(--ink-dim)}
 
   /* ---- screens gallery ---- */
   .gallery{margin-top:52px;display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
@@ -315,6 +361,7 @@
     .tag.needs,.tag.ship{left:0}.tag.run{right:0}
     .cli-band{grid-template-columns:1fr;gap:32px;padding:32px 24px}
     .platforms{grid-template-columns:1fr 1fr}
+    .stakes{grid-template-columns:1fr 1fr}
     .gallery{grid-template-columns:1fr 1fr;max-width:640px;margin-inline:auto}
     .analytics,.os-band{grid-template-columns:1fr}
     .an-shot{order:-1}
@@ -332,8 +379,19 @@
     section{padding:clamp(48px,8vw,72px) 0}
     .sec-lead{max-width:none}
     .features{grid-template-columns:1fr 1fr}
+    .facts{grid-template-columns:1fr}
     .steps{grid-template-columns:1fr}
     .step .wire{display:none}
+    /* A four-column table can't shrink honestly on a narrow screen — drop the
+       provenance column into the row beneath the figure it belongs to. */
+    .metrics thead{display:none}
+    .metrics table,.metrics tbody,.metrics tr,.metrics th,.metrics td{display:block;width:auto}
+    .metrics tbody tr{border-bottom:1px solid var(--line-2);padding:6px 0}
+    .metrics tbody tr:last-child{border-bottom:0}
+    .metrics th,.metrics td{border-bottom:0;padding:4px 20px}
+    .metrics tbody th{padding-top:14px}
+    .metrics td.num{font-size:19px}
+    .metrics td.how{padding-bottom:14px}
   }
   @media(max-width:640px){
     .wrap{padding:0 16px}
@@ -349,7 +407,7 @@
     .an-item p{font-size:15.4px}
     /* Floating callout tags overlap the artwork below this width. */
     .tag{display:none}
-    .platforms,.features{grid-template-columns:1fr}
+    .platforms,.features,.stakes{grid-template-columns:1fr}
     .gallery{grid-template-columns:1fr;max-width:320px}
     .foot-in{flex-direction:column;align-items:flex-start;gap:14px}
     .foot-links{flex-wrap:wrap;gap:14px 18px}
@@ -366,7 +424,7 @@
   /* Nothing may push the page sideways — the one rule that makes a layout
      feel finished on a phone regardless of what's inside it. */
   img,svg,video{max-width:100%;height:auto}
-  .term,.gallery,.features,.platforms,.steps{min-width:0}
+  .term,.gallery,.features,.platforms,.steps,.stakes,.facts,.metrics{min-width:0}
 </style>
 </head>
 <body>
@@ -378,12 +436,14 @@
   <div class="wrap nav-in">
     <a class="brand" href="#top"><img src="/assets/icon.png" alt="Pounce" /> pounce</a>
     <div class="nav-links">
-      <a class="lnk" href="#features">Features</a>
-      <a class="lnk" href="#analytics">Analytics</a>
+      <a class="lnk" href="#access">Access</a>
+      <a class="lnk" href="#search">Search</a>
+      <a class="lnk" href="#weight">Metrics</a>
       <a class="lnk" href="/docs/getting-started">Docs</a>
       <a class="lnk" href="/how-it-works">How it works</a>
       <a class="lnk" href="/changelog">Changelog</a>
       <a class="lnk" href="https://github.com/pounce-ai/pounce" target="_blank" rel="noopener">Open source</a>
+      <a class="lnk" href="https://discord.gg/xK5MQ8KzQH" target="_blank" rel="noopener">Discord</a>
       <span class="nav-live"><span class="led"></span>iOS&nbsp;live</span>
       <a class="nav-cta" href="https://apps.apple.com/app/id6779601425" target="_blank" rel="noopener">Download</a>
     </div>
@@ -394,10 +454,10 @@
   <div class="h-copy">
     <span class="kicker">now live on the App Store</span>
     <h1>
-      <span class="lead-line">Your coding agents,</span>
-      <em>in your pocket.</em>
+      <span class="lead-line">Every agent, every machine,</span>
+      <em>in one pocket.</em>
     </h1>
-    <p class="sub">Pounce puts <b>Claude, Codex, Cursor &amp; opencode</b> in one place — every agent, on every machine you own. Watch them work in real time, jump in by voice, review the diff, and ship. All from your phone.</p>
+    <p class="sub">Pounce is the control plane for <b>Claude Code, Codex, Cursor &amp; opencode</b> running on <b>your own computers</b>. Watch them work, steer by voice, review the diff, ship — then search every thread you've ever run, and hand a colleague read-only access to exactly the projects you choose.</p>
     <div class="cta-row">
       <a class="btn btn--app" href="https://apps.apple.com/app/id6779601425" target="_blank" rel="noopener" aria-label="Download Pounce on the App Store">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.37 1.43c.07 1.06-.32 2.09-1 2.86-.71.79-1.86 1.4-2.98 1.31-.09-1.03.39-2.1 1.04-2.78.72-.78 1.97-1.36 2.94-1.39zM20.5 17.2c-.55 1.27-.82 1.84-1.53 2.96-.99 1.56-2.39 3.51-4.12 3.52-1.54.01-1.94-1-4.03-.99-2.09.01-2.53 1.01-4.07.99-1.73-.02-3.05-1.78-4.04-3.34C-.04 16.46-.34 11.34 1.36 8.62c1.2-1.93 3.1-3.06 4.89-3.06 1.82 0 2.96 1 4.46 1 1.46 0 2.35-1 4.46-1 1.59 0 3.28.87 4.48 2.37-3.94 2.16-3.3 7.78.85 9.27z"/></svg>
@@ -459,6 +519,174 @@
   </div>
 </header>
 
+<!-- table stakes: land the expected feature set fast, then pivot -->
+<section id="stakes">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="kicker">the floor, not the pitch</span>
+      <h2 class="sec-title">Everything you'd expect from a control plane.</h2>
+      <p class="sec-lead">Your agents run on your machines, on your own subscriptions. Nothing is resold, nothing is proxied through us, and none of it is the reason to read further.</p>
+    </div>
+    <div class="stakes">
+      <div class="stake reveal"><b>Four agents, one app</b><span>Claude Code, Codex, Cursor and opencode — driven end to end, not just listed.</span></div>
+      <div class="stake reveal"><b>Live streaming</b><span>Reasoning, tool calls and diffs arrive token by token, as if you were at the terminal.</span></div>
+      <div class="stake reveal"><b>Bring your own subscription</b><span>Pounce drives the CLI you already log into. No keys resold, no quota of ours.</span></div>
+      <div class="stake reveal"><b>Answer the prompts</b><span>Permission and plan dialogs come through to your phone. Approve, deny, or reply.</span></div>
+      <div class="stake reveal"><b>Review and ship</b><span>Read the diff, commit, push, open a PR — without opening a laptop.</span></div>
+      <div class="stake reveal"><b>Hold to talk</b><span>Speak a task. Transcription happens on the device, then it runs.</span></div>
+      <div class="stake reveal"><b>Reach it from anywhere</b><span>Peer-to-peer over Iroh. No VPN, no port-forwarding, no relay holding your code.</span></div>
+      <div class="stake reveal"><b>Open source, MIT</b><span>Phone app, desktop app, Bridge and tunnel. Fork any of it.</span></div>
+    </div>
+    <p class="stakes-foot reveal">That is the table stakes. <b>Three things below are ours alone.</b></p>
+  </div>
+</section>
+
+<!-- screens gallery: proof that the above is a real app, not a roadmap -->
+<section id="screens" style="padding-top:0">
+  <div class="wrap">
+    <div class="gallery">
+      <figure class="shot-fig reveal"><div class="device"><img src="/assets/shot-home.png" alt="Pounce home — all your coding agents across every machine, sorted by what needs you" loading="lazy" /></div><figcaption><b>Fleet</b> · one screen</figcaption></figure>
+      <figure class="shot-fig reveal"><div class="device"><img src="/assets/shot-session.png" alt="Live agent session — reasoning, tool calls and diffs streaming in real time" loading="lazy" /></div><figcaption><b>Live session</b> · in real time</figcaption></figure>
+      <figure class="shot-fig reveal"><div class="device"><img src="/assets/shot-filters.png" alt="Filter the fleet by device, agent, status, branch or project" loading="lazy" /></div><figcaption><b>Filters</b> · find anything</figcaption></figure>
+      <figure class="shot-fig reveal"><div class="device"><img src="/assets/shot-changes.png" alt="Review the diff and commit, push, or open a PR straight from your phone" loading="lazy" /></div><figcaption><b>Ship</b> · diff &amp; PR</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<!-- differentiator 01: access -->
+<section id="access">
+  <div class="wrap">
+    <div class="cli-band reveal">
+      <div class="cli-copy">
+        <span class="only"><span class="n">01</span> only in pounce</span>
+        <h2 class="sec-title" style="font-size:clamp(26px,3.6vw,40px);margin-top:18px">Access, sliced to a single thread.</h2>
+        <p class="sec-lead">Every other remote for coding agents stops at <i>your</i> agents on <i>your</i> machine. Pounce goes three ways at once — <b>many agents</b>, <b>many sessions running at the same time</b>, and <b>many machines</b> in one list, each identified by the machine itself so re-pairing it at a new address updates the row instead of duplicating it.</p>
+        <p class="sec-lead" style="margin-top:14px">Then it does the thing nobody else does: it lets you <b>give someone else read access to part of it</b>. Make a computer discoverable and the other Pounce machines on the network can see its name and ask. Because you can't tick a project you've never seen, asking happens twice — a <b>five-minute preview</b> that shows space names and dates and nothing else, then a request for the exact spaces and threads they picked. You approve the scope and the duration yourself; a six-digit code has to match on both screens.</p>
+        <p class="sec-lead" style="margin-top:14px">What they get is read-only by construction. Writes are refused on the verb before any route is consulted, and a thread outside the grant answers <b>404, not 403</b> — so the boundary doesn't leak the shape of what's behind it. Each grant runs down <b>its own tunnel with its own identity</b>, so revoking closes the door at the transport, not just the API. Revoking leaves a tombstone rather than a deletion, which is how the other side's app knows to drop the machine instead of showing it as merely offline.</p>
+        <p class="sec-lead" style="margin-top:14px"><a href="/docs/sharing">How sharing works →</a></p>
+      </div>
+      <div class="term" aria-label="Terminal showing one machine asking another for scoped, expiring, read-only access">
+        <div class="term-bar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span><span class="term-t">app, browser, or terminal</span></div>
+        <div class="term-body">
+          <div class="tline"><span class="ps">$</span>pounce peers</div>
+          <div class="tline dim">Machines on this network</div>
+          <div class="tline">&nbsp;&nbsp;work-laptop &nbsp;<span class="dim">192.168.1.24</span></div>
+          <div class="tline dim">&nbsp;</div>
+          <div class="tline"><span class="ps">$</span>pounce ask work-laptop --spaces api</div>
+          <div class="tline dim">Check this code matches: 418-207</div>
+          <div class="tline ok">✓ work-laptop granted api · 8h left</div>
+          <div class="tline dim">&nbsp;</div>
+          <div class="tline"><span class="ps">$</span>pounce revoke work-laptop</div>
+          <div class="tline dim">read-only · scoped · expiring · revocable</div>
+        </div>
+        <div class="facts" style="padding:0 22px 22px">
+          <div class="fact"><b>2-step</b><span>preview → read</span></div>
+          <div class="fact"><b>404</b><span>not 403, out of scope</span></div>
+          <div class="fact"><b>1 tunnel</b><span>per grant</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- differentiator 02: search -->
+<section id="search">
+  <div class="wrap">
+    <div class="cli-band flip reveal">
+      <div class="cli-copy">
+        <span class="only"><span class="n">02</span> only in pounce</span>
+        <h2 class="sec-title" style="font-size:clamp(26px,3.6vw,40px);margin-top:18px">Search every agent you've ever run.</h2>
+        <p class="sec-lead">Coding agents each start with amnesia and none of them can read the others. Pounce already reads all four, on all your machines — so it can put a <b>single search box</b> over the whole lot. Not thread titles: the <b>message bodies</b>, including what the tools printed.</p>
+        <p class="sec-lead" style="margin-top:14px">Search <b>everything</b>, or narrow to <b>one project</b>, or <b>find in this thread</b> from the session header with a hit counter and chevrons to hop between matches. A result opens the thread, waits for the full history rather than the last page, scrolls to the message and marks it with the term it matched.</p>
+        <p class="sec-lead" style="margin-top:14px">The index is a local full-text index over the transcripts already on disk, built by <b class="mono">ctx</b>, which the Bridge installs into <b class="mono">~/.pounce/bin</b> and refreshes after each turn. It runs on the machine the history lives on. Nothing is uploaded, and there is no Pounce server involved — a machine that's off simply isn't searched. The same history is available to your other tools over <a href="/docs/mcp">MCP</a>, read-only.</p>
+        <p class="sec-lead" style="margin-top:14px"><a href="/docs/search">How search works →</a></p>
+      </div>
+      <div class="term" aria-label="Terminal showing the Pounce MCP server being registered with Claude Code">
+        <div class="term-bar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span><span class="term-t">searchable from the app, or any MCP client</span></div>
+        <div class="term-body">
+          <div class="tline"><span class="ps">$</span>claude mcp add pounce -- npx use-pounce mcp</div>
+          <div class="tline ok">✓ Added stdio MCP server pounce</div>
+          <div class="tline dim">&nbsp;</div>
+          <div class="tline dim">search_history &nbsp; what was already tried</div>
+          <div class="tline dim">list_threads &nbsp;&nbsp;&nbsp; sessions across every agent</div>
+          <div class="tline dim">get_thread &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; what actually happened</div>
+          <div class="tline dim">list_markers &nbsp;&nbsp;&nbsp; what you flagged as important</div>
+          <div class="tline dim">recent_activity &nbsp;what's been worked on lately</div>
+        </div>
+        <div class="facts" style="padding:0 22px 22px">
+          <div class="fact"><b>4 agents</b><span>one index</span></div>
+          <div class="fact"><b>3 scopes</b><span>all · project · thread</span></div>
+          <div class="fact"><b>0 bytes</b><span>uploaded</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- differentiator 03: measured weight -->
+<section id="weight">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="only"><span class="n">03</span> only in pounce</span>
+      <h2 class="sec-title" style="margin-top:18px">Small enough to leave running.</h2>
+      <p class="sec-lead">The thing that hosts your agents sits on your computer all day, so its weight is a feature. Pounce's desktop app bundles no Chromium — it draws on the system WebView and runs the Bridge <b>inside its own process</b>, so there is no second app, no helper process per window, and one number to look at.</p>
+      <p class="sec-lead" style="margin-top:14px">Here is that number, and every other one we could measure. Nothing below is an estimate.</p>
+    </div>
+
+    <div class="metrics reveal">
+      <table>
+        <caption>Measured 12 August 2026 · Mac mini (M4), macOS 26.3 · sizes are 1024-based MB, as reported by <code>du</code></caption>
+        <thead>
+          <tr><th scope="col">What</th><th scope="col">Measured</th><th scope="col">How</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Bridge app, macOS download</th>
+            <td class="num">23.9 MB</td>
+            <td class="how">Pounce.dmg, release v1.1.4 — 25,087,389 bytes</td>
+          </tr>
+          <tr>
+            <th scope="row">Bridge app, Windows download</th>
+            <td class="num">34.7 MB</td>
+            <td class="how">stable-win-x64-Pounce-Setup.zip, v1.1.4 — 36,355,259 bytes</td>
+          </tr>
+          <tr>
+            <th scope="row">Bridge app, Debian/Ubuntu x64</th>
+            <td class="num">35.6 MB</td>
+            <td class="how">pounce_1.1.4_amd64.deb — 37,317,576 bytes</td>
+          </tr>
+          <tr>
+            <th scope="row">Bridge app on disk, installed</th>
+            <td class="num">81 MB</td>
+            <td class="how">shipped v1.1.4 macOS archive unpacked, then <code>du -sh Pounce.app</code></td>
+          </tr>
+          <tr>
+            <th scope="row">Pounce Desktop on disk, installed</th>
+            <td class="num">100 MB</td>
+            <td class="how"><code>du -sh /Applications/Pounce.app</code>, version 1.0.37</td>
+          </tr>
+          <tr>
+            <th scope="row">Bridge memory, idle, one process</th>
+            <td class="num">129 MB</td>
+            <td class="how"><code>ps -o rss=</code> 45 s after start, hosting 177 threads across 53 projects and 4 agents on this machine</td>
+          </tr>
+          <tr class="ref">
+            <th scope="row">For reference: T3 Code (Nightly), Electron</th>
+            <td class="num">418 MB</td>
+            <td class="how"><code>du -sh</code> on the same Mac the same day, version 0.0.33-nightly.20260810.1056</td>
+          </tr>
+          <tr class="ref">
+            <th scope="row">For reference: Discord, Electron</th>
+            <td class="num">445 MB</td>
+            <td class="how"><code>du -sh</code> on the same Mac the same day</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="metrics-note reveal">The two reference rows are installed-size only, taken on that same Mac mini so the comparison is like for like. We have not measured another product's memory use, so there is no memory comparison here — only ours. Download sizes come straight from the published release assets; you can check them yourself with <code>gh release view v1.1.4 --repo pounce-ai/pounce --json assets</code>.</p>
+  </div>
+</section>
+
 <!-- npx one-liner -->
 <section id="cli">
   <div class="wrap">
@@ -476,63 +704,6 @@
           <div class="term-qr"><img src="/assets/pair-qr.svg" alt="Sample pairing QR code" /></div>
           <div class="tline ok">✓ Works from anywhere</div>
           <div class="tline dim">Scan with the Pounce app — or your camera.</div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- sharing -->
-<section id="sharing">
-  <div class="wrap">
-    <div class="cli-band flip reveal">
-      <div class="cli-copy">
-        <span class="kicker">one grant, every agent</span>
-        <h2 class="sec-title" style="font-size:clamp(26px,3.6vw,40px)">Lend someone your agent history</h2>
-        <p class="sec-lead">The person debugging beside you can't see what you already tried. Now they can. Make a computer visible and the other Pounce machines here find it, and one can ask another for access — you approve <b>which projects</b> and <b>for how long</b>. It's read-only: they browse threads, diffs and search, and can never send a turn or run a command.</p>
-        <p class="sec-lead" style="margin-top:14px">One grant covers <b>whatever ran there</b>. Share a project and the Codex session from their build box opens next to your Claude one — not a link to a copy somebody remembered to publish, but the machine itself, on your network.</p>
-        <p class="sec-lead" style="margin-top:14px">You can't tick a project you've never seen, so asking happens twice — a short preview showing <b>names and dates only</b>, then a request for what they picked. Both stop at a person, with a matching code on each screen. Revoke any time; it expires on its own anyway.</p>
-        <p class="sec-lead" style="margin-top:14px"><a href="/docs/sharing">How sharing works →</a></p>
-      </div>
-      <div class="term" aria-label="Terminal showing one machine asking another for scoped, expiring access">
-        <div class="term-bar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span><span class="term-t">app, browser, or terminal</span></div>
-        <div class="term-body">
-          <div class="tline"><span class="ps">$</span>pounce peers</div>
-          <div class="tline dim">Nearby machines</div>
-          <div class="tline">&nbsp;&nbsp;work-laptop &nbsp;<span class="dim">192.168.1.24</span></div>
-          <div class="tline dim">&nbsp;</div>
-          <div class="tline"><span class="ps">$</span>pounce ask work-laptop --spaces api</div>
-          <div class="tline dim">Check the code matches: 418-207</div>
-          <div class="tline ok">✓ work-laptop granted api · 8h left</div>
-          <div class="tline dim">&nbsp;</div>
-          <div class="tline dim">read-only · scoped · expires · revocable</div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- mcp -->
-<section id="mcp">
-  <div class="wrap">
-    <div class="cli-band reveal">
-      <div class="cli-copy">
-        <span class="kicker">works with your other agents</span>
-        <h2 class="sec-title" style="font-size:clamp(26px,3.6vw,40px)">Your history, in every agent</h2>
-        <p class="sec-lead">Every coding agent starts with amnesia — it can't see what you tried in a different tool yesterday. Pounce already reads them all, so one line gives <b>Claude Code</b>, <b>Cursor</b> and anything else that speaks <b>MCP</b> your whole cross-agent history. Read-only, and entirely on your machine.</p>
-        <p class="sec-lead" style="margin-top:14px"><a href="/docs/mcp">Read the MCP docs →</a></p>
-      </div>
-      <div class="term" aria-label="Terminal showing the Pounce MCP server being registered with Claude Code">
-        <div class="term-bar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span><span class="term-t">one line, any MCP client</span></div>
-        <div class="term-body">
-          <div class="tline"><span class="ps">$</span>claude mcp add pounce -- npx use-pounce mcp</div>
-          <div class="tline ok">✓ Added stdio MCP server pounce</div>
-          <div class="tline dim">&nbsp;</div>
-          <div class="tline dim">search_history &nbsp; what was already tried</div>
-          <div class="tline dim">list_threads &nbsp;&nbsp;&nbsp; sessions across every agent</div>
-          <div class="tline dim">get_thread &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; what actually happened</div>
-          <div class="tline dim">list_markers &nbsp;&nbsp;&nbsp; what you flagged as important</div>
-          <div class="tline dim">recent_activity &nbsp;what's been worked on lately</div>
         </div>
       </div>
     </div>
@@ -572,46 +743,9 @@
         <span class="arr">↗</span>
         <div class="pic"><svg viewBox="0 0 24 24" fill="var(--violet-bright)"><path d="M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm0 2v8h16V7H4zm3 11h10v2H7v-2z"/></svg></div>
         <h3>Windows · Linux</h3>
-        <p><span class="mono">npx use-pounce</span> in a terminal — or the headless Bridge bundle. Pair from your phone.</p>
-        <span class="state get"><span>▸</span>Get the Bridge</span>
+        <p>A real installer — <span class="mono">.exe</span> for Windows, <span class="mono">.deb</span> or tarball for Linux. It lives in the tray and shows the QR.</p>
+        <span class="state get"><span>▸</span>Get the Bridge app</span>
       </a>
-    </div>
-  </div>
-</section>
-
-<!-- features -->
-<section id="features">
-  <div class="wrap">
-    <div class="sec-head reveal">
-      <span class="kicker">why pounce</span>
-      <h2 class="sec-title">One thumb. Every agent. Every machine.</h2>
-      <p class="sec-lead">Built for developers running coding agents across a Mac mini, a laptop, and a studio box — who want to keep things moving without sitting at a desk.</p>
-    </div>
-    <div class="features">
-      <div class="feat reveal"><div class="fn">01 · stream</div><h3>Real-time streaming</h3><p>Watch every agent think and edit live, token by token, exactly as if you were at the terminal.</p></div>
-      <div class="feat reveal"><div class="fn">02 · voice</div><h3>Hold to talk</h3><p>Press and speak. Pounce transcribes on-device and runs it — navigate, filter, or fire off a new task.</p></div>
-      <div class="feat reveal"><div class="fn">03 · fleet</div><h3>Multi-device fleet</h3><p>Every machine you pair shows up in one list. Filter by device or agent; jump between them instantly.</p></div>
-      <div class="feat reveal"><div class="fn">04 · triage</div><h3>“Needs you” first</h3><p>Threads waiting on your input float to the top, so you always know where to look — and nothing stalls.</p></div>
-      <div class="feat reveal"><div class="fn">05 · anywhere</div><h3>Pair once, reach it anywhere</h3><p>Scan a QR once — even over SSH to a faraway server. Pounce's own secure tunnel finds your machine from any network, no VPN.</p></div>
-      <div class="feat reveal"><div class="fn">06 · share</div><h3>Share with another machine</h3><p>Let a colleague's computer read the threads you choose — scoped to a project, read-only, and it expires. Approve it with one click.</p></div>
-      <div class="feat reveal"><div class="fn">07 · ship</div><h3>Review &amp; ship</h3><p>See the diff, commit, push, open a PR — finish the job from your phone without breaking flow.</p></div>
-    </div>
-  </div>
-</section>
-
-<!-- screens gallery -->
-<section id="screens">
-  <div class="wrap">
-    <div class="sec-head center reveal">
-      <span class="kicker">see it in action</span>
-      <h2 class="sec-title">The whole loop, in your hand</h2>
-      <p class="sec-lead">From a glanceable fleet to a live agent thread to a one-tap PR.</p>
-    </div>
-    <div class="gallery">
-      <figure class="shot-fig reveal"><div class="device"><img src="/assets/shot-home.png" alt="Pounce home — all your coding agents across every machine, sorted by what needs you" /></div><figcaption><b>Fleet</b> · one screen</figcaption></figure>
-      <figure class="shot-fig reveal"><div class="device"><img src="/assets/shot-session.png" alt="Live agent session — reasoning, tool calls and diffs streaming in real time" /></div><figcaption><b>Live session</b> · in real time</figcaption></figure>
-      <figure class="shot-fig reveal"><div class="device"><img src="/assets/shot-filters.png" alt="Filter the fleet by device, agent, status, branch or project" /></div><figcaption><b>Filters</b> · find anything</figcaption></figure>
-      <figure class="shot-fig reveal"><div class="device"><img src="/assets/shot-changes.png" alt="Review the diff and commit, push, or open a PR straight from your phone" /></div><figcaption><b>Ship</b> · diff &amp; PR</figcaption></figure>
     </div>
   </div>
 </section>
@@ -626,7 +760,7 @@
     <div class="steps">
       <div class="step reveal">
         <h3>Install on your computer</h3>
-        <p>On a <b>Mac</b>, download the Pounce desktop app. On <b>Windows or Linux</b>, run the headless Bridge. Prefer a terminal? <b class="mono">npx use-pounce</b> does it in one line. Every path starts your agent host and shows a QR.</p>
+        <p>On a <b>Mac</b>, download the Pounce desktop app. On <b>Windows or Linux</b>, run the installer and Pounce sits in your tray. Prefer a terminal? <b class="mono">npx use-pounce</b> does it in one line. Every path starts your agent host and shows a QR.</p>
         <svg class="wire" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 11h13m0 0-4-4m4 4-4 4"/></svg>
       </div>
       <div class="step reveal">
@@ -719,8 +853,8 @@
   <div class="wrap">
     <div class="cta reveal">
       <span class="kicker" style="justify-content:center">ready when you are</span>
-      <h2 style="margin-top:12px">Ready to pounce?</h2>
-      <p>Download the app, run the Bridge, scan once. Your agents are in your pocket for the rest of the day.</p>
+      <h2 style="margin-top:12px">Your agents deserve a control plane.</h2>
+      <p>Download the app, run the Bridge, scan once. Every agent on every machine, searchable — and shareable on your terms.</p>
       <div class="cta-row">
         <a class="btn btn--app" href="https://apps.apple.com/app/id6779601425" target="_blank" rel="noopener" aria-label="Download Pounce on the App Store">
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.37 1.43c.07 1.06-.32 2.09-1 2.86-.71.79-1.86 1.4-2.98 1.31-.09-1.03.39-2.1 1.04-2.78.72-.78 1.97-1.36 2.94-1.39zM20.5 17.2c-.55 1.27-.82 1.84-1.53 2.96-.99 1.56-2.39 3.51-4.12 3.52-1.54.01-1.94-1-4.03-.99-2.09.01-2.53 1.01-4.07.99-1.73-.02-3.05-1.78-4.04-3.34C-.04 16.46-.34 11.34 1.36 8.62c1.2-1.93 3.1-3.06 4.89-3.06 1.82 0 2.96 1 4.46 1 1.46 0 2.35-1 4.46-1 1.59 0 3.28.87 4.48 2.37-3.94 2.16-3.3 7.78.85 9.27z"/></svg>
@@ -743,6 +877,7 @@
       <a href="/changelog">Changelog</a>
       <a href="https://github.com/pounce-ai/pounce" target="_blank" rel="noopener">GitHub</a>
       <a href="https://github.com/pounce-ai/pounce/releases/latest" target="_blank" rel="noopener">Bridge</a>
+      <a href="https://discord.gg/xK5MQ8KzQH" target="_blank" rel="noopener">Discord</a>
       <a href="/how-it-works">How it works</a>
       <a href="/privacy">Privacy</a>
       <a href="https://github.com/pounce-ai/pounce/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
