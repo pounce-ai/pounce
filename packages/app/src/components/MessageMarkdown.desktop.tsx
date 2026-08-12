@@ -21,6 +21,11 @@ import { useGround, useThemeHex } from "../ui/useThemeHex";
 import { StyleSheet } from "react-native-unistyles";
 import { MD4C_FLAGS, buildAssistantStyle, buildUserStyle, scaleStyle } from "./markdownStyle";
 
+/** The shared flags, minus LaTeX. The desktop pod is built without RaTeX (see
+ *  the note in desktop/macos/Podfile), so `$..$` must stay plain text here —
+ *  with the flag on, the parser would emit math spans no renderer backs. */
+const DESKTOP_MD4C_FLAGS = { ...MD4C_FLAGS, latexMath: false };
+
 /** Executes a command on the thread's host and resolves with its result. Mirrors
  *  the mobile fork's export so Timeline can import it from either. */
 export type RunCommand = (command: string) => Promise<{ code: number; output: string } | null>;
@@ -251,7 +256,7 @@ function MarkdownBody({
     <EnrichedMarkdownText
       markdown={paced}
       markdownStyle={markdownStyle}
-      md4cFlags={MD4C_FLAGS}
+      md4cFlags={DESKTOP_MD4C_FLAGS}
       flavor="github"
       selectable
       contextMenuItems={contextMenuItems}
