@@ -9,8 +9,17 @@
  * Search and filters live as icons in the titlebar row so the two lists stay
  * uninterrupted.
  */
-import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Animated,
+  Easing,
+  Image,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { LegendList } from "@legendapp/list/react-native";
 import { useSelector } from "@legendapp/state/react";
@@ -29,7 +38,9 @@ import {
 import { useDevices, useIgnoredSet, useProjectNames, useThreads } from "@pounce/app/state/db/hooks";
 import { SidebarSessionsSkeleton, SidebarSpacesSkeleton } from "./SidebarSkeleton";
 import { Entrance } from "./Motion";
-import { AgentStatusIcon, COLOR, INPUT_TWEAKS, timeAgo } from "@pounce/app/ui";
+import { COLOR, INPUT_TWEAKS, timeAgo } from "@pounce/app/ui";
+import { useAgentHex } from "@pounce/app/ui/useThemeHex";
+import { useAttentionClock } from "@pounce/app/hooks/useAttentionClock";
 import { GlassSurface } from "@pounce/app/ui/native/GlassSurface";
 import { DragRegion, TITLEBAR_INSET } from "@pounce/app/ui/native/DragRegion";
 import { useTrafficLightInset } from "./fullscreen";
@@ -65,6 +76,10 @@ const TITLE_EDGE_INSET = 10;
 
 /** Spaces shown before the list collapses behind a "N more" toggle. */
 const SPACE_LIMIT = 6;
+
+/** The account row's mark: our cat, cropped to the face and pre-masked to a
+ *  circle so it needs no overflow clipping at this size. */
+const AVATAR_MARK = require("../../assets/avatar-mark.png");
 
 /** Sort order: needs-you → running → other live → archived; newest within each. */
 function rank(s: Session): number {
@@ -103,6 +118,8 @@ export function Sidebar() {
    *  something the sidebar always shows. */
   const needsOnly = f.show.length === 1 && f.show[0] === "needs";
   const filtersActive = !!(f.device || f.agent || f.repos.length || needsOnly || f.favOnly);
+  // Bound once for the list: every row's edge and glyph read from it.
+  const agentHexOf = useAgentHex();
   const deviceList = useDevices();
   const threads = useThreads();
   const projectNames = useProjectNames();
@@ -166,15 +183,29 @@ export function Sidebar() {
   // Settled stays closed: it is the archive, and it is long.
   const [showDrafts, setShowDrafts] = useState(true);
   const [showBlocked, setShowBlocked] = useState(true);
+  const [showRunning, setShowRunning] = useState(true);
   // Threads blocked on the user get their own section rather than just sorting
   // first: "at the top" and "a place of its own" read differently once the list
   // is long, and this is the one group you must not scroll past.
-  const { blocked, rest } = useMemo(() => {
+  // Three cuts, in the order you scan for them: waiting on you, moving right
+  // now, everything else. Attention wins over running when a thread is both —
+  // a blocked agent may still report itself busy, and "it needs you" is the
+  // fact you act on.
+  // needsYou reads the wall clock (ATTENTION_GRACE_MS), so this memo has to be
+  // woken when a pending thread finishes serving that period — nothing else
+  // changes at that moment.
+  const attentionTick = useAttentionClock(active);
+  const { blocked, running, rest } = useMemo(() => {
     const blocked: Session[] = [];
+    const running: Session[] = [];
     const rest: Session[] = [];
-    for (const t of active) (needsYou(t) ? blocked : rest).push(t);
-    return { blocked, rest };
-  }, [active]);
+    for (const t of active) {
+      if (needsYou(t)) blocked.push(t);
+      else if (t.activity === "running" || t.activity === "streaming") running.push(t);
+      else rest.push(t);
+    }
+    return { blocked, running, rest };
+  }, [active, attentionTick]);
   // Parked tasks, above the threads: a draft is the newest thing you touched
   // and the only row here that is waiting on YOU rather than on an agent.
   // Narrowed with the space, like everything else in this list.
@@ -342,6 +373,7 @@ export function Sidebar() {
             selected={item.id === selectedId}
             onPress={() => router.push(`/session/${item.id}`)}
             onSettle={canSettle(item) ? () => void toggleSettled(item) : undefined}
+            agentHue={agentHexOf(item.agent, COLOR.fgFaint as string)!}
           />
         )}
         estimatedItemSize={54}
@@ -427,8 +459,9 @@ export function Sidebar() {
             </Shelf>
 
             <Shelf
-              label="Needs you"
+              label="Needs attention"
               count={blocked.length}
+              badge
               open={showBlocked}
               onToggle={() => setShowBlocked((v) => !v)}
               empty="Nothing is waiting on you."
@@ -442,6 +475,31 @@ export function Sidebar() {
                   selected={item.id === selectedId}
                   onPress={() => router.push(`/session/${item.id}`)}
                   onSettle={canSettle(item) ? () => void toggleSettled(item) : undefined}
+                  agentHue={agentHexOf(item.agent, COLOR.fgFaint as string)!}
+                />
+              ))}
+            </Shelf>
+
+            {/* Work in flight, pulled out of the main list. It is the other
+                thing you scan for — "is anything moving?" — and previously it
+                only sorted to the top, which reads as ordinary once the list is
+                long enough to scroll. */}
+            <Shelf
+              label="Running"
+              count={running.length}
+              open={showRunning}
+              onToggle={() => setShowRunning((v) => !v)}
+            >
+              {running.map((item) => (
+                <SessionRow
+                  key={item.id}
+                  session={item}
+                  project={projectNames[item.repoId] ?? item.repoId.replace(/^repo:/, "")}
+                  showHost={showHost}
+                  selected={item.id === selectedId}
+                  onPress={() => router.push(`/session/${item.id}`)}
+                  onSettle={canSettle(item) ? () => void toggleSettled(item) : undefined}
+                  agentHue={agentHexOf(item.agent, COLOR.fgFaint as string)!}
                 />
               ))}
             </Shelf>
@@ -521,11 +579,16 @@ export function Sidebar() {
       >
         {/* The mark IS the status light. A separate dot at the far end of the
             row said the same thing a second time, at the edge of where anyone
-            looks — whereas the paw is the first thing in the row and already
-            carries the eye. Grey when there's nothing reachable, accent when
-            there is. */}
+            looks — whereas this is the first thing in the row and already
+            carries the eye.
+
+            Our cat rather than a generic paw glyph, cropped to the face: the
+            whole badge is a beige smudge at 24pt, where the face still reads.
+            Status moved from the FILL to a ring around it, because the artwork
+            now occupies the fill — grey ring when there's nothing reachable,
+            accent when there is. */}
         <View style={[s.avatar, connected ? s.avatarOnline : s.avatarOffline]}>
-          <Ionicons name="paw" size={13} color={connected ? COLOR.onAccent : COLOR.fgMuted} />
+          <Image source={AVATAR_MARK} style={s.avatarImage} />
         </View>
         <View style={s.flex1}>
           <Text numberOfLines={1} style={s.accountName}>
@@ -587,6 +650,7 @@ function Shelf({
   children,
   pinned,
   empty,
+  badge,
 }: {
   label: string;
   count: number;
@@ -600,6 +664,9 @@ function Shelf({
    *  needs you" is an answer; a section that vanishes is a question about
    *  whether it was ever there. */
   empty?: string;
+  /** Draw the count as a filled pill rather than plain text. For the one shelf
+   *  whose number is a call to act — the rest are just how many there are. */
+  badge?: boolean;
 }) {
   if (!count && !empty) return null;
   return (
@@ -611,7 +678,13 @@ function Shelf({
           color={COLOR.fgFaint}
         />
         <Text style={s.shelfLabel}>{label}</Text>
-        <Text style={s.shelfCount}>{count}</Text>
+        {badge && count ? (
+          <View style={s.shelfBadge}>
+            <Text style={s.shelfBadgeText}>{count}</Text>
+          </View>
+        ) : (
+          <Text style={s.shelfCount}>{count}</Text>
+        )}
       </Pressable>
       {open ? (
         !count && empty ? (
@@ -698,25 +771,31 @@ function SpaceRow({
       <Text numberOfLines={1} style={s.spaceName}>
         {space.name}
       </Text>
-      {showHost && !hover ? (
-        <Text numberOfLines={1} style={s.spaceHost}>
-          @ {space.host}
-        </Text>
-      ) : null}
       {/* Compose at the TRAILING edge, where an action belongs — the leading
           icon is identity, not a button. It takes the host label's place on
           hover so the row keeps its width and the names stay aligned. */}
-      {hover ? (
-        <Pressable
-          onPress={onCompose}
-          hitSlop={6}
-          accessibilityRole="button"
-          accessibilityLabel={`New task in ${space.name}`}
-          style={({ pressed }) => pressed && s.pressed60}
-        >
-          <Ionicons name="create-outline" size={13} color={COLOR.accent} />
-        </Pressable>
-      ) : null}
+      <HoverSwap
+        hover={hover}
+        minWidth={13}
+        resting={
+          showHost ? (
+            <Text numberOfLines={1} style={s.spaceHost}>
+              @ {space.host}
+            </Text>
+          ) : null
+        }
+        action={
+          <Pressable
+            onPress={onCompose}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={`New task in ${space.name}`}
+            style={({ pressed }) => pressed && s.pressed60}
+          >
+            <Ionicons name="create-outline" size={13} color={COLOR.accent} />
+          </Pressable>
+        }
+      />
     </Pressable>
   );
 }
@@ -728,6 +807,7 @@ function SessionRow({
   selected,
   onPress,
   onSettle,
+  agentHue,
 }: {
   session: Session;
   project: string;
@@ -736,11 +816,15 @@ function SessionRow({
   onPress: () => void;
   /** Absent when the thread is busy or blocked — those can't be settled. */
   onSettle?: () => void;
+  /** Bound once by the list rather than per row — see `useAgentHex`. */
+  agentHue: string;
 }) {
   // Archived threads (worktree gone) are history — they stay readable but drop
   // back so the live list reads first.
   const dim = !session.isLive;
   const [hover, setHover] = useState(false);
+  const edgeFade = useHoverFade(hover);
+  const busy = session.activity === "running" || session.activity === "streaming";
   return (
     <Pressable
       onPress={onPress}
@@ -748,37 +832,66 @@ function SessionRow({
       onHoverOut={() => setHover(false)}
       style={({ pressed }) => [s.sessionRow, selected ? s.rowSelected : pressed && s.rowHover]}
     >
+      {/* The agent's colour on the leading edge, on hover only. Painted down
+          every row at rest it was a column of stripes competing with the text
+          for the same glance — the small square beside the project name already
+          carries agent identity when you are reading. This is the pointer's
+          echo: it says which thread you are about to open, and whose it is.
+          Inset and rounded rather than a full-height rule, so it reads as a
+          marker rather than a border on the row. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          s.sessionEdge,
+          { backgroundColor: dim ? COLOR.fgFaint : agentHue, opacity: edgeFade },
+        ]}
+      />
       <View style={s.sessionCaptionRow}>
+        {/* The agent's mark, in its own hue — the same colour as the edge, so
+            the two read as one signal rather than two competing ones. */}
+        <View style={[s.sessionGlyph, { backgroundColor: dim ? COLOR.fgFaint : agentHue }]} />
         <Text numberOfLines={1} style={[s.sessionCaption, dim && s.dimmed]}>
-          {showHost ? `${project} · ${session.host}` : project}
+          {project}
         </Text>
         {/* The timestamp gives up its place on hover rather than the row growing
             a column that is empty most of the time. */}
-        {hover && onSettle ? (
-          <Pressable
-            onPress={onSettle}
-            hitSlop={6}
-            accessibilityRole="button"
-            accessibilityLabel={`Settle ${session.title}`}
-            style={({ pressed }) => pressed && s.pressed60}
-          >
-            <Ionicons name="checkmark-circle-outline" size={13} color={COLOR.accent} />
-          </Pressable>
-        ) : (
-          <Text style={s.sessionTime}>{timeAgo(session.updatedAt)}</Text>
-        )}
+        <HoverSwap
+          hover={hover && !!onSettle}
+          minWidth={13}
+          resting={
+            /* What it is doing, then for how long — a bare timestamp said only
+               that something happened, and you had to open the thread to learn
+               whether it was still going. */
+            <View style={s.sessionStatus}>
+              {busy ? (
+                <RunningTag label={`Working ${timeAgo(session.updatedAt)}`} />
+              ) : (
+                <Text style={s.sessionTime}>{timeAgo(session.updatedAt)}</Text>
+              )}
+            </View>
+          }
+          action={
+            onSettle ? (
+              <Pressable
+                onPress={onSettle}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={`Settle ${session.title}`}
+                style={({ pressed }) => pressed && s.pressed60}
+              >
+                <Ionicons name="checkmark-circle-outline" size={13} color={COLOR.accent} />
+              </Pressable>
+            ) : null
+          }
+        />
       </View>
       <Text numberOfLines={1} style={[s.sessionTitle, dim && s.dimmed]}>
         {session.title}
       </Text>
       <View style={s.sessionMetaRow}>
-        {/* The open thread's own feed already shows live state — its row stays calm. */}
-        <AgentStatusIcon
-          agent={session.agent}
-          activity={session.activity}
-          size={11}
-          animated={!selected}
-        />
+        {/* Agent moved to the leading edge as colour, and live state to the
+            status line — what is left here is WHERE the work is: which branch,
+            on which machine. */}
         {session.branch ? (
           <>
             <Ionicons
@@ -788,6 +901,16 @@ function SessionRow({
             />
             <Text numberOfLines={1} style={s.sessionBranch}>
               {session.branch}
+            </Text>
+          </>
+        ) : null}
+        {/* The machine only earns a place when the list spans more than one —
+            otherwise every row would repeat the same name. */}
+        {showHost ? (
+          <>
+            <Ionicons name="desktop-outline" size={9} color={COLOR.fgFaint} />
+            <Text numberOfLines={1} style={s.sessionHost}>
+              {session.host}
             </Text>
           </>
         ) : null}
@@ -914,6 +1037,101 @@ function PeersButton() {
   );
 }
 
+/**
+ * "Working 36s" — the tag a row wears while its agent is busy.
+ *
+ * The liveness is the tag's own slow breath rather than a spinning logo. A
+ * spinner is a loop at a fixed speed: it says "busy" at the same pitch whether
+ * one thread is running or eight, and eight of them in a list is a lot of
+ * competing motion for a sidebar you are trying to read past. This is one
+ * element easing between full and half opacity, which reads as alive at a
+ * glance and as nothing at all in peripheral vision.
+ *
+ * The dashed border carries the same idea statically — an outline that hasn't
+ * closed yet, for work that hasn't finished.
+ */
+function RunningTag({ label }: { label: string }) {
+  const pulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const step = (toValue: number) =>
+      Animated.timing(pulse, {
+        toValue,
+        duration: 1100,
+        easing: Easing.inOut(Easing.quad),
+        useNativeDriver: true,
+      });
+    const loop = Animated.loop(Animated.sequence([step(0.45), step(1)]));
+    loop.start();
+    // Stopped on unmount: a recycled LegendList row would otherwise leave the
+    // animation running against a view that has moved on to another thread.
+    return () => loop.stop();
+  }, [pulse]);
+  return (
+    <Animated.View style={[s.runningTag, { opacity: pulse }]}>
+      <Text style={s.runningTagText}>{label}</Text>
+    </Animated.View>
+  );
+}
+
+/**
+ * A 0→1 value that follows a hover flag, on the shared timing.
+ *
+ * In is slower than out: something arriving wants to be noticed, something
+ * leaving should already be gone by the time the eye follows the pointer to the
+ * next row.
+ */
+function useHoverFade(hover: boolean): Animated.Value {
+  const t = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(t, {
+      toValue: hover ? 1 : 0,
+      duration: hover ? 110 : 80,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [hover, t]);
+  return t;
+}
+
+/**
+ * Crossfade between what a row shows at rest and the control that takes its
+ * place on hover.
+ *
+ * Both stay mounted and stacked in one slot, so the row never reflows — the
+ * same reason these swaps replace the timestamp or host label instead of adding
+ * a column that would be empty most of the time. Mounting the control on hover
+ * instead popped it in at full opacity, which reads as a flicker at the speed a
+ * pointer crosses a list of rows.
+ *
+ * Out is quicker than in: a control arriving wants to be noticed, one leaving
+ * should already be gone by the time the eye follows the pointer to the next
+ * row. `pointerEvents` is tied to `hover`, not to the animation, so a click
+ * landing during the fade still hits the control.
+ */
+function HoverSwap({
+  hover,
+  minWidth,
+  resting,
+  action,
+}: {
+  hover: boolean;
+  /** Keeps the slot open when there is nothing at rest to hold it. */
+  minWidth: number;
+  resting: ReactNode;
+  action: ReactNode;
+}) {
+  const t = useHoverFade(hover);
+  const restOpacity = t.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
+  return (
+    <View style={[s.swapSlot, { minWidth }]}>
+      <Animated.View style={{ opacity: restOpacity }}>{resting}</Animated.View>
+      <Animated.View pointerEvents={hover ? "auto" : "none"} style={[s.swapAction, { opacity: t }]}>
+        {action}
+      </Animated.View>
+    </View>
+  );
+}
+
 const s = StyleSheet.create((theme) => ({
   // No background: the GlassSurface backdrop paints (vibrancy or fallback).
   root: { flex: 1 },
@@ -982,6 +1200,17 @@ const s = StyleSheet.create((theme) => ({
     color: theme.colors.fgFaint,
   },
 
+  /** The stacked slot a HoverSwap fades within — sized by whichever of the two
+   *  is wider, so neither state shifts the row. */
+  swapSlot: { alignItems: "flex-end", justifyContent: "center" },
+  swapAction: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    bottom: 0,
+    alignItems: "flex-end",
+    justifyContent: "center",
+  },
   rowSelected: { backgroundColor: theme.colors.surfaceHover },
   rowHover: { backgroundColor: theme.colors.surface },
 
@@ -1014,7 +1243,44 @@ const s = StyleSheet.create((theme) => ({
     paddingHorizontal: 8,
     paddingVertical: 6,
   },
-  sessionCaptionRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  /** The hover marker — see the note at the render site. Absolute, so it costs
+   *  the row no layout and cannot shift the text when it appears. */
+  sessionEdge: {
+    position: "absolute",
+    left: 0,
+    top: 5,
+    bottom: 5,
+    width: 2.5,
+    borderRadius: 999,
+  },
+  /** Right-hand status: what the thread is doing, not just when it last did it. */
+  sessionStatus: { flexDirection: "row", alignItems: "center", gap: 4 },
+  /** The busy tag. Dashed, in the accent, at the same size as the timestamp it
+   *  replaces so the row's right edge does not jump between the two states. */
+  runningTag: {
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: theme.colors.accentLine,
+    borderRadius: 5,
+    paddingHorizontal: 5,
+    paddingVertical: 0.5,
+  },
+  runningTagText: { fontSize: 9.5, color: theme.colors.accent },
+  /** The machine, at the end of the meta line. */
+  sessionHost: { fontSize: 10, color: theme.colors.fgFaint },
+  /** A count that has to be noticed — the attention shelf's badge. */
+  shelfBadge: {
+    minWidth: 15,
+    paddingHorizontal: 4,
+    borderRadius: 999,
+    backgroundColor: theme.colors.warning,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  shelfBadgeText: { fontSize: 9.5, fontWeight: "700", color: theme.colors.onAccent },
+  sessionCaptionRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  /** A small square in the agent's hue, leading the project name. */
+  sessionGlyph: { height: 8, width: 8, borderRadius: 2.5 },
   sessionCaption: { flex: 1, fontSize: 10.5, color: theme.colors.fgFaint },
   sessionTime: { flexShrink: 0, fontSize: 10.5, color: theme.colors.fgFaint },
   sessionTitle: { marginTop: 1, fontSize: 12.5, color: theme.colors.fg },
@@ -1044,7 +1310,10 @@ const s = StyleSheet.create((theme) => ({
      two, so they cannot drift apart. */
   shelf: {
     gap: 1,
-    borderTopWidth: 1,
+    // Hairline, not 1pt: on a Retina display 1pt is two physical pixels, and
+    // the Settled shelf's rule lands within about forty points of the account
+    // row's — two heavy full-width lines stacked at the foot of the sidebar.
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: COLOR.border,
     paddingTop: 6,
     paddingBottom: 2,
@@ -1115,7 +1384,8 @@ const s = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    borderTopWidth: 1,
+    // See the shelf's note — same reason, and these two are the pair.
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -1127,12 +1397,16 @@ const s = StyleSheet.create((theme) => ({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 999,
+    // The ring carries reachability now that the artwork owns the fill.
+    borderWidth: 1.5,
   },
-  avatarOnline: { backgroundColor: theme.colors.accent },
+  /** Inset by the ring so the two never touch and the cat stays circular. */
+  avatarImage: { height: 19, width: 19, borderRadius: 999 },
+  avatarOnline: { borderColor: theme.colors.accent },
   // Connecting counts as offline here on purpose: this is a two-state light,
   // and a third colour mid-handshake would flicker on every reconnect. The
   // subtitle beneath already says "Connecting…" for anyone watching.
-  avatarOffline: { backgroundColor: theme.colors.surfaceHover },
+  avatarOffline: { borderColor: theme.colors.surfaceHover },
   accountAction: {
     height: 24,
     width: 24,

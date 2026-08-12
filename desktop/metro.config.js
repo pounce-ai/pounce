@@ -47,6 +47,20 @@ const EXACT = {
   "@pounce/shared": PKG("shared/src/index.ts"),
   "@pounce/runtime": PKG("runtime/src/index.ts"),
   "@pounce/transcript": PKG("transcript/src/index.js"),
+  // Pin the native markdown renderer to DESKTOP's copy.
+  //
+  // It is installed twice — the workspace root hoists one for apps/mobile, and
+  // desktop has its own outside that workspace. Shared code under packages/app
+  // imports it by bare name, and Metro resolves that by walking up from the
+  // importing FILE, which lands on the root copy; the native side, autolinked
+  // from desktop, registers the desktop copy. Two JS modules then register the
+  // same Fabric components and RN throws "Tried to register two views with the
+  // same name EnrichedMarkdownText". The component survives that but measures
+  // every message to zero height, so the transcript renders as empty bubbles.
+  "react-native-enriched-markdown": path.resolve(
+    projectRoot,
+    "node_modules/react-native-enriched-markdown/src/index.tsx",
+  ),
 };
 const PREFIX = {
   "@pounce/app/": PKG("app/src"),

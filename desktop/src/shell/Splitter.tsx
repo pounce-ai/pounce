@@ -49,8 +49,16 @@ export function Splitter({
 
 const s = StyleSheet.create((theme) => ({
   root: { width: SPLITTER_WIDTH, alignItems: "center", justifyContent: "center" },
-  // Full-height hairline: the divider you actually see.
-  rule: { position: "absolute", top: 0, bottom: 0, width: 1, backgroundColor: theme.colors.border },
+  // Full-height hairline: the divider you actually see. Takes the shim's
+  // hairline rather than a literal 1 — see the note in shims/unistyles.ts, the
+  // two are not the same number on macOS.
+  rule: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: theme.colors.border,
+  },
   // The affordance — a short raised bar saying "this edge moves". Uses a text
   // grey, not a border colour: `borderStrong` is AppKit's gridColor, which is
   // almost invisible against a light window.

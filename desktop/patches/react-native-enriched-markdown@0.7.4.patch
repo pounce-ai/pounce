@@ -1,0 +1,13 @@
+diff --git a/ios/math/ENRMRaTeXBridge.swift b/ios/math/ENRMRaTeXBridge.swift
+index bc3a9467d6e0b73aab13f0e20b30bdfe13547e58..b77f4ad5cdbdb2540eb4f29da557ff46dc1f3c09 100644
+--- a/ios/math/ENRMRaTeXBridge.swift
++++ b/ios/math/ENRMRaTeXBridge.swift
+@@ -7,7 +7,7 @@ import RaTeX
+ import UIKit
+ #elseif canImport(AppKit)
+ import AppKit
+-private typealias UIColor = NSColor
++public typealias UIColor = NSColor
+ #endif
+ 
+ @objc(ENRMRaTeXRenderResult)

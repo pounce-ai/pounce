@@ -3,9 +3,16 @@
  * their own, and anything bigger than a row living behind a chevron on its own
  * screen.
  *
- * Metrics (24pt corners, 16pt row padding, 18pt labels, 22pt icons) are the
- * whole look; change them here and every settings screen moves together. A card
- * whose body isn't rows wraps itself in `SettingsCard` for the same reason.
+ * Metrics are the whole look; change them here and every settings screen moves
+ * together. A card whose body isn't rows wraps itself in `SettingsCard` for the
+ * same reason.
+ *
+ * They come in two sets. The phone numbers are the iOS grouped-list ones — an
+ * 18pt label is what a thumb reads at arm's length. On a desktop those same
+ * numbers tower over the rest of the window, whose chrome runs at 10–11pt, so
+ * `M` below picks a tighter set: type near the macOS system size, smaller
+ * icons, and less air per row so a settings pane doesn't need scrolling to show
+ * six destinations. Nothing else about the look changes between them.
  */
 import type { ReactNode } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
@@ -14,6 +21,41 @@ import { useRouter } from "expo-router";
 import { PounceIcon } from "../../ui/native/Icon";
 import type { IoniconName } from "../../ui/native/icon-map";
 import { IS_DESKTOP } from "../../ui";
+
+/** The one place the phone/desktop metric split lives. */
+const M = IS_DESKTOP
+  ? {
+      title: 17,
+      sectionTitle: 11.5,
+      caption: 11.5,
+      captionLine: 16,
+      label: 13,
+      value: 12,
+      icon: 16,
+      chevron: 12,
+      radius: 12,
+      rowPadV: 8,
+      rowPadH: 12,
+      rowGap: 10,
+      cardGap: 6,
+      sectionGap: 16,
+    }
+  : {
+      title: 22,
+      sectionTitle: 14,
+      caption: 14,
+      captionLine: 19,
+      label: 18,
+      value: 16,
+      icon: 22,
+      chevron: 16,
+      radius: 24,
+      rowPadV: 16,
+      rowPadH: 16,
+      rowGap: 16,
+      cardGap: 8,
+      sectionGap: 24,
+    };
 
 /** The page body every settings screen scrolls in. Must be the screen's ROOT on
  *  mobile: the native large title only collapses against the first child scroll
@@ -111,7 +153,7 @@ export function SettingsRow({
         (icon ? (
           <PounceIcon
             name={icon}
-            size={22}
+            size={M.icon}
             color={destructive ? theme.colors.danger : theme.colors.fg}
           />
         ) : null)}
@@ -129,7 +171,7 @@ export function SettingsRow({
           gets one — an action row (Sync now) does its work in place. */}
       {accessory ??
         (href ? (
-          <PounceIcon name="chevron-forward" size={16} color={theme.colors.fgFaint} />
+          <PounceIcon name="chevron-forward" size={M.chevron} color={theme.colors.fgFaint} />
         ) : null)}
     </View>
   );
@@ -186,7 +228,7 @@ export function SettingsPage({
 const s = StyleSheet.create((theme, rt) => ({
   /** Safe-area padding in the sheet — applied natively, no re-render. */
   scrollPad: {
-    gap: 24,
+    gap: M.sectionGap,
     // contentInsetAdjustmentBehavior is iOS-only: Android's toolbar is in-flow
     // with no automatic inset, and desktop has no bar at all, so both need the
     // top padding spelled out.
@@ -203,8 +245,8 @@ const s = StyleSheet.create((theme, rt) => ({
     paddingHorizontal: 20,
     paddingBottom: 12,
   },
-  headerTitle: { fontSize: 22, fontWeight: "700", color: theme.colors.fg },
-  section: { gap: 8 },
+  headerTitle: { fontSize: M.title, fontWeight: "700", color: theme.colors.fg },
+  section: { gap: M.cardGap },
   // Baseline-ish alignment: the title sets the line, the action sits to its
   // right without stretching the row taller than the text.
   sectionHeader: { flexDirection: "row", alignItems: "flex-end", gap: 12 },
@@ -212,29 +254,40 @@ const s = StyleSheet.create((theme, rt) => ({
   sectionTitle: {
     flex: 1,
     paddingHorizontal: 8,
-    fontSize: 14,
+    fontSize: M.sectionTitle,
     fontWeight: "500",
     color: theme.colors.fgMuted,
   },
-  caption: { paddingHorizontal: 8, fontSize: 14, lineHeight: 19, color: theme.colors.fgMuted },
+  caption: {
+    paddingHorizontal: 8,
+    fontSize: M.caption,
+    lineHeight: M.captionLine,
+    color: theme.colors.fgMuted,
+  },
   card: {
     overflow: "hidden",
-    borderRadius: 24,
-    // The squircle, not a circular arc — at 24pt that is the whole difference
-    // between "iOS card" and "rounded rectangle".
+    borderRadius: M.radius,
+    // The squircle, not a circular arc — at the phone's 24pt that is the whole
+    // difference between "iOS card" and "rounded rectangle".
     borderCurve: "continuous",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surfaceAlt,
   },
-  row: { flexDirection: "row", alignItems: "center", gap: 16, padding: 16 },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: M.rowGap,
+    paddingVertical: M.rowPadV,
+    paddingHorizontal: M.rowPadH,
+  },
   rowDivided: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border },
   rowDisabled: { opacity: 0.45 },
-  label: { flexShrink: 0, fontSize: 18, color: theme.colors.fg },
-  labelDanger: { flexShrink: 0, fontSize: 18, color: theme.colors.danger },
+  label: { flexShrink: 0, fontSize: M.label, color: theme.colors.fg },
+  labelDanger: { flexShrink: 0, fontSize: M.label, color: theme.colors.danger },
   /* Takes the slack so the value hugs the chevron and the label never wraps
      early — the value is the thing allowed to truncate, in the middle. */
   valueSlot: { minWidth: 0, flex: 1, alignItems: "flex-end" },
-  value: { maxWidth: 180, textAlign: "right", fontSize: 16, color: theme.colors.fgMuted },
+  value: { maxWidth: 180, textAlign: "right", fontSize: M.value, color: theme.colors.fgMuted },
   pressed: { opacity: 0.6 },
 }));

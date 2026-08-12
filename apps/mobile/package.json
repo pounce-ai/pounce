@@ -55,7 +55,7 @@
     "react-native": "0.86.0",
     "react-native-boost": "^1.5.0",
     "react-native-edge-to-edge": "^1.8.1",
-    "react-native-enriched-markdown": "^0.7.3",
+    "react-native-enriched-markdown": "0.7.4",
     "react-native-gesture-handler": "~2.32.0",
     "react-native-keyboard-controller": "1.21.9",
     "react-native-mmkv": "^3.1.0",
