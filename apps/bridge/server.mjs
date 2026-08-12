@@ -56,6 +56,7 @@ import { ptyNative } from "./agents/pty.mjs";
 import { agentEnv, binPath, binVersion, primaryLanIp } from "./agents/env.mjs";
 import { publicConfig, readConfig, writeConfig } from "./agents/config.mjs";
 import { LEGACY_TOKEN, bridgeToken, legacyAllows, tokenMatches } from "./agents/token.mjs";
+import { hostIsAddress } from "./agents/host-guard.mjs";
 import { bridgeId as machineBridgeId } from "./agents/identity.mjs";
 import { createDiscovery } from "./agents/discovery.mjs";
 import {
@@ -879,11 +880,46 @@ async function watchTick() {
   }
 }
 
+/**
+ * Largest JSON body we will hold in memory.
+ *
+ * Generous next to anything real — a turn's text, a CLAUDE.md being saved — and
+ * the point is only that a ceiling EXISTS. /v1/access/request is deliberately
+ * unauthenticated (a peer asking for access holds no credential yet) and calls
+ * this before the token gate, so without a cap any host on the network could
+ * hand the bridge an endless body and grow the process until it died.
+ */
+const MAX_BODY_BYTES = 10 * 1024 * 1024;
+
 function readBody(req) {
   return new Promise((resolve) => {
     let b = "";
-    req.on("data", (d) => (b += d));
+    let bytes = 0;
+    let done = false;
+    // An over-long body resolves EMPTY rather than rejecting: every route
+    // already treats an unparseable body that way and answers with its own
+    // "field required" 400, so the ceiling needs no new error path at ~30 call
+    // sites. The socket is destroyed so the sender stops writing.
+    req.on("data", (d) => {
+      if (done) return;
+      bytes += d.length;
+      if (bytes > MAX_BODY_BYTES) {
+        done = true;
+        req.destroy();
+        resolve({});
+        return;
+      }
+      b += d;
+    });
+    req.on("aborted", () => {
+      if (!done) ((done = true), resolve({}));
+    });
+    req.on("error", () => {
+      if (!done) ((done = true), resolve({}));
+    });
     req.on("end", () => {
+      if (done) return;
+      done = true;
       try {
         resolve(JSON.parse(b || "{}"));
       } catch {
@@ -1251,6 +1287,9 @@ function isOwnOrigin(req) {
   const o = req.headers.origin;
   return o === `http://127.0.0.1:${PORT}` || o === `http://localhost:${PORT}`;
 }
+
+// The DNS-rebinding gate is hostIsAddress, imported from agents/host-guard.mjs
+// — see that file for why the Origin check below does not cover it.
 
 // Self-contained pairing page served at GET / (loopback only). The desktop app
 // points its window here, so /ui and /qr.svg are same-origin (no CORS, and the
@@ -1807,9 +1846,14 @@ const server = http.createServer(async (req, res) => {
   // ...with ONE exception: the bridge's own loopback page. Browsers attach an
   // Origin to same-origin POSTs, so the approve/deny buttons on /peers would
   // otherwise 403 themselves. Matching our own origin exactly keeps every
-  // property above: a rogue site sends its own origin, and DNS rebinding sends
-  // the attacker's too — neither can forge this one, and non-loopback callers
+  // property above: a rogue site sends its own origin, and non-loopback callers
   // are refused regardless of what they claim.
+  //
+  // DNS rebinding is NOT closed here — a rebound page is same-origin and sends
+  // no Origin at all, so this check never fires for it. hostIsAddress is what
+  // catches that, and it has to run first: every route below is behind it,
+  // including the unauthenticated ones and /ui, which carries the token.
+  if (!hostIsAddress(req.headers.host)) return send(res, 403, { error: "forbidden" });
   if (req.headers.origin && !isOwnOrigin(req)) return send(res, 403, { error: "forbidden" });
 
   if (url.pathname === "/health") return send(res, 200, { ok: true });
@@ -2370,10 +2414,29 @@ const server = http.createServer(async (req, res) => {
         return send(res, 400, { error: "agent, thread, ref required" });
       const img = await host.getImage(agent, thread, ref).catch(() => null);
       if (!img) return send(res, 404, { error: "image not found" });
+      // `mediaType` is TRANSCRIPT data, not ours: claude reads it from the
+      // record's `source.media_type` and codex from the `data:` URL's own label
+      // (`[^;,]+`, i.e. anything). Echoing it into Content-Type let a crafted
+      // session serve `text/html` from the bridge's origin — script at
+      // http://127.0.0.1:<port>, which can read /ui for the token and POST
+      // /v1/exec past isOwnOrigin. Answer with a type from OUR list or not at
+      // all, so a new adapter cannot reintroduce this by trusting its input.
+      const IMAGE_TYPES = new Set([
+        "image/png",
+        "image/jpeg",
+        "image/jpg",
+        "image/gif",
+        "image/webp",
+        "image/bmp",
+        "image/heic",
+      ]);
+      const type = String(img.mediaType || "").toLowerCase();
+      if (!IMAGE_TYPES.has(type)) return send(res, 415, { error: "not an image" });
       res.writeHead(200, {
-        "content-type": img.mediaType,
+        "content-type": type,
         "cache-control": "private, max-age=86400",
         "access-control-allow-origin": "*",
+        "x-content-type-options": "nosniff",
       });
       res.end(img.buffer);
       return;
@@ -2400,7 +2463,15 @@ const server = http.createServer(async (req, res) => {
         cwd: url.searchParams.get("cwd") || null,
       });
       if (url.searchParams.get("download") === "1") {
-        res.setHeader("content-disposition", `attachment; filename="${agent}-${thread}.atif.json"`);
+        // `agent` and `thread` are request parameters, so they do not belong in
+        // a header value unescaped: a quote in either closes the filename early
+        // and lets the rest of this header be written by the caller. Node
+        // already refuses CR/LF (so no response splitting) — this is the rest.
+        const safe = (s) => String(s).replace(/[^A-Za-z0-9._-]/g, "_");
+        res.setHeader(
+          "content-disposition",
+          `attachment; filename="${safe(agent)}-${safe(thread)}.atif.json"`,
+        );
       }
       return send(res, 200, doc);
     }
@@ -2434,6 +2505,19 @@ const server = http.createServer(async (req, res) => {
         "content-type": mime,
         "cache-control": "private, max-age=86400",
         "access-control-allow-origin": "*",
+        // An SVG is a DOCUMENT, not a bitmap: it can carry <script>, and this
+        // route hands it back under the bridge's own origin. That was a way to
+        // run script AT http://127.0.0.1:<port> — where /ui is same-origin
+        // readable (so: the token) and a same-origin POST to /v1/exec passes
+        // isOwnOrigin. A screenshot an agent was asked to Read is enough of a
+        // foothold to get such a file on disk, so the file itself is untrusted.
+        //
+        // `sandbox` alone would do it; default-src 'none' also stops the
+        // variant that merely beacons the file's existence out. nosniff is for
+        // the other seven types — without it a mislabelled .png sniffed as HTML
+        // reopens exactly the same hole.
+        "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        "x-content-type-options": "nosniff",
       });
       createReadStream(p).pipe(res);
       return;
