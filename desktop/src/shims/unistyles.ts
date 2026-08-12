@@ -116,8 +116,25 @@ function themedSheet<S extends NamedStyles<S>>(fn: (theme: AppTheme, rt: MiniRun
   });
 }
 
+/**
+ * A REAL hairline, which react-native-macos does not give us.
+ *
+ * RN computes `PixelRatio.roundToNearestPixel(0.4)` and, if that lands on 0,
+ * falls back to `1 / PixelRatio.get()`. `PixelRatio.get()` is
+ * `Dimensions.get("window").scale`, and react-native-macos reports 1 whatever
+ * the display's real backing scale is — so `round(0.4 * 1) / 1` is 0 and the
+ * fallback is `1 / 1`. Both branches collapse to a full point, which on a 2x
+ * panel draws two physical pixels: not a hairline, a rule. Every divider in the
+ * app that asked for a hairline was getting the heavy version.
+ *
+ * Half a point is the true hairline on a Retina Mac. On a 1x display AppKit
+ * antialiases it to a faint line rather than dropping it, which is the right
+ * failure direction for a divider.
+ */
+const HAIRLINE = Math.min(RNStyleSheet.hairlineWidth, 0.5);
+
 export const StyleSheet = {
-  hairlineWidth: RNStyleSheet.hairlineWidth,
+  hairlineWidth: HAIRLINE,
   absoluteFill: RNStyleSheet.absoluteFill,
   absoluteFillObject: RNStyleSheet.absoluteFillObject,
   flatten: RNStyleSheet.flatten,
@@ -163,7 +180,10 @@ export function withUnistyles<P extends object>(
   if (!mappings) return Component;
   const Wrapped = (props: P) => {
     useThemeVersion();
-    return createElement(Component, { ...mappings(themeFor(currentName), DESKTOP_RUNTIME), ...props });
+    return createElement(Component, {
+      ...mappings(themeFor(currentName), DESKTOP_RUNTIME),
+      ...props,
+    });
   };
   return Wrapped;
 }

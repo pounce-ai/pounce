@@ -23,9 +23,11 @@
     "expo-desktop-prebuild-config": "^1.0.0",
     "expo-desktop-stubs": "^54.0.0",
     "expo-status-bar": "~3.0.9",
+    "katex": "^0.18.4",
     "rangi": "^2.1.0",
     "react": "19.1.4",
     "react-native": "0.81.6",
+    "react-native-enriched-markdown": "0.7.4",
     "react-native-macos": "0.81.8",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-svg": "15.15.5",
@@ -52,6 +54,7 @@
     }
   },
   "patchedDependencies": {
-    "react-native-macos@0.81.8": "patches/react-native-macos@0.81.8.patch"
+    "react-native-macos@0.81.8": "patches/react-native-macos@0.81.8.patch",
+    "react-native-enriched-markdown@0.7.4": "patches/react-native-enriched-markdown@0.7.4.patch"
   }
 }

@@ -15,9 +15,52 @@ import type { Session } from "@pounce/shared";
 /** Dotfolders (e.g. .deepsec) are treated as hidden — never surfaced anywhere. */
 export const isDotName = (name: string): boolean => name.startsWith(".");
 
-/** A session that wants the user's attention (failed / awaiting input). */
-export const needsYou = (s: Session): boolean =>
+/**
+ * How long a thread must sit in an attention state before it counts.
+ *
+ * An agent between tool calls reports itself idle for a moment, and a turn that
+ * is about to retry reports failed. Without a settling period those blips push
+ * a thread into the attention shelf and pull it straight back out, which reads
+ * as the list twitching at you — and trains you to ignore the one signal that
+ * is supposed to mean "stop what you are doing".
+ */
+export const ATTENTION_GRACE_MS = 10_000;
+
+/** In an attention state right now, before the settling period is applied. */
+const inAttentionState = (s: Session): boolean =>
   s.needsAttention || s.activity === "failed" || s.activity === "awaiting_input";
+
+/**
+ * A session that wants the user's attention, and has wanted it for long enough
+ * to be believed.
+ *
+ * `updatedAt` is when the thread entered its current state, so the elapsed time
+ * needs no extra bookkeeping. A thread with a clock skewed into the future is
+ * treated as not-yet-settled rather than never settling: the comparison is a
+ * lower bound, so a future timestamp simply waits until the clock catches up.
+ */
+export function needsYouAt(s: Session, now: number): boolean {
+  if (!inAttentionState(s)) return false;
+  const since = Date.parse(s.updatedAt);
+  // An unparseable timestamp must not hide a blocked thread forever — a thread
+  // that needs you is the one thing this layer may never lose.
+  if (Number.isNaN(since)) return true;
+  return now - since >= ATTENTION_GRACE_MS;
+}
+
+/**
+ * The same, against the wall clock.
+ *
+ * Deliberately ONE parameter: this is passed straight to `Array.prototype
+ * .filter` in several places, which would hand a second parameter the element
+ * INDEX and quietly compare the first item against epoch 0. Callers that need
+ * to control the clock use `needsYouAt`.
+ *
+ * Reading the clock inside means the answer changes without any state changing,
+ * so a list that must re-check when the settling period elapses pairs this with
+ * `useAttentionClock`.
+ */
+export const needsYou = (s: Session): boolean => needsYouAt(s, Date.now());
 
 /** Sort rank for a session list: attention → active → live → done. */
 export function rankSession(s: Session): number {

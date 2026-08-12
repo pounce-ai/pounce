@@ -37,7 +37,7 @@
     },
     "apps/cli": {
       "name": "use-pounce",
-      "version": "0.5.1",
+      "version": "0.5.3",
       "bin": {
         "pounce": "bin/pounce.mjs",
       },
@@ -103,7 +103,7 @@
         "react-native": "0.86.0",
         "react-native-boost": "^1.5.0",
         "react-native-edge-to-edge": "^1.8.1",
-        "react-native-enriched-markdown": "^0.7.3",
+        "react-native-enriched-markdown": "0.7.4",
         "react-native-gesture-handler": "~2.32.0",
         "react-native-keyboard-controller": "1.21.9",
         "react-native-mmkv": "^3.1.0",
@@ -2887,7 +2887,7 @@
 
     "react-native-edge-to-edge": ["react-native-edge-to-edge@1.8.1", "", { "peerDependencies": { "react": "*", "react-native": "*" } }, "sha512-bhvsKqeX9PGkY9wBUk9vni/tJNJdKtLPbs/j3e/3CdV4JmUWfTXYYoL+4Hc8Wmej+5eJxkc8KOFa454ruFWBCA=="],
 
-    "react-native-enriched-markdown": ["react-native-enriched-markdown@0.7.3", "", { "peerDependencies": { "@expo/config-plugins": ">=50.0.0", "katex": ">=0.16.0", "react": "*", "react-native": "*" }, "optionalPeers": ["@expo/config-plugins", "katex"] }, "sha512-+RP3r3bveVpMbT8GLt5GRZl8L2an5hrUMPHHLZ8z4ivtICql26D7T+DDXVSph+vZc7rbPbP5/5RsouDOPaDXWg=="],
+    "react-native-enriched-markdown": ["react-native-enriched-markdown@0.7.4", "", { "peerDependencies": { "@expo/config-plugins": ">=50.0.0", "katex": ">=0.16.0", "react": "*", "react-native": "*" }, "optionalPeers": ["@expo/config-plugins", "katex"] }, "sha512-NXkqZL4d5vM6wOBwYwx0r1Xyw2h+E8SyobrS8nKnbpjYOyKZj6zIdOq1KJFrlenJNu/tXpbJ8jtQagaA4Wj4cg=="],
 
     "react-native-gesture-handler": ["react-native-gesture-handler@2.32.0", "", { "dependencies": { "@egjs/hammerjs": "^2.0.17", "@types/react-test-renderer": "^19.1.0", "hoist-non-react-statics": "^3.3.0", "invariant": "^2.2.4" }, "peerDependencies": { "react": "*", "react-native": "*" } }, "sha512-uYIMOKlKENORq2SABE+jIjbPU+h5I/sQKcq2v16zRq848nwEp1fWRVwML4QWqijc8UcXJC25o54S8GQd4Mf2OA=="],
 

@@ -41,6 +41,7 @@ import {
   useThreads,
 } from "../state/db/hooks";
 import { spaceKeyOf } from "../state/spaces";
+import { useAttentionClock } from "../hooks/useAttentionClock";
 import { canSettle, isSettled, partitionSettled } from "../state/settled";
 import { autoSettleDays$, settled$, settleOptions, toggleSettled } from "../state/settledStore";
 import { type Draft, draftTitle, drafts$, listDrafts, removeDraft } from "../state/drafts";
@@ -177,6 +178,9 @@ export default function HomeScreen() {
   // doesn't touch these deps, so the row list keeps the same reference — the
   // LegendList (and any in-list tour spotlight) never churns. Most-recently
   // worked-upon threads/folders float to the top; attention rank breaks ties.
+  // needsYou reads the wall clock (ATTENTION_GRACE_MS); nothing else changes
+  // at the moment a pending thread crosses it, so this wakes the memo.
+  const attentionTick = useAttentionClock(rawThreads);
   const { rows, attention: attentionCount } = useMemo(() => {
     const repos = Object.fromEntries(projectList.map((r) => [r.id, r]));
     // applyFilters handles device + agent + selected folders + permanently
@@ -286,6 +290,7 @@ export default function HomeScreen() {
     autoSettleDays,
     draftList,
     archiveOnly,
+    attentionTick,
   ]);
 
   const onRefresh = useCallback(async () => {
