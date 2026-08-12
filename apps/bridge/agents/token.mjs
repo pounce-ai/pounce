@@ -71,14 +71,35 @@ export function bridgeToken({ dir = POUNCE_DIR, file = TOKEN_FILE } = {}) {
     cached = { token: process.env.BRIDGE_TOKEN, legacyUntil: 0 };
     return cached;
   }
+  let present = false;
   try {
+    present = existsSync(file);
     const saved = JSON.parse(readFileSync(file, "utf8"));
     if (typeof saved?.token === "string" && saved.token) {
       cached = { token: saved.token, legacyUntil: Number(saved.legacyUntil) || 0 };
       return cached;
     }
   } catch {
-    // Absent or torn — mint below.
+    // Fall through to the guard below: absent means mint, unreadable does not.
+  }
+  // A token file that EXISTS but won't parse is not the same as no token file.
+  // Minting over it — which is what used to happen — silently invalidates the
+  // credential every paired device is holding, and `/v1/token` cannot hand back
+  // a replacement to a device whose token is already wrong. That is the one-way
+  // door described in devices.mjs, walked through by a single bad read.
+  //
+  // So: keep the damaged file, and serve a token that works for this run only.
+  // Devices that have adopted their own credential (the common case after one
+  // sync) are unaffected either way — that is the durable half of the fix, and
+  // this is the half that stops a torn file taking the shared token with it.
+  if (present) {
+    console.warn(
+      `[pounce] ${file} exists but could not be read — leaving it untouched. ` +
+        `Paired devices holding their own credential are unaffected; anything ` +
+        `still on the shared token may need to re-pair. Move the file aside to mint a new one.`,
+    );
+    cached = { token: randomBytes(32).toString("hex"), legacyUntil: 0 };
+    return cached;
   }
   const legacyUntil =
     LEGACY_HOURS > 0 && looksLikeUpgrade(dir) ? Date.now() + LEGACY_HOURS * 3600_000 : 0;
@@ -116,7 +137,16 @@ export function tokenMatches(presented, expected) {
  * even though they are GETs. /v1/token is the one deliberate exception — it IS
  * the migration.
  */
-const LEGACY_DENY = new Set(["/v1/pair", "/v1/config", "/v1/exec"]);
+const LEGACY_DENY = new Set([
+  "/v1/pair",
+  "/v1/config",
+  "/v1/exec",
+  // Minting a per-device credential from a password that is in the git history
+  // would turn a window bounded by the clock into one that never closes. The
+  // GET/HEAD test below already refuses this POST; naming it here means a later
+  // decision to let the legacy token write something cannot open it by accident.
+  "/v1/device/adopt",
+]);
 export function legacyAllows(method, pathname) {
   if (pathname === "/v1/token") return true;
   if (method !== "GET" && method !== "HEAD") return false;
