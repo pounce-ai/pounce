@@ -1,3 +1,64 @@
+diff --git a/node_modules/react-native-enriched-markdown/.bun-tag-622fbc25afc6124e b/.bun-tag-622fbc25afc6124e
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/react-native-enriched-markdown/.bun-tag-89d57cd3f45aa658 b/.bun-tag-89d57cd3f45aa658
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/ios/EnrichedMarkdownText.mm b/ios/EnrichedMarkdownText.mm
+index 1dc1097549f90ef8bcaff83526a808104de4d986..ec6d0c41ff636581a8eda2bb9626d7602a92242e 100644
+--- a/ios/EnrichedMarkdownText.mm
++++ b/ios/EnrichedMarkdownText.mm
+@@ -686,7 +686,7 @@ Class<RCTComponentViewProtocol> EnrichedMarkdownTextCls(void)
+ {
+   auto emitter = std::static_pointer_cast<EnrichedMarkdownTextEventEmitter const>(_eventEmitter);
+   if (emitter)
+-    emitter->onTaskListItemPress({.index = (int)index, .checked = checked, .text = std::string(text.UTF8String ?: "")});
++    emitter->onTaskListItemPress({.index = (int)index, .checked = static_cast<bool>(checked), .text = std::string(text.UTF8String ?: "")});
+ }
+ 
+ - (void)emitContextMenuItemPress:(NSString *)itemText
+diff --git a/ios/input/EnrichedMarkdownTextInput.mm b/ios/input/EnrichedMarkdownTextInput.mm
+index 4cd71776ad375f94b23308e78bc7c4a6b03ea6f6..e73b0a586e42f426e1a085713c5b0aaa7ff1bf38 100644
+--- a/ios/input/EnrichedMarkdownTextInput.mm
++++ b/ios/input/EnrichedMarkdownTextInput.mm
+@@ -1263,12 +1263,12 @@ using namespace facebook::react;
+   _prevState.initialized = YES;
+ 
+   emitter->onChangeState({
+-      .bold = {.isActive = boldActive},
+-      .italic = {.isActive = italicActive},
+-      .underline = {.isActive = underlineActive},
+-      .strikethrough = {.isActive = strikethroughActive},
+-      .spoiler = {.isActive = spoilerActive},
+-      .link = {.isActive = linkActive},
++      .bold = {.isActive = static_cast<bool>(boldActive)},
++      .italic = {.isActive = static_cast<bool>(italicActive)},
++      .underline = {.isActive = static_cast<bool>(underlineActive)},
++      .strikethrough = {.isActive = static_cast<bool>(strikethroughActive)},
++      .spoiler = {.isActive = static_cast<bool>(spoilerActive)},
++      .link = {.isActive = static_cast<bool>(linkActive)},
+   });
+ }
+ 
+@@ -1347,12 +1347,12 @@ using namespace facebook::react;
+       .selectionEnd = static_cast<int>(NSMaxRange(selectedRange)),
+       .styleState =
+           {
+-              .bold = {.isActive = boldActive},
+-              .italic = {.isActive = italicActive},
+-              .underline = {.isActive = underlineActive},
+-              .strikethrough = {.isActive = strikethroughActive},
+-              .spoiler = {.isActive = spoilerActive},
+-              .link = {.isActive = linkActive},
++              .bold = {.isActive = static_cast<bool>(boldActive)},
++              .italic = {.isActive = static_cast<bool>(italicActive)},
++              .underline = {.isActive = static_cast<bool>(underlineActive)},
++              .strikethrough = {.isActive = static_cast<bool>(strikethroughActive)},
++              .spoiler = {.isActive = static_cast<bool>(spoilerActive)},
++              .link = {.isActive = static_cast<bool>(linkActive)},
+           },
+   });
+ }
 diff --git a/ios/math/ENRMRaTeXBridge.swift b/ios/math/ENRMRaTeXBridge.swift
 index bc3a9467d6e0b73aab13f0e20b30bdfe13547e58..b77f4ad5cdbdb2540eb4f29da557ff46dc1f3c09 100644
 --- a/ios/math/ENRMRaTeXBridge.swift

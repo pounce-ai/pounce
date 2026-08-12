@@ -9,6 +9,16 @@ require "#{ws_dir}/node_modules/react-native-macos/scripts/react_native_pods.rb"
 
 prepare_react_native_project!
 
+# No LaTeX math (RaTeX) in the desktop transcript. Math pulls RaTeX in via
+# React Native's spm_dependency, whose generated module.modulemaps define
+# RaTeXFFI twice under a universal Release build — the platform products copy
+# and the per-target copy — and Xcode 26's dependency scanner refuses the
+# redefinition before the pod's own cleanup script can run. The package also
+# documents that math requires `use_frameworks! :linkage => :dynamic`, which
+# this Podfile deliberately is not. Mobile keeps math; a `$..$` span here
+# renders as literal text (the md4c flag is off on desktop to match).
+ENV['ENRICHED_MARKDOWN_ENABLE_MATH'] = '0'
+
 target 'PounceDesktop-macOS' do
   platform :macos, '14.0'
   use_expo_modules!
@@ -40,6 +50,20 @@ target 'PounceDesktop-macOS' do
 
   post_install do |installer|
         react_native_post_install(installer)
+
+    # BOOL is `signed char` on x86_64 macOS (a real `bool` on arm64 and iOS),
+    # so this pod's `{.isActive = someBOOL}` brace-initializers narrow and fail
+    # -Wc++11-narrowing on the x86_64 slice of a universal build — one file at
+    # a time, since each error stops that file's compile. The narrowing is the
+    # benign BOOL->bool case, so silence the class here rather than chase call
+    # sites through a growing package patch.
+    installer.pods_project.targets.each do |target|
+      if target.name == 'ReactNativeEnrichedMarkdown'
+        target.build_configurations.each do |config|
+          config.build_settings['OTHER_CPLUSPLUSFLAGS'] = '$(inherited) -Wno-c++11-narrowing'
+        end
+      end
+    end
 
     # Fix for Xcode 26.4 build error
     # https://stackoverflow.com/a/79921410/5951226
