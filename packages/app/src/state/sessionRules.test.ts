@@ -22,7 +22,7 @@ function session(over: Partial<Session> = {}): Session {
     branch: null,
     worktree: null,
     cwd: null,
-    isLive: true,
+    isResumable: true,
     activity: "idle",
     needsAttention: false,
     createdAt: new Date(NOW).toISOString(),

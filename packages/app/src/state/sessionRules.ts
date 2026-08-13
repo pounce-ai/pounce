@@ -122,11 +122,11 @@ export function recentlyActiveAt(s: Session, now: number): boolean {
 
 export const recentlyActive = (s: Session): boolean => recentlyActiveAt(s, Date.now());
 
-/** Sort rank for a session list: attention → active → live → done. */
+/** Sort rank for a session list: attention → moving → resumable → archived. */
 export function rankSession(s: Session): number {
   if (needsYou(s)) return 0;
   if (s.activity === "running" || s.activity === "streaming") return 1;
-  if (s.isLive) return 2;
+  if (s.isResumable) return 2;
   return 3;
 }
 

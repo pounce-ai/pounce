@@ -32,7 +32,7 @@ const session = (over: Partial<Session> = {}): Session =>
     branch: null,
     worktree: null,
     cwd: null,
-    isLive: true,
+    isResumable: true,
     activity: "idle",
     needsAttention: false,
     createdAt: "2026-08-01T00:00:00.000Z",

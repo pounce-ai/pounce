@@ -530,7 +530,7 @@ export default function SessionScreen() {
   const sources = useSelector(() => sources$[id!].get()) ?? [];
   const onDropFiles = useCallback(
     (files: DroppedFile[]) => {
-      if (!session?.isLive) return;
+      if (!session?.isResumable) return;
       const cwd = session.cwd;
       const kindOf = (f: DroppedFile): ThreadSource["kind"] =>
         f.type?.startsWith("image/") || IMAGE_EXT.test(f.name)
@@ -558,7 +558,7 @@ export default function SessionScreen() {
       if (images.length) composerRef.current?.attachImages(images);
       if (mentions.length) composerRef.current?.addMentions(mentions);
     },
-    [session?.isLive, session?.cwd, session?.id, session?.agent, reportedCaps],
+    [session?.isResumable, session?.cwd, session?.id, session?.agent, reportedCaps],
   );
   // Marker overrides for this thread, live from the collection so the list
   // recomputes on every toggle.
@@ -1068,7 +1068,17 @@ export default function SessionScreen() {
     );
   }
 
-  const canSteer = session.isLive;
+  /**
+   * Whether the composer accepts input at all.
+   *
+   * This is "the thread can be resumed", nothing more. It was named `canSend`
+   * while reading `isLive`, which promised something the app cannot do: there
+   * is no mid-turn steer path (the bridge can only write into a PTY-hosted
+   * session's prompt), so a follow-up typed during a turn is queued locally and
+   * sent when the turn ends. Naming it for what it is stops the composer
+   * offering to steer.
+   */
+  const canSend = session.isResumable;
   const caps = effectiveCaps(session.agent, reportedCaps);
   // Turn start = the newest user message; drives the elapsed readout in the
   // composer's pill row. Output tokens are estimated at ~4 chars/token —
@@ -1379,8 +1389,8 @@ export default function SessionScreen() {
                     highlight={searchHighlight}
                     anchorToId={anchorId}
                     onLongPressEvent={onLongPressEvent}
-                    onRunCommand={canSteer ? onRunCommand : undefined}
-                    onRetrySend={canSteer ? onRetrySend : undefined}
+                    onRunCommand={canSend ? onRunCommand : undefined}
+                    onRetrySend={canSend ? onRetrySend : undefined}
                     onAtBottomChange={setAtBottom}
                     onRespondPermission={(requestId, optionId) => {
                       if (session?.hostId)
@@ -1439,10 +1449,10 @@ export default function SessionScreen() {
           onStop={() => void stop()}
           onViewChanges={() => router.push(`/changes?id=${session.id}`)}
           onTerminal={() => router.push(`/terminal?id=${session.id}`)}
-          onAddSource={canSteer ? () => composerRef.current?.startMention() : undefined}
+          onAddSource={canSend ? () => composerRef.current?.startMention() : undefined}
           onRemoveSource={(p) => removeSource(session.id, p)}
           onFixConflicts={
-            canSteer
+            canSend
               ? () =>
                   composerRef.current?.insert(
                     "Resolve the merge conflicts in this worktree, then continue.",
@@ -1483,8 +1493,8 @@ export default function SessionScreen() {
               ]),
             );
           }}
-          effort={canSteer && showEffort ? { label: effortLabel, onPress: openEffort } : null}
-          mode={canSteer && showMode ? { label: modeLabel, onPress: openMode } : null}
+          effort={canSend && showEffort ? { label: effortLabel, onPress: openEffort } : null}
+          mode={canSend && showMode ? { label: modeLabel, onPress: openMode } : null}
           onClose={() => setModelSheet(false)}
         />
 
@@ -1534,7 +1544,7 @@ export default function SessionScreen() {
             {COMPOSER_OVERLAYS_LIST ? <ComposerScrim /> : null}
             <View style={[s.composerBar, s.composerBarPad]}>
               <View style={DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }}>
-                {!canSteer ? (
+                {!canSend ? (
                   <Text style={s.archivedNote}>
                     Archived session — worktree was removed. Read-only.
                   </Text>
@@ -1591,7 +1601,7 @@ export default function SessionScreen() {
                   ref={composerRef}
                   agent={session.agent}
                   caps={caps}
-                  disabled={!canSteer}
+                  disabled={!canSend}
                   running={running}
                   turnStartedAt={turnStartTs}
                   turnTokens={turnTokens}
@@ -1601,18 +1611,18 @@ export default function SessionScreen() {
                   onStop={stop}
                   onViewChanges={() => router.push(`/changes?id=${session.id}`)}
                   diffStat={diffStat}
-                  readOnly={!canSteer}
+                  readOnly={!canSend}
                   // No model selector on an archived thread — the worktree is
                   // gone, so there is no next turn for a model to apply to.
                   model={
-                    canSteer && live && !!session.cwd
+                    canSend && live && !!session.cwd
                       ? { label: modelPillLabel, onPress: () => setModelSheet(true) }
                       : null
                   }
                   // Mode lives in the Model sheet now; the pill only appears as a
                   // fallback when there's no model pill to reach that sheet through.
                   mode={
-                    canSteer && showMode && !(live && !!session.cwd)
+                    canSend && showMode && !(live && !!session.cwd)
                       ? { label: modeLabel, active: activeMode !== "default", onPress: openMode }
                       : null
                   }

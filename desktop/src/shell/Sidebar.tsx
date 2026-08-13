@@ -82,7 +82,7 @@ const SPACE_LIMIT = 6;
 function rank(s: Session): number {
   if (needsYou(s)) return 0;
   if (s.activity === "running" || s.activity === "streaming") return 1;
-  if (s.isLive) return 2;
+  if (s.isResumable) return 2;
   return 3;
 }
 
@@ -856,7 +856,7 @@ function SessionRow({
 }) {
   // Archived threads (worktree gone) are history — they stay readable but drop
   // back so the live list reads first.
-  const dim = !session.isLive;
+  const dim = !session.isResumable;
   const [hover, setHover] = useState(false);
   const edgeFade = useHoverFade(hover);
   const busy = session.activity === "running" || session.activity === "streaming";

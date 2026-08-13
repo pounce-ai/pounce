@@ -454,8 +454,11 @@ function listDirs(dir) {
  * mislabel the others. resolveWorktreeOwners() rewrites `repo` from git's own
  * records; this only has to be sane for what git can't account for.
  *
- * `isLive` = the directory still exists (you can resume/steer it); otherwise
- * it's an archived session (worktree was merged + cleaned up).
+ * `isLive` = the directory still exists, i.e. the thread can be RESUMED.
+ * Not "is running" and not "is recent": it is true for almost every thread
+ * forever. The app calls it `isResumable` for that reason (three bugs came from
+ * reading this name as activity); the wire keeps `isLive` so a phone on an
+ * older build still understands a new bridge.
  */
 function repoInfo(cwd) {
   const p = normPath(cwd);

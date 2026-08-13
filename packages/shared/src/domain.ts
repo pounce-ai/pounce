@@ -138,7 +138,7 @@ export type ActivityStatus =
 /**
  * A Session is the first-class object: one git worktree = one branch = one
  * agent = one conversation. Many sessions per repo; ephemeral (worktrees get
- * created, worked, merged, cleaned up → `isLive` false = archived history).
+ * created, worked, merged, cleaned up → `isResumable` false = archived history).
  */
 export interface Session {
   readonly id: Id; // the daemon threadId
@@ -152,8 +152,17 @@ export interface Session {
   readonly branch: string | null;
   readonly worktree: string | null;
   readonly cwd: string | null;
-  /** Worktree exists on disk → can resume/steer. Else archived (read-only). */
-  readonly isLive: boolean;
+  /**
+   * The thread can still be resumed: its working directory exists.
+   *
+   * NOT "is running", and not "is recent" — it is true for almost every thread
+   * forever, and false only once a worktree has been merged and cleaned up.
+   * It was called `isLive`, and three separate bugs came from reading that name
+   * as activity: threads seeded as idle, a `canSteer` that only meant
+   * "resumable", and enrichment that looked like it filtered to live work when
+   * it filtered to nothing at all.
+   */
+  readonly isResumable: boolean;
   readonly activity: ActivityStatus;
   /** Needs the user: awaiting input / failed / completed-unviewed. */
   readonly needsAttention: boolean;
