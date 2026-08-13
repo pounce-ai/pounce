@@ -17,7 +17,15 @@
  * which is why it also turns up on your phone, where there is no SSH.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { Ionicons } from "@expo/vector-icons";
 import { PounceIcon } from "@pounce/app/ui/native/Icon";
@@ -117,7 +125,8 @@ export default function AddMachineScreen() {
   const [log, setLog] = useState("");
   const [answer, setAnswer] = useState("");
   const [saving, setSaving] = useState(false);
-  const [added, setAdded] = useState<string | null>(null);
+  /** Named the moment it lands, shown on the form we return to. */
+  const [justAdded, setJustAdded] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [hosts, setHosts] = useState<SshHost[] | null>(null);
   const scroller = useRef<ScrollView>(null);
@@ -155,7 +164,7 @@ export default function AddMachineScreen() {
     async (pick?: SshHost) => {
       setStartError(null);
       setLog("");
-      setAdded(null);
+      setJustAdded(null);
       // "user@host" is how everybody writes it, so accept it in the host field
       // rather than insisting the parts go in separate boxes.
       const typed = pick ? pick.name : host;
@@ -202,6 +211,16 @@ export default function AddMachineScreen() {
     [state],
   );
 
+  const reset = useCallback(() => {
+    stopWatching();
+    if (state && state.phase !== "done") void cancelSsh(state.id).catch(() => {});
+    setState(null);
+    setLog("");
+    setAnswer("");
+    setJustAdded(null);
+    setStartError(null);
+  }, [state, stopWatching]);
+
   // Saving is a separate, explicit step. The bridge finds out how to reach the
   // machine; putting it in the list is this side's job, and doing it silently
   // would mean a machine appearing in the sidebar with no moment that said so.
@@ -210,28 +229,27 @@ export default function AddMachineScreen() {
     setSaving(true);
     try {
       const dev = await saveSshDevice(state.device);
-      setAdded(dev.name);
       // Pull its threads in now, so the machine isn't an empty row until the
       // next sync tick.
       void syncLiveDataStreaming().catch(() => {});
+      // Back to the list this run started from. The job is done, and a
+      // finished transcript with nothing left to do on it reads as unfinished —
+      // the confirmation belongs where you'd add the next machine.
+      reset();
+      setJustAdded(dev.name);
     } catch (e) {
       setStartError(String((e as Error)?.message || e));
     } finally {
       setSaving(false);
     }
-  }, [state]);
-
-  const reset = useCallback(() => {
-    stopWatching();
-    if (state && state.phase !== "done") void cancelSsh(state.id).catch(() => {});
-    setState(null);
-    setLog("");
-    setAnswer("");
-    setAdded(null);
-    setStartError(null);
-  }, [state, stopWatching]);
+  }, [state, reset]);
 
   const lines = cleanLines(log);
+  // The transcript should use the sheet it is in. Roughly half the window,
+  // floored so a short window still shows a useful amount and capped so a very
+  // tall one doesn't push the prompt and the buttons below the fold.
+  const { height: windowHeight } = useWindowDimensions();
+  const logHeight = Math.max(190, Math.min(520, Math.round(windowHeight * 0.42)));
   const running = state !== null && state.phase !== "done" && state.phase !== "failed";
   // The host field doubles as the filter — one control, and typing narrows the
   // list rather than sitting beside it doing nothing.
@@ -245,6 +263,16 @@ export default function AddMachineScreen() {
       <SettingsPage title="Add a machine">
         {!state ? (
           <>
+            {/* The run that just finished, reported where you land rather than
+                on a transcript you had to dismiss yourself. */}
+            {justAdded ? (
+              <View style={s.addedBanner}>
+                <PounceIcon name="checkmark-circle" size={16} color={COLOR.success} />
+                <Text style={s.addedText}>
+                  {`${justAdded} added. Its threads are syncing, and it's on your phone too.`}
+                </Text>
+              </View>
+            ) : null}
             <SettingsCaption>
               Any machine you can reach over SSH. Pounce connects, sets itself up there, and adds it
               — no need to go and run anything yourself.
@@ -374,15 +402,11 @@ export default function AddMachineScreen() {
               <View style={s.doneCard}>
                 <Text style={s.doneName}>{state.device.hostName}</Text>
                 <Text style={s.doneBody}>
-                  {added
-                    ? "Added. Its threads are syncing now, and it's on your phone too — the connection doesn't go through this Mac."
-                    : "Ready to add. It'll be reachable from anywhere, including your phone."}
+                  Ready to add. It&apos;ll be reachable from anywhere, including your phone.
                 </Text>
-                {!added ? (
-                  <Pressable style={s.primary} disabled={saving} onPress={save}>
-                    <Text style={s.primaryLabel}>{saving ? "Adding…" : "Add this machine"}</Text>
-                  </Pressable>
-                ) : null}
+                <Pressable style={s.primary} disabled={saving} onPress={save}>
+                  <Text style={s.primaryLabel}>{saving ? "Adding…" : "Add this machine"}</Text>
+                </Pressable>
               </View>
             ) : null}
 
@@ -390,7 +414,7 @@ export default function AddMachineScreen() {
             {startError ? <Text style={s.error}>{startError}</Text> : null}
 
             {lines.length ? (
-              <View style={s.logCard}>
+              <View style={[s.logCard, { height: logHeight }]}>
                 <ScrollView
                   ref={scroller}
                   style={s.logScroll}
@@ -405,9 +429,11 @@ export default function AddMachineScreen() {
                 the shell draws that now — and a run you've finished reading is
                 the only time you want it anyway. */}
             {running ? null : (
-              <Pressable onPress={reset} style={s.startOver}>
-                <Text style={s.link}>Start over</Text>
-              </Pressable>
+              <View style={s.startOver}>
+                <Pressable onPress={reset} style={s.ghost}>
+                  <Text style={s.ghostLabel}>Start over</Text>
+                </Pressable>
+              </View>
             )}
           </>
         )}
@@ -465,7 +491,18 @@ function Field({
 const s = StyleSheet.create((theme) => ({
   root: { flex: 1, backgroundColor: theme.colors.bg },
   link: { fontSize: 13, color: theme.colors.accent },
-  startOver: { alignSelf: "center", paddingTop: 4 },
+  startOver: { alignItems: "center", paddingTop: 4 },
+  addedBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.successSoft,
+  },
+  addedText: { flex: 1, fontSize: 12.5, lineHeight: 18, color: theme.colors.fg },
 
   hint: { fontSize: 11.5, color: theme.colors.fgFaint },
   error: { fontSize: 12.5, lineHeight: 18, color: theme.colors.danger },
@@ -521,10 +558,11 @@ const s = StyleSheet.create((theme) => ({
   doneName: { fontSize: 14.5, fontWeight: "600", color: theme.colors.fg },
   doneBody: { fontSize: 12.5, lineHeight: 18, color: theme.colors.fgMuted },
 
-  // Fixed height rather than growing: the log is reference while you wait, and
-  // a box that grows to 200 lines would push the prompt off the screen.
+  // Height is set per-render from the window (see logHeight): SettingsPage
+  // scrolls, so `flex: 1` would collapse rather than fill. Bounded at both
+  // ends — a transcript that grows without limit pushes the prompt off screen,
+  // and one pinned to 190pt letterboxes itself in a tall window.
   logCard: {
-    height: 190,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: theme.colors.border,

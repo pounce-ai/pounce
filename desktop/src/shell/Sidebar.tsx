@@ -36,6 +36,8 @@ import {
   toggleSettled,
 } from "@pounce/app/state/settledStore";
 import { useDevices, useIgnoredSet, useProjectNames, useThreads } from "@pounce/app/state/db/hooks";
+import { isThisMachine } from "@pounce/app/services/deviceProvenance";
+import { deviceLabel } from "@pounce/app/state/stores";
 import { SidebarSessionsSkeleton, SidebarSpacesSkeleton } from "./SidebarSkeleton";
 import { Entrance } from "./Motion";
 import { COLOR, INPUT_TWEAKS, timeAgo } from "@pounce/app/ui";
@@ -234,9 +236,25 @@ export function Sidebar() {
 
   const online = deviceList.filter((d) => d.online);
 
-  // "@ machine" only earns its place when there's more than one machine —
-  // on a single-Mac setup it's the same suffix on every row.
-  const showHost = useMemo(() => new Set(spaces.map((sp) => sp.hostId)).size > 1, [spaces]);
+  /**
+   * The "@ machine" chip for a row, or null to leave it off.
+   *
+   * Three rules, and they all say the same thing — the chip is only worth space
+   * when it tells you something you didn't know:
+   *   nothing on a single-machine setup, where it's the same suffix everywhere;
+   *   nothing for the machine you're sitting at, which is the default reading
+   *     of a row with no chip;
+   *   and the name you gave the machine, not the hostname its bridge reports,
+   *     since a rename you made is the name you'll be looking for.
+   */
+  const hostChip = useMemo(() => {
+    const multi = new Set(spaces.map((sp) => sp.hostId)).size > 1;
+    const localId = deviceList.find((d) => isThisMachine(d.url))?.id ?? null;
+    return (hostId: string, fallback: string): string | null => {
+      if (!multi || hostId === localId) return null;
+      return deviceLabel(hostId, deviceList.find((d) => d.id === hostId)?.name ?? fallback);
+    };
+  }, [spaces, deviceList]);
   // Spaces is a shortcut to the places you're working, not a directory of every
   // repo you've ever opened: past a handful it buries the session list (which is
   // what people actually navigate by), so the tail collapses behind a toggle.
@@ -369,7 +387,7 @@ export function Sidebar() {
           <SessionRow
             session={item}
             project={projectNames[item.repoId] ?? item.repoId.replace(/^repo:/, "")}
-            showHost={showHost}
+            hostChip={hostChip}
             selected={item.id === selectedId}
             onPress={() => router.push(`/session/${item.id}`)}
             onSettle={canSettle(item) ? () => void toggleSettled(item) : undefined}
@@ -393,7 +411,7 @@ export function Sidebar() {
                 <Entrance key={sp.key} index={i} animate={pristine}>
                   <SpaceRow
                     space={sp}
-                    showHost={showHost}
+                    hostChip={hostChip}
                     selected={space === sp.key}
                     // One click enters the space: narrows the list below AND
                     // opens its page. Second click leaves — a Space is
@@ -471,7 +489,7 @@ export function Sidebar() {
                   key={item.id}
                   session={item}
                   project={projectNames[item.repoId] ?? item.repoId.replace(/^repo:/, "")}
-                  showHost={showHost}
+                  hostChip={hostChip}
                   selected={item.id === selectedId}
                   onPress={() => router.push(`/session/${item.id}`)}
                   onSettle={canSettle(item) ? () => void toggleSettled(item) : undefined}
@@ -495,7 +513,7 @@ export function Sidebar() {
                   key={item.id}
                   session={item}
                   project={projectNames[item.repoId] ?? item.repoId.replace(/^repo:/, "")}
-                  showHost={showHost}
+                  hostChip={hostChip}
                   selected={item.id === selectedId}
                   onPress={() => router.push(`/session/${item.id}`)}
                   onSettle={canSettle(item) ? () => void toggleSettled(item) : undefined}
@@ -738,13 +756,13 @@ function SectionHeader({
 
 function SpaceRow({
   space,
-  showHost,
+  hostChip,
   selected,
   onPress,
   onCompose,
 }: {
   space: Space;
-  showHost: boolean;
+  hostChip: (hostId: string, fallback: string) => string | null;
   selected: boolean;
   onPress: () => void;
   /** Start a task already scoped to this project. */
@@ -778,9 +796,9 @@ function SpaceRow({
         hover={hover}
         minWidth={13}
         resting={
-          showHost ? (
+          hostChip(space.hostId, space.host) ? (
             <Text numberOfLines={1} style={s.spaceHost}>
-              @ {space.host}
+              @ {hostChip(space.hostId, space.host)}
             </Text>
           ) : null
         }
@@ -803,7 +821,7 @@ function SpaceRow({
 function SessionRow({
   session,
   project,
-  showHost,
+  hostChip,
   selected,
   onPress,
   onSettle,
@@ -811,7 +829,7 @@ function SessionRow({
 }: {
   session: Session;
   project: string;
-  showHost: boolean;
+  hostChip: (hostId: string, fallback: string) => string | null;
   selected: boolean;
   onPress: () => void;
   /** Absent when the thread is busy or blocked — those can't be settled. */
@@ -904,13 +922,13 @@ function SessionRow({
             </Text>
           </>
         ) : null}
-        {/* The machine only earns a place when the list spans more than one —
-            otherwise every row would repeat the same name. */}
-        {showHost ? (
+        {/* Only when it says something: another machine, under the name you
+            gave it. See hostChip. */}
+        {hostChip(session.hostId, session.host) ? (
           <>
             <Ionicons name="desktop-outline" size={9} color={COLOR.fgFaint} />
             <Text numberOfLines={1} style={s.sessionHost}>
-              {session.host}
+              {hostChip(session.hostId, session.host)}
             </Text>
           </>
         ) : null}
