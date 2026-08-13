@@ -34,6 +34,7 @@ import { savePairing } from "../../services/runtime";
 import { type ParsedPairing, pairingHostName, parsePairing } from "../../services/pairing";
 import { DeviceSetupCard } from "../../components/DeviceSetupCard";
 import { ConnectFlow } from "../../components/ConnectFlow";
+import { TunnelFleet } from "../../components/settings/TunnelFleet";
 import {
   SettingsCard,
   SettingsRow,
@@ -290,6 +291,11 @@ export default function DevicesScreen() {
             />
           </SettingsCard>
         ) : null}
+
+        {/* Which tunnel each machine is on. Sits under the device list because
+            it is a property OF that list — "are these in sync" is a question
+            about the set, not about any one machine. */}
+        {devices.length ? <TunnelFleet /> : null}
 
         {/* Nothing paired yet? The same self-advancing card the Home screen
             leads with — the install command, then the machine it finds. */}

@@ -4,11 +4,11 @@
  * Everything here is best-effort and side-effect-free.
  */
 import os from "node:os";
-import path from "node:path";
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { agentEnv, binVersion, lanIps } from "./env.mjs";
 import { binOverride, CONFIG_FILE } from "./config.mjs";
+import { tunnelBinary, tunnelVersion } from "./tunnel-bin.mjs";
 
 const IS_WIN = process.platform === "win32";
 
@@ -33,16 +33,6 @@ const AGENT_BIN = {
   opencode: "opencode",
   cursor: "cursor-agent",
 };
-
-function tunnelBinary() {
-  const candidates = [
-    process.env.POUNCE_TUNNEL_BIN,
-    // Bundled next to the launcher (desktop app), then the legacy install dir.
-    new URL(`./tunnel/${IS_WIN ? "pounce-tunnel.exe" : "pounce-tunnel"}`, import.meta.url).pathname,
-    path.join(os.homedir(), ".pounce", "bin", IS_WIN ? "pounce-tunnel.exe" : "pounce-tunnel"),
-  ].filter(Boolean);
-  return candidates.find((p) => existsSync(p)) || null;
-}
 
 /**
  * Build the full report. `adapters` is the host's list of agent adapters (each
@@ -97,6 +87,7 @@ export async function buildDoctorReport(adapters) {
     }
   }
   const tunnelBin = tunnelBinary();
+  const tunnelVer = tunnelBin ? tunnelVersion() : null;
   const sessionsTotal = agents.reduce((s, a) => s + a.sessionCount, 0);
   const ips = lanIps();
   const port = Number(process.env.BRIDGE_PORT || 8099);
@@ -116,7 +107,18 @@ export async function buildDoctorReport(adapters) {
     },
     agents,
     // Off-LAN reachability. No binary → LAN-only (works on the same network).
-    tunnel: { ok: !!tunnelBin, path: tunnelBin, mode: tunnelBin ? "internet" : "lan-only" },
+    // The version is here so a fleet can be compared: `source` says whether the
+    // binary told us itself or we are reading the stamp we wrote when we
+    // installed it, and `unknown` (an old binary with no `version`, no stamp)
+    // is a real answer rather than a missing one.
+    tunnel: {
+      ok: !!tunnelBin,
+      path: tunnelBin,
+      mode: tunnelBin ? "internet" : "lan-only",
+      version: tunnelVer?.version ?? null,
+      proto: tunnelVer?.proto ?? null,
+      source: tunnelVer?.source ?? null,
+    },
     sessionsTotal,
     host: os.hostname().replace(/\.local$/, ""),
     home: os.homedir(),

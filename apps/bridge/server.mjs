@@ -89,7 +89,17 @@ import {
   killAllSshBootstraps,
   startSshBootstrap,
 } from "./agents/ssh.mjs";
-import { ensureTunnelBinary, lastTunnelError, tunnelBinary } from "./agents/tunnel-bin.mjs";
+import {
+  compareVersions,
+  ensureTunnelBinary,
+  fetchTunnel,
+  lastTunnelError,
+  latestTunnelRelease,
+  rollbackTunnel,
+  tunnelBinary,
+  tunnelVersion,
+} from "./agents/tunnel-bin.mjs";
+import { runTunnelUpdate } from "./agents/tunnel-update.mjs";
 import { listSshHosts } from "./agents/ssh-hosts.mjs";
 
 const IS_WIN = process.platform === "win32";
@@ -2926,6 +2936,71 @@ const server = http.createServer(async (req, res) => {
         tunnel: eligible ? tunnelInfo() : null,
       });
     }
+    // --- what tunnel is this machine running, and is it the newest? ------------
+    // Deliberately a NORMAL authenticated route, not an owner-only one: the
+    // whole point is that a phone or desktop can ask a remote server this over
+    // the very tunnel being reported on. A scoped grant holder can read it too,
+    // which is harmless — it is a version number, and they can already tell
+    // which protocol they connected with.
+    if (url.pathname === "/v1/tunnel/version") {
+      const current = tunnelVersion();
+      const body = {
+        installed: !!tunnelBinary(),
+        running: !!tunnelChild,
+        version: current?.version ?? null,
+        proto: current?.proto ?? null,
+        // How we know. `stamp` means the binary predates `version`; `unknown`
+        // means we have one and can't identify it. The fleet view shows the
+        // difference rather than printing a confident null.
+        source: current?.source ?? null,
+        lastUpdate: tunnelUpdateState(),
+        latest: null,
+        updateAvailable: null,
+      };
+      // Only reach for GitHub when asked — a sync must not spend a rate-limited
+      // API call per device per refresh.
+      if (url.searchParams.get("check") === "1") {
+        try {
+          const latest = await latestTunnelRelease();
+          body.latest = latest?.version ?? null;
+          body.updateAvailable =
+            !!latest?.version &&
+            (body.version === null || compareVersions(body.version, latest.version) < 0);
+        } catch (e) {
+          body.checkError = String(e?.message || e);
+        }
+      }
+      return send(res, 200, body);
+    }
+
+    // --- replace it ------------------------------------------------------------
+    if (url.pathname === "/v1/tunnel/update" && req.method === "POST") {
+      // A paired device may do this; a guest holding a scoped read grant may
+      // not. Replacing the binary that carries this machine's networking is an
+      // owner's act, and "can read my threads until Tuesday" is not that.
+      if (req.grant) return send(res, 403, { error: "forbidden_for_grant" });
+      if (!tunnelEligible()) {
+        return send(res, 409, {
+          error:
+            "this bridge does not own the machine's tunnel identity (non-default port without POUNCE_TUNNEL=1)",
+        });
+      }
+      if (tunnelUpdateState()?.state === "updating") {
+        return send(res, 409, { error: "an update is already running", state: tunnelUpdateState() });
+      }
+      // Answer BEFORE touching anything. Restarting `serve` kills the
+      // connection this request arrived on when it came in over the tunnel, so
+      // a reply sent afterwards would never be read. The caller re-dials — the
+      // node id is unchanged — and reads /v1/tunnel/version to see how it went.
+      send(res, 202, {
+        accepted: true,
+        from: tunnelVersion()?.version ?? null,
+        note: "The tunnel will restart. Re-dial and read /v1/tunnel/version for the result.",
+      });
+      void updateTunnelBinary();
+      return;
+    }
+
     if (url.pathname === "/v1/git/changes") {
       const cwd = url.searchParams.get("cwd");
       if (!cwd || !existsSync(cwd)) return send(res, 200, { branch: null, files: [], diff: "" });
@@ -3477,6 +3552,92 @@ function ensureTunnel() {
     tunnelChild = null;
   }
 }
+// --- updating the tunnel binary underneath ourselves -----------------------------
+// The hard part of this whole feature. On a remote server the update arrives
+// THROUGH the tunnel it replaces: restarting `serve` drops the very connection
+// carrying the request, so the caller can never be told how it went over that
+// channel. Two things make it survivable.
+//
+// The identity key (~/.pounce/tunnel.key) is not touched, so the node id is the
+// SAME after the restart — the caller can re-dial the machine it was already
+// talking to and ask. And the binary we replaced is kept, so a new one that
+// won't run can be undone from here rather than needing somebody to find an SSH
+// client. Neither makes the update transactional; together they make it
+// recoverable, which on a machine you may not be able to reach again is the
+// property that actually matters.
+
+/** How the last update went, for the caller that comes back to ask. */
+let lastTunnelUpdate = null;
+
+export function tunnelUpdateState() {
+  return lastTunnelUpdate;
+}
+
+/**
+ * Restart `serve` onto whatever binary is now at the path.
+ *
+ * The close handler must not race us: left attached it respawns on a backoff of
+ * its own, and we would end up with two processes claiming one identity — the
+ * exact lottery ensureTunnel's boot-time sweep exists to prevent. So it is
+ * detached, and the respawn is ours to do.
+ *
+ * The pause is not cosmetic. SIGTERM is a request, and a `serve` still holding
+ * the identity when its replacement registers means the relay routes to
+ * whichever got there last — which may be the process we just told to die.
+ */
+async function restartTunnel() {
+  const child = tunnelChild;
+  tunnelChild = null; // ensureTunnel's guard, and the handler's, both read this
+  try {
+    child?.removeAllListeners("close");
+    child?.kill("SIGTERM");
+  } catch {}
+  if (child) await new Promise((r) => setTimeout(r, 500));
+  ensureTunnel();
+}
+
+/** Did `serve` come back up and republish an identity? That — not the process
+ *  merely existing — is the test: a binary that starts and immediately fails to
+ *  bind is exactly the failure we are guarding against. */
+async function tunnelBackUp(timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 500));
+    if (tunnelChild && tunnelInfo()?.nodeId) return true;
+  }
+  return false;
+}
+
+/**
+ * Download the newest tunnel, swap it in, and restart `serve` on it — rolling
+ * back if the result can't stand up.
+ *
+ * Runs detached from the request that asked for it: see above, that request's
+ * connection is a casualty of the restart. The sequence itself lives in
+ * agents/tunnel-update.mjs, where it can be tested against a machine that
+ * refuses to come back up without needing one.
+ */
+async function updateTunnelBinary() {
+  const startedAt = new Date().toISOString();
+  lastTunnelUpdate = {
+    state: "updating",
+    from: tunnelVersion()?.version ?? null,
+    to: null,
+    startedAt,
+    error: null,
+  };
+  const result = await runTunnelUpdate({
+    currentVersion: () => tunnelVersion()?.version ?? null,
+    install: fetchTunnel,
+    restart: restartTunnel,
+    isUp: tunnelBackUp,
+    rollback: rollbackTunnel,
+    log: (m) => console.log(m),
+  });
+  lastTunnelUpdate = { ...result, startedAt, finishedAt: new Date().toISOString() };
+  return lastTunnelUpdate;
+}
+
 /** Every tunnel this bridge is responsible for: the machine-wide one and each
  *  live grant's. Left running they squat on identities the next boot re-claims. */
 function killAllTunnels() {

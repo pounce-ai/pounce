@@ -21,7 +21,28 @@ permissions:
   contents: write
 
 jobs:
+  # The tag and the binary must agree. `pounce-tunnel version` reads
+  # CARGO_PKG_VERSION, and the app trusts the binary's own word over the tag it
+  # was downloaded under — so shipping tunnel-v0.3.0 built from a Cargo.toml
+  # still saying 0.2.0 would leave every machine reporting the old version
+  # forever, with the fleet view insisting an update was available and the
+  # update never changing anything. Cheap to check, silent and confusing to miss.
+  version-matches:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches Cargo.toml
+        working-directory: apps/tunnel
+        run: |
+          cargo_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if [ "$cargo_version" != "${{ inputs.version }}" ]; then
+            echo "::error::Releasing tunnel-v${{ inputs.version }} but apps/tunnel/Cargo.toml says $cargo_version. Bump Cargo.toml (and Cargo.lock) first."
+            exit 1
+          fi
+          echo "Cargo.toml and the requested tag agree on $cargo_version."
+
   build:
+    needs: version-matches
     strategy:
       matrix:
         include:
