@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Session } from "@pounce/shared";
-import {
-  ATTENTION_GRACE_MS,
-  ATTENTION_STALE_MS,
-  needsYou,
-  needsYouAt,
-  rankSession,
-} from "./sessionRules";
+import { ATTENTION_GRACE_MS, needsYou, needsYouAt, rankSession } from "./sessionRules";
 
 const NOW = Date.parse("2026-08-12T12:00:00.000Z");
 
@@ -60,26 +54,19 @@ describe("needsYouAt", () => {
     expect(needsYouAt(session({ needsAttention: true, updatedAt: "not a date" }), NOW)).toBe(true);
   });
 
-  it("lets a failure nobody has touched since yesterday stop being urgent", () => {
-    // The reported bug: threads aged 1d and 4d sitting in NEEDS ATTENTION.
-    const failed = session({ activity: "failed", updatedAt: ago(ATTENTION_STALE_MS) });
-    expect(needsYouAt(failed, NOW)).toBe(false);
-    expect(
-      needsYouAt(session({ activity: "failed", updatedAt: ago(4 * ATTENTION_STALE_MS) }), NOW),
-    ).toBe(false);
+  it("keeps a failure urgent however old, until somebody says otherwise", () => {
+    // A clock is not evidence that anyone dealt with it. Age is what ./settled's
+    // dismissal is for; this layer only ever answers "is it in that state".
+    const DAY = 24 * 60 * 60 * 1000;
+    for (const age of [DAY, 4 * DAY, 60 * DAY])
+      expect(needsYouAt(session({ activity: "failed", updatedAt: ago(age) }), NOW)).toBe(true);
   });
 
-  it("keeps a failure urgent right up to the window", () => {
-    const failed = session({ activity: "failed", updatedAt: ago(ATTENTION_STALE_MS - 1) });
-    expect(needsYouAt(failed, NOW)).toBe(true);
-  });
-
-  it("never expires a thread that is actually blocked on you", () => {
-    // Nothing is waiting on a failure; something IS waiting on these, so age
-    // must not be allowed to quietly drop them.
+  it("keeps a blocked thread urgent however old", () => {
+    const YEAR = 365 * 24 * 60 * 60 * 1000;
     for (const s of [
-      session({ activity: "awaiting_input", updatedAt: ago(30 * ATTENTION_STALE_MS) }),
-      session({ needsAttention: true, updatedAt: ago(30 * ATTENTION_STALE_MS) }),
+      session({ activity: "awaiting_input", updatedAt: ago(YEAR) }),
+      session({ needsAttention: true, updatedAt: ago(YEAR) }),
     ])
       expect(needsYouAt(s, NOW)).toBe(true);
   });

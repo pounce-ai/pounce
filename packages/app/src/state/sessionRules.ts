@@ -26,47 +26,27 @@ export const isDotName = (name: string): boolean => name.startsWith(".");
  */
 export const ATTENTION_GRACE_MS = 10_000;
 
-/**
- * How long a FAILED turn stays urgent.
- *
- * A failure is finished: nothing is waiting on an answer, the work simply
- * stopped. "Needs attention" means stop what you are doing, and a failure you
- * have walked past since yesterday plainly isn't that — leaving it there put
- * threads aged `1d` and `4d` in the shelf and taught the user to skim past it,
- * which costs them the failures that ARE fresh.
- *
- * It expires INTO the ordinary live list, not out of sight: this is a day
- * shorter than ./settled's three quiet days, so a decayed failure is still
- * sitting in "active" for two more days before the archive rule can claim it.
- */
-export const ATTENTION_STALE_MS = 24 * 60 * 60 * 1000;
-
 /** In an attention state right now, before the settling period is applied. */
 const inAttentionState = (s: Session): boolean =>
   s.needsAttention || s.activity === "failed" || s.activity === "awaiting_input";
 
 /**
- * Attention that is allowed to expire.
- *
- * ONLY a failed turn. A thread that is BLOCKED — `awaiting_input`, or one the
- * bridge flagged for a reason of its own — stays urgent for as long as it is
- * blocked, however old: it is genuinely waiting on the user, and dropping one
- * of those is the failure this whole layer exists to prevent. `needsAttention`
- * is derived from the activity, so a failure carries no second reason with it.
- */
-const attentionExpires = (s: Session): boolean => s.activity === "failed";
-
-/**
  * A session that wants the user's attention, and has wanted it for long enough
- * to be believed — and recently enough to still be worth stopping for.
+ * to be believed.
+ *
+ * Nothing here ages out, deliberately. A thread leaves the attention shelf when
+ * the user says it has been dealt with (./settled — a dismissal that re-arms
+ * itself if the thread fails again) or when its state changes. Not on a clock:
+ * a shelf that quietly files things after N hours is one you cannot trust to be
+ * complete, and elapsed time was never evidence that anybody looked.
  *
  * `updatedAt` is the thread's LAST ACTIVITY, not the moment it entered its
  * current state (the bridge sends `lastActivityAt`, which is a transcript
- * timestamp). So the grace period below is a lower bound on how long the thread
- * has been QUIET, which is what catches a blip — an agent between tool calls,
- * or a turn about to retry, is quiet for a moment and then moves again. It is
- * not a lower bound on the age of the state, which is why a stale failure needs
- * the separate upper bound above.
+ * timestamp). So the grace period is a lower bound on how long the thread has
+ * been QUIET — which is exactly what catches a blip, since an agent between
+ * tool calls or a turn about to retry goes quiet for a moment and then moves
+ * again. It is NOT a lower bound on the age of the state, so do not read it as
+ * one: that misreading is what once left day-old failures looking urgent.
  *
  * A thread with a clock skewed into the future is treated as not-yet-settled
  * rather than never settling: the comparison is a lower bound, so a future
@@ -78,9 +58,7 @@ export function needsYouAt(s: Session, now: number): boolean {
   // An unparseable timestamp must not hide a blocked thread forever — a thread
   // that needs you is the one thing this layer may never lose.
   if (Number.isNaN(since)) return true;
-  const quiet = now - since;
-  if (quiet < ATTENTION_GRACE_MS) return false;
-  return !(attentionExpires(s) && quiet >= ATTENTION_STALE_MS);
+  return now - since >= ATTENTION_GRACE_MS;
 }
 
 /**

@@ -103,7 +103,6 @@ describe("keeping an old thread out of the drawer", () => {
 describe("work that outranks anything recorded", () => {
   it.each([
     ["awaiting_input", { activity: "awaiting_input" }],
-    ["failed", { activity: "failed" }],
     ["running", { activity: "running" }],
     ["streaming", { activity: "streaming" }],
     ["queued", { activity: "queued" }],
@@ -129,13 +128,32 @@ describe("work that outranks anything recorded", () => {
     expect(isSettled(old, undefined, OPTS)).toBe(false);
   });
 
-  it("does let the archive claim a failure nobody has touched in days", () => {
-    // The one state that stops outranking the record: a failed turn is finished,
-    // so once it is past ATTENTION_STALE_MS it is an ordinary quiet thread and
-    // the three-day rule applies to it like any other. Anything BLOCKED is
-    // covered by the case above and can never be filed away.
+  it("lets the user dismiss a failure, and offers the gesture for one", () => {
+    // The asymmetry this rule exists for: a failure is finished, so "I've seen
+    // it" is a real answer. Nothing is waiting on it the way something waits on
+    // an awaiting_input thread, which the case above still protects absolutely.
+    const touched = new Date(Date.now() - 60_000).toISOString();
+    const cleared = new Date(Date.now() - 30_000).toISOString();
+    const failed = session({ activity: "failed", updatedAt: touched });
+    expect(canSettle(failed)).toBe(true);
+    expect(isSettled(failed, settledAt(cleared), OPTS)).toBe(true);
+  });
+
+  it("brings a dismissed failure back if it fails again", () => {
+    // Free, via `stale`: the thread moving past the dismissal discards it. This
+    // is what makes acknowledging safe — you are clearing THIS failure, not
+    // muting the thread.
+    const cleared = new Date(Date.now() - 60_000).toISOString();
+    const touchedSince = new Date(Date.now() - 30_000).toISOString();
+    const failed = session({ activity: "failed", updatedAt: touchedSince });
+    expect(isSettled(failed, settledAt(cleared), OPTS)).toBe(false);
+  });
+
+  it("never lets the CLOCK file a failure nobody dismissed", () => {
+    // The rejected design: a max age after which the shelf quietly drops it. A
+    // shelf that files things on a timer is one you cannot trust to be complete.
     const old = session({ activity: "failed", updatedAt: "2026-01-01T00:00:00.000Z" });
-    expect(isSettled(old, undefined, OPTS)).toBe(true);
+    expect(isSettled(old, undefined, OPTS)).toBe(false);
   });
 
   it("offers the gesture for a quiet thread", () => {

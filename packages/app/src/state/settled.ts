@@ -42,17 +42,35 @@ export interface SettleOptions {
 }
 
 /**
+ * Blocked on the user in a way only the user can end.
+ *
+ * `awaiting_input` is a question with the cursor waiting on it; a thread the
+ * bridge flagged for a reason of its own is the same kind of thing. Neither is
+ * something you can acknowledge your way out of — the resolution is to answer
+ * it — so no override, and no clock, may file one.
+ *
+ * A FAILURE is deliberately not here. It is finished: nothing is waiting on an
+ * answer, and "I've seen it" is a real and sufficient response. See isSettled.
+ */
+function blockedOnUser(s: Session): boolean {
+  return needsYou(s) && s.activity !== "failed";
+}
+
+/**
  * Work in progress, or work blocked on the user.
  *
  * This OUTRANKS everything below — a user's settle and auto-settle alike. A
- * settled thread that starts running, fails, or asks a question comes straight
- * back to the active list, and a busy thread cannot be settled in the first
- * place. Without that rule an inbox is a way to lose things, which is why it is
+ * settled thread that starts running or asks a question comes straight back to
+ * the active list, and a busy thread cannot be settled in the first place.
+ * Without that rule an inbox is a way to lose things, which is why it is
  * checked before anything else.
  */
 export function isBusy(s: Session): boolean {
   return (
-    needsYou(s) || s.activity === "running" || s.activity === "streaming" || s.activity === "queued"
+    blockedOnUser(s) ||
+    s.activity === "running" ||
+    s.activity === "streaming" ||
+    s.activity === "queued"
   );
 }
 
@@ -69,14 +87,22 @@ function stale(s: Session, o: SettleOverride): boolean {
 /**
  * Settled resolution. The order is the whole rule:
  *
- *   1. busy or blocked   → active, whatever anyone said
- *   2. a live override   → exactly what the user said, both directions
- *   3. quiet for N days  → settled
+ *   1. busy or blocked        → active, whatever anyone said
+ *   2. a live override        → exactly what the user said, both directions
+ *   3. an unacknowledged fail → active, however old
+ *   4. quiet for N days       → settled
  *
  * Step 2 is what makes auto-unsettle free: an override only counts while the
  * thread hasn't moved since, so any new turn, reply or status change drops
- * through to step 3 on its own. Nothing watches for activity, so nothing can
- * miss it.
+ * through on its own. Nothing watches for activity, so nothing can miss it.
+ * That is also what re-arms a dismissal: acknowledge a failure and it goes, and
+ * if the thread fails AGAIN its `updatedAt` moves past the override and it
+ * comes back by itself.
+ *
+ * Step 3 is the deliberate asymmetry. A failure leaves the attention shelf
+ * because you said so, never because enough time passed — a clock that files
+ * failures for you makes the shelf something you cannot trust to be complete,
+ * and "it's been there a while" was never evidence that anyone dealt with it.
  */
 export function isSettled(
   s: Session,
@@ -85,6 +111,7 @@ export function isSettled(
 ): boolean {
   if (isBusy(s)) return false;
   if (override && !stale(s, override)) return override.state === "settled";
+  if (needsYou(s)) return false;
   if (opts.autoSettleAfterDays == null) return false;
   const touched = Date.parse(s.updatedAt);
   // Bad data never hides a thread.
