@@ -19,4 +19,13 @@
 /// to start. Call only from the main thread.
 + (SPUStandardUpdaterController *)sharedController;
 
+/// Arm Sparkle's scheduled check. Must be called once at launch: the controller
+/// above is created lazily and every other caller is something the user has to
+/// go and click, so without this the background check is never scheduled and a
+/// released version sits unannounced however the "Automatic updates" toggle
+/// reads. Named rather than left as a bare `[PounceUpdater sharedController];`
+/// in the app delegate, where a statement that discards its result reads as
+/// dead code and invites tidying away.
++ (void)startAtLaunch;
+
 @end

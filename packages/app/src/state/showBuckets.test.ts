@@ -26,9 +26,7 @@ const session = (over: Partial<Session> = {}): Session =>
     activity: "idle",
     needsAttention: false,
     createdAt: "2026-08-01T00:00:00.000Z",
-    // Wall-clock anchored: showBucket asks needsYou, which reads Date.now(), and
-    // a failure is only urgent while it is recent — a fixed date would age out.
-    updatedAt: new Date(Date.now() - 60_000).toISOString(),
+    updatedAt: "2026-08-10T11:00:00.000Z",
     ...over,
   }) as Session;
 

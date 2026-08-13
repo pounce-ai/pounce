@@ -6,6 +6,11 @@
 import { describe, expect, it } from "vitest";
 import { scaledWidth } from "./layout";
 
+// Copies of the shipped bounds, not imports: the real ones live beside their
+// call sites in Dashboard.tsx and metrics.ts, and importing either would pull
+// react-native into a plain unit test. These pin the SHAPE of the rule — the
+// numbers are asserted relatively (floor holds, cap holds, a laptop is left
+// alone) so this stays honest if a policy is retuned.
 const CONTENT = { fraction: 0.86, min: 1120, max: 1600 };
 const SIDEBAR = { fraction: 0.18, min: 264, max: 460 };
 

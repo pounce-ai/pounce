@@ -75,6 +75,23 @@ export function needsYouAt(s: Session, now: number): boolean {
  */
 export const needsYou = (s: Session): boolean => needsYouAt(s, Date.now());
 
+/**
+ * WHY a thread wants you — which decides what may end it.
+ *
+ * `blocked` is a question with the cursor waiting on it: only answering ends
+ * that, so no dismissal and no clock may file it. `failed` is finished, and
+ * "I've seen it" is a real answer.
+ *
+ * This lives here, with the states themselves, rather than in ./settled — that
+ * file decides what to DO about a reason, not what the reasons are. Splitting
+ * them left two predicates in two files that had to be edited in agreement,
+ * and a fifth attention state would have silently inherited "not dismissable".
+ */
+export function attentionReason(s: Session): "blocked" | "failed" | null {
+  if (!needsYou(s)) return null;
+  return s.activity === "failed" ? "failed" : "blocked";
+}
+
 /** Sort rank for a session list: attention → active → live → done. */
 export function rankSession(s: Session): number {
   if (needsYou(s)) return 0;

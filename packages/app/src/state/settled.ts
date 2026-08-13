@@ -6,7 +6,7 @@
  * and the one thing an inbox must never do is bury work that is waiting on you.
  */
 import type { Session } from "@pounce/shared";
-import { needsYou } from "./sessionRules";
+import { attentionReason } from "./sessionRules";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -41,20 +41,9 @@ export interface SettleOptions {
   readonly autoSettleAfterDays: number | null;
 }
 
-/**
- * Blocked on the user in a way only the user can end.
- *
- * `awaiting_input` is a question with the cursor waiting on it; a thread the
- * bridge flagged for a reason of its own is the same kind of thing. Neither is
- * something you can acknowledge your way out of — the resolution is to answer
- * it — so no override, and no clock, may file one.
- *
- * A FAILURE is deliberately not here. It is finished: nothing is waiting on an
- * answer, and "I've seen it" is a real and sufficient response. See isSettled.
- */
-function blockedOnUser(s: Session): boolean {
-  return needsYou(s) && s.activity !== "failed";
-}
+/** A turn the agent is still working on. */
+const inFlight = (s: Session): boolean =>
+  s.activity === "running" || s.activity === "streaming" || s.activity === "queued";
 
 /**
  * Work in progress, or work blocked on the user.
@@ -64,14 +53,13 @@ function blockedOnUser(s: Session): boolean {
  * the active list, and a busy thread cannot be settled in the first place.
  * Without that rule an inbox is a way to lose things, which is why it is
  * checked before anything else.
+ *
+ * A FAILURE is deliberately not busy: it is finished, nothing is waiting on an
+ * answer, and "I've seen it" is a real response. ../state/sessionRules owns
+ * that distinction (attentionReason) so the set of states lives in one place.
  */
 export function isBusy(s: Session): boolean {
-  return (
-    blockedOnUser(s) ||
-    s.activity === "running" ||
-    s.activity === "streaming" ||
-    s.activity === "queued"
-  );
+  return attentionReason(s) === "blocked" || inFlight(s);
 }
 
 /** An override the thread's own activity has already overtaken. */
@@ -109,9 +97,11 @@ export function isSettled(
   override: SettleOverride | undefined,
   opts: SettleOptions,
 ): boolean {
-  if (isBusy(s)) return false;
+  // Read once: this reaches Date.now(), and one list deserves one clock.
+  const reason = attentionReason(s);
+  if (reason === "blocked" || inFlight(s)) return false;
   if (override && !stale(s, override)) return override.state === "settled";
-  if (needsYou(s)) return false;
+  if (reason === "failed") return false;
   if (opts.autoSettleAfterDays == null) return false;
   const touched = Date.parse(s.updatedAt);
   // Bad data never hides a thread.

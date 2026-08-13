@@ -83,14 +83,18 @@ gh release create "$VERSION" "${ASSETS[@]}" \
   --latest=false \
   --notes "Signed + notarized macOS build (Apple Silicon). Download Pounce.dmg, open it, drag Pounce to Applications, launch, and scan the QR with the Pounce app. Installs from v1.0.2+ update automatically."
 
-# The rolling pointer the bridge's updater actually reads — mirrors the
-# "Refresh the rolling bridge-latest release" step in release-bridge.yml.
-# Without it a locally-cut release installs fine but never self-updates.
-if ! gh release view bridge-latest >/dev/null 2>&1; then
-  gh release create bridge-latest \
-    --title "Bridge auto-update channel" \
-    --notes "Rolling update channel for the Pounce tray app. Not a download — see the versioned releases for installers." \
-    --latest=false
-fi
-gh release upload bridge-latest --clobber "${UPDATE_ASSETS[@]}"
-echo "✅ Done — notarized build + update artifacts are live on the Releases page."
+# Deliberately NOT refreshing `bridge-latest` here. That rolling channel is what
+# every installed tray app polls, and it is shared by all platforms — but this
+# script builds macOS only. Pushing this run's assets into it would leave the
+# win/linux entries behind from whatever CI last published, against notes still
+# naming CI's version, which is the partial-set state release-bridge.yml runs
+# four platforms with `fail-fast: false` specifically to prevent. It also has no
+# equivalent of the workflow's package.json/electrobun.config.ts version gate —
+# and that value is the one the updater compares.
+#
+# So a build cut here installs but does not self-update. Run the Release Bridge
+# workflow to publish the channel; it holds the same signing secrets and does
+# the whole set.
+echo "✅ Done — notarized build is live on the Releases page."
+echo "   Note: bridge-latest was NOT refreshed. Run the Release Bridge workflow"
+echo "   to publish an update the installed tray apps will actually pick up."

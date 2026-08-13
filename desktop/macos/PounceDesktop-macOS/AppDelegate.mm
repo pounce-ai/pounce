@@ -119,17 +119,11 @@ static void PounceStartBridge(void)
 
   [self setupStatusItem];
 
-  // Start Sparkle at launch. Nothing else does: the shared controller is built
-  // lazily, and every other caller is a thing the user has to go and click
-  // (the tray item, the Settings rows) — the consent modal bails out before it
-  // touches the updater once the question has been answered. So on a normal
-  // launch the updater was never instantiated, its scheduled check never ran,
-  // and a released version sat there unannounced no matter what the
-  // "Automatic updates" toggle said. Starting it here does NOT force a check:
-  // Sparkle only polls when automaticallyChecksForUpdates is on, and
+  // Arm Sparkle's scheduled check; see +startAtLaunch. This does NOT force a
+  // check — Sparkle only polls when automaticallyChecksForUpdates is on, and
   // SUEnableAutomaticChecks=NO in Info.plist keeps that off (and Sparkle's own
   // first-run prompt suppressed) until the user opts in.
-  [PounceUpdater sharedController];
+  [PounceUpdater startAtLaunch];
 }
 
 #pragma mark - Window lifecycle

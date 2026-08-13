@@ -93,7 +93,11 @@ export default function DashboardScreen() {
   const [selected, setSelected] = useState<string | null>(null);
   const [chartWidth, setChartWidth] = useState(0);
   const [heatWidth, setHeatWidth] = useState(0);
-  const [paneWidth, setPaneWidth] = useState(0);
+  // The derived cap, not the raw measurement: below ~1300pt and above ~1860pt
+  // scaledWidth is constant, so storing the pane width made every pixel of a
+  // window drag a fresh state value and re-rendered the whole screen — and the
+  // heat grid and chart re-measured off the back of it — for identical output.
+  const [contentMax, setContentMax] = useState(CONTENT_WIDTH.min);
   const [sharing, setSharing] = useState(false);
   const shareRef = useRef<View>(null);
 
@@ -294,7 +298,8 @@ export default function DashboardScreen() {
         contentInsetAdjustmentBehavior="automatic"
         onLayout={
           IS_DESKTOP
-            ? (e: LayoutChangeEvent) => setPaneWidth(e.nativeEvent.layout.width)
+            ? (e: LayoutChangeEvent) =>
+                setContentMax(scaledWidth(e.nativeEvent.layout.width, CONTENT_WIDTH))
             : undefined
         }
         contentContainerStyle={[
@@ -305,7 +310,7 @@ export default function DashboardScreen() {
           IS_DESKTOP && s.contentDesktop,
           // …but the cap follows the pane rather than being one number, or a
           // large display pays for its width in gutter. See CONTENT_WIDTH.
-          IS_DESKTOP && { maxWidth: scaledWidth(paneWidth, CONTENT_WIDTH) },
+          IS_DESKTOP && { maxWidth: contentMax },
           // Desktop starts level with the sidebar's first section header, which
           // sits 9pt under its own titlebar row — both columns begin at the same
           // y instead of the content pane hanging 17pt lower. (No notch here, so

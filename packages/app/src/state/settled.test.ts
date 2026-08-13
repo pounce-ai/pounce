@@ -100,53 +100,47 @@ describe("keeping an old thread out of the drawer", () => {
   });
 });
 
+/** Every state nothing may file — not a dismissal, not the clock. One list, so
+ *  a new blocker state cannot be added to one guarantee and forgotten in the
+ *  other. A FAILURE is deliberately absent: it is dismissable by hand. */
+const BLOCKERS: [string, Partial<Session>][] = [
+  ["awaiting_input", { activity: "awaiting_input" }],
+  ["running", { activity: "running" }],
+  ["streaming", { activity: "streaming" }],
+  ["queued", { activity: "queued" }],
+  ["flagged as needing attention", { needsAttention: true }],
+];
+
 describe("work that outranks anything recorded", () => {
-  it.each([
-    ["awaiting_input", { activity: "awaiting_input" }],
-    ["running", { activity: "running" }],
-    ["streaming", { activity: "streaming" }],
-    ["queued", { activity: "queued" }],
-    ["flagged as needing attention", { needsAttention: true }],
-  ])("refuses to hide a thread that is %s", (_label, over) => {
-    // Anchored to the WALL clock, not the frozen NOW above: isBusy asks needsYou,
-    // which reads Date.now(), and a failure only reads as fresh in real time.
-    const touched = new Date(Date.now() - 60_000).toISOString();
-    const cleared = new Date(Date.now() - 30_000).toISOString();
-    const busy = session({ ...(over as Partial<Session>), updatedAt: touched });
-    expect(isSettled(busy, settledAt(cleared), OPTS)).toBe(false);
+  it.each(BLOCKERS)("refuses to hide a thread that is %s", (_label, over) => {
+    const busy = session({ ...(over as Partial<Session>) });
+    expect(isSettled(busy, settledAt(LATER), OPTS)).toBe(false);
     expect(canSettle(busy)).toBe(false);
   });
 
-  it.each([
-    ["awaiting_input", { activity: "awaiting_input" }],
-    ["running", { activity: "running" }],
-    ["streaming", { activity: "streaming" }],
-    ["queued", { activity: "queued" }],
-    ["flagged as needing attention", { needsAttention: true }],
-  ])("keeps auto-settle away from a thread that is %s, however old", (_label, over) => {
-    const old = session({ ...(over as Partial<Session>), updatedAt: "2026-01-01T00:00:00.000Z" });
-    expect(isSettled(old, undefined, OPTS)).toBe(false);
-  });
+  it.each(BLOCKERS)(
+    "keeps auto-settle away from a thread that is %s, however old",
+    (_label, over) => {
+      const old = session({ ...(over as Partial<Session>), updatedAt: "2026-01-01T00:00:00.000Z" });
+      expect(isSettled(old, undefined, OPTS)).toBe(false);
+    },
+  );
 
   it("lets the user dismiss a failure, and offers the gesture for one", () => {
     // The asymmetry this rule exists for: a failure is finished, so "I've seen
     // it" is a real answer. Nothing is waiting on it the way something waits on
     // an awaiting_input thread, which the case above still protects absolutely.
-    const touched = new Date(Date.now() - 60_000).toISOString();
-    const cleared = new Date(Date.now() - 30_000).toISOString();
-    const failed = session({ activity: "failed", updatedAt: touched });
+    const failed = session({ activity: "failed" });
     expect(canSettle(failed)).toBe(true);
-    expect(isSettled(failed, settledAt(cleared), OPTS)).toBe(true);
+    expect(isSettled(failed, settledAt(LATER), OPTS)).toBe(true);
   });
 
   it("brings a dismissed failure back if it fails again", () => {
     // Free, via `stale`: the thread moving past the dismissal discards it. This
     // is what makes acknowledging safe — you are clearing THIS failure, not
     // muting the thread.
-    const cleared = new Date(Date.now() - 60_000).toISOString();
-    const touchedSince = new Date(Date.now() - 30_000).toISOString();
-    const failed = session({ activity: "failed", updatedAt: touchedSince });
-    expect(isSettled(failed, settledAt(cleared), OPTS)).toBe(false);
+    const failed = session({ activity: "failed" });
+    expect(isSettled(failed, settledAt(EARLIER), OPTS)).toBe(false);
   });
 
   it("never lets the CLOCK file a failure nobody dismissed", () => {

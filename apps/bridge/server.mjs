@@ -519,7 +519,10 @@ async function streamThreads(sink) {
     await listThreads(a.id, async (page) => {
       for (const t of page) seedActivity(t);
       await resolveWorktreeOwners(page);
-      seen.push(...page);
+      // Only LIVE threads, because only those get enriched below — keeping
+      // every thread from every agent alive for the length of a stream is the
+      // retention this paged path exists to avoid.
+      for (const t of page) if (t.isLive) seen.push(t);
       await sink(page);
     });
   }
@@ -527,6 +530,13 @@ async function streamThreads(sink) {
   // syncs by streaming (the desktop's connect) saw every thread as idle or
   // completed forever. Enriching afterwards can't help the pages already sent,
   // but it fills lastKnownActivity so the next sync — by either path — is right.
+  //
+  // Newest first, matching getThreads, because enrichThreadActivity reads only
+  // the first 30 and runs one pass at a time. Left in per-agent listing order
+  // this pass would spend the only slot on whichever threads the first agent
+  // happened to return, and the concurrent poll — which wanted the newest —
+  // would find the door shut and skip.
+  seen.sort((x, y) => (y.createdAt || "").localeCompare(x.createdAt || ""));
   void enrichThreadActivity(seen);
 }
 
@@ -607,12 +617,14 @@ function enrichThreadActivity(threads) {
   return mapLimit(liveThreads, 4, async (t) => {
     try {
       const a = await threadActivity(t.agent, t.id);
-      if (a.activity) t.activity = a.activity;
-      if (a.lastActivityAt) t.lastActivityAt = a.lastActivityAt;
       if (a.activity) {
+        t.activity = a.activity;
+        if (a.lastActivityAt) t.lastActivityAt = a.lastActivityAt;
+        // No createdAt fallback here — seedActivity owns what an unknown
+        // timestamp means, and two places deciding that is how they drift.
         lastKnownActivity.set(`${t.agent}:${t.id}`, {
           activity: a.activity,
-          lastActivityAt: a.lastActivityAt || t.createdAt,
+          lastActivityAt: a.lastActivityAt,
         });
       }
       flagAwaitingPrompt(t); // a pending prompt outranks transcript-derived state

@@ -29,6 +29,7 @@ import {
 import { StyleSheet } from "react-native-unistyles";
 import { Ionicons } from "@expo/vector-icons";
 import { PounceIcon } from "@pounce/app/ui/native/Icon";
+import { scaledWidth } from "@pounce/app/ui/layout";
 import {
   SettingsCaption,
   SettingsCard,
@@ -249,7 +250,7 @@ export default function AddMachineScreen() {
   // floored so a short window still shows a useful amount and capped so a very
   // tall one doesn't push the prompt and the buttons below the fold.
   const { height: windowHeight } = useWindowDimensions();
-  const logHeight = Math.max(190, Math.min(520, Math.round(windowHeight * 0.42)));
+  const logHeight = scaledWidth(windowHeight, { fraction: 0.42, min: 190, max: 520 });
   const running = state !== null && state.phase !== "done" && state.phase !== "failed";
   // The host field doubles as the filter — one control, and typing narrows the
   // list rather than sitting beside it doing nothing.
