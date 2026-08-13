@@ -960,6 +960,26 @@ export default function SessionScreen() {
     setQueued(queueRef.current);
   }, []);
 
+  /**
+   * Send a follow-up the drain never reached.
+   *
+   * A turn that THROWS leaves the loop through the exception, so anything still
+   * queued behind it stays there with nothing left to drain it — and, before
+   * this, still captioned "sends after the current reply". Deliberately manual:
+   * re-running automatically after a failure is how one broken turn becomes
+   * five.
+   */
+  const sendQueued = useCallback(
+    (i: number) => {
+      const item = queueRef.current[i];
+      if (!item) return;
+      queueRef.current = queueRef.current.filter((_, n) => n !== i);
+      setQueued(queueRef.current);
+      void onSubmit(item);
+    },
+    [onSubmit],
+  );
+
   // A send can strand: if the turn lands somewhere other than this thread (a
   // resume that forks into its own session, say) the host echo never arrives,
   // so the optimistic row would sit at "Sending…" forever. Timeline offers a
@@ -1533,16 +1553,38 @@ export default function SessionScreen() {
                   <View style={s.queuedWrap}>
                     {queued.map((q, i) => (
                       <View key={i} style={s.queuedRow}>
-                        <PounceIcon name="time-outline" size={13} color={theme.colors.fgFaint} />
+                        <PounceIcon
+                          name={sending ? "time-outline" : "alert-circle-outline"}
+                          size={13}
+                          color={sending ? theme.colors.fgFaint : theme.colors.warning}
+                        />
                         <Text numberOfLines={1} style={s.queuedText}>
                           {q.text || (q.images.length ? "🖼️ Image" : "")}
                         </Text>
+                        {/* Stranded rows get a way out. Tapping sends this one
+                            now, which is what the label had been promising. */}
+                        {!sending ? (
+                          <Pressable onPress={() => sendQueued(i)} hitSlop={8}>
+                            <PounceIcon
+                              name="arrow-up-circle"
+                              size={15}
+                              color={theme.colors.accent}
+                            />
+                          </Pressable>
+                        ) : null}
                         <Pressable onPress={() => cancelQueued(i)} hitSlop={8}>
                           <PounceIcon name="close" size={14} color={theme.colors.fgMuted} />
                         </Pressable>
                       </View>
                     ))}
-                    <Text style={s.queuedHint}>Queued — sends after the current reply</Text>
+                    {/* The label has to match reality: with no turn in flight
+                        nothing is going to drain these, and saying otherwise
+                        leaves someone waiting on a message that never went. */}
+                    <Text style={s.queuedHint}>
+                      {sending
+                        ? "Queued — sends after the current reply"
+                        : "Not sent — the turn ended before these went"}
+                    </Text>
                   </View>
                 ) : null}
                 <Composer
