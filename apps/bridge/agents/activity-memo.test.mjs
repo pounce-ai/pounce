@@ -25,16 +25,42 @@ describe("what gets remembered", () => {
     }
   });
 
-  it("refuses a turn that is still in flight", () => {
-    // The bug this prevents: enrichment only re-reads the 30 NEWEST threads, so
-    // a thread pinned as running the moment before it dropped out of that window
-    // stays running forever — and isBusy() makes a running thread unsettleable,
-    // so nobody could dismiss or archive it either.
+  it("keeps a turn in flight too, so RUNNING stops flickering", () => {
+    // Measured against a live bridge: `running` dropped to 0 and back on the
+    // same beat a failure did. Refusing to remember it left half the flicker.
     const memo = new Map();
     for (const activity of ["running", "streaming", "queued"]) {
-      expect(rememberActivity(memo, thread(), { activity })).toBe(false);
+      expect(rememberActivity(memo, thread(), { activity })).toBe(true);
     }
-    expect(memo.size).toBe(0);
+  });
+
+  it("lets an in-flight reading go stale, so it can never pin a thread", () => {
+    // The danger of keeping it: enrichment only re-reads the 30 NEWEST threads,
+    // so a thread that drops out of that window would assert "running" forever
+    // — and isBusy() makes a running thread unsettleable, so nobody could
+    // dismiss or archive it. Past the window we fall back to the guess, which
+    // is wrong for one cycle instead of wrong permanently.
+    const memo = new Map();
+    const T0 = 1_000_000;
+    rememberActivity(memo, thread(), { activity: "running" }, T0);
+
+    const fresh = thread();
+    seedActivity(memo, fresh, T0 + 30_000);
+    expect(fresh.activity).toBe("running");
+
+    const stale = thread();
+    seedActivity(memo, stale, T0 + 90_000);
+    expect(stale.activity).toBe("idle");
+  });
+
+  it("never lets a settled reading go stale", () => {
+    // A failure stays true until the thread moves, however long that is.
+    const memo = new Map();
+    const T0 = 1_000_000;
+    rememberActivity(memo, thread(), { activity: "failed" }, T0);
+    const t = thread();
+    seedActivity(memo, t, T0 + 30 * 24 * 60 * 60 * 1000);
+    expect(t.activity).toBe("failed");
   });
 
   it("refuses a pending prompt, which is re-applied from live state", () => {

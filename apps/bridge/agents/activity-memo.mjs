@@ -13,26 +13,40 @@
  */
 
 /**
- * States worth carrying across a rebuild.
+ * A reading that stays true until something happens, so it can be carried
+ * across a rebuild indefinitely.
  *
  * A thread only gets re-read while it is among the newest 30, and `isLive` is
- * not a filter that helps — it means the working directory still exists, so it
- * is true for almost everything forever. So anything remembered here is
- * remembered until the thread happens to be in that window again, which for an
- * older thread may be never.
+ * no help as a filter — it means the working directory still exists, so it is
+ * true for almost everything forever. Anything kept here is therefore kept
+ * until that thread is in the window again, which for an older thread may be
+ * never. These three survive that: a failed turn stays failed, a finished one
+ * stays finished, until the thread moves.
  *
- * That is fine for a settled reading and wrong for a transient one. `running`,
- * `streaming` and `queued` describe a turn IN FLIGHT: they are only true for as
- * long as nobody looks away, they are re-read on every pass while the thread is
- * in the window (so nothing needs to remember them), and pinning one is not a
- * cosmetic error — `isBusy` treats a running thread as unsettleable, so a
- * thread stuck that way can never be dismissed or archived by anyone.
- *
- * `awaiting_input` is absent for a different reason: a pending prompt is live
+ * `awaiting_input` is deliberately in neither set: a pending prompt is live
  * state the bridge re-applies on every rebuild, and remembering it would strand
  * a thread as blocked after its prompt had been answered.
  */
-const REMEMBERED = new Set(["failed", "completed", "idle"]);
+const SETTLED = new Set(["failed", "completed", "idle"]);
+
+/**
+ * A turn in flight. Remembered too — but only briefly.
+ *
+ * These flicker for the same reason a failure did: the rebuild seeds a guess
+ * and the response goes out before enrichment lands, so a running thread reads
+ * `idle` on any poll that catches the wrong side of the cycle and the sidebar
+ * moves it out of RUNNING and back. Refusing to remember them at all left that
+ * half of the flicker in place.
+ *
+ * The freshness window is what makes it safe. A settled reading stays true
+ * until something happens; "running" is only true for as long as nobody looked
+ * away, and a thread that drops out of the enrichment window would otherwise
+ * assert it forever — which isBusy() turns into a thread nobody can settle or
+ * archive. Past the window we fall back to the guess, which is wrong for at
+ * most one cycle and self-corrects, rather than wrong permanently.
+ */
+const TRANSIENT = new Set(["running", "streaming", "queued"]);
+const TRANSIENT_TTL_MS = 60_000;
 
 /** Map key. Thread ids are unique per agent, not globally. */
 const keyOf = (t) => `${t.agent}:${t.id}`;
@@ -41,11 +55,16 @@ const keyOf = (t) => `${t.agent}:${t.id}`;
  * Record a reading, if it is one of the kind worth keeping. Returns whether it
  * was kept, which is only of interest to tests.
  */
-export function rememberActivity(memo, t, reading) {
-  if (!reading?.activity || !REMEMBERED.has(reading.activity)) return false;
+export function rememberActivity(memo, t, reading, now = Date.now()) {
+  const activity = reading?.activity;
+  if (!activity) return false;
+  const transient = TRANSIENT.has(activity);
+  if (!transient && !SETTLED.has(activity)) return false;
   memo.set(keyOf(t), {
-    activity: reading.activity,
+    activity,
     lastActivityAt: reading.lastActivityAt,
+    transient,
+    at: now,
   });
   return true;
 }
@@ -58,13 +77,15 @@ export function rememberActivity(memo, t, reading) {
  * Nothing can happen in it any more, so "completed" is true by construction and
  * a remembered reading could only ever be older news.
  */
-export function seedActivity(memo, t) {
+export function seedActivity(memo, t, now = Date.now()) {
   if (!t.isLive) {
     t.activity = "completed";
     t.lastActivityAt = t.lastActivityAt ?? t.createdAt;
     return;
   }
-  const known = memo.get(keyOf(t));
+  let known = memo.get(keyOf(t));
+  // A stale "still working" reading is worse than no reading: see TRANSIENT.
+  if (known?.transient && now - known.at > TRANSIENT_TTL_MS) known = undefined;
   t.activity = known?.activity ?? "idle";
   t.lastActivityAt = known?.lastActivityAt ?? t.createdAt;
 }
