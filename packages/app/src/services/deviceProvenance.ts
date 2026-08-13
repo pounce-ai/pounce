@@ -59,6 +59,17 @@ export function deviceIconFor(name: string, addedVia?: AddedVia): string {
 }
 
 /**
+ * Is this the machine the app itself is running on?
+ *
+ * The desktop pairs with its own bridge over loopback, so a loopback url is the
+ * marker. Worth knowing because "@ this machine" is noise on every row — the
+ * host is only information when it is somewhere else.
+ */
+export function isThisMachine(url: string): boolean {
+  return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i.test(url.trim());
+}
+
+/**
  * The reachability line under a machine's name.
  *
  * A remote server earns a word of its own. "Offline" on a Mac across the room

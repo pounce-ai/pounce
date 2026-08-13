@@ -7,7 +7,7 @@
  * calls for a different fix.
  */
 import { describe, expect, it } from "vitest";
-import { addedViaFor, deviceIconFor, deviceStatusText } from "./deviceProvenance";
+import { addedViaFor, deviceIconFor, deviceStatusText, isThisMachine } from "./deviceProvenance";
 
 describe("recognising an SSH-added machine", () => {
   it("keeps a provenance that was recorded at add time", () => {
@@ -58,5 +58,23 @@ describe("what the status line says", () => {
   it("leaves an ordinary machine's wording untouched", () => {
     expect(deviceStatusText({ online: true })).toBe("Online");
     expect(deviceStatusText({ online: false })).toBe("Offline");
+  });
+});
+
+describe("which machine am I looking at", () => {
+  it("recognises the machine the app is running on", () => {
+    // The desktop pairs with its own bridge over loopback, and "@ this machine"
+    // on every row is noise rather than information.
+    expect(isThisMachine("http://127.0.0.1:8099")).toBe(true);
+    expect(isThisMachine("http://localhost:8099")).toBe(true);
+    expect(isThisMachine("http://[::1]:8099")).toBe(true);
+  });
+
+  it("does not mistake another machine for this one", () => {
+    expect(isThisMachine("http://192.168.1.10:8099")).toBe(false);
+    expect(isThisMachine("http://172.31.45.115:8099")).toBe(false);
+    // The prefix must not match a hostname that merely starts the same way.
+    expect(isThisMachine("http://localhost.evil.example:8099")).toBe(false);
+    expect(isThisMachine("http://127.0.0.1.evil.example")).toBe(false);
   });
 });
