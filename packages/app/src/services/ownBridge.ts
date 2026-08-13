@@ -87,3 +87,34 @@ export async function mine<T>(
 
 export const minePost = <T>(path: string, body: unknown) =>
   mine<T>(path, { method: "POST", body: JSON.stringify(body) });
+
+/**
+ * Ask our own bridge to open a loopback proxy onto a peer's iroh tunnel, and
+ * return the port it listens on. Null when there is no local bridge to ask, or
+ * when it can't reach the peer — the caller stays on the LAN address.
+ *
+ * Authenticated, like every other owner route. It was once a bare `fetch` from
+ * bridge.ts, which got a flat 401 and was swallowed as "no tunnel": a machine
+ * added over SSH is reachable ONLY this way, so it sat permanently offline with
+ * no threads and nothing on screen to explain why.
+ *
+ * The wait is long on purpose. The first dial on a machine that has never used
+ * the tunnel downloads the binary before it can spawn anything, and eight
+ * seconds is not enough for a release asset.
+ */
+export async function dialPeer(
+  nodeId: string,
+  relay: string | null,
+  token: string,
+): Promise<number | null> {
+  try {
+    const { port } = await mine<{ port?: number }>(
+      "/v1/peers/dial",
+      { method: "POST", body: JSON.stringify({ nodeId, relay, token }) },
+      60_000,
+    );
+    return port ?? null;
+  } catch {
+    return null;
+  }
+}
