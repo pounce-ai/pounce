@@ -525,26 +525,15 @@ async function dialTunnel(
   return dialViaLocalBridge(nodeId, relay, token);
 }
 
-/** Ask the bridge on THIS machine to dial the peer for us. Loopback-only on its
- *  side; null on any build or machine where that isn't available. */
+/** Ask the bridge on THIS machine to dial the peer for us — an authenticated,
+ *  loopback-only owner route; see dialPeer in ./ownBridge. */
 async function dialViaLocalBridge(
   nodeId: string,
   relay: string | null,
   token: string,
 ): Promise<number | null> {
-  const port = process.env.EXPO_PUBLIC_BRIDGE_PORT ?? "8099";
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/v1/peers/dial`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ nodeId, relay, token }),
-    });
-    if (!res.ok) return null;
-    const { port: dialed } = (await res.json()) as { port?: number };
-    return dialed ?? null;
-  } catch {
-    return null;
-  }
+  const { dialPeer } = await import("./ownBridge");
+  return dialPeer(nodeId, relay, token);
 }
 
 // Back-compat single-config helpers (used by older call sites / Settings).
