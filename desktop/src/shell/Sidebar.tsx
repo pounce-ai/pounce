@@ -59,6 +59,8 @@ import { deriveSpaces, spaceKeyFor, spaceKeyOf, type Space } from "./Spaces";
 import { SidebarGlyph } from "./icons";
 import { ThemeButton } from "./ThemeMenu";
 
+const EMPTY_ROWS: Session[] = [];
+
 /** Tapping the appearance button cycles system → light → dark, and the glyph
  *  shows the mode you're in — same contract as mobile's header button. */
 const NEXT_APPEARANCE: Record<AppearanceMode, AppearanceMode> = {
@@ -192,6 +194,7 @@ export function Sidebar() {
   const [showDrafts, setShowDrafts] = useState(true);
   const [showBlocked, setShowBlocked] = useState(true);
   const [showRunning, setShowRunning] = useState(true);
+  const [showOthers, setShowOthers] = useState(true);
   // Threads blocked on the user get their own section rather than just sorting
   // first: "at the top" and "a place of its own" read differently once the list
   // is long, and this is the one group you must not scroll past.
@@ -385,7 +388,7 @@ export function Sidebar() {
 
       <LegendList
         style={s.flex1}
-        data={rest}
+        data={showOthers ? rest : EMPTY_ROWS}
         keyExtractor={(item) => item.id}
         // No entrance animation on these rows. LegendList recycles and
         // repositions row containers itself; wrapping each one in an extra
@@ -531,9 +534,17 @@ export function Sidebar() {
               ))}
             </Shelf>
 
-            {/* Everything else follows with no label of its own: it is the
-                list, not a fourth shelf, and heading it would imply a group you
-                can act on the way you can act on the other three. */}
+            {/* Everything else, headed and collapsible like its siblings. It
+                used to run on unlabelled — which left the longest group in the
+                list as the only one you could neither name nor fold away. */}
+            {rest.length ? (
+              <ShelfHeader
+                label="Others"
+                count={rest.length}
+                open={showOthers}
+                onToggle={() => setShowOthers((v) => !v)}
+              />
+            ) : null}
           </View>
         }
         ListEmptyComponent={
@@ -698,21 +709,7 @@ function Shelf({
   if (!count && !empty) return null;
   return (
     <View style={pinned ? s.shelf : undefined}>
-      <Pressable onPress={onToggle} style={({ pressed }) => [s.shelfHeader, pressed && s.rowHover]}>
-        <Ionicons
-          name={open ? "chevron-down" : "chevron-forward"}
-          size={11}
-          color={COLOR.fgFaint}
-        />
-        <Text style={s.shelfLabel}>{label}</Text>
-        {badge && count ? (
-          <View style={s.shelfBadge}>
-            <Text style={s.shelfBadgeText}>{count}</Text>
-          </View>
-        ) : (
-          <Text style={s.shelfCount}>{count}</Text>
-        )}
-      </Pressable>
+      <ShelfHeader label={label} count={count} open={open} onToggle={onToggle} badge={badge} />
       {open ? (
         !count && empty ? (
           <Text style={s.shelfEmpty}>{empty}</Text>
@@ -725,6 +722,37 @@ function Shelf({
         )
       ) : null}
     </View>
+  );
+}
+
+/** A shelf's own row. Separate from Shelf because "Others" heads the
+ *  virtualized list rather than wrapping children — a Shelf there would have to
+ *  take the whole thread list as children and lose the recycling. */
+function ShelfHeader({
+  label,
+  count,
+  open,
+  onToggle,
+  badge,
+}: {
+  label: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  badge?: boolean;
+}) {
+  return (
+    <Pressable onPress={onToggle} style={({ pressed }) => [s.shelfHeader, pressed && s.rowHover]}>
+      <Ionicons name={open ? "chevron-down" : "chevron-forward"} size={11} color={COLOR.fgFaint} />
+      <Text style={s.shelfLabel}>{label}</Text>
+      {badge && count ? (
+        <View style={s.shelfBadge}>
+          <Text style={s.shelfBadgeText}>{count}</Text>
+        </View>
+      ) : (
+        <Text style={s.shelfCount}>{count}</Text>
+      )}
+    </Pressable>
   );
 }
 
