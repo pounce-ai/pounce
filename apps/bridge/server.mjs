@@ -507,6 +507,7 @@ async function listThreads(agent, onPage) {
  *  per page so the app can render progressively instead of blocking until the
  *  whole list is built. */
 async function streamThreads(sink) {
+  const seen = [];
   const agents = await getAgents();
   // Same as getThreads: list threads for every JSONL agent that has sessions on
   // disk — NOT gated on `a.available`. History is viewable without a runnable CLI
@@ -516,15 +517,17 @@ async function streamThreads(sink) {
   const avail = agents.filter((a) => a.wire === "jsonl" && a.id !== "shell");
   for (const a of avail) {
     await listThreads(a.id, async (page) => {
-      for (const t of page) {
-        t.activity = t.isLive ? "idle" : "completed";
-        t.lastActivityAt = t.createdAt;
-        flagAwaitingPrompt(t);
-      }
+      for (const t of page) seedActivity(t);
       await resolveWorktreeOwners(page);
+      seen.push(...page);
       await sink(page);
     });
   }
+  // This path used to be the ONE that never read real activity: a client that
+  // syncs by streaming (the desktop's connect) saw every thread as idle or
+  // completed forever. Enriching afterwards can't help the pages already sent,
+  // but it fills lastKnownActivity so the next sync — by either path — is right.
+  void enrichThreadActivity(seen);
 }
 
 async function getThreads(fresh = false) {
@@ -550,11 +553,7 @@ async function getThreads(fresh = false) {
 
     // Provisional activity so the list returns fast — real activity is filled in
     // asynchronously below.
-    for (const t of threads) {
-      t.activity = t.isLive ? "idle" : "completed";
-      t.lastActivityAt = t.createdAt;
-      flagAwaitingPrompt(t);
-    }
+    for (const t of threads) seedActivity(t);
 
     // Enrich live threads with real activity from their turn history in the
     // background rather than blocking the list on it. We mutate these same
@@ -573,6 +572,33 @@ function flagAwaitingPrompt(t) {
   if (pendingPrompt(t.id)) t.activity = "awaiting_input";
 }
 
+/**
+ * The last activity we actually READ for a thread, remembered for the life of
+ * the process.
+ *
+ * The thread list is rebuilt from scratch every cache cycle and seeded with a
+ * guess, while enrichment is asynchronous and skipped whenever another pass is
+ * already running. Without a memory of the previous reading, a failed thread
+ * therefore reported `completed` again on every rebuild and went back to
+ * `failed` a moment later — and since the app polls on the same 20s period as
+ * this cache, that landed as the attention shelf dropping the thread and
+ * picking it up over and over.
+ *
+ * A remembered reading is never worse than the guess it replaces: both may be
+ * out of date, but only one of them was ever true. A pending PTY prompt is
+ * deliberately NOT remembered — that state belongs to the prompt, which
+ * `flagAwaitingPrompt` re-applies from live state on every rebuild, so caching
+ * it would strand a thread as "awaiting input" after it had been answered.
+ */
+const lastKnownActivity = new Map(); // `${agent}:${id}` -> { activity, lastActivityAt }
+
+function seedActivity(t) {
+  const known = lastKnownActivity.get(`${t.agent}:${t.id}`);
+  t.activity = known?.activity ?? (t.isLive ? "idle" : "completed");
+  t.lastActivityAt = known?.lastActivityAt ?? t.createdAt;
+  flagAwaitingPrompt(t);
+}
+
 let enrichInFlight = false;
 function enrichThreadActivity(threads) {
   if (enrichInFlight) return;
@@ -583,6 +609,12 @@ function enrichThreadActivity(threads) {
       const a = await threadActivity(t.agent, t.id);
       if (a.activity) t.activity = a.activity;
       if (a.lastActivityAt) t.lastActivityAt = a.lastActivityAt;
+      if (a.activity) {
+        lastKnownActivity.set(`${t.agent}:${t.id}`, {
+          activity: a.activity,
+          lastActivityAt: a.lastActivityAt || t.createdAt,
+        });
+      }
       flagAwaitingPrompt(t); // a pending prompt outranks transcript-derived state
     } catch {}
   }).finally(() => {
@@ -2986,7 +3018,10 @@ const server = http.createServer(async (req, res) => {
         });
       }
       if (tunnelUpdateState()?.state === "updating") {
-        return send(res, 409, { error: "an update is already running", state: tunnelUpdateState() });
+        return send(res, 409, {
+          error: "an update is already running",
+          state: tunnelUpdateState(),
+        });
       }
       // Answer BEFORE touching anything. Restarting `serve` kills the
       // connection this request arrived on when it came in over the tunnel, so

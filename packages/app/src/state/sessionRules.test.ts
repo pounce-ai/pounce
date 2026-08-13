@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Session } from "@pounce/shared";
-import { ATTENTION_GRACE_MS, needsYou, needsYouAt, rankSession } from "./sessionRules";
+import {
+  ATTENTION_GRACE_MS,
+  ATTENTION_STALE_MS,
+  needsYou,
+  needsYouAt,
+  rankSession,
+} from "./sessionRules";
 
 const NOW = Date.parse("2026-08-12T12:00:00.000Z");
 
@@ -52,6 +58,30 @@ describe("needsYouAt", () => {
   it("never hides a blocked thread behind an unparseable timestamp", () => {
     // Losing one of these is the one failure this layer must not have.
     expect(needsYouAt(session({ needsAttention: true, updatedAt: "not a date" }), NOW)).toBe(true);
+  });
+
+  it("lets a failure nobody has touched since yesterday stop being urgent", () => {
+    // The reported bug: threads aged 1d and 4d sitting in NEEDS ATTENTION.
+    const failed = session({ activity: "failed", updatedAt: ago(ATTENTION_STALE_MS) });
+    expect(needsYouAt(failed, NOW)).toBe(false);
+    expect(
+      needsYouAt(session({ activity: "failed", updatedAt: ago(4 * ATTENTION_STALE_MS) }), NOW),
+    ).toBe(false);
+  });
+
+  it("keeps a failure urgent right up to the window", () => {
+    const failed = session({ activity: "failed", updatedAt: ago(ATTENTION_STALE_MS - 1) });
+    expect(needsYouAt(failed, NOW)).toBe(true);
+  });
+
+  it("never expires a thread that is actually blocked on you", () => {
+    // Nothing is waiting on a failure; something IS waiting on these, so age
+    // must not be allowed to quietly drop them.
+    for (const s of [
+      session({ activity: "awaiting_input", updatedAt: ago(30 * ATTENTION_STALE_MS) }),
+      session({ needsAttention: true, updatedAt: ago(30 * ATTENTION_STALE_MS) }),
+    ])
+      expect(needsYouAt(s, NOW)).toBe(true);
   });
 
   it("waits, rather than never firing, when the timestamp is in the future", () => {

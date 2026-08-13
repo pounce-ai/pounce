@@ -64,14 +64,33 @@ VERSION="v$(node -p "require('./package.json').version" 2>/dev/null || echo 1.0.
 echo "▸ Creating GitHub Release ${VERSION}…"
 cd "$ROOT"
 # Upload the installer + the auto-update artifacts (update.json + bundle + any
-# BSDIFF patch). The updater fetches these by their `stable-…` names from the
-# release's /latest/download URL, so existing installs self-update.
-ASSETS=("$APP/artifacts/Pounce.dmg")
+# BSDIFF patch). The bridge's updater reads them from the rolling `bridge-latest`
+# release (see bridge-desktop/electrobun.config.ts), which is refreshed below.
+UPDATE_ASSETS=()
 for f in "$APP/artifacts/"stable-macos-*; do
   case "$f" in *.dmg) continue ;; esac   # skip the duplicate stable-*.dmg
-  ASSETS+=("$f")
+  UPDATE_ASSETS+=("$f")
 done
+[ ${#UPDATE_ASSETS[@]} -gt 0 ] || { echo "❌ no stable-macos-* update artifacts in $APP/artifacts — installs would never self-update"; exit 1; }
+ASSETS=("$APP/artifacts/Pounce.dmg" "${UPDATE_ASSETS[@]}")
+# --latest=false is load-bearing, and this script shipped without it: GitHub's
+# "latest" belongs to the macOS desktop app, whose Sparkle feed resolves through
+# releases/latest/download/appcast.xml. A bridge release that grabs "latest"
+# 404s that feed — and the URL is baked into every shipped build, so desktop
+# auto-update stays dead until the next desktop release takes the title back.
 gh release create "$VERSION" "${ASSETS[@]}" \
   --title "Pounce ${VERSION}" \
+  --latest=false \
   --notes "Signed + notarized macOS build (Apple Silicon). Download Pounce.dmg, open it, drag Pounce to Applications, launch, and scan the QR with the Pounce app. Installs from v1.0.2+ update automatically."
+
+# The rolling pointer the bridge's updater actually reads — mirrors the
+# "Refresh the rolling bridge-latest release" step in release-bridge.yml.
+# Without it a locally-cut release installs fine but never self-updates.
+if ! gh release view bridge-latest >/dev/null 2>&1; then
+  gh release create bridge-latest \
+    --title "Bridge auto-update channel" \
+    --notes "Rolling update channel for the Pounce tray app. Not a download — see the versioned releases for installers." \
+    --latest=false
+fi
+gh release upload bridge-latest --clobber "${UPDATE_ASSETS[@]}"
 echo "✅ Done — notarized build + update artifacts are live on the Releases page."

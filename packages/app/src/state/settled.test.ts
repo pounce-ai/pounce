@@ -109,12 +109,33 @@ describe("work that outranks anything recorded", () => {
     ["queued", { activity: "queued" }],
     ["flagged as needing attention", { needsAttention: true }],
   ])("refuses to hide a thread that is %s", (_label, over) => {
-    const busy = session(over as Partial<Session>);
-    expect(isSettled(busy, settledAt(LATER), OPTS)).toBe(false);
+    // Anchored to the WALL clock, not the frozen NOW above: isBusy asks needsYou,
+    // which reads Date.now(), and a failure only reads as fresh in real time.
+    const touched = new Date(Date.now() - 60_000).toISOString();
+    const cleared = new Date(Date.now() - 30_000).toISOString();
+    const busy = session({ ...(over as Partial<Session>), updatedAt: touched });
+    expect(isSettled(busy, settledAt(cleared), OPTS)).toBe(false);
     expect(canSettle(busy)).toBe(false);
-    // And auto-settle can't reach it either, however old it is.
-    const oldBusy = { ...busy, updatedAt: "2026-01-01T00:00:00.000Z" } as Session;
-    expect(isSettled(oldBusy, undefined, OPTS)).toBe(false);
+  });
+
+  it.each([
+    ["awaiting_input", { activity: "awaiting_input" }],
+    ["running", { activity: "running" }],
+    ["streaming", { activity: "streaming" }],
+    ["queued", { activity: "queued" }],
+    ["flagged as needing attention", { needsAttention: true }],
+  ])("keeps auto-settle away from a thread that is %s, however old", (_label, over) => {
+    const old = session({ ...(over as Partial<Session>), updatedAt: "2026-01-01T00:00:00.000Z" });
+    expect(isSettled(old, undefined, OPTS)).toBe(false);
+  });
+
+  it("does let the archive claim a failure nobody has touched in days", () => {
+    // The one state that stops outranking the record: a failed turn is finished,
+    // so once it is past ATTENTION_STALE_MS it is an ordinary quiet thread and
+    // the three-day rule applies to it like any other. Anything BLOCKED is
+    // covered by the case above and can never be filed away.
+    const old = session({ activity: "failed", updatedAt: "2026-01-01T00:00:00.000Z" });
+    expect(isSettled(old, undefined, OPTS)).toBe(true);
   });
 
   it("offers the gesture for a quiet thread", () => {
