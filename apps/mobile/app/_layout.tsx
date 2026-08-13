@@ -13,6 +13,7 @@ import { useThemeHex } from "@pounce/app/ui/useThemeHex";
 import { applyAppearance } from "@pounce/app/state/appearance";
 import { Providers } from "@pounce/app/components/Providers";
 import { UpdateBanner } from "@pounce/app/components/UpdateBanner";
+import { SHEET_FRACTION } from "@pounce/app/components/FilterSheet";
 import { bootstrap } from "@pounce/app/services/runtime";
 import { attachPushNavigation } from "@pounce/app/services/push";
 import { attachNotificationTapHandler, initLocalNotifications } from "@pounce/app/services/notify";
@@ -66,8 +67,15 @@ export default function RootLayout() {
       >
         <Sheet.Screen name="(main)" />
         {/* Filters as a native sheet; state is global (filters$), so the
-            sheet needs no params and Home/Search react live as chips toggle. */}
-        <Sheet.Screen name="filters" options={{ detents: ["auto", 1] }} />
+            sheet needs no params and Home/Search react live as chips toggle.
+
+            A FIXED detent, not 'auto'. 'auto' measures the content once and
+            settles on a height smaller than the content actually needs, so the
+            Done bar — pinned to the bottom of that content — ends up below the
+            bottom of the sheet. The body sizes itself against this same
+            fraction (FilterSheet's SHEET_FRACTION), which only works if the
+            number is known up front. */}
+        <Sheet.Screen name="filters" options={{ detents: [SHEET_FRACTION] }} />
         {/* Changes is a FULL screen (diff WebView + commit bar) presented as a
             draggable sheet — a large fixed detent, never 'auto' (a WebView has
             no intrinsic height to measure; the route wrapper sizes content). */}

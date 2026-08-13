@@ -44,6 +44,32 @@ export function fmtCost(cost: number): string {
   return `$${cost.toFixed(2)}`;
 }
 
+/**
+ * Bytes as a person reads them: 1_400_000_000 → "1.4 GB", 24_100_000 → "24 MB".
+ *
+ * Base 1024, because that is what `du` measured and what the Finder's
+ * "GB on disk" disagrees with by 7% — matching the measurement is the only way
+ * the number here and the number there can ever be the same number.
+ *
+ * `null` is not zero: a tree the host couldn't measure renders as "—", because
+ * "0 B" would invite deleting a directory on the grounds that it's empty.
+ */
+export function fmtBytes(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  if (n <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  // One decimal only where it changes the reading: "1.4 GB" is useful, and
+  // "847.3 MB" is three characters saying nothing.
+  const digits = i >= 3 && v < 100 ? 1 : 0;
+  return `${v.toFixed(digits).replace(/\.0$/, "")} ${units[i]}`;
+}
+
 /** Plain counts with thousands separators: 60708 → "60,708". */
 export function fmtCount(n: number): string {
   return Number.isFinite(n) ? Math.round(n).toLocaleString("en-US") : "0";

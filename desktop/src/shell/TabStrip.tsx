@@ -39,6 +39,8 @@ import { SidebarGlyph } from "./icons";
 const PANE_ICON: Record<string, React.ComponentProps<typeof Ionicons>["name"]> = {
   "/space": "folder-outline",
   "/metric": "stats-chart-outline",
+  "/disk": "server-outline",
+  "/skill": "cube-outline",
   "/settings": "settings-outline",
   "/new": "create-outline",
 };
@@ -115,11 +117,15 @@ export function TabStrip() {
           ? null
           : tab.path === "/metric"
             ? (METRIC_LABEL[tab.params.key as MetricKey] ?? "Metric")
-            : tab.path === "/settings"
-              ? "Settings"
-              : tab.path === "/new"
-                ? "New task"
-                : spaceLabel(tab.params.key, projectNames);
+            : tab.path === "/disk"
+              ? "Disk"
+              : tab.path === "/skill"
+                ? (tab.params.name ?? "Skill")
+                : tab.path === "/settings"
+                  ? "Settings"
+                  : tab.path === "/new"
+                    ? "New task"
+                    : spaceLabel(tab.params.key, projectNames);
         return (
           <Pressable
             key={tabKey(tab)}

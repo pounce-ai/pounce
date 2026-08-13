@@ -87,14 +87,45 @@ export function QuotaCard({
                 {q.planType ? <Text style={s.plan}>{q.planType}</Text> : null}
                 {stale ? <Text style={s.stale}>stale</Text> : null}
               </View>
-              {/* Agents that name a plan but publish no meter say so, rather than
-                being left out — an absent row reads as "unused", which is a
-                different and wrong claim. */}
-              {!q.windows.length && q.note ? <Text style={s.note}>{q.note}</Text> : null}
+              {/* METERS FIRST, on every card. The reported windows are the
+                headline — the one thing every agent that has them says in the
+                same shape — so they sit directly under the name, and the
+                supporting prose (a measurement of our own, or the reason there
+                is no bar) follows. Claude used to lead with three lines of
+                text and hide its bars below them, which made the one card with
+                the most to say the hardest to read at a glance. */}
+              {q.windows.map((w, i) => {
+                const pct = Math.max(0, Math.min(100, w.usedPercent));
+                // Warn before it bites, not after: amber past halfway, red near full.
+                const fill =
+                  pct >= 90
+                    ? theme.colors.danger
+                    : pct >= 60
+                      ? theme.colors.warning
+                      : theme.colors.accent;
+                const reset = untilReset(w.resetsAt, now);
+                return (
+                  // Keyed by position as well as label: an agent can report two
+                  // windows that share a name (Claude's weekly limits differ by
+                  // model, and one of them arrives unscoped), and a duplicate
+                  // key makes React reuse the wrong row.
+                  <View key={`${i}:${w.label}`} style={[s.window, stale && s.dimmed]}>
+                    <View style={s.windowHead}>
+                      <Text style={s.windowLabel}>{w.label}</Text>
+                      <Text style={s.windowPct}>{Math.round(pct)}%</Text>
+                      {reset ? <Text style={s.windowReset}>resets {reset}</Text> : null}
+                    </View>
+                    <View style={s.track}>
+                      <View style={[s.fill, { width: `${pct}%`, backgroundColor: fill }]} />
+                    </View>
+                  </View>
+                );
+              })}
               {/* Measured, not reported: no bar and no percentage, because the
                 size of the window isn't knowable locally. What IS knowable —
                 how much has gone in, how fast, when it rolls over — is worth
-                more than a fabricated gauge. */}
+                more than a fabricated gauge. Below the reported bars, because
+                it is the footnote to them and not the headline. */}
               {q.blocks?.current ? (
                 <View style={s.blockBox}>
                   <View style={s.blockHead}>
@@ -112,29 +143,10 @@ export function QuotaCard({
                   </Text>
                 </View>
               ) : null}
-              {q.windows.map((w) => {
-                const pct = Math.max(0, Math.min(100, w.usedPercent));
-                // Warn before it bites, not after: amber past halfway, red near full.
-                const fill =
-                  pct >= 90
-                    ? theme.colors.danger
-                    : pct >= 60
-                      ? theme.colors.warning
-                      : theme.colors.accent;
-                const reset = untilReset(w.resetsAt, now);
-                return (
-                  <View key={w.label} style={[s.window, stale && s.dimmed]}>
-                    <View style={s.windowHead}>
-                      <Text style={s.windowLabel}>{w.label}</Text>
-                      <Text style={s.windowPct}>{Math.round(pct)}%</Text>
-                      {reset ? <Text style={s.windowReset}>resets {reset}</Text> : null}
-                    </View>
-                    <View style={s.track}>
-                      <View style={[s.fill, { width: `${pct}%`, backgroundColor: fill }]} />
-                    </View>
-                  </View>
-                );
-              })}
+              {/* Agents that name a plan but publish no meter say so, rather than
+                being left out — an absent row reads as "unused", which is a
+                different and wrong claim. */}
+              {!q.windows.length && q.note ? <Text style={s.note}>{q.note}</Text> : null}
             </View>
           );
         })}

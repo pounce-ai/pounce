@@ -61,7 +61,7 @@ function parse(href: Href): Route {
  * a question. As a card it also had to be dismissed before you could look at
  * the very threads you were about to describe work against.
  */
-const PANES = new Set(["/space", "/metric", "/settings", "/new"]);
+const PANES = new Set(["/space", "/metric", "/disk", "/skill", "/settings", "/new"]);
 
 /**
  * Identity of an open tab: what makes two hrefs "the same thing already open".

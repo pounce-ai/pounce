@@ -214,6 +214,8 @@ const READ_ROUTES = new Set([
   "/v1/context",
   "/v1/git/changes",
   "/v1/git/checks",
+  "/v1/skills",
+  "/v1/skill",
   "/v1/file",
   "/v1/markers",
 ]);
@@ -227,7 +229,7 @@ const READ_ROUTES = new Set([
  * totals already summed across every thread on the host. There is no per-thread
  * row left to drop, so "filtering" it would be a fiction.
  */
-const FULL_ONLY_ROUTES = new Set(["/v1/quota", "/v1/activity"]);
+const FULL_ONLY_ROUTES = new Set(["/v1/quota", "/v1/activity", "/v1/disk"]);
 
 export function grantAllowsRoute(grant, method, pathname) {
   // Read-only is enforced by the verb as well as the path: several allowed

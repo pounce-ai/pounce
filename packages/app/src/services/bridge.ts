@@ -1434,6 +1434,114 @@ export async function setSettled(
   return settled ?? {};
 }
 
+/** One worktree an agent left on a machine, with what it costs and what would
+ *  be lost by taking it back. */
+export interface WorktreeRow {
+  hostId: string;
+  path: string;
+  /** The directory's own name — what the worktree is called day to day. */
+  name: string;
+  /** Project it was cut from, or null when nothing can place it. */
+  repo: string | null;
+  branch: string | null;
+  /** Agent whose threads last ran here; null when no thread claims it. */
+  agent: string | null;
+  /** Measured size, or null when the host couldn't measure it. Never 0 for
+   *  "unknown" — the two mean different things on this screen. */
+  bytes: number | null;
+  threads: number;
+  lastActivityAt: string | null;
+  idleDays: number | null;
+  /** Uncommitted files. Above zero, deleting destroys work. `null` when git
+   *  couldn't be asked at all (a pruned worktree) — which is not the same as
+   *  clean, and is never shown as such. */
+  dirtyFiles: number | null;
+  /** Commits that exist on no remote, or null when git couldn't say. */
+  unpushed: number | null;
+  lastThreadId: string | null;
+}
+
+export interface DiskReport {
+  hostId: string;
+  scannedAt: string;
+  /** Floor, not exact: rows the host couldn't measure contribute nothing. */
+  totalBytes: number;
+  unmeasured: number;
+  agents: { agent: string | null; bytes: number; worktrees: number }[];
+  worktrees: WorktreeRow[];
+}
+
+/** What a removal did, or why it declined to. */
+export type RemoveWorktreeResult =
+  | {
+      ok: true;
+      path: string;
+      branch: string | null;
+      branchDeleted: boolean;
+      unpushed: number | null;
+    }
+  | {
+      ok: false;
+      reason: "dirty";
+      /** null = the host couldn't check, not "zero files". */
+      dirtyFiles: number | null;
+      unpushed: number | null;
+      branch: string | null;
+      lastThreadId: string | null;
+      lastThreadAgent: string | null;
+    }
+  | { ok: false; reason: "unknown" | "gone" | "failed"; branch?: string | null };
+
+/**
+ * Worktree disk usage across every paired device, one report per machine.
+ *
+ * Kept per-host rather than merged: a path only means something on the machine
+ * it's on, and reclaiming space is something you do to one machine at a time.
+ */
+export async function fetchDisk(opts?: { fresh?: boolean }): Promise<DiskReport[]> {
+  const devices = await hostsToQuery();
+  const pages = await Promise.all(
+    devices.map(async (cfg) => {
+      try {
+        // Measuring trees is slow on a cold cache — a long timeout, and the
+        // host caches the answer for everyone else.
+        const r = await get<Omit<DiskReport, "hostId">>(
+          cfg,
+          `/v1/disk${opts?.fresh ? "?fresh=1" : ""}`,
+          120_000,
+        );
+        return [{ ...r, hostId: cfg.id }];
+      } catch {
+        return [];
+      }
+    }),
+  );
+  return pages.flat().sort((a, b) => b.totalBytes - a.totalBytes);
+}
+
+/**
+ * Delete one worktree on one machine.
+ *
+ * `force` is the user having been told it holds uncommitted work and said to
+ * do it anyway; `deleteBranch` is a separate answer to a separate question, and
+ * neither is ever inferred from the other.
+ */
+export async function removeWorktree(
+  hostId: string,
+  path: string,
+  opts?: { force?: boolean; deleteBranch?: boolean },
+): Promise<RemoveWorktreeResult> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) throw new Error("That machine isn't paired any more.");
+  const res = await fetch(`${await bridgeBase(cfg)}/v1/disk/worktree/remove`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+    body: JSON.stringify({ path, force: !!opts?.force, deleteBranch: !!opts?.deleteBranch }),
+  });
+  if (!res.ok) throw new Error(`bridge /v1/disk/worktree/remove -> ${res.status}`);
+  return (await res.json()) as RemoveWorktreeResult;
+}
+
 /**
  * Plan quota across every paired device. On a subscription this is the number
  * that actually means something — dollars don't exist to report. Agents with
@@ -1649,6 +1757,69 @@ export interface ContextFiles {
  * that simply has no context yet), which the screen offers to fix, so the two
  * must not collapse into the same value.
  */
+/**
+ * One skill an agent working in a project can reach.
+ *
+ * Read the way skills.sh lays them out rather than any single agent's, so
+ * `agents` is the interesting field: a skill in the shared store is only
+ * reachable by the agents whose farm links it.
+ */
+export interface SkillRow {
+  name: string;
+  description: string | null;
+  /** Canonical directory, or null when the skill is declared but not installed. */
+  path: string | null;
+  scope: "project" | "user";
+  /** Agent ids whose skill directory links this one. Empty means installed but
+   *  wired to nothing — no agent can currently use it. */
+  agents: string[];
+  /** False when `skills-lock.json` declares it and the store hasn't got it —
+   *  the state a fresh worktree is in. */
+  installed: boolean;
+  files: number;
+  bytes: number;
+  updatedAt: string | null;
+  source: { source: string; ref: string | null; kind: string | null } | null;
+}
+
+export interface SkillsReport {
+  /** Project root the skills were resolved against, or null outside a project. */
+  root: string | null;
+  skills: SkillRow[];
+}
+
+/** Skills available in a project, from one machine. Null when it can't answer —
+ *  which the caller must not render as "this project has no skills". */
+export async function fetchSkills(hostId: string, cwd: string): Promise<SkillsReport | null> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return null;
+  try {
+    return await get<SkillsReport>(cfg, `/v1/skills?cwd=${encodeURIComponent(cwd)}`, 20_000);
+  } catch {
+    return null;
+  }
+}
+
+/** One skill's SKILL.md. The host only serves a directory it just listed for
+ *  this cwd, so an unknown path is a 404 rather than a file read. */
+export async function fetchSkillDoc(
+  hostId: string,
+  cwd: string,
+  dir: string,
+): Promise<(SkillRow & { doc: string }) | null> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return null;
+  try {
+    return await get<SkillRow & { doc: string }>(
+      cfg,
+      `/v1/skill?cwd=${encodeURIComponent(cwd)}&dir=${encodeURIComponent(dir)}`,
+      20_000,
+    );
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchContextFiles(hostId: string, cwd: string): Promise<ContextFiles | null> {
   const cfg = await deviceForHost(hostId);
   if (!cfg) return null;
