@@ -10,16 +10,7 @@
  * uninterrupted.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import {
-  Animated,
-  Easing,
-  Image,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Animated, Easing, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { LegendList } from "@legendapp/list/react-native";
 import { useSelector } from "@legendapp/state/react";
@@ -86,10 +77,6 @@ const TITLE_EDGE_INSET = 10;
 
 /** Spaces shown before the list collapses behind a "N more" toggle. */
 const SPACE_LIMIT = 6;
-
-/** The account row's mark: our cat, cropped to the face and pre-masked to a
- *  circle so it needs no overflow clipping at this size. */
-const AVATAR_MARK = require("../../assets/avatar-mark.png");
 
 /** Sort order: needs-you → running → other live → archived; newest within each. */
 function rank(s: Session): number {
@@ -615,19 +602,12 @@ export function Sidebar() {
         onPress={() => router.push("/settings")}
         style={({ pressed }) => [s.account, pressed && s.accountHover]}
       >
-        {/* The mark IS the status light. A separate dot at the far end of the
-            row said the same thing a second time, at the edge of where anyone
-            looks — whereas this is the first thing in the row and already
-            carries the eye.
-
-            Our cat rather than a generic paw glyph, cropped to the face: the
-            whole badge is a beige smudge at 24pt, where the face still reads.
-            Status moved from the FILL to a ring around it, because the artwork
-            now occupies the fill — grey ring when there's nothing reachable,
-            accent when there is. */}
-        <View style={[s.avatar, connected ? s.avatarOnline : s.avatarOffline]}>
-          <Image source={AVATAR_MARK} style={s.avatarImage} />
-        </View>
+        {/* A plain light, not the cat. The artwork earned its place as an app
+            icon and lost it here: at 24pt in the corner of every window it read
+            as decoration, and decoration in the one row that reports status
+            makes the status harder to find, not easier. The dot leads the row,
+            so it is the first thing the eye crosses on the way to the name. */}
+        <View style={[s.statusDot, connected ? s.statusDotOn : s.statusDotOff]} />
         <View style={s.flex1}>
           <Text numberOfLines={1} style={s.accountName}>
             {online.length ? online.map((d) => d.name).join(", ") : "Pounce"}
@@ -1446,22 +1426,11 @@ const s = StyleSheet.create((theme) => ({
     paddingVertical: 8,
   },
   accountHover: { backgroundColor: theme.colors.surface },
-  avatar: {
-    height: 24,
-    width: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 999,
-    // The ring carries reachability now that the artwork owns the fill.
-    borderWidth: 1.5,
-  },
-  /** Inset by the ring so the two never touch and the cat stays circular. */
-  avatarImage: { height: 19, width: 19, borderRadius: 999 },
-  avatarOnline: { borderColor: theme.colors.accent },
+  statusDot: { height: 8, width: 8, borderRadius: 999 },
+  statusDotOn: { backgroundColor: theme.colors.accent },
   // Connecting counts as offline here on purpose: this is a two-state light,
-  // and a third colour mid-handshake would flicker on every reconnect. The
-  // subtitle beneath already says "Connecting…" for anyone watching.
-  avatarOffline: { borderColor: theme.colors.surfaceHover },
+  // and a third colour mid-handshake would flicker on every reconnect.
+  statusDotOff: { backgroundColor: theme.colors.surfaceHover },
   accountAction: {
     height: 24,
     width: 24,
