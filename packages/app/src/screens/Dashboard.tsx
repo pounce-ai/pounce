@@ -15,6 +15,7 @@ import { Stack, useRouter } from "expo-router";
 import { PounceIcon } from "../ui/native/Icon";
 import { AgentLogo, IS_DESKTOP } from "../ui";
 import { agentLabel } from "../ui/tokens";
+import { scaledWidth } from "../ui/layout";
 import { fmtCost, fmtCount, fmtDayLabel, fmtDelta, fmtTokens } from "../ui/format";
 import { fetchActivity, fetchQuota } from "../services/bridge";
 import { useDevices } from "../state/db/hooks";
@@ -65,6 +66,16 @@ const HEAT_TRANSITION = LinearTransition.duration(220);
 
 const PERIODS: Period[] = ["week", "month", "year"];
 
+/** The desktop column. A flat 1120 was the whole rule before, and on a 1920pt
+ *  window it left ~290pt of dead gutter down each side — the pane is wide, the
+ *  content refused to use it. 0.86 of the pane keeps a margin without donating
+ *  the window to it, the 1120 floor means a laptop-sized pane is no narrower
+ *  than it already was, and 1600 is where a stat tile row stops being scannable
+ *  in one look and the heat map goes back to being a smear. Measured off the
+ *  ScrollView, not useWindowDimensions: on macOS that reports the SCREEN, and
+ *  the pane is the window minus the sidebar minus whatever the dock took. */
+const CONTENT_WIDTH = { fraction: 0.86, min: 1120, max: 1600 };
+
 /**
  * The user's coding activity across every paired machine: a year-long heatmap,
  * headline stats for a chosen period, streaks, a trend chart, and a per-agent
@@ -82,6 +93,11 @@ export default function DashboardScreen() {
   const [selected, setSelected] = useState<string | null>(null);
   const [chartWidth, setChartWidth] = useState(0);
   const [heatWidth, setHeatWidth] = useState(0);
+  // The derived cap, not the raw measurement: below ~1300pt and above ~1860pt
+  // scaledWidth is constant, so storing the pane width made every pixel of a
+  // window drag a fresh state value and re-rendered the whole screen — and the
+  // heat grid and chart re-measured off the back of it — for identical output.
+  const [contentMax, setContentMax] = useState(CONTENT_WIDTH.min);
   const [sharing, setSharing] = useState(false);
   const shareRef = useRef<View>(null);
 
@@ -280,12 +296,21 @@ export default function DashboardScreen() {
       <ScrollView
         // iOS ties the large title to this scroll view — see ScreenRoot.
         contentInsetAdjustmentBehavior="automatic"
+        onLayout={
+          IS_DESKTOP
+            ? (e: LayoutChangeEvent) =>
+                setContentMax(scaledWidth(e.nativeEvent.layout.width, CONTENT_WIDTH))
+            : undefined
+        }
         contentContainerStyle={[
           s.content,
           // Desktop gets a capped, centred column: the same stack run edge to
           // edge across a 1400pt window leaves stat tiles a foot apart and a
           // heat-map stretched into a smear.
           IS_DESKTOP && s.contentDesktop,
+          // …but the cap follows the pane rather than being one number, or a
+          // large display pays for its width in gutter. See CONTENT_WIDTH.
+          IS_DESKTOP && { maxWidth: contentMax },
           // Desktop starts level with the sidebar's first section header, which
           // sits 9pt under its own titlebar row — both columns begin at the same
           // y instead of the content pane hanging 17pt lower. (No notch here, so
@@ -680,8 +705,9 @@ const s = StyleSheet.create((theme, rt) => ({
   // Claims the leftover height in the chart card so it can be measured; the
   // floor keeps it usable when the neighbouring card is short.
   chartFill: { flex: 1, minHeight: 96, justifyContent: "flex-end" },
+  // The cap itself is applied at the call site — it depends on the measured
+  // pane, and a number here as well would be a second source of truth.
   contentDesktop: {
-    maxWidth: 1120,
     width: "100%",
     alignSelf: "center",
     paddingHorizontal: 24,

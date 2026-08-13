@@ -40,6 +40,7 @@ import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
+  sidebarWidthFor,
 } from "./metrics";
 import SessionScreen from "@pounce/app/screens/Session";
 import SessionsScreen from "@pounce/app/screens/Sessions";
@@ -244,7 +245,13 @@ export function Shell() {
   const termThread = useThread(threadId ?? undefined);
   const termOpen = useSelector(() => isTermOpen(threadId));
   const [shellWidth, setShellWidth] = useState(0);
-  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
+  // The width the user chose, or null to follow the window. One value, because
+  // it is one fact: once someone has dragged the splitter the window's opinion
+  // is stale, and resizing (or full-screening) must not undo a width they set
+  // by hand. Keeping a width AND a "was it dragged" flag meant two things to
+  // hold in agreement, and a reset or a persisted width would have to touch both.
+  const [userWidth, setUserWidth] = useState<number | null>(null);
+  const sidebarWidth = userWidth ?? sidebarWidthFor(shellWidth);
   const sidebarStart = useRef(SIDEBAR_DEFAULT_WIDTH);
 
   // What the dock may take: everything left over once the sidebar and a
@@ -262,6 +269,8 @@ export function Shell() {
     <View
       style={s.root}
       onLayout={(e) => {
+        // Same reason the dock measures here: the sidebar's opening width is a
+        // fraction of THIS WINDOW, which Dimensions cannot tell us.
         setShellWidth(e.nativeEvent.layout.width);
         // The window's real content height — Dimensions reports the screen on
         // this platform, so the chrome can only learn this from here.
@@ -294,7 +303,7 @@ export function Shell() {
               sidebarStart.current = sidebarWidth;
             }}
             onMove={(dx) =>
-              setSidebarWidth(
+              setUserWidth(
                 Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, sidebarStart.current + dx)),
               )
             }

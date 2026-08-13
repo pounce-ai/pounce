@@ -22,7 +22,7 @@ const session = (over: Partial<Session> = {}): Session =>
     branch: null,
     worktree: null,
     cwd: null,
-    isLive: true,
+    isResumable: true,
     activity: "idle",
     needsAttention: false,
     createdAt: "2026-08-01T00:00:00.000Z",
@@ -65,7 +65,7 @@ describe("showBucket", () => {
       session({ activity: "failed" }),
       session({ activity: "awaiting_input" }),
       session({ needsAttention: true }),
-      session({ isLive: false, activity: "completed" }),
+      session({ isResumable: false, activity: "completed" }),
     ];
     const buckets: ShowBucket[] = ["needs", "active", "settled"];
     for (const s of all) {

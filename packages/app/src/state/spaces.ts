@@ -109,7 +109,7 @@ export function deriveSpaces(
       name: repoName(head.repoId),
       host: head.host,
       sessionCount: list.length,
-      liveCount: list.filter((s) => s.isLive).length,
+      liveCount: list.filter((s) => s.isResumable).length,
       live: list.some((s) => s.activity === "running" || s.activity === "streaming"),
       attention: list.filter(needsYou).length,
       agents: agentsOf(list),

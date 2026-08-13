@@ -26,8 +26,8 @@ export function LiveStrip() {
   const live = useLiveSessions();
   const fallback = useSessionsByLastActive(FALLBACK_COUNT);
   const repoNames = useProjectNames();
-  const isLive = live.length > 0;
-  const sessions = isLive ? live.slice(0, MAX_LIVE) : fallback;
+  const isResumable = live.length > 0;
+  const sessions = isResumable ? live.slice(0, MAX_LIVE) : fallback;
   if (sessions.length === 0) return null;
   return (
     <View style={s.root}>
@@ -36,8 +36,8 @@ export function LiveStrip() {
         style={({ pressed }) => [s.headerRow, pressed && s.pressed70]}
       >
         <View style={s.headerLeft}>
-          {isLive ? <View style={s.liveDot} /> : null}
-          <Text style={s.headerLabel}>{isLive ? `Live · ${live.length}` : "Recent"}</Text>
+          {isResumable ? <View style={s.liveDot} /> : null}
+          <Text style={s.headerLabel}>{isResumable ? `Live · ${live.length}` : "Recent"}</Text>
         </View>
         <Text style={s.seeAll}>See all →</Text>
       </Pressable>

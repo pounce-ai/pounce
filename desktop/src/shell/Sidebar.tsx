@@ -10,23 +10,20 @@
  * uninterrupted.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import {
-  Animated,
-  Easing,
-  Image,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Animated, Easing, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { LegendList } from "@legendapp/list/react-native";
 import { useSelector } from "@legendapp/state/react";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@pounce/shared";
-import { applyFilters, connection$, filters$, needsYou } from "@pounce/app/state/stores";
+import {
+  applyFilters,
+  connection$,
+  filters$,
+  needsYou,
+  recentlyActive,
+} from "@pounce/app/state/stores";
 import { canSettle, partitionSettled } from "@pounce/app/state/settled";
 import { draftTitle, drafts$, listDrafts, newDraft, removeDraft } from "@pounce/app/state/drafts";
 import {
@@ -52,6 +49,8 @@ import { nav$, selectSpace } from "../shims/router";
 import { deriveSpaces, spaceKeyFor, spaceKeyOf, type Space } from "./Spaces";
 import { SidebarGlyph } from "./icons";
 import { ThemeButton } from "./ThemeMenu";
+
+const EMPTY_ROWS: Session[] = [];
 
 /** Tapping the appearance button cycles system → light → dark, and the glyph
  *  shows the mode you're in — same contract as mobile's header button. */
@@ -79,15 +78,11 @@ const TITLE_EDGE_INSET = 10;
 /** Spaces shown before the list collapses behind a "N more" toggle. */
 const SPACE_LIMIT = 6;
 
-/** The account row's mark: our cat, cropped to the face and pre-masked to a
- *  circle so it needs no overflow clipping at this size. */
-const AVATAR_MARK = require("../../assets/avatar-mark.png");
-
 /** Sort order: needs-you → running → other live → archived; newest within each. */
 function rank(s: Session): number {
   if (needsYou(s)) return 0;
   if (s.activity === "running" || s.activity === "streaming") return 1;
-  if (s.isLive) return 2;
+  if (s.isResumable) return 2;
   return 3;
 }
 
@@ -186,6 +181,7 @@ export function Sidebar() {
   const [showDrafts, setShowDrafts] = useState(true);
   const [showBlocked, setShowBlocked] = useState(true);
   const [showRunning, setShowRunning] = useState(true);
+  const [showOthers, setShowOthers] = useState(true);
   // Threads blocked on the user get their own section rather than just sorting
   // first: "at the top" and "a place of its own" read differently once the list
   // is long, and this is the one group you must not scroll past.
@@ -197,16 +193,19 @@ export function Sidebar() {
   // woken when a pending thread finishes serving that period — nothing else
   // changes at that moment.
   const attentionTick = useAttentionClock(active);
-  const { blocked, running, rest } = useMemo(() => {
+  const { blocked, recent, rest } = useMemo(() => {
     const blocked: Session[] = [];
-    const running: Session[] = [];
+    const recent: Session[] = [];
     const rest: Session[] = [];
     for (const t of active) {
       if (needsYou(t)) blocked.push(t);
-      else if (t.activity === "running" || t.activity === "streaming") running.push(t);
+      // Not just "running": a thread keeps its place for a few minutes after
+      // the agent stops, so finishing a turn doesn't move the row out from
+      // under the person watching it. See RECENT_WINDOW_MS.
+      else if (recentlyActive(t)) recent.push(t);
       else rest.push(t);
     }
-    return { blocked, running, rest };
+    return { blocked, recent, rest };
   }, [active, attentionTick]);
   // Parked tasks, above the threads: a draft is the newest thing you touched
   // and the only row here that is waiting on YOU rather than on an agent.
@@ -376,7 +375,7 @@ export function Sidebar() {
 
       <LegendList
         style={s.flex1}
-        data={rest}
+        data={showOthers ? rest : EMPTY_ROWS}
         keyExtractor={(item) => item.id}
         // No entrance animation on these rows. LegendList recycles and
         // repositions row containers itself; wrapping each one in an extra
@@ -503,12 +502,12 @@ export function Sidebar() {
                 only sorted to the top, which reads as ordinary once the list is
                 long enough to scroll. */}
             <Shelf
-              label="Running"
-              count={running.length}
+              label="Recent"
+              count={recent.length}
               open={showRunning}
               onToggle={() => setShowRunning((v) => !v)}
             >
-              {running.map((item) => (
+              {recent.map((item) => (
                 <SessionRow
                   key={item.id}
                   session={item}
@@ -522,9 +521,17 @@ export function Sidebar() {
               ))}
             </Shelf>
 
-            {/* Everything else follows with no label of its own: it is the
-                list, not a fourth shelf, and heading it would imply a group you
-                can act on the way you can act on the other three. */}
+            {/* Everything else, headed and collapsible like its siblings. It
+                used to run on unlabelled — which left the longest group in the
+                list as the only one you could neither name nor fold away. */}
+            {rest.length ? (
+              <ShelfHeader
+                label="Others"
+                count={rest.length}
+                open={showOthers}
+                onToggle={() => setShowOthers((v) => !v)}
+              />
+            ) : null}
           </View>
         }
         ListEmptyComponent={
@@ -595,19 +602,12 @@ export function Sidebar() {
         onPress={() => router.push("/settings")}
         style={({ pressed }) => [s.account, pressed && s.accountHover]}
       >
-        {/* The mark IS the status light. A separate dot at the far end of the
-            row said the same thing a second time, at the edge of where anyone
-            looks — whereas this is the first thing in the row and already
-            carries the eye.
-
-            Our cat rather than a generic paw glyph, cropped to the face: the
-            whole badge is a beige smudge at 24pt, where the face still reads.
-            Status moved from the FILL to a ring around it, because the artwork
-            now occupies the fill — grey ring when there's nothing reachable,
-            accent when there is. */}
-        <View style={[s.avatar, connected ? s.avatarOnline : s.avatarOffline]}>
-          <Image source={AVATAR_MARK} style={s.avatarImage} />
-        </View>
+        {/* A plain light, not the cat. The artwork earned its place as an app
+            icon and lost it here: at 24pt in the corner of every window it read
+            as decoration, and decoration in the one row that reports status
+            makes the status harder to find, not easier. The dot leads the row,
+            so it is the first thing the eye crosses on the way to the name. */}
+        <View style={[s.statusDot, connected ? s.statusDotOn : s.statusDotOff]} />
         <View style={s.flex1}>
           <Text numberOfLines={1} style={s.accountName}>
             {online.length ? online.map((d) => d.name).join(", ") : "Pounce"}
@@ -689,21 +689,7 @@ function Shelf({
   if (!count && !empty) return null;
   return (
     <View style={pinned ? s.shelf : undefined}>
-      <Pressable onPress={onToggle} style={({ pressed }) => [s.shelfHeader, pressed && s.rowHover]}>
-        <Ionicons
-          name={open ? "chevron-down" : "chevron-forward"}
-          size={11}
-          color={COLOR.fgFaint}
-        />
-        <Text style={s.shelfLabel}>{label}</Text>
-        {badge && count ? (
-          <View style={s.shelfBadge}>
-            <Text style={s.shelfBadgeText}>{count}</Text>
-          </View>
-        ) : (
-          <Text style={s.shelfCount}>{count}</Text>
-        )}
-      </Pressable>
+      <ShelfHeader label={label} count={count} open={open} onToggle={onToggle} badge={badge} />
       {open ? (
         !count && empty ? (
           <Text style={s.shelfEmpty}>{empty}</Text>
@@ -716,6 +702,37 @@ function Shelf({
         )
       ) : null}
     </View>
+  );
+}
+
+/** A shelf's own row. Separate from Shelf because "Others" heads the
+ *  virtualized list rather than wrapping children — a Shelf there would have to
+ *  take the whole thread list as children and lose the recycling. */
+function ShelfHeader({
+  label,
+  count,
+  open,
+  onToggle,
+  badge,
+}: {
+  label: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  badge?: boolean;
+}) {
+  return (
+    <Pressable onPress={onToggle} style={({ pressed }) => [s.shelfHeader, pressed && s.rowHover]}>
+      <Ionicons name={open ? "chevron-down" : "chevron-forward"} size={11} color={COLOR.fgFaint} />
+      <Text style={s.shelfLabel}>{label}</Text>
+      {badge && count ? (
+        <View style={s.shelfBadge}>
+          <Text style={s.shelfBadgeText}>{count}</Text>
+        </View>
+      ) : (
+        <Text style={s.shelfCount}>{count}</Text>
+      )}
+    </Pressable>
   );
 }
 
@@ -839,7 +856,7 @@ function SessionRow({
 }) {
   // Archived threads (worktree gone) are history — they stay readable but drop
   // back so the live list reads first.
-  const dim = !session.isLive;
+  const dim = !session.isResumable;
   const [hover, setHover] = useState(false);
   const edgeFade = useHoverFade(hover);
   const busy = session.activity === "running" || session.activity === "streaming";
@@ -1409,22 +1426,11 @@ const s = StyleSheet.create((theme) => ({
     paddingVertical: 8,
   },
   accountHover: { backgroundColor: theme.colors.surface },
-  avatar: {
-    height: 24,
-    width: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 999,
-    // The ring carries reachability now that the artwork owns the fill.
-    borderWidth: 1.5,
-  },
-  /** Inset by the ring so the two never touch and the cat stays circular. */
-  avatarImage: { height: 19, width: 19, borderRadius: 999 },
-  avatarOnline: { borderColor: theme.colors.accent },
+  statusDot: { height: 8, width: 8, borderRadius: 999 },
+  statusDotOn: { backgroundColor: theme.colors.accent },
   // Connecting counts as offline here on purpose: this is a two-state light,
-  // and a third colour mid-handshake would flicker on every reconnect. The
-  // subtitle beneath already says "Connecting…" for anyone watching.
-  avatarOffline: { borderColor: theme.colors.surfaceHover },
+  // and a third colour mid-handshake would flicker on every reconnect.
+  statusDotOff: { backgroundColor: theme.colors.surfaceHover },
   accountAction: {
     height: 24,
     width: 24,

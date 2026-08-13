@@ -37,7 +37,7 @@ export function SessionCard({
           {session.branch ? (
             <BranchChip branch={session.branch} worktree={session.worktree} style={s.branch} />
           ) : null}
-          {!session.isLive ? <Text style={s.archived}>archived</Text> : null}
+          {!session.isResumable ? <Text style={s.archived}>archived</Text> : null}
         </View>
 
         <View style={s.footerRow}>

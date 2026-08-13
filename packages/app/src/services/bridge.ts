@@ -64,6 +64,7 @@ interface BridgeThread {
   repo: string;
   worktree: string | null;
   isWorktree: boolean;
+  /** Wire name, kept for older bridges/apps. Mapped to `isResumable`. */
   isLive: boolean;
   activity?: string | null;
   lastActivityAt?: string | null;
@@ -754,7 +755,7 @@ function buildWorkspace(
         branch: t.gitBranch ?? (t.isWorktree ? t.worktree : null),
         worktree: t.worktree,
         cwd: t.cwd,
-        isLive: t.isLive,
+        isResumable: t.isLive,
         activity,
         needsAttention,
         createdAt: createdTs,
@@ -1037,7 +1038,7 @@ export async function syncLiveData(opts?: {
           branch: t.gitBranch ?? (t.isWorktree ? t.worktree : null),
           worktree: t.worktree,
           cwd: t.cwd,
-          isLive: t.isLive,
+          isResumable: t.isLive,
           activity,
           needsAttention,
           createdAt: createdTs,

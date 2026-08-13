@@ -100,6 +100,10 @@ import {
   tunnelVersion,
 } from "./agents/tunnel-bin.mjs";
 import { runTunnelUpdate } from "./agents/tunnel-update.mjs";
+import {
+  rememberActivity,
+  seedActivity as seedFromMemo,
+} from "./agents/activity-memo.mjs";
 import { listSshHosts } from "./agents/ssh-hosts.mjs";
 
 const IS_WIN = process.platform === "win32";
@@ -450,8 +454,11 @@ function listDirs(dir) {
  * mislabel the others. resolveWorktreeOwners() rewrites `repo` from git's own
  * records; this only has to be sane for what git can't account for.
  *
- * `isLive` = the directory still exists (you can resume/steer it); otherwise
- * it's an archived session (worktree was merged + cleaned up).
+ * `isLive` = the directory still exists, i.e. the thread can be RESUMED.
+ * Not "is running" and not "is recent": it is true for almost every thread
+ * forever. The app calls it `isResumable` for that reason (three bugs came from
+ * reading this name as activity); the wire keeps `isLive` so a phone on an
+ * older build still understands a new bridge.
  */
 function repoInfo(cwd) {
   const p = normPath(cwd);
@@ -507,6 +514,7 @@ async function listThreads(agent, onPage) {
  *  per page so the app can render progressively instead of blocking until the
  *  whole list is built. */
 async function streamThreads(sink) {
+  const seen = [];
   const agents = await getAgents();
   // Same as getThreads: list threads for every JSONL agent that has sessions on
   // disk — NOT gated on `a.available`. History is viewable without a runnable CLI
@@ -516,15 +524,27 @@ async function streamThreads(sink) {
   const avail = agents.filter((a) => a.wire === "jsonl" && a.id !== "shell");
   for (const a of avail) {
     await listThreads(a.id, async (page) => {
-      for (const t of page) {
-        t.activity = t.isLive ? "idle" : "completed";
-        t.lastActivityAt = t.createdAt;
-        flagAwaitingPrompt(t);
-      }
+      for (const t of page) seedActivity(t);
       await resolveWorktreeOwners(page);
+      // Only LIVE threads, because only those get enriched below — keeping
+      // every thread from every agent alive for the length of a stream is the
+      // retention this paged path exists to avoid.
+      for (const t of page) if (t.isLive) seen.push(t);
       await sink(page);
     });
   }
+  // This path used to be the ONE that never read real activity: a client that
+  // syncs by streaming (the desktop's connect) saw every thread as idle or
+  // completed forever. Enriching afterwards can't help the pages already sent,
+  // but it fills lastKnownActivity so the next sync — by either path — is right.
+  //
+  // Newest first, matching getThreads, because enrichThreadActivity reads only
+  // the first 30 and runs one pass at a time. Left in per-agent listing order
+  // this pass would spend the only slot on whichever threads the first agent
+  // happened to return, and the concurrent poll — which wanted the newest —
+  // would find the door shut and skip.
+  seen.sort((x, y) => (y.createdAt || "").localeCompare(x.createdAt || ""));
+  void enrichThreadActivity(seen);
 }
 
 async function getThreads(fresh = false) {
@@ -550,11 +570,7 @@ async function getThreads(fresh = false) {
 
     // Provisional activity so the list returns fast — real activity is filled in
     // asynchronously below.
-    for (const t of threads) {
-      t.activity = t.isLive ? "idle" : "completed";
-      t.lastActivityAt = t.createdAt;
-      flagAwaitingPrompt(t);
-    }
+    for (const t of threads) seedActivity(t);
 
     // Enrich live threads with real activity from their turn history in the
     // background rather than blocking the list on it. We mutate these same
@@ -573,6 +589,19 @@ function flagAwaitingPrompt(t) {
   if (pendingPrompt(t.id)) t.activity = "awaiting_input";
 }
 
+/**
+ * The last real activity reading per thread, carried across list rebuilds.
+ *
+ * The rules for what may be remembered — and why a transient state must not be —
+ * live in agents/activity-memo.mjs, where they can be tested without a bridge.
+ */
+const lastKnownActivity = new Map();
+
+function seedActivity(t) {
+  seedFromMemo(lastKnownActivity, t);
+  flagAwaitingPrompt(t);
+}
+
 let enrichInFlight = false;
 function enrichThreadActivity(threads) {
   if (enrichInFlight) return;
@@ -581,8 +610,12 @@ function enrichThreadActivity(threads) {
   return mapLimit(liveThreads, 4, async (t) => {
     try {
       const a = await threadActivity(t.agent, t.id);
-      if (a.activity) t.activity = a.activity;
-      if (a.lastActivityAt) t.lastActivityAt = a.lastActivityAt;
+      if (a.activity) {
+        t.activity = a.activity;
+        if (a.lastActivityAt) t.lastActivityAt = a.lastActivityAt;
+        // Only settled readings are kept; see activity-memo.
+        rememberActivity(lastKnownActivity, t, a);
+      }
       flagAwaitingPrompt(t); // a pending prompt outranks transcript-derived state
     } catch {}
   }).finally(() => {
@@ -2986,7 +3019,10 @@ const server = http.createServer(async (req, res) => {
         });
       }
       if (tunnelUpdateState()?.state === "updating") {
-        return send(res, 409, { error: "an update is already running", state: tunnelUpdateState() });
+        return send(res, 409, {
+          error: "an update is already running",
+          state: tunnelUpdateState(),
+        });
       }
       // Answer BEFORE touching anything. Restarting `serve` kills the
       // connection this request arrived on when it came in over the tunnel, so

@@ -118,6 +118,12 @@ static void PounceStartBridge(void)
   self.window.releasedWhenClosed = NO;
 
   [self setupStatusItem];
+
+  // Arm Sparkle's scheduled check; see +startAtLaunch. This does NOT force a
+  // check — Sparkle only polls when automaticallyChecksForUpdates is on, and
+  // SUEnableAutomaticChecks=NO in Info.plist keeps that off (and Sparkle's own
+  // first-run prompt suppressed) until the user opts in.
+  [PounceUpdater startAtLaunch];
 }
 
 #pragma mark - Window lifecycle

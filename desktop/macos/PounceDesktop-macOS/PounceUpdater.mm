@@ -31,6 +31,10 @@ RCT_EXPORT_MODULE();
   return controller;
 }
 
++ (void)startAtLaunch {
+  (void)[self sharedController];
+}
+
 - (SPUStandardUpdaterController *)controllerOrNil {
   return [PounceUpdater sharedController];
 }

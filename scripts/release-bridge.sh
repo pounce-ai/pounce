@@ -64,14 +64,37 @@ VERSION="v$(node -p "require('./package.json').version" 2>/dev/null || echo 1.0.
 echo "▸ Creating GitHub Release ${VERSION}…"
 cd "$ROOT"
 # Upload the installer + the auto-update artifacts (update.json + bundle + any
-# BSDIFF patch). The updater fetches these by their `stable-…` names from the
-# release's /latest/download URL, so existing installs self-update.
-ASSETS=("$APP/artifacts/Pounce.dmg")
+# BSDIFF patch). The bridge's updater reads them from the rolling `bridge-latest`
+# release (see bridge-desktop/electrobun.config.ts), which is refreshed below.
+UPDATE_ASSETS=()
 for f in "$APP/artifacts/"stable-macos-*; do
   case "$f" in *.dmg) continue ;; esac   # skip the duplicate stable-*.dmg
-  ASSETS+=("$f")
+  UPDATE_ASSETS+=("$f")
 done
+[ ${#UPDATE_ASSETS[@]} -gt 0 ] || { echo "❌ no stable-macos-* update artifacts in $APP/artifacts — installs would never self-update"; exit 1; }
+ASSETS=("$APP/artifacts/Pounce.dmg" "${UPDATE_ASSETS[@]}")
+# --latest=false is load-bearing, and this script shipped without it: GitHub's
+# "latest" belongs to the macOS desktop app, whose Sparkle feed resolves through
+# releases/latest/download/appcast.xml. A bridge release that grabs "latest"
+# 404s that feed — and the URL is baked into every shipped build, so desktop
+# auto-update stays dead until the next desktop release takes the title back.
 gh release create "$VERSION" "${ASSETS[@]}" \
   --title "Pounce ${VERSION}" \
+  --latest=false \
   --notes "Signed + notarized macOS build (Apple Silicon). Download Pounce.dmg, open it, drag Pounce to Applications, launch, and scan the QR with the Pounce app. Installs from v1.0.2+ update automatically."
-echo "✅ Done — notarized build + update artifacts are live on the Releases page."
+
+# Deliberately NOT refreshing `bridge-latest` here. That rolling channel is what
+# every installed tray app polls, and it is shared by all platforms — but this
+# script builds macOS only. Pushing this run's assets into it would leave the
+# win/linux entries behind from whatever CI last published, against notes still
+# naming CI's version, which is the partial-set state release-bridge.yml runs
+# four platforms with `fail-fast: false` specifically to prevent. It also has no
+# equivalent of the workflow's package.json/electrobun.config.ts version gate —
+# and that value is the one the updater compares.
+#
+# So a build cut here installs but does not self-update. Run the Release Bridge
+# workflow to publish the channel; it holds the same signing secrets and does
+# the whole set.
+echo "✅ Done — notarized build is live on the Releases page."
+echo "   Note: bridge-latest was NOT refreshed. Run the Release Bridge workflow"
+echo "   to publish an update the installed tray apps will actually pick up."

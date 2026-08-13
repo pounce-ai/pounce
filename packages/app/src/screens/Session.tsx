@@ -14,6 +14,7 @@ import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import { useQuery } from "@tanstack/react-query";
 import type { LegendListRef } from "@legendapp/list/react-native";
+import { adoptedMode } from "../state/permissionModes";
 import type { PermissionMode, TimelineEvent } from "@pounce/shared";
 import { collapseToolResults, Timeline } from "../components/Timeline";
 import { deriveTaskTimeline } from "../components/taskEvents";
@@ -227,10 +228,12 @@ export default function SessionScreen() {
   const [mode, setMode] = useState<PermissionMode | undefined>(undefined);
   const [effort, setEffort] = useState<ReasoningEffort | undefined>(undefined);
   // Reflect the thread's actual permission mode (a terminal session may run in
-  // acceptEdits/plan/…) so the picker isn't stuck on default. Follows the synced
-  // mode as it changes; a local pick sticks until the host's mode next changes.
+  // acceptEdits/plan/…) so the picker isn't stuck on default — but only ever
+  // DOWNWARD. Taking over a thread that was running in acceptEdits used to move
+  // the picker, and the user with it, into approving file writes without asking.
+  // See adoptedMode: a stricter mode is adopted, a looser one is left to pick.
   useEffect(() => {
-    if (session?.permissionMode) setMode(session.permissionMode);
+    setMode((shown) => adoptedMode(shown, session?.permissionMode));
   }, [session?.permissionMode]);
   // A freshly-created thread still carries its temporary new_* id here; favouriting
   // it would orphan once live sync swaps in the real id, so gate the star on that.
@@ -527,7 +530,7 @@ export default function SessionScreen() {
   const sources = useSelector(() => sources$[id!].get()) ?? [];
   const onDropFiles = useCallback(
     (files: DroppedFile[]) => {
-      if (!session?.isLive) return;
+      if (!session?.isResumable) return;
       const cwd = session.cwd;
       const kindOf = (f: DroppedFile): ThreadSource["kind"] =>
         f.type?.startsWith("image/") || IMAGE_EXT.test(f.name)
@@ -555,7 +558,7 @@ export default function SessionScreen() {
       if (images.length) composerRef.current?.attachImages(images);
       if (mentions.length) composerRef.current?.addMentions(mentions);
     },
-    [session?.isLive, session?.cwd, session?.id, session?.agent, reportedCaps],
+    [session?.isResumable, session?.cwd, session?.id, session?.agent, reportedCaps],
   );
   // Marker overrides for this thread, live from the collection so the list
   // recomputes on every toggle.
@@ -957,6 +960,26 @@ export default function SessionScreen() {
     setQueued(queueRef.current);
   }, []);
 
+  /**
+   * Send a follow-up the drain never reached.
+   *
+   * A turn that THROWS leaves the loop through the exception, so anything still
+   * queued behind it stays there with nothing left to drain it — and, before
+   * this, still captioned "sends after the current reply". Deliberately manual:
+   * re-running automatically after a failure is how one broken turn becomes
+   * five.
+   */
+  const sendQueued = useCallback(
+    (i: number) => {
+      const item = queueRef.current[i];
+      if (!item) return;
+      queueRef.current = queueRef.current.filter((_, n) => n !== i);
+      setQueued(queueRef.current);
+      void onSubmit(item);
+    },
+    [onSubmit],
+  );
+
   // A send can strand: if the turn lands somewhere other than this thread (a
   // resume that forks into its own session, say) the host echo never arrives,
   // so the optimistic row would sit at "Sending…" forever. Timeline offers a
@@ -1045,7 +1068,17 @@ export default function SessionScreen() {
     );
   }
 
-  const canSteer = session.isLive;
+  /**
+   * Whether the composer accepts input at all.
+   *
+   * This is "the thread can be resumed", nothing more. It was named `canSend`
+   * while reading `isLive`, which promised something the app cannot do: there
+   * is no mid-turn steer path (the bridge can only write into a PTY-hosted
+   * session's prompt), so a follow-up typed during a turn is queued locally and
+   * sent when the turn ends. Naming it for what it is stops the composer
+   * offering to steer.
+   */
+  const canSend = session.isResumable;
   const caps = effectiveCaps(session.agent, reportedCaps);
   // Turn start = the newest user message; drives the elapsed readout in the
   // composer's pill row. Output tokens are estimated at ~4 chars/token —
@@ -1356,8 +1389,8 @@ export default function SessionScreen() {
                     highlight={searchHighlight}
                     anchorToId={anchorId}
                     onLongPressEvent={onLongPressEvent}
-                    onRunCommand={canSteer ? onRunCommand : undefined}
-                    onRetrySend={canSteer ? onRetrySend : undefined}
+                    onRunCommand={canSend ? onRunCommand : undefined}
+                    onRetrySend={canSend ? onRetrySend : undefined}
                     onAtBottomChange={setAtBottom}
                     onRespondPermission={(requestId, optionId) => {
                       if (session?.hostId)
@@ -1416,10 +1449,10 @@ export default function SessionScreen() {
           onStop={() => void stop()}
           onViewChanges={() => router.push(`/changes?id=${session.id}`)}
           onTerminal={() => router.push(`/terminal?id=${session.id}`)}
-          onAddSource={canSteer ? () => composerRef.current?.startMention() : undefined}
+          onAddSource={canSend ? () => composerRef.current?.startMention() : undefined}
           onRemoveSource={(p) => removeSource(session.id, p)}
           onFixConflicts={
-            canSteer
+            canSend
               ? () =>
                   composerRef.current?.insert(
                     "Resolve the merge conflicts in this worktree, then continue.",
@@ -1460,8 +1493,8 @@ export default function SessionScreen() {
               ]),
             );
           }}
-          effort={canSteer && showEffort ? { label: effortLabel, onPress: openEffort } : null}
-          mode={canSteer && showMode ? { label: modeLabel, onPress: openMode } : null}
+          effort={canSend && showEffort ? { label: effortLabel, onPress: openEffort } : null}
+          mode={canSend && showMode ? { label: modeLabel, onPress: openMode } : null}
           onClose={() => setModelSheet(false)}
         />
 
@@ -1511,7 +1544,7 @@ export default function SessionScreen() {
             {COMPOSER_OVERLAYS_LIST ? <ComposerScrim /> : null}
             <View style={[s.composerBar, s.composerBarPad]}>
               <View style={DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }}>
-                {!canSteer ? (
+                {!canSend ? (
                   <Text style={s.archivedNote}>
                     Archived session — worktree was removed. Read-only.
                   </Text>
@@ -1530,23 +1563,45 @@ export default function SessionScreen() {
                   <View style={s.queuedWrap}>
                     {queued.map((q, i) => (
                       <View key={i} style={s.queuedRow}>
-                        <PounceIcon name="time-outline" size={13} color={theme.colors.fgFaint} />
+                        <PounceIcon
+                          name={sending ? "time-outline" : "alert-circle-outline"}
+                          size={13}
+                          color={sending ? theme.colors.fgFaint : theme.colors.warning}
+                        />
                         <Text numberOfLines={1} style={s.queuedText}>
                           {q.text || (q.images.length ? "🖼️ Image" : "")}
                         </Text>
+                        {/* Stranded rows get a way out. Tapping sends this one
+                            now, which is what the label had been promising. */}
+                        {!sending ? (
+                          <Pressable onPress={() => sendQueued(i)} hitSlop={8}>
+                            <PounceIcon
+                              name="arrow-up-circle"
+                              size={15}
+                              color={theme.colors.accent}
+                            />
+                          </Pressable>
+                        ) : null}
                         <Pressable onPress={() => cancelQueued(i)} hitSlop={8}>
                           <PounceIcon name="close" size={14} color={theme.colors.fgMuted} />
                         </Pressable>
                       </View>
                     ))}
-                    <Text style={s.queuedHint}>Queued — sends after the current reply</Text>
+                    {/* The label has to match reality: with no turn in flight
+                        nothing is going to drain these, and saying otherwise
+                        leaves someone waiting on a message that never went. */}
+                    <Text style={s.queuedHint}>
+                      {sending
+                        ? "Queued — sends after the current reply"
+                        : "Not sent — the turn ended before these went"}
+                    </Text>
                   </View>
                 ) : null}
                 <Composer
                   ref={composerRef}
                   agent={session.agent}
                   caps={caps}
-                  disabled={!canSteer}
+                  disabled={!canSend}
                   running={running}
                   turnStartedAt={turnStartTs}
                   turnTokens={turnTokens}
@@ -1556,18 +1611,18 @@ export default function SessionScreen() {
                   onStop={stop}
                   onViewChanges={() => router.push(`/changes?id=${session.id}`)}
                   diffStat={diffStat}
-                  readOnly={!canSteer}
+                  readOnly={!canSend}
                   // No model selector on an archived thread — the worktree is
                   // gone, so there is no next turn for a model to apply to.
                   model={
-                    canSteer && live && !!session.cwd
+                    canSend && live && !!session.cwd
                       ? { label: modelPillLabel, onPress: () => setModelSheet(true) }
                       : null
                   }
                   // Mode lives in the Model sheet now; the pill only appears as a
                   // fallback when there's no model pill to reach that sheet through.
                   mode={
-                    canSteer && showMode && !(live && !!session.cwd)
+                    canSend && showMode && !(live && !!session.cwd)
                       ? { label: modeLabel, active: activeMode !== "default", onPress: openMode }
                       : null
                   }

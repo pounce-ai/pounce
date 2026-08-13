@@ -663,7 +663,11 @@ export function Composer({
             onSubmitKey={onEnterKey}
             editable={!disabled}
             placeholder={
-              disabled ? "Read-only" : running ? "Queue a follow-up or steer…" : placeholder
+              disabled
+                ? "Read-only"
+                : running
+                  ? "Queue a follow-up — sends when this turn ends"
+                  : placeholder
             }
             placeholderTextColor="#62626D"
             multiline

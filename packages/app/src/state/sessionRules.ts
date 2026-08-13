@@ -34,10 +34,23 @@ const inAttentionState = (s: Session): boolean =>
  * A session that wants the user's attention, and has wanted it for long enough
  * to be believed.
  *
- * `updatedAt` is when the thread entered its current state, so the elapsed time
- * needs no extra bookkeeping. A thread with a clock skewed into the future is
- * treated as not-yet-settled rather than never settling: the comparison is a
- * lower bound, so a future timestamp simply waits until the clock catches up.
+ * Nothing here ages out, deliberately. A thread leaves the attention shelf when
+ * the user says it has been dealt with (./settled — a dismissal that re-arms
+ * itself if the thread fails again) or when its state changes. Not on a clock:
+ * a shelf that quietly files things after N hours is one you cannot trust to be
+ * complete, and elapsed time was never evidence that anybody looked.
+ *
+ * `updatedAt` is the thread's LAST ACTIVITY, not the moment it entered its
+ * current state (the bridge sends `lastActivityAt`, which is a transcript
+ * timestamp). So the grace period is a lower bound on how long the thread has
+ * been QUIET — which is exactly what catches a blip, since an agent between
+ * tool calls or a turn about to retry goes quiet for a moment and then moves
+ * again. It is NOT a lower bound on the age of the state, so do not read it as
+ * one: that misreading is what once left day-old failures looking urgent.
+ *
+ * A thread with a clock skewed into the future is treated as not-yet-settled
+ * rather than never settling: the comparison is a lower bound, so a future
+ * timestamp simply waits until the clock catches up.
  */
 export function needsYouAt(s: Session, now: number): boolean {
   if (!inAttentionState(s)) return false;
@@ -62,11 +75,58 @@ export function needsYouAt(s: Session, now: number): boolean {
  */
 export const needsYou = (s: Session): boolean => needsYouAt(s, Date.now());
 
-/** Sort rank for a session list: attention → active → live → done. */
+/**
+ * WHY a thread wants you — which decides what may end it.
+ *
+ * `blocked` is a question with the cursor waiting on it: only answering ends
+ * that, so no dismissal and no clock may file it. `failed` is finished, and
+ * "I've seen it" is a real answer.
+ *
+ * This lives here, with the states themselves, rather than in ./settled — that
+ * file decides what to DO about a reason, not what the reasons are. Splitting
+ * them left two predicates in two files that had to be edited in agreement,
+ * and a fifth attention state would have silently inherited "not dismissable".
+ */
+export function attentionReason(s: Session): "blocked" | "failed" | null {
+  if (!needsYou(s)) return null;
+  return s.activity === "failed" ? "failed" : "blocked";
+}
+
+/**
+ * How long a thread keeps its place after the agent stops.
+ *
+ * A turn ending is not a reason to move the row. You watched something run,
+ * it finished, and the thread you were about to click is suddenly not where
+ * you left it — the group emptied out from under you and the thread is
+ * somewhere in a list of two hundred. The state changed; where you look for it
+ * shouldn't, not for a few minutes.
+ *
+ * Five minutes is "am I still working on this", not a cache: long enough to
+ * come back from reading the output, short enough that the group stays a
+ * summary of now rather than of this morning.
+ */
+export const RECENT_WINDOW_MS = 5 * 60 * 1000;
+
+/**
+ * Moving now, or recently enough that it should still be where it was.
+ *
+ * `updatedAt` is last-activity time, which for once is exactly the question
+ * being asked — no state-entry timestamp needed.
+ */
+export function recentlyActiveAt(s: Session, now: number): boolean {
+  if (s.activity === "running" || s.activity === "streaming") return true;
+  const since = Date.parse(s.updatedAt);
+  if (Number.isNaN(since)) return false;
+  return now - since < RECENT_WINDOW_MS;
+}
+
+export const recentlyActive = (s: Session): boolean => recentlyActiveAt(s, Date.now());
+
+/** Sort rank for a session list: attention → moving → resumable → archived. */
 export function rankSession(s: Session): number {
   if (needsYou(s)) return 0;
   if (s.activity === "running" || s.activity === "streaming") return 1;
-  if (s.isLive) return 2;
+  if (s.isResumable) return 2;
   return 3;
 }
 
