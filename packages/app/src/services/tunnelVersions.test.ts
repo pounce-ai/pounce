@@ -88,4 +88,24 @@ describe("what a row says", () => {
     expect(versionText(machine({ source: "stamp" }))).toBe("0.2.0 (recorded)");
     expect(versionText(machine({ source: "binary" }))).toBe("0.2.0");
   });
+
+  it("says a bridge is too old rather than calling the machine unreachable", () => {
+    // The state EVERY machine is in until its bridge is updated, so it has to
+    // read as a to-do and not a fault. "Can't reach" would send someone to go
+    // check a server that answered perfectly well.
+    const old = machine({ bridgeTooOld: true, version: null, installed: false });
+    expect(versionText(old)).toBe("Bridge too old to say — update it there");
+    // And it must not be mistaken for genuinely unreachable.
+    expect(versionText(machine({ reachable: false, bridgeTooOld: true }))).toBe("Can't reach");
+  });
+});
+
+describe("an out-of-date bridge in the fleet summary", () => {
+  it("counts as unknown, never as agreement", () => {
+    // It answered, but told us nothing about its tunnel. Letting it vote would
+    // make a mixed fleet look settled.
+    const d = fleetDrift([machine(), machine({ hostId: "b", bridgeTooOld: true, version: null })]);
+    expect(d.unknown).toBe(1);
+    expect(d.versions).toEqual(["0.2.0"]);
+  });
 });

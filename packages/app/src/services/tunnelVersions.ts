@@ -27,6 +27,16 @@ export interface TunnelStatus {
   readonly name: string;
   /** False when we couldn't ask. Distinct from "asked, and it has no tunnel". */
   readonly reachable: boolean;
+  /**
+   * We reached it and it has no idea what we're asking — a bridge from before
+   * the version route existed (404).
+   *
+   * Its own state, because "can't reach" would be a lie about a machine that
+   * answered, and would send someone to check whether a healthy server is down.
+   * This is the ordinary state of every machine until its bridge is updated,
+   * not a rare edge, so it has to read as a to-do rather than a fault.
+   */
+  readonly bridgeTooOld?: boolean;
   readonly installed: boolean;
   readonly running: boolean;
   readonly version: string | null;
@@ -78,6 +88,9 @@ export function fleetDrift(statuses: readonly TunnelStatus[]): FleetDrift {
  */
 export function versionText(t: TunnelStatus): string {
   if (!t.reachable) return "Can't reach";
+  // Reached it, and it predates the question. Names the fix, because the fix
+  // is on that machine and not in this app.
+  if (t.bridgeTooOld) return "Bridge too old to say — update it there";
   if (!t.installed) return "No tunnel — LAN only";
   if (!t.version) return "Unknown version";
   // Marked, because it is a weaker claim: the binary didn't say so, we did,

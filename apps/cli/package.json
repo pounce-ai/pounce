@@ -1,6 +1,6 @@
 {
   "name": "use-pounce",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Pair your phone with this machine in one command: npx use-pounce starts the Pounce bridge in the background and prints a QR to scan. Works over SSH — pairing rides an iroh p2p tunnel, no port-forwarding.",
   "keywords": [
     "claude-code",

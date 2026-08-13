@@ -34,6 +34,17 @@ interface VersionBody {
   lastUpdate?: TunnelUpdateState | null;
 }
 
+/** Carries the status so a caller can tell "it said no" from "it said what?" —
+ *  a 404 here means an older bridge, not an unreachable machine. */
+class HttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
 async function call<T>(
   cfg: DeviceConfig,
   path: string,
@@ -50,7 +61,7 @@ async function call<T>(
       headers: { ...init.headers, authorization: `Bearer ${cfg.token}` },
     });
     const body = (await res.json().catch(() => ({}))) as T & { error?: string };
-    if (!res.ok) throw new Error(body?.error || `${path} -> ${res.status}`);
+    if (!res.ok) throw new HttpError(body?.error || `${path} -> ${res.status}`, res.status);
     return body;
   } finally {
     clearTimeout(timer);
@@ -88,6 +99,14 @@ export async function readTunnel(cfg: DeviceConfig, check = false): Promise<Tunn
       error: null,
     };
   } catch (e) {
+    // A 404 is a bridge from before this route existed, NOT a machine that's
+    // down. It answered — it just doesn't know the question. Calling that
+    // "can't reach" would send someone to go check a server that is perfectly
+    // healthy, and it's the state every machine is in until its bridge is
+    // updated, so it is the common case rather than an edge one.
+    if (e instanceof HttpError && e.status === 404) {
+      return { ...base, reachable: true, bridgeTooOld: true, error: null };
+    }
     // Unreachable is its OWN state, deliberately distinct from "no tunnel" and
     // from "old tunnel". A machine we couldn't ask must never be rendered as up
     // to date, and must never be counted as drift either.
