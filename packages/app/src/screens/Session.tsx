@@ -14,6 +14,7 @@ import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
 import { useQuery } from "@tanstack/react-query";
 import type { LegendListRef } from "@legendapp/list/react-native";
+import { adoptedMode } from "../state/permissionModes";
 import type { PermissionMode, TimelineEvent } from "@pounce/shared";
 import { collapseToolResults, Timeline } from "../components/Timeline";
 import { deriveTaskTimeline } from "../components/taskEvents";
@@ -227,10 +228,12 @@ export default function SessionScreen() {
   const [mode, setMode] = useState<PermissionMode | undefined>(undefined);
   const [effort, setEffort] = useState<ReasoningEffort | undefined>(undefined);
   // Reflect the thread's actual permission mode (a terminal session may run in
-  // acceptEdits/plan/…) so the picker isn't stuck on default. Follows the synced
-  // mode as it changes; a local pick sticks until the host's mode next changes.
+  // acceptEdits/plan/…) so the picker isn't stuck on default — but only ever
+  // DOWNWARD. Taking over a thread that was running in acceptEdits used to move
+  // the picker, and the user with it, into approving file writes without asking.
+  // See adoptedMode: a stricter mode is adopted, a looser one is left to pick.
   useEffect(() => {
-    if (session?.permissionMode) setMode(session.permissionMode);
+    setMode((shown) => adoptedMode(shown, session?.permissionMode));
   }, [session?.permissionMode]);
   // A freshly-created thread still carries its temporary new_* id here; favouriting
   // it would orphan once live sync swaps in the real id, so gate the star on that.
