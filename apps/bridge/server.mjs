@@ -43,6 +43,8 @@ import {
   setMarker,
 } from "./agents/markers.mjs";
 import { baseName, createWorktreeIndex, normPath } from "./agents/worktrees.mjs";
+import { forgetSize, readDisk, removeWorktree } from "./agents/disk.mjs";
+import { readSkillDoc, readSkills } from "./agents/skills.mjs";
 import { toAtif } from "./agents/atif.mjs";
 import { resolvePermission } from "./agents/acp.mjs";
 import {
@@ -100,10 +102,7 @@ import {
   tunnelVersion,
 } from "./agents/tunnel-bin.mjs";
 import { runTunnelUpdate } from "./agents/tunnel-update.mjs";
-import {
-  rememberActivity,
-  seedActivity as seedFromMemo,
-} from "./agents/activity-memo.mjs";
+import { rememberActivity, seedActivity as seedFromMemo } from "./agents/activity-memo.mjs";
 import { listSshHosts } from "./agents/ssh-hosts.mjs";
 
 const IS_WIN = process.platform === "win32";
@@ -480,6 +479,15 @@ function repoInfo(cwd) {
 // repo-side rather than by parsing paths.
 const worktreeIndex = createWorktreeIndex({ git });
 const resolveWorktreeOwners = (threads) => worktreeIndex.resolve(threads);
+
+/** Disk report deps: the same git the rest of the server uses, `exec` adapted
+ *  to disk.mjs's (cmd, args, timeout) shape, and a real recursive delete. */
+const diskDeps = {
+  git,
+  exec: (cmd, args, timeoutMs) => exec(cmd, args, undefined, timeoutMs),
+  rm: async (dir) => rmSync(dir, { recursive: true, force: true }),
+  repoRootOf: worktreeIndex.repoRootOf,
+};
 
 async function listThreads(agent, onPage) {
   // Adapter metas carry preview already cleaned; shape + repo-fold here so the
@@ -1293,7 +1301,10 @@ async function guardScopedParams(req, url) {
   }
   // Routes addressed by a directory: allowed only inside a granted thread's
   // checkout or worktree.
-  if (["/v1/context", "/v1/git/changes", "/v1/git/checks"].includes(p)) {
+  if (["/v1/context", "/v1/git/changes", "/v1/git/checks", "/v1/skills", "/v1/skill"].includes(p)) {
+    // `/v1/skill` also takes a `dir`, but that one is checked against the
+    // skills this very cwd resolves to (see readSkillDoc) — so the cwd gate is
+    // the only one a grant needs, and a guest can't read a skill outside it.
     return pathInScope(scope, url.searchParams.get("cwd")) ? null : miss;
   }
   if (p === "/v1/file") {
@@ -2780,6 +2791,80 @@ const server = http.createServer(async (req, res) => {
           return { quota };
         }),
       );
+    }
+    // What the agents have left on disk, worktree by worktree. Sizing a tree is
+    // the expensive part and the answer barely moves, so this is cached hard;
+    // pull-to-refresh sends fresh=1, which re-measures.
+    // The skills an agent working in `cwd` can actually reach — read the way
+    // skills.sh lays them out, so this is not one agent's view (see
+    // agents/skills.mjs). Cheap enough to serve straight, but cached because a
+    // Space page asks on every visit and the answer only moves when someone
+    // installs a skill.
+    if (url.pathname === "/v1/skills") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return send(res, 400, { error: "cwd required" });
+      return send(res, 200, await cached(`skills:${cwd}`, 60_000, () => readSkills({ cwd })));
+    }
+    // One skill's SKILL.md. `dir` is checked against what readSkills returns
+    // for this cwd, so it can only ever read a skill — see readSkillDoc.
+    if (url.pathname === "/v1/skill") {
+      const cwd = url.searchParams.get("cwd");
+      const dir = url.searchParams.get("dir");
+      if (!cwd || !dir) return send(res, 400, { error: "cwd and dir required" });
+      const skill = readSkillDoc({ cwd, dir });
+      return skill
+        ? send(res, 200, skill)
+        : send(res, 404, { error: "not a skill in this project" });
+    }
+    if (url.pathname === "/v1/disk") {
+      const fresh = url.searchParams.get("fresh") === "1";
+      if (fresh) {
+        cache.delete("disk");
+        forgetSize();
+      }
+      return send(
+        res,
+        200,
+        await cached("disk", 5 * 60_000, async () => {
+          // The same list the app is looking at: a worktree is dated, and
+          // attributed to an agent, by the threads that actually ran in it.
+          const threads = await getThreads();
+          return readDisk({
+            // `sweep`, not `all`: a worktree nobody has ever opened a thread in
+            // is exactly the one still sitting there at 3GB, and the ordinary
+            // thread-side index would never have heard of it.
+            owners: await worktreeIndex.sweep(threads.map((t) => t.cwd)),
+            threads,
+            ...diskDeps,
+          });
+        }),
+      );
+    }
+    // Reclaim one worktree. A refusal (`ok:false` with a reason) is an ordinary
+    // 200: "it has uncommitted work" is an answer the app turns into a choice,
+    // not an error to show as a failure.
+    // POST, not DELETE: every other destructive action here is a POST (see
+    // /v1/devices/revoke), it carries a body without depending on how each
+    // client's fetch treats a DELETE body, and the grant check refuses every
+    // non-GET verb identically.
+    if (url.pathname === "/v1/disk/worktree/remove" && req.method === "POST") {
+      const { path: target, force, deleteBranch } = await readBody(req);
+      if (!target) return send(res, 400, { error: "path required" });
+      const result = await removeWorktree({
+        path: target,
+        force: force === true,
+        deleteBranch: deleteBranch === true,
+        owners: worktreeIndex.all(),
+        threads: await getThreads(),
+        ...diskDeps,
+      });
+      // The report and the thread list both describe a directory that no longer
+      // exists; neither may be served from cache after this.
+      if (result.ok) {
+        cache.delete("disk");
+        cache.delete("threads");
+      }
+      return send(res, 200, result);
     }
     if (url.pathname === "/v1/warm" && req.method === "POST") {
       // The app's ranking of which threads to keep hot (usage-predicted). We

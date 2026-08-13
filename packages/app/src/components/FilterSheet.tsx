@@ -67,6 +67,21 @@ export function FilterButton({ active, onPress }: { active: boolean; onPress: ()
   );
 }
 
+/**
+ * How much of the screen the filter sheet occupies on a phone.
+ *
+ * Shared with the route that presents it (apps/mobile app/_layout.tsx sets the
+ * detent, app/filters.tsx sets the matching height) because the sheet's height
+ * has to be a number BOTH of them know: the detent decides how tall the sheet
+ * is drawn, and the content has to be exactly that tall for the Done bar to sit
+ * at the bottom of the viewport rather than at the bottom of the content.
+ *
+ * Measured on the simulator rather than picked: at 0.86 the content came up
+ * ~50pt short of the sheet it was sitting in, which put a visible band of dead
+ * card under the Done bar.
+ */
+export const SHEET_FRACTION = 0.86;
+
 /** A pill filter toggle. */
 function FilterChip({
   label,
@@ -122,6 +137,11 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
           RN Modal window; lifts the sheet so the folder search isn't covered. */}
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={s.kav}>
         <Pressable style={s.backdrop} onPress={onClose} />
+        {/* This card used to CLIP everything past 92% of the window with no way
+            to reach it — and Done, being last, was the first thing to go. The
+            body inside is bounded and scrolls now, so the cap bounds it instead
+            of hiding it. No `fill`: this card has no definite height of its
+            own, so the body has to bound itself. */}
         <View style={[s.sheet, s.sheetPad, { maxHeight: Math.round(height * 0.92) }]}>
           <FilterSheetContent onClose={onClose} />
         </View>
@@ -130,9 +150,12 @@ export function FilterSheet({ visible, onClose }: { visible: boolean; onClose: (
   );
 }
 
-/** The sheet's body — shared by the RN-Modal variant above (desktop) and the
- *  native formSheet route on mobile (apps/mobile app/filters.tsx). The parent
- *  supplies the container (backdrop/sheet chrome) and vertical gap. */
+/** The sheet's body — shared by the RN-Modal variant above (desktop), the
+ *  desktop shell's routed modal card, and the native sheet route on mobile
+ *  (apps/mobile app/filters.tsx). The parent supplies only the container
+ *  (backdrop / card / sheet chrome and its padding); scrolling, the gap between
+ *  sections, and the pinned Done bar belong to the body, so all three
+ *  presentations can't disagree about whether Done is reachable. */
 /**
  * The branch / project pickers.
  *
@@ -151,7 +174,22 @@ function OptionList({ maxHeight, children }: { maxHeight: number; children: Reac
   );
 }
 
-export function FilterSheetContent({ onClose }: { onClose: () => void }) {
+export function FilterSheetContent({
+  onClose,
+  fill = false,
+}: {
+  onClose: () => void;
+  /**
+   * Does the parent give this a DEFINITE height to fill?
+   *
+   * It decides how the scrolling body is bounded, and there is no way to infer
+   * it — the desktop shell hands this component a fixed-height card (fill), and
+   * both sheet presentations hand it a container that sizes to its content
+   * (not fill), where `flex: 1` resolves to zero and the whole sheet renders as
+   * a bare Done button. Verified the hard way on the simulator.
+   */
+  fill?: boolean;
+}) {
   const { theme } = useUnistyles();
   const { height } = useWindowDimensions();
   const f = useSelector(() => filters$.get());
@@ -182,6 +220,10 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
    *  detent grows to fit this, and dragging it up to the full detent is the
    *  native way to ask for more room. */
   const folderMax = Math.round(height * 0.42);
+  /** How tall the scrolling body may get when the parent hasn't given it a
+   *  height to fill. Leaves room under it for the Done bar, its safe-area
+   *  padding and the sheet's own grabber. */
+  const bodyMax = Math.round(height * 0.72);
   const hasFilter = hasActiveFilter();
   const shownRepos = useMemo(() => {
     const q = repoQuery.trim().toLowerCase();
@@ -220,26 +262,37 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
   }, [branchOptions, f.branchQuery]);
 
   return (
-    <>
-      {/* No grabber of our own. This content is presented in a REAL native
+    <View style={fill ? s.contentFill : undefined}>
+      {/* The body scrolls; Done does not. This used to be one flat fragment the
+          callers each wrapped in their own ScrollView (or, in the RN-Modal
+          case, in nothing at all) — so with enough projects the sheet ran past
+          the bottom of the window, taking the only way to dismiss it with them.
+          Owning both halves here is what makes the three presentations agree. */}
+      <ScrollView
+        style={fill ? s.bodyFill : { maxHeight: bodyMax }}
+        contentContainerStyle={s.bodyContent}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+      >
+        {/* No grabber of our own. This content is presented in a REAL native
           sheet (see the root layout's TrueSheet navigator), which draws its own
           handle and, with `detents: ["auto", 1]`, already drags to full height —
           so the hand-rolled bar was a second handle stacked under the system
           one, doing a job the system one does better. */}
-      <View style={s.rowBetween}>
-        <Text style={s.title}>Filter</Text>
-        {hasFilter ? (
-          <Pressable
-            onPress={() => filters$.set(CLEARED_FILTERS)}
-            style={({ pressed }) => [s.clearRow, pressed && s.pressed60]}
-          >
-            <PounceIcon name="close-circle-outline" size={15} color={theme.colors.fgMuted} />
-            <Text style={s.clearText}>Clear all</Text>
-          </Pressable>
-        ) : null}
-      </View>
+        <View style={s.rowBetween}>
+          <Text style={s.title}>Filter</Text>
+          {hasFilter ? (
+            <Pressable
+              onPress={() => filters$.set(CLEARED_FILTERS)}
+              style={({ pressed }) => [s.clearRow, pressed && s.pressed60]}
+            >
+              <PounceIcon name="close-circle-outline" size={15} color={theme.colors.fgMuted} />
+              <Text style={s.clearText}>Clear all</Text>
+            </Pressable>
+          ) : null}
+        </View>
 
-      {/* Show — three DISJOINT buckets, so this multi-selects like Status does.
+        {/* Show — three DISJOINT buckets, so this multi-selects like Status does.
           The default is both live ones on and the archive off, which is the
           ordinary "my work" view; drop one to narrow, add Settled to bring the
           archive in alongside rather than instead.
@@ -248,236 +301,245 @@ export function FilterSheetContent({ onClose }: { onClose: () => void }) {
           had to change twice over: it excluded settled threads (so the word was
           a lie), and it was a SUPERSET of "Needs you" (so the two could never
           both be on, which is the thing this group now does). */}
-      <View style={s.section}>
-        <Text style={s.sectionLabel}>Show</Text>
-        <View style={s.chipsWrap}>
-          {SHOW_CHIPS.map((c) => (
-            <FilterChip
-              key={c.bucket}
-              label={c.label}
-              active={f.show.includes(c.bucket)}
-              onPress={() => toggleShow(c.bucket)}
-            />
-          ))}
-        </View>
-      </View>
-
-      {/* Status — coarse buckets over the activity axis (multi-select; none = all). */}
-      <View style={s.section}>
-        <Text style={s.sectionLabel}>Status</Text>
-        <View style={s.chipsWrap}>
-          {STATUS_CHIPS.map((c) => (
-            <FilterChip
-              key={c.bucket}
-              label={c.label}
-              active={f.statuses.includes(c.bucket)}
-              onPress={() => toggleStatus(c.bucket)}
-              icon={<View style={[s.statusDot, { backgroundColor: theme.colors[c.dot] }]} />}
-            />
-          ))}
-        </View>
-      </View>
-
-      {devices.length > 1 ? (
         <View style={s.section}>
-          <Text style={s.sectionLabel}>Device</Text>
+          <Text style={s.sectionLabel}>Show</Text>
           <View style={s.chipsWrap}>
-            {devices.map((d) => (
+            {SHOW_CHIPS.map((c) => (
               <FilterChip
-                key={d.id}
-                label={deviceLabel(d.id, d.name)}
-                active={f.device === d.id}
-                onPress={() => filters$.device.set(f.device === d.id ? null : d.id)}
-                icon={
-                  <DeviceIcon
-                    name={d.name}
-                    emoji={deviceEmoji(d.id)}
-                    color={f.device === d.id ? theme.colors.accent : theme.colors.fgMuted}
-                    size={13}
-                  />
-                }
+                key={c.bucket}
+                label={c.label}
+                active={f.show.includes(c.bucket)}
+                onPress={() => toggleShow(c.bucket)}
               />
             ))}
           </View>
         </View>
-      ) : null}
 
-      {agents.length > 1 ? (
+        {/* Status — coarse buckets over the activity axis (multi-select; none = all). */}
         <View style={s.section}>
-          <Text style={s.sectionLabel}>Agent</Text>
+          <Text style={s.sectionLabel}>Status</Text>
           <View style={s.chipsWrap}>
-            {agents.map((a) => (
+            {STATUS_CHIPS.map((c) => (
               <FilterChip
-                key={a}
-                label={agentLabel(a)}
-                active={f.agent === a}
-                onPress={() => filters$.agent.set(f.agent === a ? null : a)}
+                key={c.bucket}
+                label={c.label}
+                active={f.statuses.includes(c.bucket)}
+                onPress={() => toggleStatus(c.bucket)}
+                icon={<View style={[s.statusDot, { backgroundColor: theme.colors[c.dot] }]} />}
               />
             ))}
           </View>
         </View>
-      ) : null}
 
-      {/* Space comes before Branch: a branch only means something inside a
+        {devices.length > 1 ? (
+          <View style={s.section}>
+            <Text style={s.sectionLabel}>Device</Text>
+            <View style={s.chipsWrap}>
+              {devices.map((d) => (
+                <FilterChip
+                  key={d.id}
+                  label={deviceLabel(d.id, d.name)}
+                  active={f.device === d.id}
+                  onPress={() => filters$.device.set(f.device === d.id ? null : d.id)}
+                  icon={
+                    <DeviceIcon
+                      name={d.name}
+                      emoji={deviceEmoji(d.id)}
+                      color={f.device === d.id ? theme.colors.accent : theme.colors.fgMuted}
+                      size={13}
+                    />
+                  }
+                />
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {agents.length > 1 ? (
+          <View style={s.section}>
+            <Text style={s.sectionLabel}>Agent</Text>
+            <View style={s.chipsWrap}>
+              {agents.map((a) => (
+                <FilterChip
+                  key={a}
+                  label={agentLabel(a)}
+                  active={f.agent === a}
+                  onPress={() => filters$.agent.set(f.agent === a ? null : a)}
+                />
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {/* Space comes before Branch: a branch only means something inside a
             project ("main" exists in all of them), so you pick the place first
             and then narrow within it. */}
-      {repos.length > 1 ? (
-        <View style={s.section}>
-          <View style={s.rowBetween}>
-            <Text style={s.sectionLabel}>Space</Text>
-            {f.repos.length ? (
-              <Pressable
-                onPress={() => filters$.repos.set([])}
-                style={({ pressed }) => pressed && s.pressed60}
-              >
-                <Text style={s.clearSmall}>Clear ({f.repos.length})</Text>
-              </Pressable>
-            ) : null}
-          </View>
-          {/* Searchable, multi-select list. Tap a row to toggle it in the
+        {repos.length > 1 ? (
+          <View style={s.section}>
+            <View style={s.rowBetween}>
+              <Text style={s.sectionLabel}>Space</Text>
+              {f.repos.length ? (
+                <Pressable
+                  onPress={() => filters$.repos.set([])}
+                  style={({ pressed }) => pressed && s.pressed60}
+                >
+                  <Text style={s.clearSmall}>Clear ({f.repos.length})</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            {/* Searchable, multi-select list. Tap a row to toggle it in the
                 filter; tap the eye to permanently hide a space everywhere. */}
-          <View style={s.searchRow}>
-            <PounceIcon name="search" size={14} color={theme.colors.fgFaint} />
-            <TextInput
-              value={repoQuery}
-              onChangeText={setRepoQuery}
-              placeholder="Search spaces…"
-              placeholderTextColor={theme.colors.fgFaint}
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={[s.input, IS_DESKTOP && s.inputDesktop]}
-            />
-          </View>
-          <OptionList maxHeight={folderMax}>
-            {shownRepos.map((r) => {
-              const ignored = isRepoIgnored(r.id);
-              const selected = f.repos.includes(r.id);
-              return (
-                <View key={r.id} style={s.repoRow}>
-                  <Pressable
-                    disabled={ignored}
-                    onPress={() =>
-                      filters$.repos.set(
-                        selected ? f.repos.filter((id) => id !== r.id) : [...f.repos, r.id],
-                      )
-                    }
-                    style={({ pressed }) => [s.optionRow, s.flex1, pressed && s.pressedHover]}
-                  >
-                    <PounceIcon
-                      name={selected ? "checkbox" : "square-outline"}
-                      size={18}
-                      color={
-                        ignored
-                          ? theme.colors.fgFaint
-                          : selected
-                            ? theme.colors.accent
-                            : theme.colors.fgMuted
+            <View style={s.searchRow}>
+              <PounceIcon name="search" size={14} color={theme.colors.fgFaint} />
+              <TextInput
+                value={repoQuery}
+                onChangeText={setRepoQuery}
+                placeholder="Search spaces…"
+                placeholderTextColor={theme.colors.fgFaint}
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={[s.input, IS_DESKTOP && s.inputDesktop]}
+              />
+            </View>
+            <OptionList maxHeight={folderMax}>
+              {shownRepos.map((r) => {
+                const ignored = isRepoIgnored(r.id);
+                const selected = f.repos.includes(r.id);
+                return (
+                  <View key={r.id} style={s.repoRow}>
+                    <Pressable
+                      disabled={ignored}
+                      onPress={() =>
+                        filters$.repos.set(
+                          selected ? f.repos.filter((id) => id !== r.id) : [...f.repos, r.id],
+                        )
                       }
-                    />
-                    <PounceIcon
-                      name="folder-outline"
-                      size={13}
-                      color={ignored ? theme.colors.fgFaint : theme.colors.fgMuted}
-                    />
-                    <Text
-                      numberOfLines={1}
-                      style={[
-                        s.optionText,
-                        ignored ? s.textIgnored : selected ? s.textAccent : s.textFg,
-                      ]}
+                      style={({ pressed }) => [s.optionRow, s.flex1, pressed && s.pressedHover]}
                     >
-                      {r.name}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => toggleRepoIgnore(r.id)}
-                    hitSlop={8}
-                    style={({ pressed }) => [s.eyeBtn, pressed && s.pressed60]}
-                  >
-                    <PounceIcon
-                      name={ignored ? "eye-off" : "eye-outline"}
-                      size={15}
-                      color={ignored ? theme.colors.accent : theme.colors.fgFaint}
-                    />
-                  </Pressable>
-                </View>
-              );
-            })}
-            {shownRepos.length === 0 ? <Text style={s.emptyText}>No spaces match.</Text> : null}
-          </OptionList>
-        </View>
-      ) : null}
+                      <PounceIcon
+                        name={selected ? "checkbox" : "square-outline"}
+                        size={18}
+                        color={
+                          ignored
+                            ? theme.colors.fgFaint
+                            : selected
+                              ? theme.colors.accent
+                              : theme.colors.fgMuted
+                        }
+                      />
+                      <PounceIcon
+                        name="folder-outline"
+                        size={13}
+                        color={ignored ? theme.colors.fgFaint : theme.colors.fgMuted}
+                      />
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          s.optionText,
+                          ignored ? s.textIgnored : selected ? s.textAccent : s.textFg,
+                        ]}
+                      >
+                        {r.name}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => toggleRepoIgnore(r.id)}
+                      hitSlop={8}
+                      style={({ pressed }) => [s.eyeBtn, pressed && s.pressed60]}
+                    >
+                      <PounceIcon
+                        name={ignored ? "eye-off" : "eye-outline"}
+                        size={15}
+                        color={ignored ? theme.colors.accent : theme.colors.fgFaint}
+                      />
+                    </Pressable>
+                  </View>
+                );
+              })}
+              {shownRepos.length === 0 ? <Text style={s.emptyText}>No spaces match.</Text> : null}
+            </OptionList>
+          </View>
+        ) : null}
 
-      {/* Branch / worktree, scoped to the chosen space(s). Typing narrows the
+        {/* Branch / worktree, scoped to the chosen space(s). Typing narrows the
             list and live-filters threads by substring; tapping a row pins that
             exact value. Hidden until a space is picked: an unscoped list mixes
             every project's branches together, where a dozen identical "main"
             rows tell you nothing about which one you'd be filtering to. */}
-      {f.repos.length && branchOptions.length ? (
-        <View style={s.section}>
-          <View style={s.rowBetween}>
-            <Text style={s.sectionLabel}>Branch / worktree</Text>
-            {f.branchQuery ? (
-              <Pressable
-                onPress={() => filters$.branchQuery.set("")}
-                style={({ pressed }) => pressed && s.pressed60}
-              >
-                <Text style={s.clearSmall}>Clear</Text>
-              </Pressable>
-            ) : null}
-          </View>
-          <View style={s.searchRow}>
-            <PounceIcon name="git-branch-outline" size={14} color={theme.colors.fgFaint} />
-            <TextInput
-              value={f.branchQuery}
-              onChangeText={(t) => filters$.branchQuery.set(t)}
-              placeholder="Search branch or worktree…"
-              placeholderTextColor={theme.colors.fgFaint}
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={[s.input, IS_DESKTOP && s.inputDesktop]}
-            />
-            {f.branchQuery ? (
-              <Pressable
-                onPress={() => filters$.branchQuery.set("")}
-                hitSlop={8}
-                style={({ pressed }) => pressed && s.pressed60}
-              >
-                <PounceIcon name="close-circle" size={15} color={theme.colors.fgFaint} />
-              </Pressable>
-            ) : null}
-          </View>
-          <OptionList maxHeight={180}>
-            {shownBranches.map((b) => {
-              const active = f.branchQuery === b;
-              return (
+        {f.repos.length && branchOptions.length ? (
+          <View style={s.section}>
+            <View style={s.rowBetween}>
+              <Text style={s.sectionLabel}>Branch / worktree</Text>
+              {f.branchQuery ? (
                 <Pressable
-                  key={b}
-                  onPress={() => filters$.branchQuery.set(active ? "" : b)}
-                  style={({ pressed }) => [s.optionRow, pressed && s.pressedHover]}
+                  onPress={() => filters$.branchQuery.set("")}
+                  style={({ pressed }) => pressed && s.pressed60}
                 >
-                  <PounceIcon
-                    name={active ? "checkmark-circle" : "git-branch-outline"}
-                    size={16}
-                    color={active ? theme.colors.accent : theme.colors.fgMuted}
-                  />
-                  <Text numberOfLines={1} style={[s.optionText, active ? s.textAccent : s.textFg]}>
-                    {b}
-                  </Text>
+                  <Text style={s.clearSmall}>Clear</Text>
                 </Pressable>
-              );
-            })}
-            {shownBranches.length === 0 ? (
-              <Text style={s.emptyText}>No branches match.</Text>
-            ) : null}
-          </OptionList>
-        </View>
-      ) : null}
+              ) : null}
+            </View>
+            <View style={s.searchRow}>
+              <PounceIcon name="git-branch-outline" size={14} color={theme.colors.fgFaint} />
+              <TextInput
+                value={f.branchQuery}
+                onChangeText={(t) => filters$.branchQuery.set(t)}
+                placeholder="Search branch or worktree…"
+                placeholderTextColor={theme.colors.fgFaint}
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={[s.input, IS_DESKTOP && s.inputDesktop]}
+              />
+              {f.branchQuery ? (
+                <Pressable
+                  onPress={() => filters$.branchQuery.set("")}
+                  hitSlop={8}
+                  style={({ pressed }) => pressed && s.pressed60}
+                >
+                  <PounceIcon name="close-circle" size={15} color={theme.colors.fgFaint} />
+                </Pressable>
+              ) : null}
+            </View>
+            <OptionList maxHeight={180}>
+              {shownBranches.map((b) => {
+                const active = f.branchQuery === b;
+                return (
+                  <Pressable
+                    key={b}
+                    onPress={() => filters$.branchQuery.set(active ? "" : b)}
+                    style={({ pressed }) => [s.optionRow, pressed && s.pressedHover]}
+                  >
+                    <PounceIcon
+                      name={active ? "checkmark-circle" : "git-branch-outline"}
+                      size={16}
+                      color={active ? theme.colors.accent : theme.colors.fgMuted}
+                    />
+                    <Text
+                      numberOfLines={1}
+                      style={[s.optionText, active ? s.textAccent : s.textFg]}
+                    >
+                      {b}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+              {shownBranches.length === 0 ? (
+                <Text style={s.emptyText}>No branches match.</Text>
+              ) : null}
+            </OptionList>
+          </View>
+        ) : null}
+      </ScrollView>
 
-      <Pressable onPress={onClose} style={({ pressed }) => [s.doneBtn, pressed && s.pressed90]}>
-        <Text style={s.doneText}>Done</Text>
-      </Pressable>
-    </>
+      {/* Pinned under the scroller, in its own bar: applying the filters is the
+          one control that must be reachable from anywhere in the list, and it
+          is the only way out of the RN-Modal variant. */}
+      <View style={s.footer}>
+        <Pressable onPress={onClose} style={({ pressed }) => [s.doneBtn, pressed && s.pressed90]}>
+          <Text style={s.doneText}>Done</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
@@ -587,8 +649,23 @@ const s = StyleSheet.create((theme, rt) => ({
   repoRow: { flexDirection: "row", alignItems: "center" },
   flex1: { flex: 1 },
   eyeBtn: { paddingHorizontal: 8, paddingVertical: 8 },
+  /** Only for a parent with a definite height (see the `fill` prop). Under a
+   *  content-measured sheet these collapse to nothing, which is why the sheets
+   *  bound the body with an explicit `maxHeight` instead. */
+  contentFill: { flex: 1 },
+  bodyFill: { flex: 1 },
+  /** The gap the callers used to pass in their own contentContainerStyle —
+   *  it belongs to the body now that the body lives here. */
+  bodyContent: { gap: 16, paddingBottom: 8 },
+  footer: {
+    // Never squeezed by the scroller above it.
+    flexShrink: 0,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bgElevated,
+    paddingTop: 10,
+  },
   doneBtn: {
-    marginTop: 4,
     height: 48,
     alignItems: "center",
     justifyContent: "center",

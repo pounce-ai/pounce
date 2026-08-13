@@ -159,6 +159,18 @@ export default function MainLayout() {
           return pushed(METRIC_TITLE[key as MetricKey] ?? "Metric");
         }}
       />
+      {/* Same drill-down treatment: reached from the Activity dashboard's disk
+          tile, and read as a page rather than dismissed as a sheet. */}
+      <Stack.Screen name="disk" options={pushed("Disk")} />
+      <Stack.Screen
+        name="skill"
+        options={({ route }) => {
+          // The skill's own name, passed by the row that opened it, so the
+          // header is right on the first frame instead of after the fetch.
+          const name = (route.params as { name?: string } | undefined)?.name;
+          return pushed(name || "Skill");
+        }}
+      />
       <Stack.Screen
         name="space"
         options={({ route }) => {

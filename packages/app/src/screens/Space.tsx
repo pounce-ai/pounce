@@ -45,6 +45,7 @@ import {
 import { CHART_GUTTER, UsageChart } from "../components/UsageChart";
 import { bucketByMonth } from "../components/usageSeries";
 import { ContextEditor } from "../components/ContextEditor";
+import { SkillsCard } from "../components/SkillsCard";
 import { PeriodPicker } from "../components/PeriodPicker";
 import { PounceIcon } from "../ui/native/Icon";
 import type { IoniconName } from "../ui/native/icon-map";
@@ -523,6 +524,10 @@ function SpaceDetail({ space, sessions }: { space: Space; sessions: Session[] })
           </Text>
         )}
       </View>
+      {/* What the agents in this project can actually DO. Below context,
+          because the context files are this project's instructions and the
+          skills are the ones it borrows. */}
+      {cwd ? <SkillsCard hostId={space.hostId} cwd={cwd} /> : null}
     </ScrollView>
   );
 }

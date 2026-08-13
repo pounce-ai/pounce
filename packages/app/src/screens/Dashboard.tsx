@@ -16,8 +16,8 @@ import { PounceIcon } from "../ui/native/Icon";
 import { AgentLogo, IS_DESKTOP } from "../ui";
 import { agentLabel } from "../ui/tokens";
 import { scaledWidth } from "../ui/layout";
-import { fmtCost, fmtCount, fmtDayLabel, fmtDelta, fmtTokens } from "../ui/format";
-import { fetchActivity, fetchQuota } from "../services/bridge";
+import { fmtBytes, fmtCost, fmtCount, fmtDayLabel, fmtDelta, fmtTokens } from "../ui/format";
+import { fetchActivity, fetchDisk, fetchQuota } from "../services/bridge";
 import { useDevices } from "../state/db/hooks";
 import { ConnectFlow } from "../components/ConnectFlow";
 import {
@@ -124,6 +124,30 @@ export default function DashboardScreen() {
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
+
+  // Worktree disk. Its own query because it answers a different question from
+  // everything else here ("what is on the disk now", not "what happened in this
+  // period") and because measuring folder trees is slow enough that it must
+  // never hold up the numbers above it — the tile shows "—" until it lands.
+  const diskQ = useQuery({
+    queryKey: ["disk"],
+    queryFn: () => fetchDisk(),
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const diskBytes = useMemo(
+    () => (diskQ.data ?? []).reduce((n, r) => n + r.totalBytes, 0),
+    [diskQ.data],
+  );
+  const diskWorktrees = useMemo(
+    () => (diskQ.data ?? []).reduce((n, r) => n + r.worktrees.length, 0),
+    [diskQ.data],
+  );
+  // NO machine answered — which is not the same as a machine answering "none".
+  // `fetchDisk` swallows per-host failures and returns the reports it got, so an
+  // empty list means nobody could be asked; rendering that as "0 B · nothing
+  // left behind" states as fact the very thing we failed to find out.
+  const diskAnswered = (diskQ.data?.length ?? 0) > 0;
 
   // One zero-filled year drives every view below, so the heatmap, the stats and
   // the streaks can never disagree about a day.
@@ -322,6 +346,13 @@ export default function DashboardScreen() {
             refreshing={q.isFetching && !q.isLoading}
             onRefresh={() => {
               forceFresh.current = true;
+              // Everything this screen shows, not just the series: the quota and
+              // disk readings have their own long stale times, so a pull that
+              // refreshed only the history left two cards sitting on answers
+              // from up to five minutes ago — including a disk figure that had
+              // failed and cached its failure.
+              void quotaQ.refetch();
+              void diskQ.refetch();
               return q.refetch();
             }}
             tintColor={theme.colors.fgMuted}
@@ -461,7 +492,7 @@ export default function DashboardScreen() {
               for turns an agent actually priced (see the caveat below). */}
             <Animated.View layout={HEAT_TRANSITION}>
               <View style={[s.tileWrap, IS_DESKTOP && s.rowDesktop]}>
-                <View style={[s.tiles, IS_DESKTOP && s.flex1]}>
+                <View style={[s.tiles, IS_DESKTOP && s.flex2]}>
                   <StatTile
                     label="Tokens"
                     value={fmtTokens(now.tokens)}
@@ -502,7 +533,7 @@ export default function DashboardScreen() {
                     onPress={() => openMetric("spend")}
                   />
                 </View>
-                <View style={[s.tiles, IS_DESKTOP && s.flex1]}>
+                <View style={[s.tiles, IS_DESKTOP && s.flex2]}>
                   <StatTile
                     label="Sessions"
                     value={fmtCount(now.sessions)}
@@ -516,6 +547,34 @@ export default function DashboardScreen() {
                     delta={fmtDelta(delta(now.messages, before.messages))}
                     icon="git-commit-outline"
                     onPress={() => openMetric("messages")}
+                  />
+                </View>
+                {/* Its own row, not a third tile beside Sessions and Messages:
+                    a StatTile is 130pt at its narrowest, and three of them plus
+                    the gaps overflow a 402pt phone — the third was clipped off
+                    the right edge.
+
+                    The only tile that isn't about the period, too: disk is a
+                    reading of right now, and changing the picker above cannot
+                    change it. It belongs here anyway, because this is where the
+                    costs of the work are listed and worktrees left behind are
+                    the one cost that never shows up until the disk is full. */}
+                <View style={[s.tiles, IS_DESKTOP && s.flex1]}>
+                  <StatTile
+                    label="Worktree disk"
+                    value={diskAnswered ? fmtBytes(diskBytes) : "—"}
+                    hint={
+                      diskQ.isPending
+                        ? "measuring…"
+                        : !diskAnswered
+                          ? "no machine answered"
+                          : diskWorktrees
+                            ? `${fmtCount(diskWorktrees)} ${diskWorktrees === 1 ? "worktree" : "worktrees"}`
+                            : "nothing left behind"
+                    }
+                    icon="server-outline"
+                    inverse
+                    onPress={() => router.push("/disk")}
                   />
                 </View>
               </View>
@@ -702,6 +761,11 @@ const s = StyleSheet.create((theme, rt) => ({
   // content left the four tiles bottoming out on three different lines.
   rowDesktop: { flexDirection: "row", alignItems: "stretch" },
   flex1: { flex: 1 },
+  /** A group of TWO tiles, beside a group of one. Proportional to the tile
+   *  count so every tile on the row ends up the same width — a lone tile in a
+   *  `flex: 1` group took a full third of the row and squeezed the four beside
+   *  it until "Estimated spend" clipped its own chevron. */
+  flex2: { flex: 2 },
   // Claims the leftover height in the chart card so it can be measured; the
   // floor keeps it usable when the neighbouring card is short.
   chartFill: { flex: 1, minHeight: 96, justifyContent: "flex-end" },

@@ -51,7 +51,12 @@ export function StatTile({
     <>
       <View style={s.labelRow}>
         {icon ? <PounceIcon name={icon} size={11} color={theme.colors.fgFaint} /> : null}
-        <Text style={s.label}>{label}</Text>
+        {/* Shrinkable and single-line: the chevron and the icon are fixed, so
+            without this a long label ("Estimated spend") pushes the chevron out
+            of the tile rather than ellipsizing inside it. */}
+        <Text numberOfLines={1} style={s.label}>
+          {label}
+        </Text>
         {onPress ? (
           <PounceIcon name="chevron-forward" size={11} color={theme.colors.fgFaint} />
         ) : null}
@@ -114,6 +119,7 @@ const s = StyleSheet.create((theme) => ({
   pressed: { opacity: 0.72 },
   labelRow: { flexDirection: "row", alignItems: "center", gap: 4 },
   label: {
+    flexShrink: 1,
     fontSize: 11,
     fontWeight: "600",
     textTransform: "uppercase",

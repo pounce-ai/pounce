@@ -154,5 +154,39 @@ export function createWorktreeIndex({ git, exists = existsSync, store } = {}) {
     return threads;
   }
 
-  return { resolve, ownerPathFor, worktreesOf, repoRootOf };
+  /**
+   * Re-ask every repo behind these directories what worktrees it has, and
+   * return the full map.
+   *
+   * `resolve` deliberately only sweeps directories it can't already place —
+   * that's what keeps the thread list cheap. The consequence is that a worktree
+   * NO THREAD HAS EVER RUN IN is never learned: its siblings are all placed, so
+   * nothing triggers a sweep of their repo. That's invisible when the question
+   * is "which project does this thread belong to", and wrong when the question
+   * is "what is on the disk" — an unused worktree is still gigabytes, and is
+   * the likeliest thing to be abandoned. So this asks unconditionally.
+   */
+  async function sweep(cwds = []) {
+    const dirs = [...new Set([...cwds, ...known].map(normPath))].filter((p) => p && exists(p));
+    const roots = new Set(
+      (await Promise.all(dirs.map((d) => repoRootOf(d).catch(() => null)))).filter(Boolean),
+    );
+    const swept = await Promise.all([...roots].map((r) => worktreesOf(r).catch(() => [])));
+    let learned = false;
+    for (const [p, name] of swept.flat()) {
+      if (owners.get(p) === name) continue;
+      owners.set(p, name);
+      learned = true;
+    }
+    if (learned) known = keys();
+    return all();
+  }
+
+  /** Every worktree path this index has ever learned → its owning repo name.
+   *  A copy, so a caller can't edit the index by holding its map. Includes
+   *  paths whose directory is gone; callers that care about disk filter those
+   *  out themselves (see agents/disk.mjs). */
+  const all = () => ({ ...owners.all() });
+
+  return { resolve, sweep, ownerPathFor, worktreesOf, repoRootOf, all };
 }

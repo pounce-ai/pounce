@@ -16,7 +16,7 @@
  * them onto this layout.
  */
 import { useRef, useState, type ComponentType } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
@@ -44,6 +44,8 @@ import {
 } from "./metrics";
 import SessionScreen from "@pounce/app/screens/Session";
 import SessionsScreen from "@pounce/app/screens/Sessions";
+import DiskScreen from "@pounce/app/screens/Disk";
+import SkillScreen from "@pounce/app/screens/Skill";
 import SearchScreen from "@pounce/app/screens/Search";
 import SettingsScreen from "@pounce/app/screens/Settings";
 import SettingsDevicesScreen from "@pounce/app/screens/settings/Devices";
@@ -98,14 +100,16 @@ function settingsModals(): Record<string, ModalEntry> {
 /** Filters as a routed modal card (same href as mobile) — the shared sheet
  *  body with the shell's standard scrim/card instead of a phone bottom sheet. */
 function FiltersModal() {
+  // A plain View, not a ScrollView: the sheet body scrolls itself and keeps its
+  // Done bar pinned below that scroller. Wrapping it in a second scroller put
+  // Done at the end of the scrolled content, so it slid off the bottom of the
+  // card exactly when a long filter list made it hardest to reach.
   return (
-    <ScrollView
-      style={s.filtersBody}
-      contentContainerStyle={{ gap: 16, paddingBottom: 32 }}
-      keyboardShouldPersistTaps="handled"
-    >
-      <FilterSheetContent onClose={() => nav$.modal.set(null)} />
-    </ScrollView>
+    <View style={s.filtersBody}>
+      {/* `fill`: this card HAS a definite height (see MODALS), so the body
+          flexes into it and pins Done to the bottom. */}
+      <FilterSheetContent fill onClose={() => nav$.modal.set(null)} />
+    </View>
   );
 }
 
@@ -121,6 +125,8 @@ function FiltersModal() {
 const PANE_SCREENS: Record<string, ComponentType> = {
   "/space": SpaceScreen,
   "/metric": MetricScreen,
+  "/disk": DiskScreen,
+  "/skill": SkillScreen,
   "/settings": SettingsScreen,
   "/new": NewTaskScreen,
 };

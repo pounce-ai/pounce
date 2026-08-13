@@ -30,13 +30,32 @@ dollars for every session, some report nothing because you're on a flat-rate
 plan where per-session dollars would be fiction, and some report usage against
 a rate limit instead. Pounce shows each of those as what it is.
 
-So a small-looking number next to a busy project usually means *not
-attributable* rather than *free*. Where a total is an estimate rather than a
+So a small-looking number next to a busy project usually means _not
+attributable_ rather than _free_. Where a total is an estimate rather than a
 figure an agent reported, it's labelled as one.
 
 Per-machine totals and per-project totals answer different questions and don't
 always reconcile — an org billing total can't be split across the projects it
 paid for.
+
+## Disk
+
+Agents working in parallel cut git worktrees, and nothing cuts them back. The
+**Worktree disk** tile totals what they're holding across every paired machine;
+opening it breaks that down by agent and lists every worktree, biggest first.
+
+Each row says what deleting it would cost — how long it's been idle, how many
+files are uncommitted, and how many commits exist on no remote. Anything idle
+for ten days with nothing uncommitted is marked **clearable**.
+
+Deleting removes the folder and keeps the branch, unless you choose _Delete
+branch too_. If a worktree has uncommitted changes the machine refuses the
+first time and offers you the thread that made them, so the choice is finish
+the work or knowingly throw it away — never a folder that quietly vanishes with
+your changes in it.
+
+Only worktrees are listed. The checkouts you work in yourself are never shown
+and can't be deleted from here.
 
 ## Per project
 
@@ -45,7 +64,7 @@ project's sessions, so you can see what one repository has cost without
 untangling it from everything else on the machine.
 
 There's no year heatmap there, on purpose: a 53-week grid measures how
-consistent *you* are, which is a fair question about you and the wrong one
+consistent _you_ are, which is a fair question about you and the wrong one
 about a project. Projects get worked in bursts and then go quiet.
 
 ## Search
