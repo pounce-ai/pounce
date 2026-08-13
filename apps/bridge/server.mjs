@@ -100,6 +100,10 @@ import {
   tunnelVersion,
 } from "./agents/tunnel-bin.mjs";
 import { runTunnelUpdate } from "./agents/tunnel-update.mjs";
+import {
+  rememberActivity,
+  seedActivity as seedFromMemo,
+} from "./agents/activity-memo.mjs";
 import { listSshHosts } from "./agents/ssh-hosts.mjs";
 
 const IS_WIN = process.platform === "win32";
@@ -583,29 +587,15 @@ function flagAwaitingPrompt(t) {
 }
 
 /**
- * The last activity we actually READ for a thread, remembered for the life of
- * the process.
+ * The last real activity reading per thread, carried across list rebuilds.
  *
- * The thread list is rebuilt from scratch every cache cycle and seeded with a
- * guess, while enrichment is asynchronous and skipped whenever another pass is
- * already running. Without a memory of the previous reading, a failed thread
- * therefore reported `completed` again on every rebuild and went back to
- * `failed` a moment later — and since the app polls on the same 20s period as
- * this cache, that landed as the attention shelf dropping the thread and
- * picking it up over and over.
- *
- * A remembered reading is never worse than the guess it replaces: both may be
- * out of date, but only one of them was ever true. A pending PTY prompt is
- * deliberately NOT remembered — that state belongs to the prompt, which
- * `flagAwaitingPrompt` re-applies from live state on every rebuild, so caching
- * it would strand a thread as "awaiting input" after it had been answered.
+ * The rules for what may be remembered — and why a transient state must not be —
+ * live in agents/activity-memo.mjs, where they can be tested without a bridge.
  */
-const lastKnownActivity = new Map(); // `${agent}:${id}` -> { activity, lastActivityAt }
+const lastKnownActivity = new Map();
 
 function seedActivity(t) {
-  const known = lastKnownActivity.get(`${t.agent}:${t.id}`);
-  t.activity = known?.activity ?? (t.isLive ? "idle" : "completed");
-  t.lastActivityAt = known?.lastActivityAt ?? t.createdAt;
+  seedFromMemo(lastKnownActivity, t);
   flagAwaitingPrompt(t);
 }
 
@@ -620,12 +610,8 @@ function enrichThreadActivity(threads) {
       if (a.activity) {
         t.activity = a.activity;
         if (a.lastActivityAt) t.lastActivityAt = a.lastActivityAt;
-        // No createdAt fallback here — seedActivity owns what an unknown
-        // timestamp means, and two places deciding that is how they drift.
-        lastKnownActivity.set(`${t.agent}:${t.id}`, {
-          activity: a.activity,
-          lastActivityAt: a.lastActivityAt,
-        });
+        // Only settled readings are kept; see activity-memo.
+        rememberActivity(lastKnownActivity, t, a);
       }
       flagAwaitingPrompt(t); // a pending prompt outranks transcript-derived state
     } catch {}
