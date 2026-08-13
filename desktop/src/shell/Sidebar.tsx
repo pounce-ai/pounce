@@ -26,7 +26,13 @@ import { useSelector } from "@legendapp/state/react";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@pounce/shared";
-import { applyFilters, connection$, filters$, needsYou } from "@pounce/app/state/stores";
+import {
+  applyFilters,
+  connection$,
+  filters$,
+  needsYou,
+  recentlyActive,
+} from "@pounce/app/state/stores";
 import { canSettle, partitionSettled } from "@pounce/app/state/settled";
 import { draftTitle, drafts$, listDrafts, newDraft, removeDraft } from "@pounce/app/state/drafts";
 import {
@@ -197,16 +203,19 @@ export function Sidebar() {
   // woken when a pending thread finishes serving that period — nothing else
   // changes at that moment.
   const attentionTick = useAttentionClock(active);
-  const { blocked, running, rest } = useMemo(() => {
+  const { blocked, recent, rest } = useMemo(() => {
     const blocked: Session[] = [];
-    const running: Session[] = [];
+    const recent: Session[] = [];
     const rest: Session[] = [];
     for (const t of active) {
       if (needsYou(t)) blocked.push(t);
-      else if (t.activity === "running" || t.activity === "streaming") running.push(t);
+      // Not just "running": a thread keeps its place for a few minutes after
+      // the agent stops, so finishing a turn doesn't move the row out from
+      // under the person watching it. See RECENT_WINDOW_MS.
+      else if (recentlyActive(t)) recent.push(t);
       else rest.push(t);
     }
-    return { blocked, running, rest };
+    return { blocked, recent, rest };
   }, [active, attentionTick]);
   // Parked tasks, above the threads: a draft is the newest thing you touched
   // and the only row here that is waiting on YOU rather than on an agent.
@@ -503,12 +512,12 @@ export function Sidebar() {
                 only sorted to the top, which reads as ordinary once the list is
                 long enough to scroll. */}
             <Shelf
-              label="Running"
-              count={running.length}
+              label="Recent"
+              count={recent.length}
               open={showRunning}
               onToggle={() => setShowRunning((v) => !v)}
             >
-              {running.map((item) => (
+              {recent.map((item) => (
                 <SessionRow
                   key={item.id}
                   session={item}

@@ -304,6 +304,7 @@ export {
   isDotName,
   needsYou,
   rankSession,
+  recentlyActive,
   showBucket,
   showNarrowed,
   type ShowBucket,

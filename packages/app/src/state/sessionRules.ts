@@ -92,6 +92,36 @@ export function attentionReason(s: Session): "blocked" | "failed" | null {
   return s.activity === "failed" ? "failed" : "blocked";
 }
 
+/**
+ * How long a thread keeps its place after the agent stops.
+ *
+ * A turn ending is not a reason to move the row. You watched something run,
+ * it finished, and the thread you were about to click is suddenly not where
+ * you left it — the group emptied out from under you and the thread is
+ * somewhere in a list of two hundred. The state changed; where you look for it
+ * shouldn't, not for a few minutes.
+ *
+ * Five minutes is "am I still working on this", not a cache: long enough to
+ * come back from reading the output, short enough that the group stays a
+ * summary of now rather than of this morning.
+ */
+export const RECENT_WINDOW_MS = 5 * 60 * 1000;
+
+/**
+ * Moving now, or recently enough that it should still be where it was.
+ *
+ * `updatedAt` is last-activity time, which for once is exactly the question
+ * being asked — no state-entry timestamp needed.
+ */
+export function recentlyActiveAt(s: Session, now: number): boolean {
+  if (s.activity === "running" || s.activity === "streaming") return true;
+  const since = Date.parse(s.updatedAt);
+  if (Number.isNaN(since)) return false;
+  return now - since < RECENT_WINDOW_MS;
+}
+
+export const recentlyActive = (s: Session): boolean => recentlyActiveAt(s, Date.now());
+
 /** Sort rank for a session list: attention → active → live → done. */
 export function rankSession(s: Session): number {
   if (needsYou(s)) return 0;

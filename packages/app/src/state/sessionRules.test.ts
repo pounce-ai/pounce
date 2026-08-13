@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Session } from "@pounce/shared";
-import { ATTENTION_GRACE_MS, needsYou, needsYouAt, rankSession } from "./sessionRules";
+import {
+  ATTENTION_GRACE_MS,
+  needsYou,
+  needsYouAt,
+  RECENT_WINDOW_MS,
+  rankSession,
+  recentlyActiveAt,
+} from "./sessionRules";
 
 const NOW = Date.parse("2026-08-12T12:00:00.000Z");
 
@@ -108,5 +115,35 @@ describe("rankSession", () => {
   it("does not rank a thread as attention during its grace period", () => {
     const fresh = session({ needsAttention: true, updatedAt: new Date().toISOString() });
     expect(rankSession(fresh)).not.toBe(0);
+  });
+});
+
+describe("keeping a row where you left it", () => {
+  it("holds a thread's place for a few minutes after the turn stops", () => {
+    // The complaint this answers: you watch a turn finish and the row you were
+    // about to click has moved out of the group, into a list of two hundred.
+    const justDone = session({ activity: "idle", updatedAt: ago(60_000) });
+    expect(recentlyActiveAt(justDone, NOW)).toBe(true);
+  });
+
+  it("lets it go once the window has passed", () => {
+    const older = session({ activity: "idle", updatedAt: ago(RECENT_WINDOW_MS + 1) });
+    expect(recentlyActiveAt(older, NOW)).toBe(false);
+  });
+
+  it("always counts a turn that is actually moving", () => {
+    // Even if its timestamp is stale — a long tool call reports nothing for
+    // minutes, and the group would empty while the agent is mid-sentence.
+    for (const activity of ["running", "streaming"] as const) {
+      expect(recentlyActiveAt(session({ activity, updatedAt: ago(60 * 60_000) }), NOW)).toBe(true);
+    }
+  });
+
+  it("does not hold a place on an unreadable timestamp", () => {
+    // The safe direction here is the opposite of needsYou's: this only decides
+    // WHERE a row sits, so guessing "recent" would pin junk to the top group.
+    expect(recentlyActiveAt(session({ activity: "idle", updatedAt: "not a date" }), NOW)).toBe(
+      false,
+    );
   });
 });
