@@ -17,13 +17,32 @@
  */
 import type { PermissionMode } from "@pounce/shared";
 
-/** How much a mode allows. Ordered, so "more permissive" is a comparison. */
+/**
+ * How much a mode allows. Ordered, so "more permissive" is a comparison.
+ *
+ * These names are ours, not any agent's. Claude Code calls them `normal` and
+ * `auto`; agents/claude.mjs maps those onto this vocabulary and turns anything
+ * it does not recognise into null, so an unfamiliar mode never arrives here.
+ */
 const PERMISSIVENESS: Record<PermissionMode, number> = {
   plan: 0,
   default: 1,
   acceptEdits: 2,
   bypassPermissions: 3,
 };
+
+/**
+ * An unknown mode ranks as maximally permissive, so it can never be adopted
+ * over something the user is showing.
+ *
+ * Not theoretical: this is a hardcoded list, one of three that have to agree
+ * (the union in @pounce/shared, the bridge's per-agent alias map, and the
+ * picker's own options). A mode added to one and not the others would otherwise
+ * sail past the check below — `undefined > 1` is false, which reads as "not an
+ * escalation" and adopts it. Failing closed costs a stale picker; failing open
+ * costs a permission nobody granted.
+ */
+const rank = (m: PermissionMode): number => PERMISSIVENESS[m] ?? Number.POSITIVE_INFINITY;
 
 /**
  * The mode to display, given what is shown now and what the host reports.
@@ -37,7 +56,7 @@ export function adoptedMode(
 ): PermissionMode | undefined {
   if (!reported) return shown;
   if (!shown) return reported;
-  return PERMISSIVENESS[reported] > PERMISSIVENESS[shown] ? shown : reported;
+  return rank(reported) > rank(shown) ? shown : reported;
 }
 
 /** Whether moving from `shown` to `reported` would loosen what an agent may do
@@ -47,5 +66,5 @@ export function isEscalation(
   reported: PermissionMode | null | undefined,
 ): boolean {
   if (!shown || !reported) return false;
-  return PERMISSIVENESS[reported] > PERMISSIVENESS[shown];
+  return rank(reported) > rank(shown);
 }

@@ -54,3 +54,23 @@ describe("naming the dangerous transition", () => {
     expect(isEscalation("default", null)).toBe(false);
   });
 });
+
+describe("a mode we have never heard of", () => {
+  it("is never adopted over something the user is showing", () => {
+    // Three hardcoded lists have to agree: the union in @pounce/shared, the
+    // bridge's per-agent alias map (Claude's own `auto`/`normal` land here as
+    // acceptEdits/default), and the picker's options. Add a mode to one and not
+    // the others and an unranked string reaches this code — where `undefined >
+    // 1` is false, which reads as "not an escalation" and lets it through.
+    const unknown = "yoloMode" as never;
+    expect(adoptedMode("default", unknown)).toBe("default");
+    expect(adoptedMode("plan", unknown)).toBe("plan");
+    expect(isEscalation("default", unknown)).toBe(true);
+  });
+
+  it("still yields to a mode we do understand", () => {
+    // Nothing known is more permissive than something unrankable, so a real
+    // mode is an improvement on it.
+    expect(adoptedMode("yoloMode" as never, "plan")).toBe("plan");
+  });
+});
