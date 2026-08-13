@@ -41,6 +41,7 @@ import {
   SettingsPage,
 } from "../../components/settings/primitives";
 import { DeviceIcon, fmtDuration } from "../../ui";
+import { deviceStatusText } from "../../services/deviceProvenance";
 import { settingsTitle } from "./routes";
 
 type ScannerProps = { onScan: (data: string) => void; onCancel: () => void };
@@ -228,12 +229,13 @@ export default function DevicesScreen() {
                     <DeviceIcon
                       name={d.name}
                       emoji={deviceEmoji(d.id)}
+                      addedVia={d.addedVia}
                       color={d.online ? theme.colors.fg : theme.colors.fgFaint}
                       size={22}
                     />
                   }
                   label={deviceLabel(d.id, d.name)}
-                  value={d.online ? "Online" : "Offline"}
+                  value={deviceStatusText(d)}
                   accessory={
                     <View style={s.rowActions}>
                       <View style={[s.dot, d.online ? s.dotOn : s.dotOff]} />

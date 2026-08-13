@@ -38,6 +38,7 @@ import {
 } from "../state/stores";
 import { type ActivityPage, mergeActivity } from "./activity";
 import { applyBridgeToken, deviceId, resolveAdoption, resolvePairing } from "./deviceIdentity";
+import { addedViaFor, type AddedVia } from "./deviceProvenance";
 import type { SettleOverrides } from "../state/settled";
 import { clearNotify, notifyOnce } from "./notify";
 import { alertAwaitingSessions } from "./promptAlerts";
@@ -119,6 +120,18 @@ export interface DeviceConfig extends BridgeConfig {
    * rotate its own token — an update, a reinstall — without dropping us.
    */
   readonly adopted?: boolean;
+  /**
+   * How this machine got into the list.
+   *
+   * Worth recording rather than inferring. A machine added over SSH is a
+   * REMOTE one: its `url` is an address on its own network that nothing here
+   * can reach, so it lives or dies by its tunnel — which makes "Offline" mean
+   * something quite different for it than for a Mac on the same Wi-Fi, and
+   * makes the difference worth showing. Absent on everything paired before
+   * this existed, which reads as the ordinary case and is correct: SSH is the
+   * only path that sets it.
+   */
+  readonly addedVia?: AddedVia;
 }
 
 const DEVICES_KEY = "pounce.devices";
@@ -158,9 +171,15 @@ async function probeBridgeId(
   }
 }
 
+/** Stamp provenance on rows stored before we recorded it — see addedViaFor. */
+function backfillAddedVia(d: DeviceConfig): DeviceConfig {
+  const addedVia = addedViaFor(d);
+  return addedVia === d.addedVia ? d : { ...d, addedVia };
+}
+
 export async function listDeviceConfigs(): Promise<DeviceConfig[]> {
   const raw = await SecureStore.getItemAsync(DEVICES_KEY);
-  if (raw) return JSON.parse(raw) as DeviceConfig[];
+  if (raw) return (JSON.parse(raw) as DeviceConfig[]).map(backfillAddedVia);
   // migrate legacy single-bridge config
   const old = await SecureStore.getItemAsync(BRIDGE_KEY);
   if (old) {
@@ -205,7 +224,10 @@ async function writeDeviceConfigs(list: DeviceConfig[]): Promise<void> {
  *  off-LAN, the terms the access was given on, and — for a machine added over
  *  SSH — the name it calls itself, which we learn on the far side before the
  *  machine is reachable at all and which beats naming a server after its IP. */
-type DeviceExtras = Pick<DeviceConfig, "nodeId" | "relay" | "tunnelToken" | "grant" | "name">;
+type DeviceExtras = Pick<
+  DeviceConfig,
+  "nodeId" | "relay" | "tunnelToken" | "grant" | "name" | "addedVia"
+>;
 
 export async function addDeviceConfig(
   url: string,
@@ -866,6 +888,7 @@ export async function syncLiveDataStreaming(): Promise<{
           agents: agentsAvail as Device["agents"],
           sessionCount: 0,
           lastSyncAt: now,
+          addedVia: cfg.addedVia,
         };
         upsertHosts([
           { id: cfg.id, nodeId: cfg.id, name: deviceName, online, lastSeenAt: now } satisfies Host,
@@ -899,6 +922,7 @@ export async function syncLiveDataStreaming(): Promise<{
           agents: agentsAvail as Device["agents"],
           sessionCount: threadsByDevice[cfg.id].threads.length,
           lastSyncAt: now,
+          addedVia: cfg.addedVia,
         };
       }
       if (online && agentsReported === 0) daemonDown.push(deviceName);
@@ -984,6 +1008,7 @@ export async function syncLiveData(opts?: {
         agents: agentsAvail as Device["agents"],
         sessionCount: threads.length,
         lastSyncAt: now,
+        addedVia: cfg.addedVia,
       };
       upsertHosts([
         {
