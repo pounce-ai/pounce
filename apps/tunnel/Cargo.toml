@@ -1,6 +1,9 @@
 [package]
 name = "pounce-tunnel"
-version = "0.1.0"
+# Read at runtime by `pounce-tunnel version`, which is how the app tells one
+# machine's tunnel from another's — so this and the `tunnel-v*` release tag MUST
+# agree. The release workflow refuses to run if they don't.
+version = "0.2.0"
 edition = "2021"
 description = "Iroh p2p tunnel for the Pounce bridge: `serve` accepts authed QUIC streams on the Mac and proxies them to the bridge's HTTP port; `client` exposes a local TCP port that dials the serve side — the same logic the phone embeds via FFI."
 

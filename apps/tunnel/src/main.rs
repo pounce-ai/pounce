@@ -23,9 +23,28 @@ use tokio::net::{TcpListener, TcpStream};
 
 fn usage() -> ! {
     eprintln!(
-        "usage:\n  pounce-tunnel serve  --token <t> [--target 127.0.0.1:8099] [--key <path>] [--info <path>]\n  pounce-tunnel client --token <t> --node <node-id> [--relay <url>] [--listen 127.0.0.1:8098]"
+        "usage:\n  pounce-tunnel serve   --token <t> [--target 127.0.0.1:8099] [--key <path>] [--info <path>]\n  pounce-tunnel client  --token <t> --node <node-id> [--relay <url>] [--listen 127.0.0.1:8098]\n  pounce-tunnel version [--json]"
     );
     std::process::exit(2);
+}
+
+/// What this binary is, for the fleet's benefit.
+///
+/// Two different numbers, and conflating them would be a mistake. `version` is
+/// the release — what drifts between machines and what an update closes. `proto`
+/// is the ALPN, which is the actual interoperability boundary: iroh refuses a
+/// connection whose ALPN doesn't match, so two machines on the same `proto` can
+/// always talk to each other however far their releases have drifted, and two on
+/// different ones can never talk at all. That distinction is what lets a fleet be
+/// updated a machine at a time instead of all at once.
+fn print_version(json: bool) {
+    let version = env!("CARGO_PKG_VERSION");
+    let proto = String::from_utf8_lossy(ALPN).to_string();
+    if json {
+        println!(r#"{{"version":"{version}","proto":"{proto}"}}"#);
+    } else {
+        println!("pounce-tunnel {version} ({proto})");
+    }
 }
 
 fn arg(args: &[String], name: &str) -> Option<String> {
@@ -36,6 +55,13 @@ fn arg(args: &[String], name: &str) -> Option<String> {
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mode = args.first().map(String::as_str);
+    // Answered before anything else, and without touching the network, a key or
+    // a port: whoever is asking may be an update check on a machine whose tunnel
+    // is currently broken, and "what are you" must still be answerable then.
+    if matches!(mode, Some("version") | Some("--version") | Some("-V")) {
+        print_version(args.iter().any(|a| a == "--json"));
+        return Ok(());
+    }
     let token = arg(&args, "--token")
         .or_else(|| std::env::var("BRIDGE_TOKEN").ok())
         .unwrap_or_else(|| "pounce-bridge-local".into());
