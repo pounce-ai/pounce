@@ -174,5 +174,10 @@ export function saveSshDevice(device: SshDevice): Promise<DeviceConfig> {
     nodeId: device.nodeId,
     relay: device.relay,
     name: device.hostName,
+    // Remembered, not guessed. Without it a server added this way is
+    // indistinguishable in Settings from a Mac on the same Wi-Fi — same icon,
+    // same bare "Offline" — when in fact it is only ever reachable through its
+    // tunnel, which is exactly what you need to know when it stops answering.
+    addedVia: "ssh",
   });
 }

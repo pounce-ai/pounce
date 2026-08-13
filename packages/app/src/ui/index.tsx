@@ -22,6 +22,7 @@ import { openSheet } from "./sheet";
 // them here so call sites keep importing everything from "../ui".
 export { COLOR, AGENT_LABEL, AGENT_HEX, agentLabel } from "./tokens";
 import { agentLabel } from "./tokens";
+import { type AddedVia, deviceIconFor } from "../services/deviceProvenance";
 
 /** Real brand logos for agents (Claude, Codex, OpenCode, Grok, …). */
 export { AgentLogo };
@@ -117,15 +118,10 @@ export function pickSheet(
   );
 }
 
-/** Infer a device-type icon from the machine's name (Mac mini, MacBook, etc.). */
-export function deviceIconName(name: string): IoniconName {
-  const n = name.toLowerCase();
-  if (/(macbook|laptop|\bbook\b|\bair\b|notebook)/.test(n)) return "laptop-outline";
-  if (/(iphone|ipad|phone|mobile|android|pixel)/.test(n)) return "phone-portrait-outline";
-  if (/(server|ssh|\bvm\b|ec2|remote|cloud|linux|ubuntu|debian|docker|droplet|\bpi\b)/.test(n))
-    return "server-outline";
-  // mini / studio / imac / mac pro / tower / desktop → a desktop Mac
-  return "desktop-outline";
+/** A device-type icon — provenance first, name heuristic as the fallback.
+ *  The rule itself lives in services/deviceProvenance so it can be tested. */
+export function deviceIconName(name: string, addedVia?: AddedVia): IoniconName {
+  return deviceIconFor(name, addedVia) as IoniconName;
 }
 
 export function DeviceIcon({
@@ -133,12 +129,15 @@ export function DeviceIcon({
   color,
   size = 14,
   emoji,
+  addedVia,
 }: {
   name: string;
   color: ColorValue;
   size?: number;
   /** When set, replaces the inferred device glyph with the user's emoji. */
   emoji?: string;
+  /** Known provenance, which outranks the name heuristic. */
+  addedVia?: AddedVia;
 }) {
   if (emoji) {
     return (
@@ -147,7 +146,7 @@ export function DeviceIcon({
       </Text>
     );
   }
-  return <PounceIcon name={deviceIconName(name)} size={size} color={color} />;
+  return <PounceIcon name={deviceIconName(name, addedVia)} size={size} color={color} />;
 }
 
 /** Agent identity: real brand logo + name. The single, uniform way to show an

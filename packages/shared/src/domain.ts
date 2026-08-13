@@ -245,6 +245,13 @@ export interface Device {
   readonly agents: readonly AgentId[];
   readonly sessionCount: number;
   readonly lastSyncAt: ISODateString;
+  /**
+   * How the machine was added, when that changes what it IS. `ssh` means a
+   * remote server bootstrapped over SSH: its `url` belongs to its own network,
+   * so it is reachable only through its tunnel. Undefined for everything
+   * paired on the LAN or by QR.
+   */
+  readonly addedVia?: "ssh";
 }
 
 /** A repository groups its sessions (worktrees). Never shows worktree paths. */
