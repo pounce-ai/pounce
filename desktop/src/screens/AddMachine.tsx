@@ -16,7 +16,7 @@
  * identity. After that the machine is an ordinary device dialled over iroh,
  * which is why it also turns up on your phone, where there is no SSH.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -49,7 +49,12 @@ import {
   type SshHost,
   type SshState,
 } from "@pounce/app/services/ssh";
-import { syncLiveDataStreaming } from "@pounce/app/services/bridge";
+import {
+  listDeviceConfigs,
+  syncLiveDataStreaming,
+  type DeviceConfig,
+} from "@pounce/app/services/bridge";
+import { addedHostKeys, isHostAdded, parseTarget } from "@pounce/app/services/sshHosts";
 import { COLOR, INPUT_TWEAKS } from "@pounce/app/ui";
 
 /** Terminal control sequences, and the block characters the CLI's QR is drawn
@@ -130,6 +135,13 @@ export default function AddMachineScreen() {
   const [justAdded, setJustAdded] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [hosts, setHosts] = useState<SshHost[] | null>(null);
+  /** The machines already in the list, so a suggestion can say so. Read from
+   *  the stored configs rather than the synced device rows: a machine that has
+   *  been added but not yet reached is still added. */
+  const [devices, setDevices] = useState<DeviceConfig[]>([]);
+  /** The suggestion whose bootstrap we've asked for but not yet heard back on.
+   *  Short, but it's the gap between pressing Add and the screen changing. */
+  const [starting, setStarting] = useState<string | null>(null);
   const scroller = useRef<ScrollView>(null);
   const stopStream = useRef<(() => void) | null>(null);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -145,16 +157,21 @@ export default function AddMachineScreen() {
   // nobody is listening to.
   useEffect(() => stopWatching, [stopWatching]);
 
+  const refreshAdded = useCallback(async () => {
+    setDevices(await listDeviceConfigs().catch(() => []));
+  }, []);
+
   const refreshHosts = useCallback(async () => {
     // null means "haven't looked yet" and drives the spinner; an empty array is
     // a real answer and says so on screen.
     setHosts(null);
+    void refreshAdded();
     try {
       setHosts((await listSshHosts()).hosts);
     } catch {
       setHosts([]);
     }
-  }, []);
+  }, [refreshAdded]);
 
   useEffect(() => {
     void refreshHosts();
@@ -166,10 +183,12 @@ export default function AddMachineScreen() {
       setStartError(null);
       setLog("");
       setJustAdded(null);
+      setStarting(pick ? pick.name : null);
       // "user@host" is how everybody writes it, so accept it in the host field
-      // rather than insisting the parts go in separate boxes.
-      const typed = pick ? pick.name : host;
-      const [typedUser, typedHost] = typed.includes("@") ? typed.split("@") : [null, typed];
+      // rather than insisting the parts go in separate boxes. Split by the same
+      // parser the suggestion list matches with, so the machine we dial and the
+      // machine we call "Added" can't come apart.
+      const { user: typedUser, host: typedHost } = parseTarget(pick ? pick.name : host);
       // A config alias already carries its own user and port; what's in the
       // form wins only when the person put it there themselves.
       const chosenUser = pick ? pick.user || user : user || typedUser;
@@ -198,6 +217,8 @@ export default function AddMachineScreen() {
         }, 3_000);
       } catch (e) {
         setStartError(String((e as Error)?.message || e));
+      } finally {
+        setStarting(null);
       }
     },
     [host, user, sshPort, stopWatching],
@@ -229,7 +250,10 @@ export default function AddMachineScreen() {
     if (!state?.device) return;
     setSaving(true);
     try {
-      const dev = await saveSshDevice(state.device);
+      // The target we dialled, not the name that came back — that's the half
+      // the suggestion list needs to recognise this machine again.
+      const dev = await saveSshDevice(state.device, state.host);
+      void refreshAdded();
       // Pull its threads in now, so the machine isn't an empty row until the
       // next sync tick.
       void syncLiveDataStreaming().catch(() => {});
@@ -243,7 +267,7 @@ export default function AddMachineScreen() {
     } finally {
       setSaving(false);
     }
-  }, [state, reset]);
+  }, [state, reset, refreshAdded]);
 
   const lines = cleanLines(log);
   // The transcript should use the sheet it is in. Roughly half the window,
@@ -258,6 +282,9 @@ export default function AddMachineScreen() {
   const suggestions = (hosts ?? [])
     .filter((h) => !query || h.name.toLowerCase().includes(query))
     .slice(0, MAX_SUGGESTIONS);
+  // Indexed once per device list rather than once per row: the list re-renders
+  // on every keystroke, and only the suggestion side of the comparison changes.
+  const added = useMemo(() => addedHostKeys(devices), [devices]);
 
   return (
     <View style={s.root}>
@@ -327,20 +354,42 @@ export default function AddMachineScreen() {
                   <ActivityIndicator size="small" />
                 </View>
               ) : suggestions.length ? (
-                suggestions.map((h, i) => (
-                  <SettingsRow
-                    key={`${h.source}:${h.name}`}
-                    // A config alias is a machine you named; a known_hosts entry
-                    // is only somewhere you've been. Same row, different glyph —
-                    // the list stays one list.
-                    icon={h.source === "config" ? "bookmark-outline" : "time-outline"}
-                    label={h.name}
-                    value={describeHost(h)}
-                    divided={i > 0}
-                    onPress={() => begin(h)}
-                    accessory={<Text style={s.ghostLabel}>Add</Text>}
-                  />
-                ))
+                suggestions.map((h, i) => {
+                  // A machine you already have is still worth listing — seeing
+                  // it is how you know it's handled — but offering to add it
+                  // again is work you'd do for nothing, so the row stops being
+                  // a button and says where it got to instead.
+                  const have = isHostAdded(h, added);
+                  const busy = starting === h.name;
+                  const accessory = busy ? (
+                    <ActivityIndicator size="small" />
+                  ) : have ? (
+                    <View style={s.addedTag}>
+                      <PounceIcon name="checkmark-circle" size={14} color={COLOR.success} />
+                      <Text style={s.addedTagLabel}>Added</Text>
+                    </View>
+                  ) : (
+                    <Text style={s.ghostLabel}>Add</Text>
+                  );
+                  return (
+                    <SettingsRow
+                      key={`${h.source}:${h.name}`}
+                      // A config alias is a machine you named; a known_hosts entry
+                      // is only somewhere you've been. Same row, different glyph —
+                      // the list stays one list.
+                      icon={h.source === "config" ? "bookmark-outline" : "time-outline"}
+                      label={h.name}
+                      value={describeHost(h)}
+                      divided={i > 0}
+                      // Dimmed only while it's working. An added machine is a
+                      // fact rather than a disabled control, and greying it out
+                      // would read as "unavailable" — it's the opposite.
+                      disabled={busy}
+                      onPress={have ? undefined : () => begin(h)}
+                      accessory={accessory}
+                    />
+                  );
+                })
               ) : (
                 <View style={s.suggestEmpty}>
                   <Text style={s.hint}>
@@ -521,6 +570,8 @@ const s = StyleSheet.create((theme) => ({
   fieldGrow: { flex: 1 },
 
   refresh: { flexDirection: "row", alignItems: "center", gap: 4 },
+  addedTag: { flexDirection: "row", alignItems: "center", gap: 4 },
+  addedTagLabel: { fontSize: 12.5, fontWeight: "500", color: theme.colors.fgMuted },
   suggestEmpty: { alignItems: "center", justifyContent: "center", paddingVertical: 20 },
 
   statusRow: { flexDirection: "row", alignItems: "center", gap: 10 },

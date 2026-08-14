@@ -10,6 +10,7 @@
  * Kept free of react-native imports so the rules can be tested directly; the
  * screens and the icon component are thin callers.
  */
+import { hostFromUrl } from "./deviceIdentity";
 
 /** The only provenance worth recording so far — the one that changes what the
  *  machine IS, rather than merely how it was introduced. */
@@ -59,6 +60,22 @@ export function deviceIconFor(name: string, addedVia?: AddedVia): string {
 }
 
 /**
+ * The hosts that mean "wherever this is running", not a machine.
+ *
+ * One list, because anything that recognises loopback has to recognise all of
+ * it: a second copy elsewhere is a copy that will be missing whichever form
+ * gets added next. Both the `[::1]` a URL carries and the bare `::1` a hostname
+ * does are here for the same reason.
+ */
+export const LOOPBACK_HOSTS: ReadonlySet<string> = new Set([
+  "127.0.0.1",
+  "localhost",
+  "::1",
+  "[::1]",
+  "0.0.0.0",
+]);
+
+/**
  * Is this the machine the app itself is running on?
  *
  * The desktop pairs with its own bridge over loopback, so a loopback url is the
@@ -66,7 +83,8 @@ export function deviceIconFor(name: string, addedVia?: AddedVia): string {
  * host is only information when it is somewhere else.
  */
 export function isThisMachine(url: string): boolean {
-  return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i.test(url.trim());
+  const host = hostFromUrl(url.trim());
+  return !!host && LOOPBACK_HOSTS.has(host.toLowerCase());
 }
 
 /**
