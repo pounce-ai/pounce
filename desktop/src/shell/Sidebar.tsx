@@ -860,6 +860,7 @@ function SessionRow({
   const [hover, setHover] = useState(false);
   const edgeFade = useHoverFade(hover);
   const busy = session.activity === "running" || session.activity === "streaming";
+  const runStart = useRunStart(session.id, busy);
   return (
     <Pressable
       onPress={onPress}
@@ -902,7 +903,8 @@ function SessionRow({
                 <RunningTag
                   label={
                     <>
-                      Working <TimeAgo iso={session.updatedAt} />
+                      Working{runStart ? " " : ""}
+                      {runStart ? <TimeAgo iso={runStart} /> : null}
                     </>
                   }
                 />
@@ -1076,6 +1078,37 @@ function PeersButton() {
       {waiting ? <View style={s.peerBadge} /> : null}
     </Pressable>
   );
+}
+
+/**
+ * When did this thread's CURRENT run start?
+ *
+ * `session.updatedAt` bumps on every event the agent emits, so a "Working 7s"
+ * measured from it reports time since the last tool call, not how long the agent
+ * has been working — it visibly counts up and snaps back to zero every few
+ * seconds. It was reporting the wrong quantity from the day the tag landed; the
+ * live <TimeAgo/> only made it obvious.
+ *
+ * There is no turn-start timestamp on `Session` (only createdAt/updatedAt), so
+ * this remembers the first moment we saw the thread busy. Two known limits, both
+ * preferable to a counter that resets: a thread already running when the app
+ * opens is timed from when this window first saw it, and a relaunch restarts the
+ * count. A restart-proof version needs the host to report the turn's start.
+ */
+const runStartedAt = new Map<string, number>();
+function useRunStart(id: string, busy: boolean): string | null {
+  // Idempotent, so running it during render is safe: the same id and busy flag
+  // always produce the same map state.
+  if (!busy) {
+    runStartedAt.delete(id);
+    return null;
+  }
+  let started = runStartedAt.get(id);
+  if (started === undefined) {
+    started = Date.now();
+    runStartedAt.set(id, started);
+  }
+  return new Date(started).toISOString();
 }
 
 /**
