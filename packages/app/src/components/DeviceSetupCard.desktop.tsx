@@ -19,7 +19,6 @@ import { useRouter } from "expo-router";
 import { addDeviceConfig, clearBridgeConfig, syncLiveData } from "../services/bridge";
 import { allCollections, clearCollection } from "../state/db/collections";
 import { SettingsCard } from "./settings/primitives";
-import { Chevron, Reveal } from "./Disclosure";
 
 /** This Mac's own bridge (same convention as the desktop shell's localBridge). */
 const LOCAL_URL = `http://127.0.0.1:${process.env.EXPO_PUBLIC_BRIDGE_PORT ?? "8099"}`;
@@ -227,14 +226,18 @@ export function DeviceSetupCard({
               <Text style={s.cardBody}>For a machine that already prints a pairing code.</Text>
             )}
           </View>
-          {/* Turns rather than swapping glyph — see Disclosure.tsx. */}
-          <Chevron open={manual} turn={180}>
-            <Ionicons name="chevron-down" size={14} color={COLOR.fgFaint} />
-          </Chevron>
+          {/* Disclosure.tsx's Chevron/Reveal are the house style and are WRONG
+              here: this card lives inside the settings Modal, which on macOS is
+              its own window, and native-driven Animated never starts in it.
+              Verified in the app — the chevron sat still through open and close,
+              and Reveal left the form below laid out at opacity 0: a card that
+              grew to fit fields you could not see. A glyph swap is the lesser
+              cut when the turn cannot run at all. */}
+          <Ionicons name={manual ? "chevron-up" : "chevron-down"} size={14} color={COLOR.fgFaint} />
         </Pressable>
 
         {manual ? (
-          <Reveal style={s.section}>
+          <View style={s.section}>
             <Text style={s.fieldLabel}>Address</Text>
             <TextInput
               {...INPUT_TWEAKS}
@@ -269,7 +272,7 @@ export function DeviceSetupCard({
               {busy ? <ActivityIndicator size="small" color={COLOR.fgMuted} /> : null}
               <Text style={s.syncText}>{busy ? "Connecting…" : "Sync"}</Text>
             </Pressable>
-          </Reveal>
+          </View>
         ) : null}
       </View>
     </SettingsCard>
