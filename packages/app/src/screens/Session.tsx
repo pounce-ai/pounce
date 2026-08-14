@@ -95,6 +95,7 @@ import {
 import { PounceIcon } from "../ui/native/Icon";
 import { BranchChip, COLOR, INPUT_TWEAKS, IS_DESKTOP, pickSheet } from "../ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "../ui/agent-meta";
+import type { Observable } from "@legendapp/state";
 import { useThreadSearch } from "../hooks/useThreadSearch";
 
 /** Desktop renders this screen in a wide pane: pickers use Alert instead of
@@ -621,12 +622,11 @@ export default function SessionScreen() {
   // In-thread search + the search-hit deep link. Both drive the same highlight,
   // so they live together in one hook (see hooks/useThreadSearch).
   const {
-    searchHighlight,
-    threadQuery,
-    setThreadQuery,
-    threadHits,
-    threadHitIdx,
-    threadSearching,
+    threadQuery$,
+    threadHits$,
+    threadHitIdx$,
+    threadSearching$,
+    searchHighlight$,
     goToHit,
     closeThreadSearch,
   } = useThreadSearch({
@@ -641,6 +641,8 @@ export default function SessionScreen() {
     threadSearchOpen,
     setThreadSearchOpen,
   });
+  // Jump-frequency, not keystroke-frequency — cheap for the screen to hold.
+  const searchHighlight = useSelector(() => searchHighlight$.get());
 
   const onLongPressEvent = useCallback(
     (ev: TimelineEvent) => {
@@ -1155,70 +1157,14 @@ export default function SessionScreen() {
             </View>
           ) : null}
           {threadSearchOpen ? (
-            <View style={[s.searchRow, DESKTOP && s.searchRowDesktop]}>
-              <View style={[s.searchField, DESKTOP && s.searchFieldDesktop]}>
-                <PounceIcon name="search" size={DESKTOP ? 14 : 16} color={theme.colors.fgFaint} />
-                <TextInput
-                  {...INPUT_TWEAKS}
-                  value={threadQuery}
-                  onChangeText={setThreadQuery}
-                  placeholder="Find in this thread…"
-                  placeholderTextColor={theme.colors.fgFaint}
-                  autoFocus
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  style={[s.searchInput, DESKTOP && s.searchInputDesktop]}
-                />
-                {threadSearching ? (
-                  <ActivityIndicator size="small" color={theme.colors.fgFaint} />
-                ) : threadQuery.trim().length >= 3 ? (
-                  <Text style={s.hitCount}>
-                    {threadHits.length ? `${threadHitIdx + 1}/${threadHits.length}` : "0"}
-                  </Text>
-                ) : null}
-              </View>
-              <Pressable
-                disabled={!threadHits.length}
-                onPress={() => goToHit(threadHits, threadHitIdx - 1, threadQuery.trim())}
-                style={({ pressed }) => [
-                  s.hitBtn,
-                  DESKTOP && s.hitBtnDesktop,
-                  pressed && s.pressed60,
-                ]}
-              >
-                <PounceIcon
-                  name="chevron-up"
-                  size={DESKTOP ? 14 : 17}
-                  color={threadHits.length ? theme.colors.fgMuted : theme.colors.fgFaint}
-                />
-              </Pressable>
-              <Pressable
-                disabled={!threadHits.length}
-                onPress={() => goToHit(threadHits, threadHitIdx + 1, threadQuery.trim())}
-                style={({ pressed }) => [
-                  s.hitBtn,
-                  DESKTOP && s.hitBtnDesktop,
-                  pressed && s.pressed60,
-                ]}
-              >
-                <PounceIcon
-                  name="chevron-down"
-                  size={DESKTOP ? 14 : 17}
-                  color={threadHits.length ? theme.colors.fgMuted : theme.colors.fgFaint}
-                />
-              </Pressable>
-              {/* Desktop needs its own dismiss: the toggle that opened this
-                  lives up in the tab strip, which is a long way to travel to
-                  close a bar that's right here. */}
-              {DESKTOP ? (
-                <Pressable
-                  onPress={closeThreadSearch}
-                  style={({ pressed }) => [s.hitBtn, s.hitBtnDesktop, pressed && s.pressed60]}
-                >
-                  <PounceIcon name="close" size={14} color={theme.colors.fgMuted} />
-                </Pressable>
-              ) : null}
-            </View>
+            <ThreadSearchBar
+              query$={threadQuery$}
+              hits$={threadHits$}
+              hitIdx$={threadHitIdx$}
+              searching$={threadSearching$}
+              goToHit={goToHit}
+              onClose={closeThreadSearch}
+            />
           ) : null}
         </View>
 
@@ -1601,6 +1547,87 @@ export default function SessionScreen() {
 /** Plain styles for Reanimated views — unistyles sheet entries carry the C++
  *  proxy, which Animated.View rejects ("an empty object is not a valid style
  *  value"). Layout-only, so nothing here needs theme reactivity. */
+
+/**
+ * The in-thread search bar — a LEAF that subscribes to its own state.
+ *
+ * Everything it shows (query text, hit counter, whether the chevrons are live)
+ * is read here rather than in SessionScreen, so a keystroke re-renders these few
+ * nodes instead of the ~1,800-line screen around them. The screen only creates
+ * the observables and hands them down; it never subscribes to them.
+ */
+function ThreadSearchBar({
+  query$,
+  hits$,
+  hitIdx$,
+  searching$,
+  goToHit,
+  onClose,
+}: {
+  query$: Observable<string>;
+  hits$: Observable<MessageSearchHit[]>;
+  hitIdx$: Observable<number>;
+  searching$: Observable<boolean>;
+  goToHit: (hits: MessageSearchHit[], idx: number, term: string) => void;
+  onClose: () => void;
+}) {
+  const { theme } = useUnistyles();
+  const query = useSelector(() => query$.get());
+  const hits = useSelector(() => hits$.get());
+  const hitIdx = useSelector(() => hitIdx$.get());
+  const searching = useSelector(() => searching$.get());
+  const hitColor = hits.length ? theme.colors.fgMuted : theme.colors.fgFaint;
+
+  return (
+    <View style={[s.searchRow, DESKTOP && s.searchRowDesktop]}>
+      <View style={[s.searchField, DESKTOP && s.searchFieldDesktop]}>
+        <PounceIcon name="search" size={DESKTOP ? 14 : 16} color={theme.colors.fgFaint} />
+        <TextInput
+          {...INPUT_TWEAKS}
+          value={query}
+          onChangeText={(t) => query$.set(t)}
+          placeholder="Find in this thread…"
+          placeholderTextColor={theme.colors.fgFaint}
+          autoFocus
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={[s.searchInput, DESKTOP && s.searchInputDesktop]}
+        />
+        {searching ? (
+          <ActivityIndicator size="small" color={theme.colors.fgFaint} />
+        ) : query.trim().length >= 3 ? (
+          <Text style={s.hitCount}>{hits.length ? `${hitIdx + 1}/${hits.length}` : "0"}</Text>
+        ) : null}
+      </View>
+      <Pressable
+        disabled={!hits.length}
+        onPress={() => goToHit(hits, hitIdx - 1, query.trim())}
+        style={({ pressed }) => [s.hitBtn, DESKTOP && s.hitBtnDesktop, pressed && s.pressed60]}
+      >
+        <PounceIcon name="chevron-up" size={DESKTOP ? 14 : 17} color={hitColor} />
+      </Pressable>
+      <Pressable
+        disabled={!hits.length}
+        onPress={() => goToHit(hits, hitIdx + 1, query.trim())}
+        style={({ pressed }) => [s.hitBtn, DESKTOP && s.hitBtnDesktop, pressed && s.pressed60]}
+      >
+        <PounceIcon name="chevron-down" size={DESKTOP ? 14 : 17} color={hitColor} />
+      </Pressable>
+      {/* Desktop needs its own dismiss: the toggle that opened this lives up in
+          the tab strip, which is a long way to travel to close a bar that's
+          right here. */}
+      {DESKTOP ? (
+        <Pressable
+          onPress={onClose}
+          style={({ pressed }) => [s.hitBtn, s.hitBtnDesktop, pressed && s.pressed60]}
+        >
+          <PounceIcon name="close" size={14} color={theme.colors.fgMuted} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 const ANIM = {
   flex1: { flex: 1 },
   /** `bottom` is supplied per-render — the pill sits just above the composer,

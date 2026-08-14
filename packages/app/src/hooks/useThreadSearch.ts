@@ -10,12 +10,15 @@
  *   - the header's own search box, debounced against this thread's history
  *     index, with prev/next hopping between hits.
  *
- * Extracted from Session.tsx verbatim. This is a custom hook, so the state
- * still belongs to the calling component and the render behaviour is unchanged
- * — the point is that ~75 lines of one concern now read on their own instead of
- * interleaved with seven other clusters.
+ * This hook CREATES state without subscribing to it (`useObservable`), so the
+ * screen that calls it does not re-render when the query changes. The search bar
+ * subscribes to what it displays and re-renders itself; see `ThreadSearchBar` in
+ * screens/Session.tsx. Before that split, every keystroke re-rendered all ~1,800
+ * lines of the session screen.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback } from "react";
+import type { Observable } from "@legendapp/state";
+import { useObservable, useObserveEffect } from "@legendapp/state/react";
 import type { Session, TimelineEvent } from "@pounce/shared";
 import { searchMessages, type MessageSearchHit } from "../services/bridge";
 
@@ -23,13 +26,13 @@ import { searchMessages, type MessageSearchHit } from "../services/bridge";
 const MIN_THREAD_QUERY = 3;
 
 export type ThreadSearch = {
-  /** The event to mark, and the term to mark inside it. */
-  searchHighlight: { id: string; term: string } | undefined;
-  threadQuery: string;
-  setThreadQuery: (q: string) => void;
-  threadHits: MessageSearchHit[];
-  threadHitIdx: number;
-  threadSearching: boolean;
+  threadQuery$: Observable<string>;
+  threadHits$: Observable<MessageSearchHit[]>;
+  threadHitIdx$: Observable<number>;
+  threadSearching$: Observable<boolean>;
+  /** The event to mark, and the term to mark inside it. Changes once per jump,
+   *  not per keystroke, so the screen subscribing to it is cheap. */
+  searchHighlight$: Observable<{ id: string; term: string } | undefined>;
   /** Hop to `idx` (wrapping), highlight it, and scroll it into view. */
   goToHit: (hits: MessageSearchHit[], idx: number, term: string) => void;
   closeThreadSearch: () => void;
@@ -61,18 +64,23 @@ export function useThreadSearch({
   threadSearchOpen: boolean;
   setThreadSearchOpen: (open: boolean) => void;
 }): ThreadSearch {
-  const [searchHighlight, setSearchHighlight] = useState<
-    { id: string; term: string } | undefined
-  >();
+  const threadQuery$ = useObservable("");
+  const threadHits$ = useObservable<MessageSearchHit[]>([]);
+  const threadHitIdx$ = useObservable(0);
+  const threadSearching$ = useObservable(false);
+  const searchHighlight$ = useObservable<{ id: string; term: string } | undefined>(undefined);
+  const didJumpToAt$ = useObservable(false);
+  const threadGen$ = useObservable(0);
 
   // --- deep link ---
-  const didJumpToAt = useRef(false);
-  useEffect(() => {
-    if (!at || didJumpToAt.current || !fullReady || events.length === 0) return;
-    didJumpToAt.current = true;
+  // `at`/`events`/`fullReady` are plain values, so this still needs deps; the
+  // observables it writes are read with .get()/.set() and tracked by nothing.
+  useObserveEffect(() => {
+    if (!at || didJumpToAt$.peek() || !fullReady || events.length === 0) return;
+    didJumpToAt$.set(true);
     const best = findNearestIndex(String(at), q ? String(q) : undefined);
     if (best >= 0) {
-      if (q) setSearchHighlight({ id: events[best].id, term: String(q) });
+      if (q) searchHighlight$.set({ id: events[best].id, term: String(q) });
       // Repeatedly: the timeline's own open-at-bottom anchoring can land AFTER
       // the first jump and silently win, and on long threads scrollToIndex over
       // unmeasured history is approximate — later jumps correct the estimate as
@@ -83,70 +91,66 @@ export function useThreadSearch({
     }
   }, [at, q, fullReady, events, findNearestIndex, jumpTo]);
 
-  // --- header search box ---
-  const [threadQuery, setThreadQuery] = useState("");
-  const [threadHits, setThreadHits] = useState<MessageSearchHit[]>([]);
-  const [threadHitIdx, setThreadHitIdx] = useState(0);
-  const [threadSearching, setThreadSearching] = useState(false);
-  const threadGen = useRef(0);
-
   const goToHit = useCallback(
     (hits: MessageSearchHit[], idx: number, term: string) => {
       if (!hits.length) return;
       const clamped = ((idx % hits.length) + hits.length) % hits.length;
-      setThreadHitIdx(clamped);
+      threadHitIdx$.set(clamped);
       const ei = findNearestIndex(hits[clamped].timestamp, term);
       if (ei >= 0) {
-        setSearchHighlight({ id: events[ei].id, term });
+        searchHighlight$.set({ id: events[ei].id, term });
         jumpTo(ei);
       }
     },
-    [events, findNearestIndex, jumpTo],
+    [events, findNearestIndex, jumpTo, threadHitIdx$, searchHighlight$],
   );
 
-  useEffect(() => {
-    const t = threadQuery.trim();
-    const gen = ++threadGen.current;
-    if (!threadSearchOpen || t.length < MIN_THREAD_QUERY || !session?.hostId || !id) {
-      setThreadHits([]);
-      setThreadSearching(false);
-      return;
-    }
-    setThreadSearching(true);
-    const timer = setTimeout(async () => {
-      const hits = await searchMessages(t, {
-        thread: id,
-        agent: session.agent,
-        hostId: session.hostId,
-        limit: 50,
-      }).catch(() => []);
-      if (threadGen.current !== gen) return;
-      setThreadHits(hits);
-      setThreadSearching(false);
-      goToHit(hits, 0, t);
-    }, 350);
-    return () => clearTimeout(timer);
-    // goToHit changes with every event refresh; re-running the search then
+  // Re-runs when `threadQuery$` changes — it is READ here, so this effect
+  // subscribes to it directly and no render is needed to drive the search.
+  useObserveEffect(
+    (e) => {
+      const t = threadQuery$.get().trim();
+      const gen = threadGen$.peek() + 1;
+      threadGen$.set(gen);
+      if (!threadSearchOpen || t.length < MIN_THREAD_QUERY || !session?.hostId || !id) {
+        threadHits$.set([]);
+        threadSearching$.set(false);
+        return;
+      }
+      threadSearching$.set(true);
+      const timer = setTimeout(async () => {
+        const hits = await searchMessages(t, {
+          thread: id,
+          agent: session.agent,
+          hostId: session.hostId,
+          limit: 50,
+        }).catch(() => []);
+        if (threadGen$.peek() !== gen) return;
+        threadHits$.set(hits);
+        threadSearching$.set(false);
+        goToHit(hits, 0, t);
+      }, 350);
+      e.onCleanup = () => clearTimeout(timer);
+    },
+    // `goToHit` changes with every event refresh; re-running the search then
     // would spam the bridge for nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadSearchOpen, threadQuery, session?.hostId, session?.agent, id]);
+    [threadSearchOpen, session?.hostId, session?.agent, id],
+  );
 
-  // `setThreadSearchOpen` comes from the chrome seam, not useState — it isn't a
-  // guaranteed-stable identity, so it has to be a dependency.
   const closeThreadSearch = useCallback(() => {
     setThreadSearchOpen(false);
-    setThreadQuery("");
-    setThreadHits([]);
-    setSearchHighlight(undefined);
-  }, [setThreadSearchOpen]);
+    threadQuery$.set("");
+    threadHits$.set([]);
+    searchHighlight$.set(undefined);
+  }, [setThreadSearchOpen, threadQuery$, threadHits$, searchHighlight$]);
 
   return {
-    searchHighlight,
-    threadQuery,
-    setThreadQuery,
-    threadHits,
-    threadHitIdx,
-    threadSearching,
+    threadQuery$,
+    threadHits$,
+    threadHitIdx$,
+    threadSearching$,
+    searchHighlight$,
     goToHit,
     closeThreadSearch,
   };
