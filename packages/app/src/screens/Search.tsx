@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useDevices } from "../state/db/hooks";
+import { useDeviceCount } from "../state/db/hooks";
 import { ConnectFlow } from "../components/ConnectFlow";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
@@ -27,7 +27,7 @@ const FILL = { flex: 1 } as const;
 
 /** Full-screen thread search — matches title, branch, host, agent, repo. */
 export default function SearchScreen() {
-  const devices = useDevices();
+  const deviceCount = useDeviceCount();
   const { theme } = useUnistyles();
   // Desktop's sidebar seeds the modal via /search?q=… — start searching
   // immediately instead of making the user retype.
@@ -242,7 +242,7 @@ export default function SearchScreen() {
           // headers already say "0 matches", so show nothing extra.
           !showAll && (msgSearching || msgHits.length > 0) ? null : (
             <View style={s.empty}>
-              {showAll && !devices.length ? (
+              {showAll && !deviceCount ? (
                 // "Start a task to see it here" is an instruction the reader
                 // cannot follow: there is no machine to start one on. Offer the
                 // thing that unblocks them instead.

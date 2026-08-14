@@ -47,6 +47,22 @@ export function useDevices(): Device[] {
   return (useLiveQuery((q) => q.from({ d: devices })).data as Device[] | undefined) ?? [];
 }
 
+/** How many devices are paired — nothing more.
+ *
+ *  Screens that only need "is anything paired / how many" must NOT subscribe to
+ *  the whole `devices` collection: the sync rewrites `lastSyncAt` on every tick,
+ *  and a full-collection subscription re-renders the entire screen for a
+ *  timestamp it never displays. Projecting to `id` keeps the derived collection
+ *  stable across those writes, so this only re-renders when a device is actually
+ *  added or removed. */
+export function useDeviceCount(): number {
+  const rows =
+    (useLiveQuery((q) => q.from({ d: devices }).select(({ d }) => ({ id: d.id }))).data as
+      | { id: string }[]
+      | undefined) ?? [];
+  return rows.length;
+}
+
 export function useDevicesById(): Record<string, Device> {
   const list = useDevices();
   return useMemo(() => Object.fromEntries(list.map((d) => [d.id, d])), [list]);
