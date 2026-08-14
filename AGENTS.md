@@ -86,5 +86,24 @@ Real flow is `.github/workflows/desktop-release.yml`, **manual `workflow_dispatc
    bundle, and publishes one GitHub Release with the Sparkle `appcast.xml`. The release
    **must remain "latest"** — Sparkle polls `releases/latest/download/appcast.xml`.
 
-iOS: `bun run testflight` (TestFlight) / `bun run publish:ios` (EAS production +
-auto-submit); App Store metadata lives in `apps/mobile/metadata/`.
+Phones: `bun run publish:ios` (TestFlight) and `bun run publish:android` (Play
+internal track) — both `scripts/publish-testflight.sh`, EAS production with
+`--auto-submit`. `bun run testflight` is an alias for the iOS one. Version comes
+from `apps/mobile/app.json` (`version` + `ios.buildNumber` + `android.versionCode`),
+which is the only place to bump it; App Store metadata lives in
+`apps/mobile/metadata/`.
+
+The script sets **`EAS_NO_VCS=1`**, which is load-bearing: the tunnel's native
+cores are gitignored, so a git-based pack silently ships an app with no tunnel.
+Only `.easignore` — which EAS reads solely in that mode — carries them up.
+
+A TestFlight build reaches nobody until it's attached to a group, which
+`--auto-submit` does not do. After Apple finishes processing:
+
+```sh
+asc builds add-groups --app 6779601425 --platform IOS --build-number <n> \
+  --group e316680d-c2e4-408d-8370-cfddd3b97010     # Pounce Internal
+```
+
+Adding the `Public Beta` group (`f7adb73d-…`) instead needs `--submit --confirm`
+and puts the build through Apple's beta review.
