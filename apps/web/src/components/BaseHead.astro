@@ -71,7 +71,20 @@ const image = "https://use-pounce.com/assets/icon.png";
   // light like any other unrecognised value.
   try {
     const stored = localStorage.getItem("starlight-theme");
-    document.documentElement.setAttribute("data-theme", stored === "dark" ? "dark" : "light");
+    const theme = stored === "dark" ? "dark" : "light";
+    // Settle the value rather than only reading it. Starlight's own provider
+    // falls back to the OS when nothing is stored, so leaving it unset would
+    // send a first-time visitor on a dark Mac to light here and dark in /docs.
+    if (stored !== theme) localStorage.setItem("starlight-theme", theme);
+    const root = document.documentElement;
+    root.setAttribute("data-theme", theme);
+    // Paint the ground here too, not just in the stylesheet. Every navigation is
+    // a real document load (Astro is an MPA), and the browser paints its own
+    // white default in the gap before the CSS applies — which in dark mode is a
+    // white flash on every single click. `color-scheme` also makes the scrollbar
+    // and form controls match from the first frame.
+    root.style.colorScheme = theme;
+    root.style.backgroundColor = theme === "dark" ? "#17111f" : "#fef1e3";
   } catch (_) {
     document.documentElement.setAttribute("data-theme", "light");
   }

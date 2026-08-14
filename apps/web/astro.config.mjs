@@ -8,8 +8,52 @@ export default defineConfig({
   // App Store metadata point at https://use-pounce.com/privacy.html, so the
   // old flat-file URLs must keep resolving after the GitHub Pages cutover.
   build: { format: "file" },
+  /**
+   * Astro is a multi-page app: without this, every link is a cold document
+   * request made only when you click, which is why the docs felt like a full
+   * reload rather than a nav.
+   *
+   * Prefetching on hover/touch-start means the HTML is usually already in the
+   * cache by the time the click lands, so the navigation is near-instant while
+   * each page stays a real document — no client router, no hydration, and none
+   * of the state-restoration problems those bring with Starlight's islands and
+   * our pre-paint theme script.
+   *
+   * `hover` rather than `viewport`: the docs sidebar puts ~20 links on screen at
+   * once, and prefetching all of them on sight would pull far more than anyone
+   * reads.
+   */
+  prefetch: { prefetchAll: true, defaultStrategy: "hover" },
   integrations: [
     starlight({
+      /**
+       * The docs run Starlight's ThemeProvider, which falls back to the OS when
+       * nothing is stored: no stored value + a dark OS resolves to dark, while
+       * the rest of the site now defaults to light. A visitor on a dark Mac
+       * would get a light landing page and dark docs.
+       *
+       * Settling the stored value fixes it in either script order — if this runs
+       * first, ThemeProvider reads "light" and agrees; if ThemeProvider already
+       * ran and guessed dark, this corrects the attribute. It also paints the
+       * ground before first paint, so navigating between docs pages does not
+       * flash white in dark mode.
+       */
+      head: [
+        {
+          tag: "script",
+          content: `(() => {
+  try {
+    var stored = localStorage.getItem("starlight-theme");
+    var theme = stored === "dark" ? "dark" : "light";
+    if (stored !== theme) localStorage.setItem("starlight-theme", theme);
+    var root = document.documentElement;
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    root.style.backgroundColor = theme === "dark" ? "#17111f" : "#fef1e3";
+  } catch (e) {}
+})();`,
+        },
+      ],
       title: "Pounce Docs",
       description:
         "Docs for Pounce — control Claude Code, Codex, Cursor & opencode from your phone.",
