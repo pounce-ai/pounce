@@ -95,6 +95,7 @@ import {
 import { PounceIcon } from "../ui/native/Icon";
 import { BranchChip, COLOR, INPUT_TWEAKS, IS_DESKTOP, pickSheet } from "../ui";
 import { effectiveCaps, modesFor, REASONING_EFFORTS, type ReasoningEffort } from "../ui/agent-meta";
+import { useThreadSearch } from "../hooks/useThreadSearch";
 
 /** Desktop renders this screen in a wide pane: pickers use Alert instead of
  *  ActionSheetIOS (which doesn't exist there) and the transcript is capped at
@@ -617,84 +618,29 @@ export default function SessionScreen() {
     [events],
   );
 
-  // Search-hit deep link: once the FULL history is rendered (the recent-4 page
-  // won't contain an old match), scroll to the event nearest `at` and mark it
-  // with the matched term. Once per mount; the delay lets the list finish its
-  // initial layout first.
-  const didJumpToAt = useRef(false);
-  const [searchHighlight, setSearchHighlight] = useState<
-    { id: string; term: string } | undefined
-  >();
-  useEffect(() => {
-    if (!at || didJumpToAt.current || !fullQ.data || events.length === 0) return;
-    didJumpToAt.current = true;
-    const best = findNearestIndex(String(at), q ? String(q) : undefined);
-    if (best >= 0) {
-      if (q) setSearchHighlight({ id: events[best].id, term: String(q) });
-      // Repeatedly: the timeline's own open-at-bottom anchoring can land AFTER
-      // the first jump and silently win, and on long threads scrollToIndex
-      // over unmeasured history is approximate — later jumps correct the
-      // estimate as items measure. scrollToIndex is idempotent.
-      setTimeout(() => jumpTo(best), 350);
-      setTimeout(() => jumpTo(best), 1300);
-      setTimeout(() => jumpTo(best), 2800);
-    }
-  }, [at, q, fullQ.data, events, findNearestIndex, jumpTo]);
-
-  // --- In-thread search: header toggle, debounced query against this thread's
-  // history index (event-level hits), prev/next hop with yellow highlight.
-  const [threadQuery, setThreadQuery] = useState("");
-  const [threadHits, setThreadHits] = useState<MessageSearchHit[]>([]);
-  const [threadHitIdx, setThreadHitIdx] = useState(0);
-  const [threadSearching, setThreadSearching] = useState(false);
-  const threadGen = useRef(0);
-  const goToHit = useCallback(
-    (hits: MessageSearchHit[], idx: number, term: string) => {
-      if (!hits.length) return;
-      const clamped = ((idx % hits.length) + hits.length) % hits.length;
-      setThreadHitIdx(clamped);
-      const ei = findNearestIndex(hits[clamped].timestamp, term);
-      if (ei >= 0) {
-        setSearchHighlight({ id: events[ei].id, term });
-        jumpTo(ei);
-      }
-    },
-    [events, findNearestIndex, jumpTo],
-  );
-  useEffect(() => {
-    const t = threadQuery.trim();
-    const gen = ++threadGen.current;
-    if (!threadSearchOpen || t.length < 3 || !session?.hostId || !id) {
-      setThreadHits([]);
-      setThreadSearching(false);
-      return;
-    }
-    setThreadSearching(true);
-    const timer = setTimeout(async () => {
-      const hits = await searchMessages(t, {
-        thread: id,
-        agent: session.agent,
-        hostId: session.hostId,
-        limit: 50,
-      }).catch(() => []);
-      if (threadGen.current !== gen) return;
-      setThreadHits(hits);
-      setThreadSearching(false);
-      goToHit(hits, 0, t);
-    }, 350);
-    return () => clearTimeout(timer);
-    // goToHit changes with every event refresh; re-running the search then
-    // would spam the bridge for nothing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadSearchOpen, threadQuery, session?.hostId, session?.agent, id]);
-  // `setThreadSearchOpen` comes from the chrome seam, not useState — it isn't a
-  // guaranteed-stable identity, so it has to be a dependency.
-  const closeThreadSearch = useCallback(() => {
-    setThreadSearchOpen(false);
-    setThreadQuery("");
-    setThreadHits([]);
-    setSearchHighlight(undefined);
-  }, [setThreadSearchOpen]);
+  // In-thread search + the search-hit deep link. Both drive the same highlight,
+  // so they live together in one hook (see hooks/useThreadSearch).
+  const {
+    searchHighlight,
+    threadQuery,
+    setThreadQuery,
+    threadHits,
+    threadHitIdx,
+    threadSearching,
+    goToHit,
+    closeThreadSearch,
+  } = useThreadSearch({
+    id,
+    session,
+    events,
+    at: at ? String(at) : undefined,
+    q: q ? String(q) : undefined,
+    fullReady: !!fullQ.data,
+    findNearestIndex,
+    jumpTo,
+    threadSearchOpen,
+    setThreadSearchOpen,
+  });
 
   const onLongPressEvent = useCallback(
     (ev: TimelineEvent) => {
