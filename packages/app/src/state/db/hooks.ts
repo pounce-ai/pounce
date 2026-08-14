@@ -4,7 +4,7 @@
  * the react-db equivalent of the old `useSelector(() => …)` reads. Derived
  * shapes (Set/Map/Record) are memoized off the live-query data.
  */
-import { useMemo } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { eq, useLiveQuery } from "@tanstack/react-db";
 import type {
   AgentCapabilities,
@@ -144,6 +144,36 @@ export function useIgnoredSet(): Set<string> {
   const rows =
     (useLiveQuery((q) => q.from({ i: ignoredRepos })).data as { id: string }[] | undefined) ?? [];
   return useMemo(() => new Set(rows.map((r) => r.id)), [rows]);
+}
+
+/** One thread row, subscribed at the LEAF.
+ *
+ *  `useThreads()` subscribes to the whole collection, so a list that reads it at
+ *  the top re-renders every row whenever any one thread changes — measured at 38
+ *  card renders for a single title change. This watches one key instead: a card
+ *  re-renders only when its OWN row moves.
+ *
+ *  Cheaper than `useThread(id)`, which builds a filtered live query per caller.
+ *  This is a plain callback on the collection, and `get` returns a stable
+ *  reference until the row is actually rewritten — which is what makes it safe
+ *  as a `useSyncExternalStore` snapshot. */
+export function useThreadRow(id: string): Session | undefined {
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => {
+      const sub = threads.subscribeChanges((changes) => {
+        for (const c of changes) {
+          if (c.key === id) {
+            onStoreChange();
+            return;
+          }
+        }
+      });
+      return () => sub.unsubscribe();
+    },
+    [id],
+  );
+  const snapshot = useCallback(() => threads.get(id) as Session | undefined, [id]);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 export function useThread(id: string | undefined): Session | undefined {
