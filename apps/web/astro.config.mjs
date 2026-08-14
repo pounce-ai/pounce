@@ -40,9 +40,22 @@ export default defineConfig({
        * flash white in dark mode.
        */
       head: [{ tag: "script", content: THEME_BOOTSTRAP }],
-      // Starlight ships no view transition support and exposes no flag for it,
-      // but the Head component is overridable — see StarlightHead.astro.
-      components: { Head: "./src/components/StarlightHead.astro" },
+      /**
+       * No ClientRouter on the docs, deliberately.
+       *
+       * Starlight builds the Pagefind UI inside a `DOMContentLoaded` listener,
+       * and that event fires once per document load — a view transition swap
+       * never fires it again, so the search modal opened onto an empty box for
+       * anyone who arrived by clicking a sidebar link. Starlight offers no hook
+       * to re-run it, which is consistent with it shipping no view transition
+       * support at all.
+       *
+       * Re-creating PagefindUI ourselves would mean duplicating Starlight's
+       * translations, baseUrl and processResult wiring and keeping that copy in
+       * step with a dependency's internals. Working search is worth more than a
+       * softer page change, and prefetch already makes these navigations quick.
+       * The hand-built pages, which own all their own scripts, keep the router.
+       */
       title: "Pounce Docs",
       description:
         "Docs for Pounce — control Claude Code, Codex, Cursor & opencode from your phone.",
