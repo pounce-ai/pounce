@@ -463,11 +463,51 @@ RCT_jsLocation -string "localhost:<port>"`, relaunch, then prove it by reading a
 `__DEV__` counter over CDP (`curl localhost:<port>/json/list` → websocket →
 `Runtime.evaluate`).
 
-## Desktop, still unmeasured
+## Desktop shell — measured and fixed
 
-`TabStrip.tsx`, `OpenIn.tsx` and `Sidebar.tsx` each call `useThreads()` at the
-top, and the sidebar's `LegendList` uses inline `keyExtractor`/`renderItem` with
-whole `session` objects — the Home pattern before its fix. Worth the setter-count
-check before converting. Note `Sidebar`'s `useDevices()` is NOT the
-`useDeviceCount` case: it filters on `online` and looks up names, so it genuinely
-needs the collection.
+Same probe as the mobile passes (writes injected through a temporary `__DEV__`
+handle), but with a **no-write control window** first, because a live agent
+churns this workspace enough to swamp five synthetic writes. The first attempt
+without a control produced numbers that moved the wrong way and had to be thrown
+out.
+
+| 20 writes to ONE unrelated thread | Before | After |
+| --- | ---: | ---: |
+| `Shell` | 26 | **0** |
+| `TabStrip` | 27 | **1** |
+| `Sidebar` | 28 | 24 |
+
+(Control windows, no writes: before `Shell 1 / TabStrip 1`, after `TabStrip 2`.)
+
+**The first guess was wrong, and the counters said so.** Converting `TabStrip`
+and `OpenIn` to per-key reads changed nothing. The giveaway was all three
+counters moving in lockstep — Shell 8, Sidebar 8, TabStrip 8 — which is the
+signature of a parent re-rendering its children, not of three independent
+subscriptions.
+
+The cause was `Shell` calling `useThread(threadId)`. That name reads like a
+narrow lookup, but it is a **live query over the whole threads collection**, so
+any thread changing anywhere re-rendered the shell and everything beneath it.
+`useThreadRow` watches one key instead.
+
+Both halves are needed: fixing `Shell` alone would be undone by children that
+re-subscribe broadly, and fixing the children alone did nothing while the parent
+still re-rendered.
+
+`Sidebar` is unchanged at ~24 because it genuinely lists threads. Pushing its
+rows onto their own subscriptions — the Home treatment — is the remaining work.
+Note its `useDevices()` is NOT a `useDeviceCount` case: it filters on `online`
+and looks up names, so it needs the collection.
+
+## A bug the live clock exposed
+
+The sidebar's "Working 7s" tag counted up and snapped back to zero every few
+seconds. `session.updatedAt` bumps on every event an agent emits, so a duration
+measured from it reports *time since the last tool call*. The tag had read the
+wrong quantity since it landed; the live `<TimeAgo/>` only made it visible,
+because before that it recomputed only when the sidebar happened to re-render.
+
+Fixed by remembering when a thread was first seen busy. Measured side by side on
+a running thread — old: 17→31→45→**39**→53 (the 39 is the reset); new:
+0→14→28→42→56. A restart-proof version needs the host to report the turn's start;
+`Session` carries no such field.
