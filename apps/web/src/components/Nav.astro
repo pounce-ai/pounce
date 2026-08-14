@@ -51,16 +51,20 @@ const { active } = Astro.props;
         >
       </a>
 
-      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch theme">
-        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-          ><circle cx="12" cy="12" r="4"></circle><path
-            d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
-          ></path></svg
-        >
-        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-          ><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path></svg
-        >
-      </button>
+      <div class="theme-picker" id="theme-picker" role="group" aria-label="Theme">
+        <button type="button" data-theme-choice="light" aria-pressed="false" aria-label="Light theme">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            ><circle cx="12" cy="12" r="4"></circle><path
+              d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+            ></path></svg
+          >
+        </button>
+        <button type="button" data-theme-choice="dark" aria-pressed="false" aria-label="Dark theme">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            ><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path></svg
+          >
+        </button>
+      </div>
 
       <a class="btn btn--primary nav-get" href="/#get">Get Pounce</a>
     </div>
@@ -88,22 +92,31 @@ const { active } = Astro.props;
       window.addEventListener("scroll", onScroll, { passive: true });
     }
 
-    const toggle = document.getElementById("theme-toggle");
-    toggle?.addEventListener("click", () => {
-      const root = document.documentElement;
-      // With no explicit choice yet, read what the OS is actually giving us so
-      // the first click always flips what the visitor sees.
-      const current =
-        root.getAttribute("data-theme") ??
-        (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-      const next = current === "dark" ? "light" : "dark";
-      root.setAttribute("data-theme", next);
-      try {
-        // The single site-wide key, shared with Starlight — see BaseHead.
-        localStorage.setItem("starlight-theme", next);
-      } catch (_) {
-        /* nothing to persist to; the in-page switch still applies */
+    const picker = document.getElementById("theme-picker");
+    const buttons = picker ? [...picker.querySelectorAll("[data-theme-choice]")] : [];
+
+    const paint = (theme) => {
+      for (const b of buttons) {
+        b.setAttribute("aria-pressed", String(b.dataset.themeChoice === theme));
       }
-    });
+    };
+
+    // BaseHead has already set this before first paint, so the control shows the
+    // live state on load rather than a guess.
+    paint(document.documentElement.getAttribute("data-theme") || "light");
+
+    for (const b of buttons) {
+      b.addEventListener("click", () => {
+        const next = b.dataset.themeChoice;
+        document.documentElement.setAttribute("data-theme", next);
+        paint(next);
+        try {
+          // The single site-wide key, shared with Starlight — see BaseHead.
+          localStorage.setItem("starlight-theme", next);
+        } catch (_) {
+          /* nothing to persist to; the in-page switch still applies */
+        }
+      });
+    }
   })();
 </script>

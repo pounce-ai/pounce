@@ -9,7 +9,13 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { KeyboardAvoidingView, Platform } from "react-native";
+import { Platform } from "react-native";
+// The kav seam, not react-native's: RN's KeyboardAvoidingView measures the
+// keyboard against the WINDOW on the JS thread, and inside a native sheet the
+// window is not the frame this content lives in — focusing the commit field
+// lifted by the wrong amount and a frame late. Every other screen in the app
+// already goes through this seam; Changes was the one that did not.
+import { KeyboardAvoidingView } from "../components/kav";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { PounceIcon } from "../ui/native/Icon";

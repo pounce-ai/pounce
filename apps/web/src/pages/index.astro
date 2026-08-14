@@ -72,7 +72,7 @@ const benefits = [
       title="Pounce — the control plane for your coding agents"
       description="Claude Code, Codex, Cursor and opencode on your own machines, controlled from your desk and your phone. Hand a colleague one project read-only and revoke it in a tap, give any MCP client your whole cross-agent history, and see exactly what it all cost. Open source, MIT."
       path="/"
-      ogTitle="Pounce — every agent you run, shared exactly as far as you say"
+      ogTitle="Pounce — spreading love among your coding agents"
       ogDescription="Scoped, expiring, read-only access grants. Your cross-agent history over MCP. Tokens, spend, plan limits and worktree disk. Free and open source."
     />
   </head>
@@ -84,13 +84,15 @@ const benefits = [
     <!-- ------------------------------------------------------------ hero -->
     <header class="wrap hero">
       <div class="hero-copy">
-        <span class="eyebrow">Claude Code · Codex · Cursor · opencode</span>
-        <h1>Every agent you run. Shared exactly as far as you say.</h1>
+        <p class="agent-love">
+          Codex <span aria-hidden="true">♥</span> Claude <span aria-hidden="true">♥</span> Cursor
+          <span aria-hidden="true">♥</span> opencode
+        </p>
+        <h1>Spreading love among your coding agents.</h1>
         <p class="lede">
-          Pounce is the control plane for the coding agents on your own machines — on your desk and
-          in your pocket. It's the only one that lets you <b>hand a colleague one project</b>{" "}
-          read-only and revoke it in a tap, and the only one that hands your whole cross-agent
-          history back to <b>Claude Code and Cursor over MCP</b>.
+          One home for every agent running on your own machines. Watch them work from your phone,
+          lend a teammate a single project, and give any of them everything the others already
+          learned.
         </p>
 
         <div class="cta-row">
@@ -177,22 +179,54 @@ const benefits = [
             </ul>
           </div>
 
-          <aside class="handshake">
-            <div class="hs-h">The two-step handshake</div>
-            <ol class="hs-steps">
+          <!-- The handshake, drawn. Two machines, the code that proves which is
+               which, and what each of the two approvals actually grants. -->
+          <aside class="share-flow">
+            <div class="sf-row">
+              <div class="sf-node">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                  ><rect x="2" y="4" width="20" height="13" rx="2"></rect><path d="M2 20h20"
+                  ></path></svg
+                >
+                <b>Their laptop</b><small>asks</small>
+              </div>
+
+              <div class="sf-link">
+                <span class="sf-code" aria-label="Six digit verification code">
+                  <i>4</i><i>8</i><i>2</i><i>9</i><i>1</i><i>7</i>
+                </span>
+                <small>same code on both screens</small>
+              </div>
+
+              <div class="sf-node sf-node--owner">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                  ><rect x="3" y="3" width="18" height="13" rx="2"></rect><path
+                    d="M8 20h8M12 16v4"></path></svg
+                >
+                <b>Your machine</b><small>decides</small>
+              </div>
+            </div>
+
+            <ol class="sf-steps">
               <li>
-                <b>"Can I see what's there?"</b>
-                <span>A five-minute preview: project names, thread counts and dates. No messages, no file paths, no branches.</span>
+                <b>Preview</b>
+                <span>Project names, counts and dates. No messages, no paths, no branches.</span>
+                <em>expires in 5 minutes</em>
               </li>
               <li>
-                <b>"Can I read these?"</b>
-                <span>Built from what the preview turned up. You approve the scope and set the clock.</span>
+                <b>Read access</b>
+                <span>You tick the projects and set the clock. Still read-only.</span>
+                <em>1 hour · 8 hours · a day · a week · no expiry</em>
+              </li>
+              <li>
+                <b>Revoke</b>
+                <span>The threads disappear from their machine.</span>
+                <em>takes effect immediately</em>
               </li>
             </ol>
-            <p class="hs-note">
-              Both steps stop at a person — nothing is ever granted automatically. Each request shows
-              a six-digit code on both machines, so you can tell your colleague's laptop from a
-              stranger's on the same network.
+
+            <p class="sf-note">
+              Both approvals stop at a person — nothing is ever granted automatically.
             </p>
           </aside>
         </div>
@@ -277,7 +311,7 @@ const benefits = [
             name="app-desktop"
             width={1440}
             height={897}
-            alt="The Pounce desktop app: Spaces in the sidebar, sessions grouped into needs attention, recent and settled, and the activity dashboard showing 8.9B tokens, estimated spend, 22.7 GB of worktree disk and per-plan usage for Claude, opencode, Codex and Cursor"
+            alt="The Pounce desktop app: Spaces in the sidebar, sessions grouped into needs attention, recent and settled, and the activity dashboard showing 9.1B tokens, estimated spend, 22.6 GB of worktree disk and per-plan usage for Claude, opencode, Codex and Cursor"
           />
         </figure>
 
@@ -317,12 +351,12 @@ const benefits = [
         <div class="metrics">
           <div class="metric reveal">
             <span class="m-k">Worktree disk</span>
-            <span class="m-v">22.7 GB</span>
+            <span class="m-v">22.6 GB</span>
             <span class="m-n">across 12 worktrees, so you can find the ones worth reclaiming</span>
           </div>
           <div class="metric reveal">
             <span class="m-k">Estimated spend</span>
-            <span class="m-v">~$7,181</span>
+            <span class="m-v">~$7,323</span>
             <span class="m-n">by day, project, agent and machine — from what the agents report, not a guessed price list</span>
           </div>
           <div class="metric reveal">
@@ -332,7 +366,7 @@ const benefits = [
           </div>
           <div class="metric reveal">
             <span class="m-k">Tokens</span>
-            <span class="m-v">8.9B</span>
+            <span class="m-v">9.1B</span>
             <span class="m-n">with the cached share broken out, over any window you pick</span>
           </div>
         </div>
@@ -508,6 +542,24 @@ const benefits = [
         align-items: center;
         padding: 64px 24px 92px;
       }
+      /* The agent roll-call, as a wordmark rather than a feature list — it
+         says "all four, and they get along" faster than a sentence can. */
+      .agent-love {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        font-family: var(--mono);
+        font-size: 13px;
+        letter-spacing: 0.02em;
+        color: var(--ink-2);
+      }
+      .agent-love span {
+        color: var(--pink-ink);
+        font-size: 15px;
+        line-height: 1;
+      }
+
       h1 {
         font-size: clamp(38px, 4.4vw, 56px);
         font-weight: 700;
@@ -744,40 +796,101 @@ const benefits = [
         color: var(--ink);
       }
 
-      .handshake {
+      .share-flow {
         background: var(--surface);
         border: 1px solid var(--line);
         border-radius: var(--radius-lg);
-        padding: 28px 28px 24px;
+        padding: 26px 26px 22px;
         box-shadow: var(--shadow-sm);
       }
-      .hs-h {
+      .sf-row {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        gap: 12px;
+      }
+      .sf-node {
+        display: grid;
+        justify-items: center;
+        gap: 4px;
+        padding: 16px 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--ground);
+        text-align: center;
+      }
+      .sf-node svg {
+        width: 24px;
+        height: 24px;
+        color: var(--ink-3);
+      }
+      .sf-node b {
+        font-size: 14px;
+      }
+      .sf-node small {
         font-family: var(--mono);
-        font-size: 11.5px;
-        letter-spacing: 0.08em;
+        font-size: 10.5px;
+        letter-spacing: 0.05em;
         text-transform: uppercase;
+        color: var(--ink-3);
+      }
+      /* The owner's side is the one that decides, so it carries the accent. */
+      .sf-node--owner {
+        border-color: var(--brand-edge);
+        background: var(--brand-wash);
+      }
+      .sf-node--owner svg {
         color: var(--brand-ink);
       }
-      .hs-steps {
-        margin: 18px 0 0 0;
-        padding: 0;
-        list-style: none;
-        counter-reset: hs;
+
+      .sf-link {
         display: grid;
-        gap: 18px;
+        justify-items: center;
+        gap: 6px;
       }
-      .hs-steps li {
-        counter-increment: hs;
+      .sf-code {
+        display: flex;
+        gap: 3px;
+      }
+      .sf-code i {
+        display: grid;
+        place-items: center;
+        width: 19px;
+        height: 24px;
+        border-radius: 5px;
+        background: var(--surface-2);
+        border: 1px solid var(--line);
+        font-family: var(--mono);
+        font-style: normal;
+        font-size: 12.5px;
+        color: var(--brand-ink);
+      }
+      .sf-link small {
+        font-size: 11.5px;
+        color: var(--ink-3);
+        text-align: center;
+        max-width: 15ch;
+      }
+
+      .sf-steps {
+        list-style: none;
+        counter-reset: sf;
+        display: grid;
+        gap: 14px;
+        margin-top: 22px;
+      }
+      .sf-steps li {
+        counter-increment: sf;
         position: relative;
-        padding-left: 42px;
+        padding-left: 38px;
       }
-      .hs-steps li::before {
-        content: counter(hs);
+      .sf-steps li::before {
+        content: counter(sf);
         position: absolute;
         left: 0;
-        top: 0;
-        width: 28px;
-        height: 28px;
+        top: 1px;
+        width: 26px;
+        height: 26px;
         border-radius: 50%;
         display: grid;
         place-items: center;
@@ -785,23 +898,32 @@ const benefits = [
         border: 1px solid var(--brand-edge);
         color: var(--brand-ink);
         font-family: var(--mono);
-        font-size: 12.5px;
+        font-size: 12px;
       }
-      .hs-steps b {
+      .sf-steps b {
         display: block;
-        font-size: 16px;
+        font-size: 15.5px;
       }
-      .hs-steps span {
+      .sf-steps span {
         display: block;
-        margin-top: 4px;
-        color: var(--ink-2);
+        margin-top: 2px;
         font-size: 14.5px;
+        color: var(--ink-2);
       }
-      .hs-note {
-        margin-top: 22px;
-        padding-top: 18px;
+      .sf-steps em {
+        display: inline-block;
+        margin-top: 5px;
+        font-family: var(--mono);
+        font-style: normal;
+        font-size: 11px;
+        letter-spacing: 0.03em;
+        color: var(--ink-3);
+      }
+      .sf-note {
+        margin-top: 20px;
+        padding-top: 16px;
         border-top: 1px solid var(--line-soft);
-        font-size: 14px;
+        font-size: 13.5px;
         color: var(--ink-3);
       }
 

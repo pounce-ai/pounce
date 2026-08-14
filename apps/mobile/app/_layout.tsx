@@ -10,6 +10,7 @@ import {
   type TrueSheetNavigationState,
 } from "@lodev09/react-native-true-sheet/navigation";
 import { useThemeHex } from "@pounce/app/ui/useThemeHex";
+import { SHEET_FRACTION } from "@pounce/app/ui/layout";
 import { applyAppearance } from "@pounce/app/state/appearance";
 import { Providers } from "@pounce/app/components/Providers";
 import { UpdateBanner } from "@pounce/app/components/UpdateBanner";
@@ -83,7 +84,9 @@ export default function RootLayout() {
             the reserved grabber strip read as an ugly dead band above it. */}
         <Sheet.Screen
           name="changes"
-          options={{ detents: [0.99], backgroundColor: hex.bg, grabber: false }}
+          // Same constant the route wrapper sizes its content from — if these
+          // two drift apart the footer goes off the bottom of the screen.
+          options={{ detents: [SHEET_FRACTION], backgroundColor: hex.bg, grabber: false }}
         />
       </Sheet>
       <UpdateBanner />

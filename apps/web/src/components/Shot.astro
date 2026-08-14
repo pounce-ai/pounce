@@ -7,14 +7,12 @@
  * reverse) reads as a foreign object dropped into the layout.
  *
  * Both variants are emitted and CSS picks one. It cannot be a `<picture>` with
- * a `prefers-color-scheme` source: the theme toggle sets `data-theme` on the
+ * a `prefers-color-scheme` source: the theme picker sets `data-theme` on the
  * root, and media queries can't see an attribute, so an explicit choice would
- * leave the images showing the OS's preference instead of the visitor's. The
- * selectors below mirror the three states brand.css defines exactly:
+ * leave the images showing the OS's preference instead of the visitor's.
  *
- *   bare :root                      → light (the default)
- *   prefers dark, no explicit light → dark
- *   [data-theme="dark"|"light"]     → whatever was chosen, both directions
+ * BaseHead guarantees `data-theme` is always "light" or "dark" before first
+ * paint, so one pair of mutually exclusive selectors covers every case.
  *
  * The off-theme variant still downloads. That is the price of switching without
  * a flash of the wrong image, and it is why `loading` is passed through — only
@@ -66,31 +64,12 @@ const {
      image for anyone browsing in dark mode. -->
 
 <style is:global>
-  /* Light is the default, so the dark variant starts hidden. */
-  .shot--dark {
-    display: none;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) .shot--light {
-      display: none;
-    }
-    :root:not([data-theme="light"]) .shot--dark {
-      display: block;
-    }
-  }
-
-  /* An explicit choice wins over the OS in both directions. */
+  /* Exactly one rule decides, off the one attribute that is always present.
+     The previous version also matched prefers-color-scheme, so in system mode
+     the two variants could both resolve to visible and the page rendered the
+     screenshot twice. Two mutually exclusive selectors cannot do that. */
+  :root[data-theme="light"] .shot--dark,
   :root[data-theme="dark"] .shot--light {
-    display: none;
-  }
-  :root[data-theme="dark"] .shot--dark {
-    display: block;
-  }
-  :root[data-theme="light"] .shot--light {
-    display: block;
-  }
-  :root[data-theme="light"] .shot--dark {
     display: none;
   }
 </style>

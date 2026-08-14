@@ -131,3 +131,14 @@ figure.expressive-code .frame pre,
 .sl-markdown-content a:not(:where(.not-content *)) {
   text-underline-offset: 3px;
 }
+
+/* ------------------------------------------------------ two themes only -- */
+
+/* The site dropped system/auto: there are two themes and light is the default
+   (see BaseHead). Starlight's picker still renders an "Auto" option, so hide it
+   rather than ship a third state the rest of the site cannot represent.
+   The marketing pages also map a stored "auto" to light, so a value set before
+   this shipped still resolves somewhere sane. */
+starlight-theme-select select option[value="auto"] {
+  display: none;
+}

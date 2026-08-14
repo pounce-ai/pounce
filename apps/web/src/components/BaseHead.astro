@@ -39,10 +39,10 @@ const image = "https://use-pounce.com/assets/icon.png";
 <meta name="twitter:description" content={ogDescription ?? description} />
 <meta name="twitter:image" content={image} />
 
-<!-- Cream in light, plum in dark — matches the two grounds in brand.css so the
-     browser chrome never fights the page. -->
-<meta name="theme-color" content="#fef1e3" media="(prefers-color-scheme: light)" />
-<meta name="theme-color" content="#17111f" media="(prefers-color-scheme: dark)" />
+<!-- Cream, matching the light ground in brand.css. Light is the site's default
+     and the theme script sets the rest; a prefers-color-scheme pair here would
+     put the browser chrome back under OS control while the page is not. -->
+<meta name="theme-color" content="#fef1e3" />
 
 <link rel="icon" href="/assets/favicon.png" />
 <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
@@ -55,25 +55,24 @@ const image = "https://use-pounce.com/assets/icon.png";
 />
 
 <script is:inline>
-  // Runs before first paint. Stored choice wins; otherwise fall through to the
-  // OS setting by leaving data-theme unset, which is what brand.css keys its
-  // prefers-color-scheme block on.
+  // Runs before first paint, and ALWAYS ends with an explicit data-theme.
   //
-  // `starlight-theme` is the ONE key for the whole site, docs included. An
-  // earlier version kept its own `pounce-theme` and mirrored it across on
-  // write, which only synced in one direction: Starlight's own switcher never
-  // wrote our key, so flipping the theme inside the docs and clicking back to
-  // the landing page restored the stale value. Sharing the key removes the
-  // class of bug rather than patching one direction of it.
+  // The site has two themes, light and dark, and light is the default. There is
+  // no system/auto mode: when the theme could be implied by the OS instead of
+  // stated on the element, the CSS had to match on both `data-theme` and
+  // `prefers-color-scheme`, and a screenshot's light and dark variants could
+  // both resolve to visible at the same time. One always-present attribute
+  // makes that unrepresentable.
   //
-  // Starlight also stores "auto"; that must leave data-theme unset so the OS
-  // preference applies, which the `dark`/`light` check below already does.
+  // `starlight-theme` is the ONE key for the whole site, docs included — an
+  // earlier version kept its own key and mirrored on write, which only synced
+  // one way because Starlight's picker never wrote ours. Starlight may still
+  // store "auto" if someone picks it there; with system mode gone, that maps to
+  // light like any other unrecognised value.
   try {
     const stored = localStorage.getItem("starlight-theme");
-    if (stored === "dark" || stored === "light") {
-      document.documentElement.setAttribute("data-theme", stored);
-    }
+    document.documentElement.setAttribute("data-theme", stored === "dark" ? "dark" : "light");
   } catch (_) {
-    /* private mode / storage disabled — the OS setting still applies */
+    document.documentElement.setAttribute("data-theme", "light");
   }
 </script>

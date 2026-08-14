@@ -16,7 +16,7 @@
 --------------------------------------------------------------------------- */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
   /* ground → raised, warm rather than neutral greys */
   --ground: #fef1e3;
@@ -68,8 +68,15 @@
 }
 
 /* Dark is the same palette re-grounded on deep plum — NOT neutral charcoal, so
-   the warmth survives. Cream becomes the type colour it already is in the mark. */
+   the warmth survives. Cream becomes the type colour it already is in the mark.
+ *
+ * There is deliberately NO prefers-color-scheme variant. The site has exactly
+ * two themes and always writes an explicit data-theme (see BaseHead), so the OS
+ * preference never participates. Keying off the attribute AND a media query is
+ * what allowed a screenshot's light and dark variants to both resolve visible
+ * at once. */
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --ground: #17111f;
   --ground-2: #120d19;
   --surface: #1f1729;
@@ -102,42 +109,6 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 20px 50px -16px rgba(0, 0, 0, 0.7), 0 40px 90px -40px rgba(0, 0, 0, 0.8);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --ground: #17111f;
-    --ground-2: #120d19;
-    --surface: #1f1729;
-    --surface-2: #281e34;
-
-    --ink: #fdf3e7;
-    --ink-2: #bcaec6;
-    --ink-3: #877a93;
-
-    --brand: #b98bff;
-    --brand-ink: #cba9ff;
-    --brand-deep: #a060f0;
-    --brand-wash: rgba(185, 139, 255, 0.14);
-    --brand-edge: rgba(185, 139, 255, 0.32);
-
-    --cta-bg: #cba9ff;
-    --cta-bg-hover: #ddc6ff;
-    --cta-fg: #1b1226;
-
-    --pink: #ff95b0;
-    --pink-ink: #ff9db6;
-    --orange: #ffb65c;
-    --orange-ink: #ffc178;
-    --green-ink: #56d29a;
-
-    --line: rgba(253, 243, 231, 0.13);
-    --line-soft: rgba(253, 243, 231, 0.07);
-
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-    --shadow-lg: 0 20px 50px -16px rgba(0, 0, 0, 0.7), 0 40px 90px -40px rgba(0, 0, 0, 0.8);
-  }
 }
 
 /* --------------------------------------------------------------- base ---- */
@@ -396,48 +367,45 @@ img {
   }
 }
 
-/* --------------------------------------------------- theme toggle button -- */
+/* ------------------------------------------------------- theme picker ---- */
 
-.theme-toggle {
-  background: none;
+/* A visible two-option segmented control rather than a single mystery icon:
+   with system mode gone there are exactly two states, so showing both and
+   marking the active one is clearer than a toggle you have to press to learn. */
+.theme-picker {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  width: 34px;
-  height: 34px;
+  border-radius: 999px;
+  background: var(--surface);
+}
+.theme-picker button {
   display: grid;
   place-items: center;
-  color: var(--ink-2);
+  width: 28px;
+  height: 26px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--ink-3);
   cursor: pointer;
   transition:
-    color 0.2s,
-    border-color 0.2s,
-    background 0.2s;
+    background 0.18s ease,
+    color 0.18s ease;
 }
-.theme-toggle:hover {
-  color: var(--brand-ink);
-  border-color: var(--brand-edge);
+.theme-picker button:hover {
+  color: var(--ink);
+}
+.theme-picker button svg {
+  width: 15px;
+  height: 15px;
+}
+/* aria-pressed is the state, so the styling follows it rather than a class —
+   they cannot drift apart that way. */
+.theme-picker button[aria-pressed="true"] {
   background: var(--brand-wash);
-}
-.theme-toggle svg {
-  width: 17px;
-  height: 17px;
-}
-.theme-toggle .moon {
-  display: none;
-}
-:root[data-theme="dark"] .theme-toggle .moon {
-  display: block;
-}
-:root[data-theme="dark"] .theme-toggle .sun {
-  display: none;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .theme-toggle .moon {
-    display: block;
-  }
-  :root:not([data-theme="light"]) .theme-toggle .sun {
-    display: none;
-  }
+  color: var(--brand-ink);
 }
 
 /* ------------------------------------------------------------- reveal ---- */
