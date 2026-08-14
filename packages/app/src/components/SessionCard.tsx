@@ -2,8 +2,33 @@ import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useRouter } from "expo-router";
 import type { Session } from "@pounce/shared";
-import { ACTIVITY_LABEL, AgentChip, BranchChip, timeAgo } from "../ui";
+import { ACTIVITY_LABEL, AgentChip, BranchChip, TimeAgo } from "../ui";
 import { GlassCard } from "../ui/native/GlassCard";
+import { useThreadRow } from "../state/db/hooks";
+
+/**
+ * A card that reads its OWN row.
+ *
+ * For long lists, prefer this over passing a `session` down. A list whose rows
+ * carry whole `Session` objects has to rebuild every row when any one thread
+ * changes, and every realised cell re-renders with it — measured at 38 card
+ * renders and 27 cell renders for a single title change on one thread. Here the
+ * row carries an id, which doesn't change, so only the card whose thread
+ * actually moved re-renders.
+ */
+export function LiveSessionCard({
+  sessionId,
+  onLongPress,
+}: {
+  sessionId: string;
+  onLongPress?: (session: Session) => void;
+}) {
+  const session = useThreadRow(sessionId);
+  // Gone between a list rebuild and this card unmounting (deleted, or filtered
+  // out mid-sync). Render nothing rather than a card full of blanks.
+  if (!session) return null;
+  return <SessionCard session={session} onLongPress={onLongPress} />;
+}
 
 export function SessionCard({
   session,
@@ -53,7 +78,7 @@ export function SessionCard({
           >
             {ACTIVITY_LABEL[session.activity]}
           </Text>
-          <Text style={s.metaText}>{timeAgo(session.updatedAt)}</Text>
+          <TimeAgo iso={session.updatedAt} style={s.metaText} />
         </View>
       </GlassCard>
     </Pressable>

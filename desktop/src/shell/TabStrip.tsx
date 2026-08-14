@@ -19,7 +19,7 @@ import { DragRegion, TITLEBAR_INSET } from "@pounce/app/ui/native/DragRegion";
 import { useTrafficLightInset } from "./fullscreen";
 import { OpenInButton } from "./OpenIn";
 import { isTermOpen, toggleTerm } from "./TerminalDock";
-import { useFavThreadSet, useProjectNames, useThreads } from "@pounce/app/state/db/hooks";
+import { useFavThreadSet, useProjectNames, useThreadRow } from "@pounce/app/state/db/hooks";
 import { toggleFavThread } from "@pounce/app/state/stores";
 import type { MetricKey } from "@pounce/app/screens/Metric";
 import { sessionChrome$ } from "@pounce/app/state/sessionChrome";
@@ -63,6 +63,24 @@ function spaceLabel(key: string | undefined, names: Record<string, string>): str
   return names[repoId] ?? repoId.replace(/^repo:/, "") ?? "Space";
 }
 
+/**
+ * A tab's agent glyph and title, each reading that tab's OWN thread row.
+ *
+ * The strip used to call `useThreads()` and `find()` per tab, so a change to any
+ * thread in the workspace re-rendered the whole strip — measured at roughly one
+ * render per write to a thread the strip never displays. These watch one key.
+ */
+function TabThreadGlyph({ sessionId }: { sessionId?: string }) {
+  const session = useThreadRow(sessionId ?? "");
+  if (!session) return <View style={s.tabDotFallback} />;
+  return <AgentStatusIcon agent={session.agent} activity={session.activity} size={11} />;
+}
+
+function TabThreadLabel({ sessionId }: { sessionId?: string }) {
+  const session = useThreadRow(sessionId ?? "");
+  return <>{session?.title ?? "Thread"}</>;
+}
+
 export function TabStrip() {
   const router = useRouter();
   const tabs = useSelector(() => nav$.tabs.get());
@@ -70,7 +88,6 @@ export function TabStrip() {
   const dock = useSelector(() => nav$.dock.get());
   const sidebar = useSelector(() => nav$.sidebar.get());
   const searchOpen = useSelector(() => sessionChrome$.searchOpen.get());
-  const threads = useThreads();
   const projectNames = useProjectNames();
   const favSet = useFavThreadSet();
   // A pane tab (a Space) is a page, not a thread — the thread controls below
@@ -109,7 +126,6 @@ export function TabStrip() {
       {tabs.map((tab: Route, i) => {
         const id = tab.params.id;
         const paneIcon = PANE_ICON[tab.path];
-        const session = paneIcon ? undefined : threads.find((t) => t.id === id);
         // A Space tab is named after its project. The key encodes `repoId
         // hostId`, so the display name comes from the same projects collection
         // the sidebar reads — never a raw `repo:foo` id.
@@ -137,13 +153,11 @@ export function TabStrip() {
                 is shown. */}
             {paneIcon ? (
               <Ionicons name={paneIcon} size={11} color={i === active ? COLOR.fg : COLOR.fgMuted} />
-            ) : session ? (
-              <AgentStatusIcon agent={session.agent} activity={session.activity} size={11} />
             ) : (
-              <View style={s.tabDotFallback} />
+              <TabThreadGlyph sessionId={id} />
             )}
             <Text numberOfLines={1} style={[s.tabLabel, i === active && s.tabLabelActive]}>
-              {paneLabel ?? session?.title ?? "Thread"}
+              {paneLabel ?? <TabThreadLabel sessionId={id} />}
             </Text>
             <Pressable
               onPress={() => closeTab(i)}

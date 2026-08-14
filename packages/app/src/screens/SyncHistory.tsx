@@ -4,7 +4,7 @@ import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { PounceIcon } from "../ui/native/Icon";
 import type { SyncLogEntry } from "../state/stores";
 import { useDevices, useSyncLog } from "../state/db/hooks";
-import { timeAgo } from "../ui";
+import { TimeAgo } from "../ui";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -86,7 +86,7 @@ export default function SyncHistoryScreen() {
                     <View style={s.cardHeader}>
                       <PounceIcon name="sync" size={14} color={theme.colors.accent} />
                       <Text style={s.cardTime}>{clock(new Date(entry.at))}</Text>
-                      <Text style={s.cardAgo}>{timeAgo(entry.at)} ago</Text>
+                      <TimeAgo iso={entry.at} suffix=" ago" style={s.cardAgo} />
                     </View>
                     <Text style={s.cardSummary}>
                       {total} new update{total === 1 ? "" : "s"} across {entry.repos.length} space

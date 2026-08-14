@@ -11,7 +11,7 @@
  */
 import { useSelector } from "@legendapp/state/react";
 import { connection$ } from "../state/stores";
-import { useDevices } from "../state/db/hooks";
+import { useDeviceCount } from "../state/db/hooks";
 import { SettingsPage, SettingsRow, SettingsSection } from "../components/settings/primitives";
 import { UpdateRows } from "../components/settings/UpdateRows";
 import { TabHeaderIcon } from "../components/TabHeaderIcon";
@@ -21,16 +21,16 @@ import { autoSettleDays$ } from "../state/settledStore";
 export default function SettingsScreen() {
   const status = useSelector(() => connection$.status.get());
   const autoDays = useSelector(() => autoSettleDays$.get());
-  const devices = useDevices();
+  const deviceCount = useDeviceCount();
   const live = status === "connected";
 
   // One row, two facts: how many machines you've paired and whether this device
   // can currently reach them. "Not connected" with no count is the honest
   // reading when nothing is paired at all.
-  const deviceValue = devices.length
+  const deviceValue = deviceCount
     ? live
-      ? `${devices.length} connected`
-      : `${devices.length} paired · offline`
+      ? `${deviceCount} connected`
+      : `${deviceCount} paired · offline`
     : "Not paired";
 
   return (
@@ -61,7 +61,7 @@ export default function SettingsScreen() {
         <SettingsRow
           icon="card-outline"
           label="Official spend"
-          value={devices.length ? undefined : "Needs a device"}
+          value={deviceCount ? undefined : "Needs a device"}
           href={settingsHref("spend")}
           divided
         />
@@ -71,7 +71,7 @@ export default function SettingsScreen() {
         <SettingsRow
           icon="medkit-outline"
           label="Diagnostics"
-          value={devices.length ? undefined : "Needs a device"}
+          value={deviceCount ? undefined : "Needs a device"}
           href="/diagnostics"
         />
         <SettingsRow icon="time-outline" label="Sync history" href="/sync-history" divided />

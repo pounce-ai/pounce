@@ -18,7 +18,7 @@ import { agentLabel } from "../ui/tokens";
 import { scaledWidth } from "../ui/layout";
 import { fmtBytes, fmtCost, fmtCount, fmtDayLabel, fmtDelta, fmtTokens } from "../ui/format";
 import { fetchActivity, fetchDisk, fetchQuota } from "../services/bridge";
-import { useDevices } from "../state/db/hooks";
+import { useDeviceCount } from "../state/db/hooks";
 import { ConnectFlow } from "../components/ConnectFlow";
 import {
   type ActivityDay,
@@ -86,7 +86,7 @@ const CONTENT_WIDTH = { fraction: 0.86, min: 1120, max: 1600 };
  * inlined in render.
  */
 export default function DashboardScreen() {
-  const devices = useDevices();
+  const deviceCount = useDeviceCount();
   const { theme } = useUnistyles();
   const router = useRouter();
   const [period, setPeriod] = useState<Period>("month");
@@ -254,7 +254,7 @@ export default function DashboardScreen() {
   const canShare = !IS_DESKTOP && captureAvailable();
   /** A machine has been paired at all — not whether it answers right now. A
    *  brief disconnect shouldn't wipe the charts you were just reading. */
-  const paired = devices.length > 0;
+  const paired = deviceCount > 0;
   // "Nothing here" is a claim about the DATA, so it may only be made when the
   // data actually arrived. A failed read is `q.isError`, handled separately —
   // and sessions count, since agents that publish no dated tokens (opencode,

@@ -2,6 +2,7 @@ import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { LegendList } from "@legendapp/list/react-native";
 import { useRouter } from "expo-router";
+import type { Session } from "@pounce/shared";
 import { useSessionsByLastActive } from "../state/db/hooks";
 import { SessionCard } from "../components/SessionCard";
 import { IS_DESKTOP } from "../ui";
@@ -11,6 +12,19 @@ import { IS_DESKTOP } from "../ui";
  * activity (newest first), across folders and devices. Reached from the Live
  * strip's header; the counterpart to Home's folder-grouped view.
  */
+/** Hoisted for the same reason Home and Search hoist theirs: an inline arrow is
+ *  a new reference on every render, which hands the list a fresh `renderItem`
+ *  and re-renders every realised cell. LegendList absorbs this better than
+ *  FlatList does — profiling this screen showed no measurable problem — but the
+ *  two lists either side of it already guard against it, and there is no reason
+ *  for this one to be the exception. */
+const keyExtractor = (s: Session) => s.id;
+const renderItem = ({ item }: { item: Session }) => (
+  <View style={s.row}>
+    <SessionCard session={item} />
+  </View>
+);
+
 export default function SessionsScreen() {
   const router = useRouter();
   const sessions = useSessionsByLastActive();
@@ -40,12 +54,8 @@ export default function SessionsScreen() {
       ) : (
         <LegendList
           data={sessions}
-          keyExtractor={(s) => s.id}
-          renderItem={({ item }) => (
-            <View style={s.row}>
-              <SessionCard session={item} />
-            </View>
-          )}
+          keyExtractor={keyExtractor}
+          renderItem={renderItem}
           estimatedItemSize={104}
           keyboardDismissMode="on-drag"
           contentContainerStyle={s.listPad}
