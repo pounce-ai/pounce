@@ -17,19 +17,19 @@ Installed globally (`npm i -g use-pounce`), the command is just `pounce`.
 
 ## Commands
 
-| Command            | What it does                                               |
-| ------------------ | ---------------------------------------------------------- |
-| `pounce`           | Start the Bridge (background) + show the pairing QR + wait |
-| `pounce qr`        | Same, but don't wait for the phone                         |
-| `pounce status`    | Bridge / tunnel / phone status                             |
-| `pounce stop`      | Stop the background Bridge and its tunnel                  |
-| `pounce logs [-f]` | Show (or follow) the Bridge log                            |
-| `pounce peers`     | Machines nearby, who's asking, who has access              |
-| `pounce peers --visible on` | Let other computers here find this one            |
-| `pounce ask <machine>` | Ask another computer to share its threads with you     |
-| `pounce approve <code>` | Let a machine in                                      |
-| `pounce deny <code>` | Turn a request down                                      |
-| `pounce revoke <id>` | Take access away again                                   |
+| Command                     | What it does                                               |
+| --------------------------- | ---------------------------------------------------------- |
+| `pounce`                    | Start the Bridge (background) + show the pairing QR + wait |
+| `pounce qr`                 | Same, but don't wait for the phone                         |
+| `pounce status`             | Bridge / tunnel / phone status                             |
+| `pounce stop`               | Stop the background Bridge and its tunnel                  |
+| `pounce logs [-f]`          | Show (or follow) the Bridge log                            |
+| `pounce peers`              | Machines nearby, who's asking, who has access              |
+| `pounce peers --visible on` | Let other computers here find this one                     |
+| `pounce ask <machine>`      | Ask another computer to share its threads with you         |
+| `pounce approve <code>`     | Let a machine in                                           |
+| `pounce deny <code>`        | Turn a request down                                        |
+| `pounce revoke <id>`        | Take access away again                                     |
 
 ## Flags
 
@@ -42,13 +42,13 @@ Installed globally (`npm i -g use-pounce`), the command is just `pounce`.
 
 Sharing flags (see [Sharing with another machine](/docs/sharing)):
 
-| Flag             | Meaning                                                    |
-| ---------------- | ---------------------------------------------------------- |
-| `--spaces a,b`   | Limit to these projects — on `ask` and on `approve`         |
-| `--all`          | Ask for everything the other machine is willing to give     |
-| `--hours <n>`    | How long the access lasts (default `24`)                    |
-| `--forever`      | No expiry                                                   |
-| `--note "text"`  | A line for the person approving                             |
+| Flag                | Meaning                                                        |
+| ------------------- | -------------------------------------------------------------- |
+| `--spaces a,b`      | Limit to these projects — on `ask` and on `approve`            |
+| `--all`             | Ask for everything the other machine is willing to give        |
+| `--hours <n>`       | How long the access lasts (default `24`)                       |
+| `--forever`         | No expiry                                                      |
+| `--note "text"`     | A line for the person approving                                |
 | `--visible on\|off` | Let other computers here find this one — **hidden by default** |
 
 ## Sharing with another machine

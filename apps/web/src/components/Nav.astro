@@ -1,0 +1,140 @@
+---
+/** Shared top bar. `active` dims the link for the page you are already on. */
+interface Props {
+  active?: "docs" | "changelog" | "how";
+}
+const { active } = Astro.props;
+---
+
+<nav class="site-nav" id="site-nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="/">
+      <img src="/assets/icon.png" alt="" width="34" height="34" />
+      pounce
+    </a>
+
+    <div class="nav-links">
+      <a href="/how-it-works" class="hide-sm" aria-current={active === "how" ? "page" : undefined}
+        >How it works</a
+      >
+      <a href="/docs" aria-current={active === "docs" ? "page" : undefined}>Docs</a>
+      <a
+        href="/changelog"
+        class="hide-sm"
+        aria-current={active === "changelog" ? "page" : undefined}>Changelog</a
+      >
+
+      <a
+        class="nav-icon hide-sm"
+        href="https://github.com/pounce-ai/pounce"
+        target="_blank"
+        rel="noopener"
+        aria-label="Pounce on GitHub"
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+          ><path
+            d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.21.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.82 1.1.82 2.22v3.29c0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"
+          ></path></svg
+        >
+      </a>
+      <a
+        class="nav-icon hide-sm"
+        href="https://discord.gg/xK5MQ8KzQH"
+        target="_blank"
+        rel="noopener"
+        aria-label="Pounce on Discord"
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+          ><path
+            d="M20.32 4.37A19.8 19.8 0 0 0 15.43 3a13.9 13.9 0 0 0-.63 1.28 18.4 18.4 0 0 0-5.6 0A13 13 0 0 0 8.57 3 19.7 19.7 0 0 0 3.68 4.38C.57 9 .0 13.5.28 17.94a19.9 19.9 0 0 0 6.05 3.06c.49-.67.92-1.38 1.29-2.13a12.9 12.9 0 0 1-2.03-.98c.17-.13.34-.26.5-.4a14.2 14.2 0 0 0 12.12 0c.16.14.33.27.5.4-.65.38-1.33.71-2.04.98.37.75.8 1.46 1.29 2.13a19.8 19.8 0 0 0 6.06-3.06c.34-5.15-.58-9.6-2.42-13.57ZM8.02 15.23c-1.18 0-2.16-1.09-2.16-2.42s.95-2.42 2.16-2.42c1.21 0 2.18 1.09 2.16 2.42 0 1.33-.95 2.42-2.16 2.42Zm7.96 0c-1.18 0-2.16-1.09-2.16-2.42s.95-2.42 2.16-2.42c1.21 0 2.18 1.09 2.16 2.42 0 1.33-.95 2.42-2.16 2.42Z"
+          ></path></svg
+        >
+      </a>
+
+      <div class="theme-picker" id="theme-picker" role="group" aria-label="Theme">
+        <button type="button" data-theme-choice="light" aria-pressed="false" aria-label="Light theme">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            ><circle cx="12" cy="12" r="4"></circle><path
+              d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+            ></path></svg
+          >
+        </button>
+        <button type="button" data-theme-choice="dark" aria-pressed="false" aria-label="Dark theme">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            ><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path></svg
+          >
+        </button>
+      </div>
+
+      <a class="btn btn--primary nav-get" href="/#get">Get Pounce</a>
+    </div>
+  </div>
+</nav>
+
+<style>
+  .nav-get {
+    padding: 10px 18px;
+    font-size: 15px;
+  }
+  @media (max-width: 640px) {
+    /* Scoped by `.nav-get:where(.astro-hash)`, and :where() contributes no
+       specificity — so a bare `.nav-get` ties with `.btn { display: inline-flex }`
+       in brand.css and loses on source order. That is why this button used to
+       stay visible at 390px, wrap onto two lines and collide with the wordmark.
+       Qualifying with the ancestor wins the tie honestly. */
+    .site-nav .nav-get {
+      display: none;
+    }
+  }
+</style>
+
+<script is:inline>
+  // Re-run on every view transition, not just the first load: the router swaps
+  // the body, so the nav this bound to is gone and the new one has no listeners.
+  // `astro:page-load` fires on the initial load AND after each swap, which is
+  // why the whole thing is a function rather than top-level statements.
+  document.addEventListener("astro:page-load", () => {
+    const nav = document.getElementById("site-nav");
+    if (nav) {
+      const onScroll = () => nav.classList.toggle("scrolled", window.scrollY > 8);
+      onScroll();
+      // The window survives swaps, so this listener would stack up one per
+      // navigation without a name to replace.
+      window.removeEventListener("scroll", window.__pounceNavScroll);
+      window.__pounceNavScroll = onScroll;
+      window.addEventListener("scroll", onScroll, { passive: true });
+    }
+
+    const picker = document.getElementById("theme-picker");
+    const buttons = picker ? [...picker.querySelectorAll("[data-theme-choice]")] : [];
+
+    const paint = (theme) => {
+      for (const b of buttons) {
+        b.setAttribute("aria-pressed", String(b.dataset.themeChoice === theme));
+      }
+    };
+
+    // The bootstrap has already set this before paint, so the control shows the
+    // live state on load rather than a guess.
+    paint(document.documentElement.getAttribute("data-theme") || "light");
+
+    for (const b of buttons) {
+      // These buttons come in with the swapped body, so they are new elements
+      // each time and cannot accumulate duplicate handlers.
+      b.addEventListener("click", () => {
+        const next = b.dataset.themeChoice;
+        const root = document.documentElement;
+        root.setAttribute("data-theme", next);
+        root.style.colorScheme = next;
+        root.style.backgroundColor = next === "dark" ? "#17111f" : "#fef1e3";
+        paint(next);
+        try {
+          // The single site-wide key, shared with Starlight — see themeBootstrap.
+          localStorage.setItem("starlight-theme", next);
+        } catch (_) {
+          /* nothing to persist to; the in-page switch still applies */
+        }
+      });
+    }
+  });
+</script>

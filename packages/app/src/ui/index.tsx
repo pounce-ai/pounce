@@ -62,7 +62,74 @@ export function fmtDuration(secs: number): string {
 }
 
 export function timeAgo(iso: string): string {
-  return fmtDuration(Math.max(1, (Date.now() - Date.parse(iso)) / 1000));
+  return timeAgoAt(iso, Date.now());
+}
+
+/** `timeAgo` against an explicit clock reading. Separated so a subscriber can
+ *  hold the clock still for the duration of a render pass (see `TimeAgo`). */
+function timeAgoAt(iso: string, now: number): string {
+  return fmtDuration(Math.max(1, (now - Date.parse(iso)) / 1000));
+}
+
+// --- the shared "now" ---
+//
+// `timeAgo` reads the wall clock, so its answer goes stale with no state change
+// behind it. That used to be papered over by accident: the sync rewrote every
+// row each tick, which re-rendered every screen, which recomputed every label.
+// Once those wasted renders were removed the labels visibly froze — a "43m"
+// thread still said 43m two minutes later.
+//
+// So make the dependency explicit and put it at the LEAF. One interval, shared
+// by every label, exists only while at least one is mounted. `nowMs` is frozen
+// between ticks so `getSnapshot` is deterministic within a render pass (React
+// requires a cached snapshot; deriving straight from `Date.now()` there risks
+// an update loop).
+let nowMs = Date.now();
+let clockTimer: ReturnType<typeof setInterval> | null = null;
+const clockListeners = new Set<() => void>();
+function subscribeClock(fn: () => void): () => void {
+  clockListeners.add(fn);
+  clockTimer ??= setInterval(() => {
+    nowMs = Date.now();
+    clockListeners.forEach((l) => l());
+  }, 1000);
+  return () => {
+    clockListeners.delete(fn);
+    if (!clockListeners.size && clockTimer) {
+      clearInterval(clockTimer);
+      clockTimer = null;
+    }
+  };
+}
+
+/**
+ * A relative timestamp that keeps itself current.
+ *
+ * The tick is 1s, but the SNAPSHOT is the formatted label — so a row reading
+ * "43m" re-renders once a minute, not once a second, and only this one `Text`
+ * re-renders rather than the screen that contains it.
+ */
+export function TimeAgo({
+  iso,
+  suffix,
+  style,
+}: {
+  iso: string;
+  /** Trailing text inside the same Text node, e.g. " ago". */
+  suffix?: string;
+  style?: StyleProp<TextStyle>;
+}) {
+  const label = useSyncExternalStore(
+    subscribeClock,
+    () => timeAgoAt(iso, nowMs),
+    () => timeAgoAt(iso, nowMs),
+  );
+  return (
+    <Text style={style}>
+      {label}
+      {suffix}
+    </Text>
+  );
 }
 
 export const ACTIVITY_LABEL: Record<ActivityStatus, string> = {

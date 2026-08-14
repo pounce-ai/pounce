@@ -14,7 +14,7 @@ always read-only — browse threads, messages, diffs and search, but never send 
 turn, run a command, or read the machine's setup.
 
 **You can't tick a project you've never seen, so asking happens twice.** First a
-short *preview*, good for nothing but a catalog: project names with counts and
+short _preview_, good for nothing but a catalog: project names with counts and
 dates, and a search over thread names. No messages, no paths, no branches, and
 it lapses in five minutes. You pick from that, then ask for read access to what
 you picked. Both steps stop at a person — nothing is ever granted automatically.
@@ -25,7 +25,7 @@ can tell a colleague's laptop from a stranger on the café wifi.
 read-only routes, so anything added to Pounce later is closed to it by default.
 Ask for a thread outside your scope and you get "not found" rather than
 "forbidden", because the difference would map what else is on the machine.
-Threads started later in a project you shared *do* appear — the project is what
+Threads started later in a project you shared _do_ appear — the project is what
 was agreed to, not a snapshot of that moment.
 
 **And it ends.** An hour, eight hours, a day, a week, or never. When it lapses

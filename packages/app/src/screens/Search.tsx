@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useDevices } from "../state/db/hooks";
+import { useDeviceCount } from "../state/db/hooks";
 import { ConnectFlow } from "../components/ConnectFlow";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "@legendapp/state/react";
@@ -10,7 +10,7 @@ import type { Session } from "@pounce/shared";
 import { searchMessages, type MessageSearchHit } from "../services/bridge";
 import { applyFilters, filters$, rankSession } from "../state/stores";
 import { useFavThreadSet, useIgnoredSet, useProjectNames, useThreads } from "../state/db/hooks";
-import { SessionCard } from "../components/SessionCard";
+import { LiveSessionCard } from "../components/SessionCard";
 import { FilterButton, FilterSheet } from "../components/FilterSheet";
 import { ScreenRoot } from "../components/ScreenRoot";
 import { TabHeaderIcon } from "../components/TabHeaderIcon";
@@ -27,7 +27,7 @@ const FILL = { flex: 1 } as const;
 
 /** Full-screen thread search — matches title, branch, host, agent, repo. */
 export default function SearchScreen() {
-  const devices = useDevices();
+  const deviceCount = useDeviceCount();
   const { theme } = useUnistyles();
   // Desktop's sidebar seeds the modal via /search?q=… — start searching
   // immediately instead of making the user retype.
@@ -81,6 +81,20 @@ export default function SearchScreen() {
         rankSession(a) - rankSession(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
     );
   }, [raw, repoNames, ignored, debouncedQuery, filters, favSet]);
+
+  // The list renders IDS, not sessions — each row subscribes to its own thread
+  // (see LiveSessionCard). This screen stays mounted behind Home, so it rebuilds
+  // `results` on every thread change; holding the id array's identity still when
+  // the same threads come back in the same order keeps that rebuild from
+  // re-rendering every realised cell of an offscreen list.
+  const resultIdsRef = useRef<string[]>([]);
+  const resultIds = useMemo(() => {
+    const next = results.map((r) => r.id);
+    const prev = resultIdsRef.current;
+    if (prev.length === next.length && prev.every((id, i) => id === next[i])) return prev;
+    resultIdsRef.current = next;
+    return next;
+  }, [results]);
 
   // Keyed to the debounced query so the header/footer/empty views swap in the
   // same commit as the data they describe.
@@ -141,14 +155,80 @@ export default function SearchScreen() {
   // literals gave each of the ~100 CellRenderers a fresh `renderItem` and
   // re-rendered the whole offscreen list — profiled at 40–110ms per sync
   // (argent, 2026-08-06). Keep them referentially stable.
-  const keyExtractor = useCallback((item: Session) => item.id, []);
+  const keyExtractor = useCallback((id: string) => id, []);
   const renderItem = useCallback(
-    ({ item }: { item: Session }) => (
+    ({ item }: { item: string }) => (
       <View style={s.resultRow}>
-        <SessionCard session={item} />
+        <LiveSessionCard sessionId={item} />
       </View>
     ),
     [],
+  );
+
+  // The header/footer/empty slots were inline JSX, so each got a fresh identity
+  // on every render of this screen — which is the very thing the note above
+  // warns about, and it re-rendered every realised cell of an offscreen list on
+  // each sync tick. Memoize them on what they actually read.
+  const listHeader = useMemo(
+    () => (
+      <Text style={s.listHeader}>
+        {showAll ? "All threads" : `${resultIds.length} match${resultIds.length === 1 ? "" : "es"}`}
+      </Text>
+    ),
+    [showAll, resultIds.length],
+  );
+
+  const listFooter = useMemo(
+    () =>
+      !showAll && (msgSearching || msgHits.length > 0) ? (
+        <View style={s.footer}>
+          <View style={s.footerHeaderRow}>
+            <Text style={s.sectionLabel}>In messages</Text>
+            {msgSearching ? <ActivityIndicator size="small" color={theme.colors.fgFaint} /> : null}
+          </View>
+          {msgHits.map((h) => (
+            <MessageHitRow
+              key={`${h.hostId}:${h.threadId}`}
+              hit={h}
+              query={debouncedQuery.trim()}
+              session={sessionById.get(h.threadId)}
+            />
+          ))}
+        </View>
+      ) : null,
+    [showAll, msgSearching, msgHits, debouncedQuery, sessionById, theme.colors.fgFaint],
+  );
+
+  const listEmpty = useMemo(
+    () =>
+      // With message hits (or a search in flight) below, a tall "No matches"
+      // hero would push the real results off-screen — the section headers
+      // already say "0 matches", so show nothing extra.
+      !showAll && (msgSearching || msgHits.length > 0) ? null : (
+        <View style={s.empty}>
+          {showAll && !deviceCount ? (
+            // "Start a task to see it here" is an instruction the reader cannot
+            // follow: there is no machine to start one on. Offer the thing that
+            // unblocks them instead.
+            <>
+              <Text style={s.emptyTitle}>Nothing to search yet</Text>
+              <Text style={s.emptyBody}>
+                Connect a computer — its threads are what you&apos;d search.
+              </Text>
+              <ConnectFlow />
+            </>
+          ) : (
+            <>
+              {showAll ? null : <Text style={s.emptyEmoji}>🔍</Text>}
+              <Text style={s.emptyTitle}>{showAll ? "No threads yet" : "No matches"}</Text>
+              <Text style={s.emptyBody}>
+                {showAll ? "Start a task to see it here." : "Try another word."}
+              </Text>
+            </>
+          )}
+        </View>
+      ),
+    [showAll, msgSearching, msgHits.length, deviceCount],
   );
 
   return (
@@ -197,7 +277,7 @@ export default function SearchScreen() {
       <FlatList
         style={FILL}
         contentInsetAdjustmentBehavior="automatic"
-        data={results}
+        data={resultIds}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         // Offscreen (behind another tab) this list gets no scroll metrics, so
@@ -211,60 +291,9 @@ export default function SearchScreen() {
         // First tap must PRESS the result, not just dismiss the keyboard —
         // without this, tapping a hit right after typing silently no-ops.
         keyboardShouldPersistTaps="handled"
-        ListHeaderComponent={
-          <Text style={s.listHeader}>
-            {showAll ? "All threads" : `${results.length} match${results.length === 1 ? "" : "es"}`}
-          </Text>
-        }
-        ListFooterComponent={
-          !showAll && (msgSearching || msgHits.length > 0) ? (
-            <View style={s.footer}>
-              <View style={s.footerHeaderRow}>
-                <Text style={s.sectionLabel}>In messages</Text>
-                {msgSearching ? (
-                  <ActivityIndicator size="small" color={theme.colors.fgFaint} />
-                ) : null}
-              </View>
-              {msgHits.map((h) => (
-                <MessageHitRow
-                  key={`${h.hostId}:${h.threadId}`}
-                  hit={h}
-                  query={debouncedQuery.trim()}
-                  session={sessionById.get(h.threadId)}
-                />
-              ))}
-            </View>
-          ) : null
-        }
-        ListEmptyComponent={
-          // With message hits (or a search in flight) below, a tall "No
-          // matches" hero would push the real results off-screen — the section
-          // headers already say "0 matches", so show nothing extra.
-          !showAll && (msgSearching || msgHits.length > 0) ? null : (
-            <View style={s.empty}>
-              {showAll && !devices.length ? (
-                // "Start a task to see it here" is an instruction the reader
-                // cannot follow: there is no machine to start one on. Offer the
-                // thing that unblocks them instead.
-                <>
-                  <Text style={s.emptyTitle}>Nothing to search yet</Text>
-                  <Text style={s.emptyBody}>
-                    Connect a computer — its threads are what you&apos;d search.
-                  </Text>
-                  <ConnectFlow />
-                </>
-              ) : (
-                <>
-                  {showAll ? null : <Text style={s.emptyEmoji}>🔍</Text>}
-                  <Text style={s.emptyTitle}>{showAll ? "No threads yet" : "No matches"}</Text>
-                  <Text style={s.emptyBody}>
-                    {showAll ? "Start a task to see it here." : "Try another word."}
-                  </Text>
-                </>
-              )}
-            </View>
-          )
-        }
+        ListHeaderComponent={listHeader}
+        ListFooterComponent={listFooter}
+        ListEmptyComponent={listEmpty}
         // Android ignores contentInsetAdjustmentBehavior (iOS-only), so the
         // list needs real top padding below the in-flow toolbar + search bar.
         contentContainerStyle={s.listPad}

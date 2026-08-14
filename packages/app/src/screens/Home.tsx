@@ -46,7 +46,7 @@ import { canSettle, isSettled, partitionSettled } from "../state/settled";
 import { autoSettleDays$, settled$, settleOptions, toggleSettled } from "../state/settledStore";
 import { type Draft, draftTitle, drafts$, listDrafts, removeDraft } from "../state/drafts";
 import { ScreenRoot } from "../components/ScreenRoot";
-import { SessionCard } from "../components/SessionCard";
+import { LiveSessionCard } from "../components/SessionCard";
 import { LiveStrip } from "../components/LiveStrip";
 import { ConnectFlow } from "../components/ConnectFlow";
 import { SessionListSkeleton } from "../components/Skeleton";
@@ -68,6 +68,23 @@ const DRAFTS_KEY = "__drafts__";
  *  valid style value". */
 const FILL = { flex: 1 } as const;
 const LIST_HEADER = <LiveStrip />;
+/** Are these two row lists interchangeable? Rows are flat objects of scalars
+ *  (plus `draft`, compared by reference — a changed draft list should rebuild),
+ *  so a shallow per-row compare is exact, and it runs over ~50 small objects
+ *  rather than re-rendering every cell. */
+function sameRows(a: Row[], b: Row[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i] as Record<string, unknown>;
+    const y = b[i] as Record<string, unknown>;
+    const xk = Object.keys(x);
+    if (xk.length !== Object.keys(y).length) return false;
+    for (const k of xk) if (!Object.is(x[k], y[k])) return false;
+  }
+  return true;
+}
+
 const rowKey = (r: Row) => {
   switch (r.type) {
     case "favHeader":
@@ -79,7 +96,7 @@ const rowKey = (r: Row) => {
     case "draft":
       return `d:${r.draft.id}`;
     default:
-      return `${r.fav ? "fav:" : ""}${r.session.id}`;
+      return `${r.fav ? "fav:" : ""}${r.sessionId}`;
   }
 };
 const rowType = (r: Row) => r.type;
@@ -112,7 +129,7 @@ type Row =
       deviceName?: string;
       deviceEmoji?: string;
     }
-  | { type: "session"; session: Session; fav?: boolean }
+  | { type: "session"; sessionId: string; fav?: boolean }
   | { type: "draft"; draft: Draft };
 
 export default function HomeScreen() {
@@ -181,7 +198,7 @@ export default function HomeScreen() {
   // needsYou reads the wall clock (ATTENTION_GRACE_MS); nothing else changes
   // at the moment a pending thread crosses it, so this wakes the memo.
   const attentionTick = useAttentionClock(rawThreads);
-  const { rows, attention: attentionCount } = useMemo(() => {
+  const { rows: computedRows, attention: attentionCount } = useMemo(() => {
     const repos = Object.fromEntries(projectList.map((r) => [r.id, r]));
     // applyFilters handles device + agent + selected folders + permanently
     // ignored folders; the Show buckets are applied below.
@@ -237,7 +254,7 @@ export default function HomeScreen() {
       const favCollapsed = !!collapsedMap[FAV_KEY];
       rows.push({ type: "favHeader", count: favSessions.length, collapsed: favCollapsed });
       if (!favCollapsed)
-        for (const s of favSessions) rows.push({ type: "session", session: s, fav: true });
+        for (const s of favSessions) rows.push({ type: "session", sessionId: s.id, fav: true });
     }
 
     const groups = new Map<string, Session[]>();
@@ -274,7 +291,7 @@ export default function HomeScreen() {
         deviceName: dev ? deviceLabel(dev.id, dev.name) : undefined,
         deviceEmoji: dev ? deviceEmoji(dev.id) : undefined,
       });
-      if (!isCollapsed) for (const s of glist) rows.push({ type: "session", session: s });
+      if (!isCollapsed) for (const s of glist) rows.push({ type: "session", sessionId: s.id });
     }
     return { rows, attention };
   }, [
@@ -292,6 +309,23 @@ export default function HomeScreen() {
     archiveOnly,
     attentionTick,
   ]);
+
+  // Hold the list's IDENTITY still when the rebuild produced the same list.
+  //
+  // The memo above has to read every thread — the ordering, grouping and
+  // attention counts all depend on their contents — so any thread change
+  // rebuilds it. But now that a row carries only an id, most of those rebuilds
+  // come out identical, and handing LegendList a fresh array re-renders every
+  // realised cell for nothing. Compare and reuse the previous array instead;
+  // the one card whose thread actually changed re-renders itself, because
+  // `LiveSessionCard` subscribes to its own row.
+  const rowsRef = useRef<Row[] | null>(null);
+  const rows = useMemo(() => {
+    const prev = rowsRef.current;
+    if (prev && sameRows(prev, computedRows)) return prev;
+    rowsRef.current = computedRows;
+    return computedRows;
+  }, [computedRows]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -426,7 +460,7 @@ export default function HomeScreen() {
         default:
           return (
             <View style={s.sessionRow}>
-              <SessionCard session={item.session} onLongPress={onLongPressSession} />
+              <LiveSessionCard sessionId={item.sessionId} onLongPress={onLongPressSession} />
             </View>
           );
       }

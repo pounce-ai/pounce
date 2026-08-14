@@ -20,7 +20,7 @@ import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import { COLOR } from "@pounce/app/ui";
 import { type EditorTarget, listEditors, openInEditor } from "@pounce/app/services/bridge";
-import { useThreads } from "@pounce/app/state/db/hooks";
+import { useThreadRow } from "@pounce/app/state/db/hooks";
 import { nav$ } from "../shims/router";
 import { AnchoredMenu, anchorStore, useAnchorButton } from "./AnchoredMenu";
 
@@ -46,11 +46,13 @@ function folderOf(t: { worktree: string | null; cwd: string | null } | undefined
 
 /** The thread the tab strip is currently showing, if it's a thread at all. */
 function useActiveThread() {
+  // Subscribe to the ACTIVE thread's row, not the whole collection. With
+  // `useThreads()` this control re-rendered on every change to any thread —
+  // measured at one render per write to a thread it never displays.
   const tabs = useSelector(() => nav$.tabs.get());
   const active = useSelector(() => nav$.active.get());
-  const threads = useThreads();
   const id = tabs[active]?.params?.id;
-  return id ? threads.find((t) => t.id === id) : undefined;
+  return useThreadRow(id ?? "");
 }
 
 /** The tab strip's control. Renders nothing when there's no folder to open —

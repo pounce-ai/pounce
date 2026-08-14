@@ -8,8 +8,8 @@ tried in a different tool yesterday, which approach you already rejected, or
 what you flagged as important.
 
 Pounce can. It already reads sessions from Claude Code, Codex, opencode and
-Cursor on your machine, so it's the one thing that can answer *"what did Codex
-try on this bug yesterday?"* — and `pounce mcp` hands that to any agent.
+Cursor on your machine, so it's the one thing that can answer _"what did Codex
+try on this bug yesterday?"_ — and `pounce mcp` hands that to any agent.
 
 ```sh
 claude mcp add pounce -- npx use-pounce mcp
@@ -128,15 +128,15 @@ else to configure and no secret to paste into a config file.
 
 ## Tools
 
-| Tool              | What it answers                                                          |
-| ----------------- | ------------------------------------------------------------------------ |
-| `search_history`  | "Has anyone tried this before?" — full-text search across every agent     |
-| `list_threads`    | "What sessions exist?" — newest first, filterable by agent or project     |
-| `get_thread`      | "What actually happened in that session?" — the full message history      |
-| `list_markers`    | "What did I flag as important?" — your own jump-to points in a thread     |
-| `recent_activity` | "What's been worked on lately?" — activity across machines and repos      |
+| Tool              | What it answers                                                       |
+| ----------------- | --------------------------------------------------------------------- |
+| `search_history`  | "Has anyone tried this before?" — full-text search across every agent |
+| `list_threads`    | "What sessions exist?" — newest first, filterable by agent or project |
+| `get_thread`      | "What actually happened in that session?" — the full message history  |
+| `list_markers`    | "What did I flag as important?" — your own jump-to points in a thread |
+| `recent_activity` | "What's been worked on lately?" — activity across machines and repos  |
 
-`list_markers` is the underrated one: markers are *your* judgement about what
+`list_markers` is the underrated one: markers are _your_ judgement about what
 mattered in a long session, so they're usually the fastest way for an agent to
 get oriented without reading thousands of messages.
 
@@ -148,7 +148,7 @@ and make git commits. **None of those are exposed over MCP.**
 Handing an arbitrary agent shell execution and commit rights through a tool
 call is a foot-gun, and it makes the security story impossible to explain in
 one sentence. Read-only keeps it simple: an MCP client connected to Pounce can
-*read* your history and nothing else.
+_read_ your history and nothing else.
 
 ## Privacy
 

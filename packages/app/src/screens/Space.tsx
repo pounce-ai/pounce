@@ -25,6 +25,7 @@ import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import type { Session } from "@pounce/shared";
 import { applyFilters, needsYou } from "../state/stores";
 import { useIgnoredSet, useProjectNames, useThreads } from "../state/db/hooks";
+import { useStable } from "../state/equality";
 import { deriveSpaces, spaceKeyOf, type Space } from "../state/spaces";
 import {
   fetchActivity,
@@ -49,7 +50,7 @@ import { SkillsCard } from "../components/SkillsCard";
 import { PeriodPicker } from "../components/PeriodPicker";
 import { PounceIcon } from "../ui/native/Icon";
 import type { IoniconName } from "../ui/native/icon-map";
-import { AgentLogo, AgentStatusIcon, IS_DESKTOP, SELECT_TEXT, timeAgo } from "../ui";
+import { AgentLogo, AgentStatusIcon, IS_DESKTOP, SELECT_TEXT, TimeAgo } from "../ui";
 import { agentLabel } from "../ui/tokens";
 import { fmtCost, fmtCount, fmtDayLabel, fmtTokens } from "../ui/format";
 
@@ -63,6 +64,9 @@ import { fmtCost, fmtCount, fmtDayLabel, fmtTokens } from "../ui/format";
 const SERIES_DAYS = 365;
 
 const PERIODS: Period[] = ["week", "month", "year"];
+
+/** Stable empty list, so "no space" doesn't hand down a fresh [] each render. */
+const EMPTY_SESSIONS: Session[] = [];
 
 export default function SpaceScreen() {
   const params = useLocalSearchParams<{ key?: string }>();
@@ -90,9 +94,25 @@ export default function SpaceScreen() {
     [visible, projectNames],
   );
 
-  const space = useMemo(
+  const found = useMemo(
     () => spaces.find((sp) => sp.key === params.key) ?? null,
     [spaces, params.key],
+  );
+
+  // `deriveSpaces` runs over every thread, so both of SpaceDetail's props were
+  // brand-new objects on every sync tick — and `sessions` was an inline
+  // `.filter()` in the JSX, which is new on every render full stop. That defeats
+  // memoization outright (the React Compiler can't help: the props really did
+  // change identity), so one thread's title moving re-rendered the whole
+  // stats tree — 28 Pressables, 72 Texts, the cadence rows and both charts,
+  // measured at ~20ms a commit. Hold the identities still when the contents
+  // haven't moved and SpaceDetail bails out instead.
+  const space = useStable(found);
+  const sessions = useStable(
+    useMemo(
+      () => (found ? visible.filter((t) => spaceKeyOf(t) === found.key) : EMPTY_SESSIONS),
+      [visible, found],
+    ),
   );
 
   if (!space) {
@@ -117,7 +137,7 @@ export default function SpaceScreen() {
       // project, and carrying either across a switch is worse than a reload.
       key={space.key}
       space={space}
-      sessions={visible.filter((t) => spaceKeyOf(t) === space.key)}
+      sessions={sessions}
     />
   );
 }
@@ -327,7 +347,7 @@ function SpaceDetail({ space, sessions }: { space: Space; sessions: Session[] })
           ) : null}
           <Text numberOfLines={1} style={s.subtitle}>
             {space.host} · {space.sessionCount} {space.sessionCount === 1 ? "thread" : "threads"} ·{" "}
-            {space.liveCount} live · {`active ${timeAgo(space.lastActivityAt)}`}
+            {space.liveCount} live · active <TimeAgo iso={space.lastActivityAt} />
           </Text>
         </View>
         {IS_DESKTOP ? (
@@ -473,7 +493,7 @@ function SpaceDetail({ space, sessions }: { space: Space; sessions: Session[] })
               <Text numberOfLines={1} style={s.waitTitle}>
                 {t.title}
               </Text>
-              <Text style={s.waitTime}>{timeAgo(t.updatedAt)}</Text>
+              <TimeAgo iso={t.updatedAt} style={s.waitTime} />
             </Pressable>
           ))}
         </View>
@@ -645,14 +665,25 @@ function Cadence({
         <CadenceLine figure="—" label="no agent turns recorded here yet" muted />
       )}
       <CadenceLine
-        figure={timeAgo(space.lastActivityAt)}
+        figure={<TimeAgo iso={space.lastActivityAt} />}
         label="since anything last happened here"
       />
     </View>
   );
 }
 
-function CadenceLine({ figure, label, muted }: { figure: string; label: string; muted?: boolean }) {
+function CadenceLine({
+  figure,
+  label,
+  muted,
+}: {
+  // A node, not a string: the "since anything last happened" row carries a live
+  // <TimeAgo/>, which has to keep itself current now that this screen no longer
+  // re-renders on every sync tick.
+  figure: React.ReactNode;
+  label: string;
+  muted?: boolean;
+}) {
   return (
     <View style={s.cadLine}>
       <Text style={[s.cadFigure, muted && s.cadFigureMuted]}>{figure}</Text>

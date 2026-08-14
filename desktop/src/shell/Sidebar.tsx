@@ -37,7 +37,7 @@ import { isThisMachine } from "@pounce/app/services/deviceProvenance";
 import { deviceLabel } from "@pounce/app/state/stores";
 import { SidebarSessionsSkeleton, SidebarSpacesSkeleton } from "./SidebarSkeleton";
 import { Entrance } from "./Motion";
-import { COLOR, INPUT_TWEAKS, timeAgo } from "@pounce/app/ui";
+import { COLOR, INPUT_TWEAKS, TimeAgo } from "@pounce/app/ui";
 import { useAgentHex } from "@pounce/app/ui/useThemeHex";
 import { useAttentionClock } from "@pounce/app/hooks/useAttentionClock";
 import { GlassSurface } from "@pounce/app/ui/native/GlassSurface";
@@ -860,6 +860,7 @@ function SessionRow({
   const [hover, setHover] = useState(false);
   const edgeFade = useHoverFade(hover);
   const busy = session.activity === "running" || session.activity === "streaming";
+  const runStart = useRunStart(session.id, busy);
   return (
     <Pressable
       onPress={onPress}
@@ -899,9 +900,16 @@ function SessionRow({
                whether it was still going. */
             <View style={s.sessionStatus}>
               {busy ? (
-                <RunningTag label={`Working ${timeAgo(session.updatedAt)}`} />
+                <RunningTag
+                  label={
+                    <>
+                      Working{runStart ? " " : ""}
+                      {runStart ? <TimeAgo iso={runStart} /> : null}
+                    </>
+                  }
+                />
               ) : (
-                <Text style={s.sessionTime}>{timeAgo(session.updatedAt)}</Text>
+                <TimeAgo iso={session.updatedAt} style={s.sessionTime} />
               )}
             </View>
           }
@@ -1073,6 +1081,37 @@ function PeersButton() {
 }
 
 /**
+ * When did this thread's CURRENT run start?
+ *
+ * `session.updatedAt` bumps on every event the agent emits, so a "Working 7s"
+ * measured from it reports time since the last tool call, not how long the agent
+ * has been working — it visibly counts up and snaps back to zero every few
+ * seconds. It was reporting the wrong quantity from the day the tag landed; the
+ * live <TimeAgo/> only made it obvious.
+ *
+ * There is no turn-start timestamp on `Session` (only createdAt/updatedAt), so
+ * this remembers the first moment we saw the thread busy. Two known limits, both
+ * preferable to a counter that resets: a thread already running when the app
+ * opens is timed from when this window first saw it, and a relaunch restarts the
+ * count. A restart-proof version needs the host to report the turn's start.
+ */
+const runStartedAt = new Map<string, number>();
+function useRunStart(id: string, busy: boolean): string | null {
+  // Idempotent, so running it during render is safe: the same id and busy flag
+  // always produce the same map state.
+  if (!busy) {
+    runStartedAt.delete(id);
+    return null;
+  }
+  let started = runStartedAt.get(id);
+  if (started === undefined) {
+    started = Date.now();
+    runStartedAt.set(id, started);
+  }
+  return new Date(started).toISOString();
+}
+
+/**
  * "Working 36s" — the tag a row wears while its agent is busy.
  *
  * The liveness is the tag's own slow breath rather than a spinning logo. A
@@ -1085,7 +1124,10 @@ function PeersButton() {
  * The dashed border carries the same idea statically — an outline that hasn't
  * closed yet, for work that hasn't finished.
  */
-function RunningTag({ label }: { label: string }) {
+// `label` is a node, not a string: it carries a live <TimeAgo/>, which has to
+// keep itself current now that the sidebar no longer re-renders on every sync
+// tick (see .claude/skills/render-once).
+function RunningTag({ label }: { label: React.ReactNode }) {
   const pulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     const step = (toValue: number) =>

@@ -10,10 +10,11 @@ import {
   type TrueSheetNavigationState,
 } from "@lodev09/react-native-true-sheet/navigation";
 import { useThemeHex } from "@pounce/app/ui/useThemeHex";
+import { SHEET_FRACTION as CHANGES_SHEET_FRACTION } from "@pounce/app/ui/layout";
 import { applyAppearance } from "@pounce/app/state/appearance";
 import { Providers } from "@pounce/app/components/Providers";
 import { UpdateBanner } from "@pounce/app/components/UpdateBanner";
-import { SHEET_FRACTION } from "@pounce/app/components/FilterSheet";
+import { SHEET_FRACTION as FILTERS_SHEET_FRACTION } from "@pounce/app/components/FilterSheet";
 import { bootstrap } from "@pounce/app/services/runtime";
 import { attachPushNavigation } from "@pounce/app/services/push";
 import { attachNotificationTapHandler, initLocalNotifications } from "@pounce/app/services/notify";
@@ -75,7 +76,7 @@ export default function RootLayout() {
             bottom of the sheet. The body sizes itself against this same
             fraction (FilterSheet's SHEET_FRACTION), which only works if the
             number is known up front. */}
-        <Sheet.Screen name="filters" options={{ detents: [SHEET_FRACTION] }} />
+        <Sheet.Screen name="filters" options={{ detents: [FILTERS_SHEET_FRACTION] }} />
         {/* Changes is a FULL screen (diff WebView + commit bar) presented as a
             draggable sheet — a large fixed detent, never 'auto' (a WebView has
             no intrinsic height to measure; the route wrapper sizes content). */}
@@ -83,7 +84,9 @@ export default function RootLayout() {
             the reserved grabber strip read as an ugly dead band above it. */}
         <Sheet.Screen
           name="changes"
-          options={{ detents: [0.99], backgroundColor: hex.bg, grabber: false }}
+          // Same constant the route wrapper sizes its content from — if these
+          // two drift apart the footer goes off the bottom of the screen.
+          options={{ detents: [CHANGES_SHEET_FRACTION], backgroundColor: hex.bg, grabber: false }}
         />
       </Sheet>
       <UpdateBanner />

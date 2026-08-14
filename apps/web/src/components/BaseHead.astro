@@ -1,0 +1,62 @@
+---
+/**
+ * Everything that belongs in <head> on a hand-built page: meta, fonts, the view
+ * transition router, and the theme bootstrap.
+ *
+ * The theme script is inlined and `is:inline` on purpose. It has to run before
+ * the first paint, or a visitor who chose dark gets a cream flash while the
+ * bundle loads — so it cannot be deferred, bundled, or moved to the body.
+ */
+import { ClientRouter } from "astro:transitions";
+import { THEME_BOOTSTRAP } from "../lib/themeBootstrap";
+
+interface Props {
+  title: string;
+  description: string;
+  path: string;
+  ogTitle?: string;
+  ogDescription?: string;
+}
+
+const { title, description, path, ogTitle, ogDescription } = Astro.props;
+const url = new URL(path, "https://use-pounce.com/").href;
+const image = "https://use-pounce.com/assets/icon.png";
+---
+
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>{title}</title>
+<meta name="description" content={description} />
+<link rel="canonical" href={url} />
+<meta name="robots" content="index, follow" />
+
+<meta property="og:site_name" content="Pounce" />
+<meta property="og:type" content="website" />
+<meta property="og:url" content={url} />
+<meta property="og:title" content={ogTitle ?? title} />
+<meta property="og:description" content={ogDescription ?? description} />
+<meta property="og:image" content={image} />
+<meta property="og:image:alt" content="Pounce — your coding agents, in your pocket" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content={ogTitle ?? title} />
+<meta name="twitter:description" content={ogDescription ?? description} />
+<meta name="twitter:image" content={image} />
+
+<!-- Cream, matching the light ground in brand.css. Light is the site's default
+     and the theme script sets the rest; a prefers-color-scheme pair here would
+     put the browser chrome back under OS control while the page is not. -->
+<meta name="theme-color" content="#fef1e3" />
+
+<link rel="icon" href="/assets/favicon.png" />
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+  rel="stylesheet"
+/>
+
+<ClientRouter />
+
+<script is:inline set:html={THEME_BOOTSTRAP} />
