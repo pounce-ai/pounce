@@ -2,7 +2,7 @@ import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useRouter } from "expo-router";
 import type { Session } from "@pounce/shared";
-import { ACTIVITY_LABEL, AgentChip, BranchChip, timeAgo } from "../ui";
+import { ACTIVITY_LABEL, AgentChip, BranchChip, TimeAgo } from "../ui";
 import { GlassCard } from "../ui/native/GlassCard";
 
 export function SessionCard({
@@ -53,7 +53,7 @@ export function SessionCard({
           >
             {ACTIVITY_LABEL[session.activity]}
           </Text>
-          <Text style={s.metaText}>{timeAgo(session.updatedAt)}</Text>
+          <TimeAgo iso={session.updatedAt} style={s.metaText} />
         </View>
       </GlassCard>
     </Pressable>

@@ -49,7 +49,7 @@ import { SkillsCard } from "../components/SkillsCard";
 import { PeriodPicker } from "../components/PeriodPicker";
 import { PounceIcon } from "../ui/native/Icon";
 import type { IoniconName } from "../ui/native/icon-map";
-import { AgentLogo, AgentStatusIcon, IS_DESKTOP, SELECT_TEXT, timeAgo } from "../ui";
+import { AgentLogo, AgentStatusIcon, IS_DESKTOP, SELECT_TEXT, TimeAgo, timeAgo } from "../ui";
 import { agentLabel } from "../ui/tokens";
 import { fmtCost, fmtCount, fmtDayLabel, fmtTokens } from "../ui/format";
 
@@ -473,7 +473,7 @@ function SpaceDetail({ space, sessions }: { space: Space; sessions: Session[] })
               <Text numberOfLines={1} style={s.waitTitle}>
                 {t.title}
               </Text>
-              <Text style={s.waitTime}>{timeAgo(t.updatedAt)}</Text>
+              <TimeAgo iso={t.updatedAt} style={s.waitTime} />
             </Pressable>
           ))}
         </View>

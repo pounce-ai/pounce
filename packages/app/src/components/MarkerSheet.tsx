@@ -3,7 +3,7 @@ import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { NativeSheet } from "./NativeSheet";
 import { PounceIcon } from "../ui/native/Icon";
 import { cleanAssistantText, parseUserMessage } from "@pounce/transcript";
-import { AgentLogo, timeAgo } from "../ui";
+import { AgentLogo, TimeAgo } from "../ui";
 
 /** A marked message, resolved against the current event list. */
 export interface Marker {
@@ -61,7 +61,7 @@ export function MarkerSheet({
               <Text numberOfLines={2} style={s.preview}>
                 {preview}
               </Text>
-              <Text style={s.time}>{timeAgo(m.ts)}</Text>
+              <TimeAgo iso={m.ts} style={s.time} />
             </Pressable>
           );
         })}
