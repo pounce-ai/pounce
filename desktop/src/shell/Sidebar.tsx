@@ -37,7 +37,7 @@ import { isThisMachine } from "@pounce/app/services/deviceProvenance";
 import { deviceLabel } from "@pounce/app/state/stores";
 import { SidebarSessionsSkeleton, SidebarSpacesSkeleton } from "./SidebarSkeleton";
 import { Entrance } from "./Motion";
-import { COLOR, INPUT_TWEAKS, timeAgo } from "@pounce/app/ui";
+import { COLOR, INPUT_TWEAKS, TimeAgo } from "@pounce/app/ui";
 import { useAgentHex } from "@pounce/app/ui/useThemeHex";
 import { useAttentionClock } from "@pounce/app/hooks/useAttentionClock";
 import { GlassSurface } from "@pounce/app/ui/native/GlassSurface";
@@ -899,9 +899,15 @@ function SessionRow({
                whether it was still going. */
             <View style={s.sessionStatus}>
               {busy ? (
-                <RunningTag label={`Working ${timeAgo(session.updatedAt)}`} />
+                <RunningTag
+                  label={
+                    <>
+                      Working <TimeAgo iso={session.updatedAt} />
+                    </>
+                  }
+                />
               ) : (
-                <Text style={s.sessionTime}>{timeAgo(session.updatedAt)}</Text>
+                <TimeAgo iso={session.updatedAt} style={s.sessionTime} />
               )}
             </View>
           }
@@ -1085,7 +1091,10 @@ function PeersButton() {
  * The dashed border carries the same idea statically — an outline that hasn't
  * closed yet, for work that hasn't finished.
  */
-function RunningTag({ label }: { label: string }) {
+// `label` is a node, not a string: it carries a live <TimeAgo/>, which has to
+// keep itself current now that the sidebar no longer re-renders on every sync
+// tick (see .claude/skills/render-once).
+function RunningTag({ label }: { label: React.ReactNode }) {
   const pulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     const step = (toValue: number) =>
