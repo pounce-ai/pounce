@@ -76,19 +76,32 @@ const { active } = Astro.props;
     padding: 10px 18px;
     font-size: 15px;
   }
-  @media (max-width: 560px) {
-    .nav-get {
+  @media (max-width: 640px) {
+    /* Scoped by `.nav-get:where(.astro-hash)`, and :where() contributes no
+       specificity — so a bare `.nav-get` ties with `.btn { display: inline-flex }`
+       in brand.css and loses on source order. That is why this button used to
+       stay visible at 390px, wrap onto two lines and collide with the wordmark.
+       Qualifying with the ancestor wins the tie honestly. */
+    .site-nav .nav-get {
       display: none;
     }
   }
 </style>
 
 <script is:inline>
-  (() => {
+  // Re-run on every view transition, not just the first load: the router swaps
+  // the body, so the nav this bound to is gone and the new one has no listeners.
+  // `astro:page-load` fires on the initial load AND after each swap, which is
+  // why the whole thing is a function rather than top-level statements.
+  document.addEventListener("astro:page-load", () => {
     const nav = document.getElementById("site-nav");
     if (nav) {
       const onScroll = () => nav.classList.toggle("scrolled", window.scrollY > 8);
       onScroll();
+      // The window survives swaps, so this listener would stack up one per
+      // navigation without a name to replace.
+      window.removeEventListener("scroll", window.__pounceNavScroll);
+      window.__pounceNavScroll = onScroll;
       window.addEventListener("scroll", onScroll, { passive: true });
     }
 
@@ -101,22 +114,27 @@ const { active } = Astro.props;
       }
     };
 
-    // BaseHead has already set this before first paint, so the control shows the
+    // The bootstrap has already set this before paint, so the control shows the
     // live state on load rather than a guess.
     paint(document.documentElement.getAttribute("data-theme") || "light");
 
     for (const b of buttons) {
+      // These buttons come in with the swapped body, so they are new elements
+      // each time and cannot accumulate duplicate handlers.
       b.addEventListener("click", () => {
         const next = b.dataset.themeChoice;
-        document.documentElement.setAttribute("data-theme", next);
+        const root = document.documentElement;
+        root.setAttribute("data-theme", next);
+        root.style.colorScheme = next;
+        root.style.backgroundColor = next === "dark" ? "#17111f" : "#fef1e3";
         paint(next);
         try {
-          // The single site-wide key, shared with Starlight — see BaseHead.
+          // The single site-wide key, shared with Starlight — see themeBootstrap.
           localStorage.setItem("starlight-theme", next);
         } catch (_) {
           /* nothing to persist to; the in-page switch still applies */
         }
       });
     }
-  })();
+  });
 </script>

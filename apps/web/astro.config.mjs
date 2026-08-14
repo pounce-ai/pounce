@@ -1,6 +1,7 @@
 // @ts-check
 import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
+import { THEME_BOOTSTRAP } from "./src/lib/themeBootstrap";
 
 export default defineConfig({
   site: "https://use-pounce.com",
@@ -38,22 +39,10 @@ export default defineConfig({
        * ground before first paint, so navigating between docs pages does not
        * flash white in dark mode.
        */
-      head: [
-        {
-          tag: "script",
-          content: `(() => {
-  try {
-    var stored = localStorage.getItem("starlight-theme");
-    var theme = stored === "dark" ? "dark" : "light";
-    if (stored !== theme) localStorage.setItem("starlight-theme", theme);
-    var root = document.documentElement;
-    root.dataset.theme = theme;
-    root.style.colorScheme = theme;
-    root.style.backgroundColor = theme === "dark" ? "#17111f" : "#fef1e3";
-  } catch (e) {}
-})();`,
-        },
-      ],
+      head: [{ tag: "script", content: THEME_BOOTSTRAP }],
+      // Starlight ships no view transition support and exposes no flag for it,
+      // but the Head component is overridable — see StarlightHead.astro.
+      components: { Head: "./src/components/StarlightHead.astro" },
       title: "Pounce Docs",
       description:
         "Docs for Pounce — control Claude Code, Codex, Cursor & opencode from your phone.",

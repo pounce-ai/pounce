@@ -482,6 +482,12 @@ const faq = [
     </style>
 
     <script is:inline>
+      // Runs immediately AND on later navigations. Registering only an
+      // astro:page-load listener is too late when this script arrives inside a
+      // swap — that event has already fired for the page being swapped in, so
+      // the callback never runs for the navigation that inserted it. Calling
+      // init() directly covers that case; the guarded listener covers the rest.
+      const initHow = () => {
       const io = new IntersectionObserver(
         (entries) => {
           for (const e of entries) {
@@ -494,6 +500,13 @@ const faq = [
         { rootMargin: "0px 0px -10% 0px" },
       );
       document.querySelectorAll(".reveal").forEach((el) => io.observe(el));
+      };
+
+      initHow();
+      if (!window.__pounce_initHow) {
+        window.__pounce_initHow = true;
+        document.addEventListener("astro:page-load", initHow);
+      }
     </script>
   </body>
 </html>

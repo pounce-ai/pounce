@@ -690,6 +690,18 @@ const benefits = [
         max-width: 1060px;
         margin: 0 auto 44px;
       }
+      /* Below the point where the screenshot would be squeezed unreadable, let
+         it scroll inside its own frame instead. The page itself must never
+         scroll sideways, so the overflow is contained here. */
+      @media (max-width: 860px) {
+        .mac--wide {
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+        }
+        .mac--wide img {
+          min-width: 820px;
+        }
+      }
 
       /* The hero pairs them: the desktop window runs wider than its column so it
          reads as the primary surface, with the phone tucked into the corner. */
@@ -1210,13 +1222,18 @@ const benefits = [
         .hero-shot {
           padding-bottom: 0;
         }
+        /* The desktop dashboard is a dense 1440px grid — at phone width none of
+           its numbers are legible, so it stops being evidence and becomes
+           texture. The phone shot carries the hero here; the desktop gets its
+           own full-width section further down. */
         .hero-shot .mac {
-          width: 100%;
+          display: none;
         }
         .phone--float {
           position: static;
-          width: 210px;
-          margin: -18px auto 0;
+          width: min(280px, 72vw);
+          margin: 0 auto;
+          border-radius: 30px;
         }
         .hero {
           padding-top: 44px;
@@ -1246,6 +1263,15 @@ const benefits = [
         .metrics {
           grid-template-columns: 1fr;
         }
+        /* Three columns leaves the machine cards ~67px wide — narrower than the
+           words in them. Stack, and turn the code strip into the divider. */
+        .sf-row {
+          grid-template-columns: 1fr;
+          gap: 10px;
+        }
+        .sf-link {
+          padding: 4px 0;
+        }
         .plat p {
           min-height: 0;
         }
@@ -1253,6 +1279,12 @@ const benefits = [
     </style>
 
     <script is:inline>
+      // Runs immediately AND on later navigations. Registering only an
+      // astro:page-load listener is too late when this script arrives inside a
+      // swap — that event has already fired for the page being swapped in, so
+      // the callback never runs for the navigation that inserted it. Calling
+      // init() directly covers that case; the guarded listener covers the rest.
+      const initHome = () => {
       // Copy the install one-liner.
       const npx = document.getElementById("npx-copy");
       npx?.addEventListener("click", async () => {
@@ -1279,6 +1311,13 @@ const benefits = [
         { rootMargin: "0px 0px -12% 0px" },
       );
       document.querySelectorAll(".reveal").forEach((el) => io.observe(el));
+      };
+
+      initHome();
+      if (!window.__pounce_initHome) {
+        window.__pounce_initHome = true;
+        document.addEventListener("astro:page-load", initHome);
+      }
     </script>
   </body>
 </html>

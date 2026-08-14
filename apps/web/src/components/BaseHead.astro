@@ -1,12 +1,15 @@
 ---
 /**
- * Everything that belongs in <head> on a hand-built page: meta, fonts, and the
- * theme bootstrap.
+ * Everything that belongs in <head> on a hand-built page: meta, fonts, the view
+ * transition router, and the theme bootstrap.
  *
  * The theme script is inlined and `is:inline` on purpose. It has to run before
  * the first paint, or a visitor who chose dark gets a cream flash while the
  * bundle loads — so it cannot be deferred, bundled, or moved to the body.
  */
+import { ClientRouter } from "astro:transitions";
+import { THEME_BOOTSTRAP } from "../lib/themeBootstrap";
+
 interface Props {
   title: string;
   description: string;
@@ -54,38 +57,6 @@ const image = "https://use-pounce.com/assets/icon.png";
   rel="stylesheet"
 />
 
-<script is:inline>
-  // Runs before first paint, and ALWAYS ends with an explicit data-theme.
-  //
-  // The site has two themes, light and dark, and light is the default. There is
-  // no system/auto mode: when the theme could be implied by the OS instead of
-  // stated on the element, the CSS had to match on both `data-theme` and
-  // `prefers-color-scheme`, and a screenshot's light and dark variants could
-  // both resolve to visible at the same time. One always-present attribute
-  // makes that unrepresentable.
-  //
-  // `starlight-theme` is the ONE key for the whole site, docs included — an
-  // earlier version kept its own key and mirrored on write, which only synced
-  // one way because Starlight's picker never wrote ours. Starlight may still
-  // store "auto" if someone picks it there; with system mode gone, that maps to
-  // light like any other unrecognised value.
-  try {
-    const stored = localStorage.getItem("starlight-theme");
-    const theme = stored === "dark" ? "dark" : "light";
-    // Settle the value rather than only reading it. Starlight's own provider
-    // falls back to the OS when nothing is stored, so leaving it unset would
-    // send a first-time visitor on a dark Mac to light here and dark in /docs.
-    if (stored !== theme) localStorage.setItem("starlight-theme", theme);
-    const root = document.documentElement;
-    root.setAttribute("data-theme", theme);
-    // Paint the ground here too, not just in the stylesheet. Every navigation is
-    // a real document load (Astro is an MPA), and the browser paints its own
-    // white default in the gap before the CSS applies — which in dark mode is a
-    // white flash on every single click. `color-scheme` also makes the scrollbar
-    // and form controls match from the first frame.
-    root.style.colorScheme = theme;
-    root.style.backgroundColor = theme === "dark" ? "#17111f" : "#fef1e3";
-  } catch (_) {
-    document.documentElement.setAttribute("data-theme", "light");
-  }
-</script>
+<ClientRouter />
+
+<script is:inline set:html={THEME_BOOTSTRAP} />

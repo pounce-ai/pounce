@@ -318,6 +318,24 @@ img {
     display: none;
   }
 }
+@media (max-width: 640px) {
+  /* The bar was overflowing its own padding at 390px — brand 85px + links 260px
+     against 342px of usable width — which is what pushed the wordmark under the
+     nav links. Tightening the gaps and letting the brand shrink keeps it on one
+     line once the CTA drops out (see Nav.astro). */
+  .site-nav .nav-in {
+    height: 62px;
+    gap: 12px;
+  }
+  .site-nav .nav-links {
+    gap: 16px;
+    font-size: 14.5px;
+  }
+  .brand {
+    min-width: 0;
+    font-size: 19px;
+  }
+}
 
 /* ------------------------------------------------------------- footer ---- */
 
