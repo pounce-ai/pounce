@@ -2,6 +2,7 @@
 import BaseHead from "../components/BaseHead.astro";
 import Nav from "../components/Nav.astro";
 import Footer from "../components/Footer.astro";
+import Shot from "../components/Shot.astro";
 import "../styles/brand.css";
 
 const steps = [
@@ -122,37 +123,19 @@ const faq = [
         <div class="shots">
           <figure class="reveal">
             <div class="phone">
-              <img
-                src="/assets/app-session.png"
-                width="640"
-                height="1391"
-                alt="A live agent session streaming reasoning and tool calls"
-                loading="lazy"
-              />
+              <Shot name="app-session" width={640} height={1391} alt="A live agent session streaming reasoning and tool calls" />
             </div>
             <figcaption><b>Watch it work.</b> Reasoning and tools, live.</figcaption>
           </figure>
           <figure class="reveal">
             <div class="phone">
-              <img
-                src="/assets/app-changes.png"
-                width="640"
-                height="1391"
-                alt="Reviewing a diff and shipping from the phone"
-                loading="lazy"
-              />
+              <Shot name="app-changes" width={640} height={1391} alt="Reviewing a diff and shipping from the phone" />
             </div>
             <figcaption><b>Review and ship.</b> Commit, push, open a PR.</figcaption>
           </figure>
           <figure class="reveal">
             <div class="phone">
-              <img
-                src="/assets/app-activity.png"
-                width="640"
-                height="1391"
-                alt="Token, spend and plan usage across every agent"
-                loading="lazy"
-              />
+              <Shot name="app-activity" width={640} height={1391} alt="Token, spend and plan usage across every agent" />
             </div>
             <figcaption><b>Watch the meter.</b> Tokens, spend, plan limits.</figcaption>
           </figure>

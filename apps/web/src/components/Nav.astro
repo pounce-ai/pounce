@@ -99,9 +99,7 @@ const { active } = Astro.props;
       const next = current === "dark" ? "light" : "dark";
       root.setAttribute("data-theme", next);
       try {
-        localStorage.setItem("pounce-theme", next);
-        // Starlight owns the docs and reads its own key. Write it too, or
-        // choosing dark here and clicking through to /docs lands on cream.
+        // The single site-wide key, shared with Starlight — see BaseHead.
         localStorage.setItem("starlight-theme", next);
       } catch (_) {
         /* nothing to persist to; the in-page switch still applies */

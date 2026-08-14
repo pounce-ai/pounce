@@ -2,6 +2,7 @@
 import BaseHead from "../components/BaseHead.astro";
 import Nav from "../components/Nav.astro";
 import Footer from "../components/Footer.astro";
+import Shot from "../components/Shot.astro";
 import "../styles/brand.css";
 
 /**
@@ -20,7 +21,7 @@ const benefits = [
       "Answer permission and plan prompts without opening a laptop",
       "A push notification when a turn needs you, and when it finishes",
     ],
-    shot: "/assets/app-home.png",
+    shot: "app-home",
     alt: "The Pounce home screen: live agent sessions across a machine, with the ones needing attention pinned to the top",
   },
   {
@@ -33,7 +34,7 @@ const benefits = [
       "Tool calls and edits expand inline, so you can see what it touched",
       "Switch models mid-thread; talk to it by voice when typing is a pain",
     ],
-    shot: "/assets/app-session.png",
+    shot: "app-session",
     alt: "A live Pounce session streaming an agent's reasoning and tool calls, showing token count and estimated cost in the header",
   },
   {
@@ -46,7 +47,7 @@ const benefits = [
       "Commit with a generated message, push, or open a draft PR",
       "Works on every worktree and branch the agent is running in",
     ],
-    shot: "/assets/app-changes.png",
+    shot: "app-changes",
     alt: "The Pounce changes view showing a syntax-highlighted diff with commit, push and draft PR actions",
   },
   {
@@ -59,7 +60,7 @@ const benefits = [
       "Estimated spend per day, project, agent and machine",
       "Costs come from what the agents themselves report, not a guessed price list",
     ],
-    shot: "/assets/app-activity.png",
+    shot: "app-activity",
     alt: "The Pounce activity screen showing token totals, estimated spend, and plan usage meters for Claude, opencode, Codex and Cursor",
   },
 ];
@@ -131,21 +132,22 @@ const benefits = [
            cut of this page did) hid the desktop app entirely. -->
       <div class="hero-shot">
         <div class="mac">
-          <img
-            src="/assets/app-desktop.png"
-            width="1440"
-            height="897"
+          <Shot
+            name="app-desktop"
+            width={1440}
+            height={897}
             alt="The Pounce desktop app — Spaces sidebar, sessions grouped by what needs attention, and the activity dashboard with tokens, spend, worktree disk and per-plan usage"
+            loading="eager"
             fetchpriority="high"
           />
         </div>
         <div class="phone phone--float">
-          <img
-            src="/assets/app-session.png"
-            width="640"
-            height="1391"
+          <Shot
+            name="app-session"
+            width={640}
+            height={1391}
             alt="Pounce on iPhone streaming a live agent session"
-            loading="lazy"
+            loading="eager"
           />
         </div>
       </div>
@@ -249,7 +251,7 @@ const benefits = [
             </div>
             <div class="benefit-shot reveal">
               <div class="phone phone--sm">
-                <img src={b.shot} width="640" height="1391" alt={b.alt} loading="lazy" />
+                <Shot name={b.shot} width={640} height={1391} alt={b.alt} />
               </div>
             </div>
           </div>
@@ -271,12 +273,11 @@ const benefits = [
         </div>
 
         <figure class="mac mac--wide reveal">
-          <img
-            src="/assets/app-desktop.png"
-            width="1440"
-            height="897"
+          <Shot
+            name="app-desktop"
+            width={1440}
+            height={897}
             alt="The Pounce desktop app: Spaces in the sidebar, sessions grouped into needs attention, recent and settled, and the activity dashboard showing 8.9B tokens, estimated spend, 22.7 GB of worktree disk and per-plan usage for Claude, opencode, Codex and Cursor"
-            loading="lazy"
           />
         </figure>
 

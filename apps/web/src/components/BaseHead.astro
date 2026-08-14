@@ -58,10 +58,18 @@ const image = "https://use-pounce.com/assets/icon.png";
   // Runs before first paint. Stored choice wins; otherwise fall through to the
   // OS setting by leaving data-theme unset, which is what brand.css keys its
   // prefers-color-scheme block on.
+  //
+  // `starlight-theme` is the ONE key for the whole site, docs included. An
+  // earlier version kept its own `pounce-theme` and mirrored it across on
+  // write, which only synced in one direction: Starlight's own switcher never
+  // wrote our key, so flipping the theme inside the docs and clicking back to
+  // the landing page restored the stale value. Sharing the key removes the
+  // class of bug rather than patching one direction of it.
+  //
+  // Starlight also stores "auto"; that must leave data-theme unset so the OS
+  // preference applies, which the `dark`/`light` check below already does.
   try {
-    // Fall back to Starlight's key so a choice made in the docs carries back
-    // out to the marketing pages, not just the other way around.
-    const stored = localStorage.getItem("pounce-theme") ?? localStorage.getItem("starlight-theme");
+    const stored = localStorage.getItem("starlight-theme");
     if (stored === "dark" || stored === "light") {
       document.documentElement.setAttribute("data-theme", stored);
     }
