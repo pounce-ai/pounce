@@ -1,41 +1,51 @@
 #!/usr/bin/env bash
-# Publish Pounce to TestFlight.
+# Publish Pounce to TestFlight (iOS) and the Play internal track (Android).
 #
-#   bash scripts/publish-testflight.sh
+#   bash scripts/publish-testflight.sh            # iOS
+#   bash scripts/publish-testflight.sh android    # Android
 #
-# Run in a REAL terminal (it has interactive prompts). At the credentials step,
-# choose "App Store Connect API Key" and paste the three values printed below —
-# they come from the key `asc` already uses, so nothing new to create. EAS then
-# signs in the cloud and `--auto-submit` ships the build to TestFlight.
+# Credentials already live on EAS servers (App Store Connect API key for iOS,
+# keystore + the local Play service-account JSON for Android), so this runs
+# unattended — no prompts, nothing to paste.
+#
+# EAS_NO_VCS=1 is LOAD-BEARING, not a convenience. The tunnel's native cores are
+# gitignored — the 412MB ios/PounceTunnelCore.xcframework and the per-ABI
+# android/src/main/jniLibs/*/libpounce_tunnel.so — so a git-based pack drops them
+# and produces an app whose tunnel is silently missing. Only the .easignore path
+# (which EAS uses solely when EAS_NO_VCS=1) carries them up. Build them first
+# with modules/pounce-tunnel/build-ios.sh / build-android.sh if they're absent.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT/apps/mobile"
 
-KEY_ID="79FP2FTFVS"   # asc profile: peppyhop
-KEY_PATH="$(python3 - <<'PY'
-import json, os
-try:
-    print(json.load(open(os.path.expanduser("~/.asc/config.json"))).get("private_key_path",""))
-except Exception:
-    print("")
-PY
-)"
+PLATFORM="${1:-ios}"
+case "$PLATFORM" in
+  ios | android) ;;
+  *)
+    echo "usage: $0 [ios|android]" >&2
+    exit 2
+    ;;
+esac
 
-cat <<EOF
+# Fail loudly here rather than shipping a tunnel-less build that only misbehaves
+# once it's on someone's phone.
+if [ "$PLATFORM" = "ios" ]; then
+  CORE="modules/pounce-tunnel/ios/PounceTunnelCore.xcframework"
+else
+  CORE="modules/pounce-tunnel/android/src/main/jniLibs/arm64-v8a/libpounce_tunnel.so"
+fi
+if [ ! -e "$CORE" ]; then
+  echo "missing $CORE — build it before publishing, or the tunnel ships broken" >&2
+  exit 1
+fi
 
-  Pounce → TestFlight
-  ───────────────────
-  Project   : @peppyhop/pounce   (com.pounce.app)
-  When EAS asks "How would you like to authenticate?", pick:
-      › App Store Connect API Key  ›  Add a new key  (or reuse if offered)
+echo "  Pounce → $([ "$PLATFORM" = ios ] && echo TestFlight || echo 'Play internal')"
+echo "  version $(node -p "require('./app.json').expo.version")"
+echo
 
-  Paste these when prompted:
-      Key ID      : ${KEY_ID}
-      Key file    : ${KEY_PATH:-<find it in ~/.asc/config.json → private_key_path>}
-      Issuer ID   : <copy from App Store Connect → Users and Access →
-                     Integrations → App Store Connect API (top of the page)>
-
-EOF
-
-exec npx eas-cli build --platform ios --profile production --auto-submit
+exec env EAS_NO_VCS=1 npx eas-cli build \
+  --platform "$PLATFORM" \
+  --profile production \
+  --auto-submit \
+  --non-interactive
