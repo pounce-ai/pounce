@@ -45,7 +45,7 @@
     "mobile": "bun run --filter @pounce/mobile start",
     "publish:ios": "cd apps/mobile && npx eas-cli build --platform ios --profile production --auto-submit",
     "test": "bun run --filter '*' test",
-    "testflight": "cd apps/mobile && npx testflight",
+    "testflight": "bash scripts/publish-testflight.sh",
     "typecheck": "bun run --filter '*' typecheck"
   },
   "workspaces": [
