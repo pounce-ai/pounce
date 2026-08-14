@@ -22,7 +22,7 @@ import { useSelector } from "@legendapp/state/react";
 import { Ionicons } from "@expo/vector-icons";
 import { nav$, RouteParamsProvider, screenKey } from "../shims/router";
 import { COLOR } from "@pounce/app/ui";
-import { useThread } from "@pounce/app/state/db/hooks";
+import { useThreadRow } from "@pounce/app/state/db/hooks";
 import { sessionChrome$ } from "@pounce/app/state/sessionChrome";
 import { ThreadUsageSummary } from "@pounce/app/components/ThreadStatusBar";
 import { AccessAlert } from "./AccessAlert";
@@ -196,7 +196,8 @@ const MODALS: Record<string, ModalEntry> = {
 /** Where the open thread actually lives — the desktop equivalent of a title
  *  bar's proxy icon. Quiet by default; it's reference, not navigation. */
 function StatusBar({ threadId }: { threadId: string }) {
-  const session = useThread(threadId);
+  // Same reason as Shell's own read below: one key, not the whole collection.
+  const session = useThreadRow(threadId);
   // Published by the open session (it does the fetching); shown here because
   // the pane has no header of its own to put it in.
   const usage = useSelector(() => sessionChrome$.usage.get());
@@ -248,7 +249,11 @@ export function Shell() {
   // rather than keep describing whatever was open before.
   const threadId = detail && !Pane ? (detail.params.id ?? null) : null;
   // The dock needs the thread's machine and folder, which only the record has.
-  const termThread = useThread(threadId ?? undefined);
+  // `useThreadRow`, NOT `useThread`: the latter is a live query over the whole
+  // threads collection, so any thread changing anywhere re-rendered Shell — and
+  // Shell re-renders the sidebar and tab strip with it. Measured at one render
+  // of all three per write to a single unrelated thread. This watches one key.
+  const termThread = useThreadRow(threadId ?? "");
   const termOpen = useSelector(() => isTermOpen(threadId));
   const [shellWidth, setShellWidth] = useState(0);
   // The width the user chose, or null to follow the window. One value, because
