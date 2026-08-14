@@ -213,6 +213,12 @@ export function DeviceSetupCard({
       <View style={s.body}>
         <Pressable
           onPress={() => setManual((m) => !m)}
+          // Every child here is text or an icon font, and on react-native-macos
+          // RCTText takes the mouse-down for selection — a header built from
+          // nothing else has no clickable pixel at all. This is why Timeline's
+          // run rows were unopenable for months. Nothing in the row is worth
+          // selecting, so the whole row becomes the target.
+          pointerEvents="box-only"
           style={({ pressed }) => [s.rowBetween, pressed && s.pressed60]}
         >
           <View style={s.grow}>
