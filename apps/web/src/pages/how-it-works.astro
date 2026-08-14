@@ -1,421 +1,516 @@
+---
+import BaseHead from "../components/BaseHead.astro";
+import Nav from "../components/Nav.astro";
+import Footer from "../components/Footer.astro";
+import "../styles/brand.css";
+
+const steps = [
+  {
+    n: "1",
+    title: "Install it on the computer your agents run on",
+    body: "On a Mac, the Pounce desktop app. On Windows or Linux, the bridge bundle. Either one picks up the coding agents already running on that machine — no terminal, no config files.",
+    tip: "Terminal person? <b class='mono'>npx use-pounce</b> does the same in one line, and works over SSH — so you can pair a server you never sit in front of.",
+  },
+  {
+    n: "2",
+    title: "A pairing code appears",
+    body: "It shows a QR code and the address it's listening on. That code carries the machine's address and a private, per-machine token, so only your phone can connect to it.",
+    tip: "The token never leaves your devices. Pair once and Pounce remembers the machine, reaching it over its own tunnel when you're away.",
+  },
+  {
+    n: "3",
+    title: "Scan it with your phone",
+    body: "Open Pounce, tap Sync a device, and point the camera at the code. That is the whole setup — no addresses to type, no tokens to copy.",
+    tip: "The built-in Camera app works too — it opens Pounce straight to the pairing screen.",
+  },
+  {
+    n: "4",
+    title: "You're connected",
+    body: "That machine's sessions sync instantly. Every agent, on every computer you've paired, lands in one list — with whatever is waiting on you at the top.",
+    tip: "Pair as many machines as you like. They share one list; filter by device, agent, project or branch.",
+  },
+];
+
+const faq = [
+  {
+    q: "Which do I install — app, bridge, or CLI?",
+    a: 'On a Mac, the <b>Pounce desktop app</b> (a signed DMG). On Windows or Linux, the headless <b>bridge</b>. Or run <b class="mono">npx use-pounce</b> in any terminal. All three do the same job: host your agents and show a pairing QR. <a href="https://github.com/pounce-ai/pounce/releases/latest" target="_blank" rel="noopener">Get them here.</a>',
+  },
+  {
+    q: "What if my phone and computer are on different networks?",
+    a: "Nothing to configure. Pounce opens its own secure peer-to-peer tunnel — pair once with the same QR and your phone reaches your machine over the internet. No VPN, no port forwarding, no Tailscale or ngrok.",
+  },
+  {
+    q: "Is the connection secure?",
+    a: "Each machine pairs with its own private token, and off-network access uses a direct peer-to-peer identity to reach home. There is no shared cloud inbox holding your sessions.",
+  },
+  {
+    q: "What can I actually do from the phone?",
+    a: 'Stream every agent live, reply or redirect, approve permission and plan prompts, review diffs, then commit, push or open a PR. The <a href="/docs/getting-started">docs</a> have the full tour.',
+  },
+];
+---
+
 <html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>How Pounce works — connect your computer in 2 minutes</title>
-<meta name="description" content="Pounce is a remote control for the coding agents already running on your computer. Install the desktop app (Mac), the headless Bridge, or run npx use-pounce, scan one QR, and steer Claude, Codex, Cursor & opencode from your phone. Here's the whole setup." />
-<link rel="canonical" href="https://use-pounce.com/how-it-works.html" />
-<meta name="robots" content="index, follow" />
-<meta property="og:site_name" content="Pounce" />
-<meta property="og:type" content="article" />
-<meta property="og:url" content="https://use-pounce.com/how-it-works.html" />
-<meta property="og:title" content="How Pounce works — set up in 2 minutes" />
-<meta property="og:description" content="Run the desktop app, the Bridge, or npx use-pounce on your computer, scan one QR with your phone, and your coding agents show up. A visual, step-by-step walkthrough." />
-<meta property="og:image" content="https://use-pounce.com/assets/icon.png" />
-<meta property="og:image:alt" content="How Pounce works — connect your computer in 2 minutes" />
-<meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="How Pounce works — set up in 2 minutes" />
-<meta name="twitter:description" content="Run the desktop app, the Bridge, or npx use-pounce on your computer, scan one QR with your phone, and your coding agents show up." />
-<meta name="twitter:image" content="https://use-pounce.com/assets/icon.png" />
-<meta name="theme-color" content="#0b0b0e" />
-<link rel="icon" href="/assets/favicon.png" />
-<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-<style is:global>
-  :root{
-    --bg:#0b0b0e; --bg-2:#0e0e13; --panel:#121218; --panel-2:#16161d;
-    --ink:#f5f4ef; --ink-dim:#a7a5b0; --ink-faint:#726f7d;
-    --violet:#7c5cff; --violet-bright:#9d86ff; --signal:#4fe6a4; --amber:#ffcf5c;
-    --line:rgba(245,244,239,.09); --line-2:rgba(245,244,239,.055);
-    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
-    --disp:"Bricolage Grotesque",-apple-system,system-ui,sans-serif;
-    --body:"Hanken Grotesk",-apple-system,system-ui,sans-serif;
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  html{scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--ink);font-family:var(--body);line-height:1.62;font-size:17px;
-    -webkit-font-smoothing:antialiased;overflow-x:hidden}
-  .bg-grid{position:fixed;inset:0;z-index:-3;
-    background-image:linear-gradient(var(--line-2) 1px,transparent 1px),linear-gradient(90deg,var(--line-2) 1px,transparent 1px);
-    background-size:64px 64px;mask-image:radial-gradient(ellipse 90% 60% at 50% -5%,#000 35%,transparent 78%)}
-  .bg-glow{position:fixed;inset:0;z-index:-2;overflow:hidden;pointer-events:none}
-  .bg-glow i{position:absolute;display:block;border-radius:50%;filter:blur(120px)}
-  .bg-glow .v{width:600px;height:600px;background:radial-gradient(circle,rgba(124,92,255,.28),transparent 62%);top:-260px;left:-160px}
-  .bg-glow .s{width:520px;height:520px;background:radial-gradient(circle,rgba(79,230,164,.09),transparent 60%);top:560px;right:-200px}
-  .grain{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5;mix-blend-mode:overlay;
-    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.42'/%3E%3C/svg%3E")}
+  <head>
+    <BaseHead
+      title="How Pounce works — pair your computer in two minutes"
+      description="Pounce is a remote control for the coding agents already running on your own machine. Install it on your computer, scan one QR code with your phone, and you're paired. No account, no cloud in the middle."
+      path="/how-it-works"
+    />
+  </head>
 
-  a{color:inherit;text-decoration:none}
-  .wrap{max-width:1100px;margin:0 auto;padding:0 26px}
-  h1,h2,h3{font-family:var(--disp);font-weight:700;letter-spacing:-.02em;line-height:1.06}
-  .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.06em;color:var(--violet-bright);display:inline-flex;align-items:center;gap:9px}
-  .kicker::before{content:"›";color:var(--ink-faint)}
-  .mono{font-family:var(--mono)}
+  <body>
+    <div class="glow" aria-hidden="true"></div>
+    <Nav active="how" />
 
-  /* nav */
-  nav{position:sticky;top:0;z-index:60;backdrop-filter:blur(16px);
-    background:linear-gradient(180deg,rgba(11,11,14,.82),rgba(11,11,14,.55));border-bottom:1px solid transparent;transition:border-color .3s}
-  nav.scrolled{border-color:var(--line)}
-  .nav-in{display:flex;align-items:center;justify-content:space-between;height:70px}
-  .brand{display:flex;align-items:center;gap:11px;font-family:var(--disp);font-weight:800;font-size:20px}
-  .brand img{width:30px;height:30px;border-radius:8px;box-shadow:0 0 0 1px var(--line)}
-  .nav-links{display:flex;align-items:center;gap:28px;font-family:var(--mono);font-size:13px;color:var(--ink-dim)}
-  .nav-links a.lnk:hover{color:var(--ink)}
-  .nav-cta{padding:9px 17px;border-radius:10px;background:var(--ink);color:#0b0b0e!important;font-weight:600;font-family:var(--body);transition:transform .2s}
-  .nav-cta:hover{transform:translateY(-2px)}
-  @media(max-width:760px){.nav-links a.lnk{display:none}}
+    <header class="wrap page-hero">
+      <span class="eyebrow">set up in about two minutes</span>
+      <h1>Pounce is a remote for the agents you already run.</h1>
+      <p class="lede">
+        Nothing runs in our cloud. Install Pounce on the computer where Claude Code, Codex, Cursor or
+        opencode already live, scan one QR code with your phone, and the two are paired.
+      </p>
+      <p class="fine">
+        No account · no Pounce server in the middle · your code and conversations stay on your own
+        devices
+      </p>
 
-  /* hero */
-  .hero{text-align:center;padding:74px 0 26px}
-  .hero h1{font-size:clamp(36px,5.6vw,62px);font-weight:800;margin:20px 0 20px}
-  .hero h1 em{font-style:normal;color:var(--violet-bright)}
-  .hero .lead{font-size:clamp(17px,2.2vw,20px);color:var(--ink-dim);max-width:640px;margin:0 auto 14px}
-  .hero .lead b{color:var(--ink);font-weight:600}
-  .hero .fine{font-family:var(--mono);font-size:13px;color:var(--ink-faint);max-width:620px;margin:0 auto}
-
-  /* requirements */
-  .needs{margin:48px 0 0;display:grid;grid-template-columns:repeat(3,1fr);gap:16px;text-align:left}
-  @media(max-width:760px){.needs{grid-template-columns:1fr}}
-  .need{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px 22px;display:flex;gap:14px;align-items:flex-start}
-  .need .ic{font-size:22px;line-height:1;flex:none}
-  .need h4{font-size:15px;font-family:var(--disp);font-weight:600;margin-bottom:4px}
-  .need p{font-size:13.5px;color:var(--ink-dim);line-height:1.5}
-
-  /* steps */
-  section{padding:64px 0}
-  .eyebrow{margin-bottom:14px}
-  .sec-title{font-size:clamp(28px,4vw,42px);font-weight:700}
-  .sec-lead{color:var(--ink-dim);font-size:17.5px;max-width:620px;margin-top:16px}
-  .center{text-align:center}.center .sec-lead{margin-inline:auto}
-
-  .step-row{display:grid;grid-template-columns:1fr 1fr;gap:56px;align-items:center;margin-top:72px}
-  .step-row:first-of-type{margin-top:40px}
-  .step-row.flip .step-visual{order:-1}
-  @media(max-width:860px){.step-row{grid-template-columns:1fr;gap:32px}.step-row.flip .step-visual,.step-visual{order:-1}}
-  .step-num{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:13px;
-    font-family:var(--mono);font-weight:600;font-size:16px;background:rgba(124,92,255,.14);border:1px solid rgba(124,92,255,.3);color:var(--violet-bright);margin-bottom:20px}
-  .step-copy h3{font-size:clamp(22px,3vw,28px);margin-bottom:12px}
-  .step-copy p{color:var(--ink-dim);font-size:16px;margin-bottom:16px}
-  .step-copy p b{color:var(--ink);font-weight:600}
-  .step-copy .tip{display:flex;gap:9px;align-items:flex-start;font-size:14px;color:var(--ink-dim);
-    background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
-  .step-copy .tip b{color:var(--ink)}
-  .step-visual{display:flex;justify-content:center}
-
-  /* mac window frame (real screenshot or mock) */
-  .mac{width:100%;max-width:440px;border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,.12);
-    box-shadow:0 44px 100px -34px rgba(0,0,0,.9)}
-  .mac>img{width:100%;display:block}
-  .mac-bar{height:38px;background:#1a1a20;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;padding:0 14px;gap:8px}
-  .tl{width:12px;height:12px;border-radius:50%}
-  .tl.r{background:#ff5f57}.tl.y{background:#febc2e}.tl.g{background:#28c840}
-  .mac-bar .mac-t{flex:1;text-align:center;font-family:var(--mono);font-size:12px;color:var(--ink-faint);margin-right:46px}
-  .bridge{background:radial-gradient(120% 80% at 50% 0%,#15131f,#0b0a10);color:var(--ink);padding:30px 24px 28px;
-    display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center}
-  .bridge .paw{font-size:24px}
-  .bridge .bt{font-family:var(--disp);font-weight:700;font-size:19px}
-  .bridge .sub{font-size:13px;color:var(--ink-dim)}
-  .bridge .qrwrap{background:#fff;border-radius:16px;padding:15px}
-  .bridge .qrwrap img{display:block;width:180px;height:180px;image-rendering:pixelated}
-  .bridge .addr{font-family:var(--mono);font-size:12px;color:var(--ink-faint)}
-  .bridge .status{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;font-family:var(--mono)}
-  .bridge .sdot{width:9px;height:9px;border-radius:50%;background:var(--violet-bright);box-shadow:0 0 0 4px rgba(124,92,255,.16)}
-  .bridge .hint{max-width:290px;font-size:12px;line-height:1.5;color:var(--ink-faint)}
-
-  /* phone frame */
-  .phone{position:relative;width:262px;height:540px;border-radius:40px;background:linear-gradient(160deg,#1a1922,#0c0b11);
-    border:1px solid rgba(255,255,255,.13);box-shadow:0 44px 90px -24px rgba(0,0,0,.85),inset 0 1px 0 rgba(255,255,255,.08);padding:11px;flex:none}
-  .screen{height:100%;border-radius:30px;overflow:hidden;background:#08070c;position:relative;border:1px solid rgba(255,255,255,.05)}
-  .screen>img{width:100%;height:100%;object-fit:cover;object-position:top center;display:block}
-  .phone-stage{position:relative;display:flex;justify-content:center;align-items:center}
-  .phone-glow{position:absolute;width:300px;height:300px;background:radial-gradient(circle,rgba(124,92,255,.4),transparent 65%);filter:blur(46px);z-index:-1}
-
-  /* scan viewfinder */
-  .scan{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(120% 80% at 50% 40%,#1b1430,#08070c)}
-  .scan-top{position:absolute;top:0;left:0;right:0;padding:20px 16px 0;text-align:center}
-  .scan-top .st{font-family:var(--disp);font-weight:700;font-size:16px}
-  .scan-top .ss{font-family:var(--mono);font-size:11px;color:var(--violet-bright);margin-top:4px}
-  .vf{position:relative;width:184px;height:184px;border-radius:20px;background:#fff;padding:13px;box-shadow:0 10px 40px rgba(0,0,0,.5)}
-  .vf img{width:100%;height:100%;image-rendering:pixelated;display:block}
-  .vf .br{position:absolute;width:28px;height:28px;border:3px solid var(--violet-bright)}
-  .vf .br.tl2{top:-4px;left:-4px;border-right:none;border-bottom:none;border-radius:11px 0 0 0}
-  .vf .br.tr2{top:-4px;right:-4px;border-left:none;border-bottom:none;border-radius:0 11px 0 0}
-  .vf .br.bl2{bottom:-4px;left:-4px;border-right:none;border-top:none;border-radius:0 0 0 11px}
-  .vf .br.br2{bottom:-4px;right:-4px;border-left:none;border-top:none;border-radius:0 0 11px 0}
-  .scan-line{position:absolute;left:13px;right:13px;height:2px;background:linear-gradient(90deg,transparent,var(--violet-bright),transparent);box-shadow:0 0 12px var(--violet-bright);animation:scanmove 2.4s ease-in-out infinite}
-  @keyframes scanmove{0%,100%{top:16px}50%{top:calc(100% - 16px)}}
-  .scan-foot{position:absolute;bottom:0;left:0;right:0;padding:0 16px 22px;text-align:center;font-family:var(--mono);font-size:12px;color:var(--ink-dim)}
-  .scan-foot b{color:var(--ink)}
-
-  /* once paired gallery */
-  .shots{margin-top:52px;display:grid;grid-template-columns:repeat(3,1fr);gap:24px;max-width:900px;margin-inline:auto}
-  .shots figure{display:flex;flex-direction:column;gap:16px}
-  .shots .device{border-radius:26px;padding:8px;background:linear-gradient(160deg,#1a1922,#0c0b11);border:1px solid rgba(255,255,255,.1);box-shadow:0 34px 60px -30px rgba(0,0,0,.85);transition:transform .3s}
-  .shots figure:hover .device{transform:translateY(-8px)}
-  .shots .device img{width:100%;border-radius:20px;display:block}
-  .shots figcaption{text-align:center;font-family:var(--mono);font-size:12.5px;color:var(--ink-dim)}
-  .shots figcaption b{color:var(--ink);font-weight:500}
-  @media(max-width:760px){.shots{grid-template-columns:1fr;max-width:300px}}
-
-  /* data flow */
-  .flow{margin-top:48px;background:var(--panel);border:1px solid var(--line);border-radius:24px;padding:38px 30px;display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap}
-  .node{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;min-width:120px}
-  .node .nic{width:60px;height:60px;border-radius:17px;display:grid;place-items:center;font-size:28px;background:rgba(124,92,255,.12);border:1px solid rgba(124,92,255,.28)}
-  .node .nt{font-family:var(--disp);font-weight:600;font-size:15px}
-  .node .nm{font-family:var(--mono);font-size:11px;color:var(--ink-faint);max-width:160px}
-  .flow-link{display:flex;flex-direction:column;align-items:center;color:var(--ink-faint);font-family:var(--mono);font-size:10.5px;gap:3px;min-width:96px}
-  .flow-link .ln{width:100%;height:2px;background:repeating-linear-gradient(90deg,var(--violet-bright) 0 7px,transparent 7px 13px)}
-  @media(max-width:760px){.flow{flex-direction:column}.flow-link{flex-direction:row;gap:8px}.flow-link .ln{width:40px}}
-  .flow-note{text-align:center;margin-top:22px;color:var(--ink-dim);font-size:15px}
-  .flow-note b{color:var(--ink)}
-  .flow-note a{color:var(--violet-bright);text-decoration:underline;text-underline-offset:2px}
-
-  /* faq */
-  .faq{margin-top:44px;display:grid;grid-template-columns:1fr 1fr;gap:16px}
-  @media(max-width:760px){.faq{grid-template-columns:1fr}}
-  .qa{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px}
-  .qa h4{font-size:16px;font-family:var(--disp);font-weight:600;margin-bottom:8px}
-  .qa p{font-size:14.5px;color:var(--ink-dim)}
-  .qa a{color:var(--violet-bright);text-decoration:underline;text-underline-offset:2px}
-
-  /* buttons + cta */
-  .btn{display:inline-flex;align-items:center;gap:12px;padding:13px 18px;border-radius:14px;border:1px solid var(--line);background:var(--panel);transition:transform .2s,border-color .2s}
-  .btn:hover{transform:translateY(-3px)}
-  .btn svg{width:26px;height:26px;flex:none}
-  .btn .t{display:flex;flex-direction:column;line-height:1.16;text-align:left}
-  .btn .t small{font-family:var(--mono);font-size:10px;letter-spacing:.04em;color:var(--ink-faint);text-transform:uppercase}
-  .btn .t span{font-family:var(--disp);font-weight:600;font-size:16.5px}
-  .btn--app{background:var(--ink);border-color:var(--ink);color:#0b0b0e}
-  .btn--app .t small{color:rgba(11,11,14,.55)}
-  .btn--ghost:hover{border-color:rgba(124,92,255,.55);background:rgba(124,92,255,.08)}
-  .btn--ghost .acc{color:var(--violet-bright)}
-  .cta{text-align:center;border:1px solid rgba(124,92,255,.28);border-radius:30px;padding:64px 28px;
-    background:radial-gradient(120% 130% at 50% 0%,rgba(124,92,255,.16),transparent 60%),linear-gradient(180deg,var(--panel),var(--bg-2))}
-  .cta h2{font-size:clamp(28px,4vw,42px)}
-  .cta p{color:var(--ink-dim);font-size:17.5px;margin:14px auto 30px;max-width:540px}
-  .cta-row{display:flex;flex-wrap:wrap;gap:13px;justify-content:center}
-
-  footer{border-top:1px solid var(--line);padding:40px 0;margin-top:20px}
-  .foot-in{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:18px}
-  .foot-links{display:flex;gap:24px;font-family:var(--mono);font-size:13px;color:var(--ink-dim)}
-  .foot-links a:hover{color:var(--ink)}
-  .foot-c{font-family:var(--mono);font-size:12.5px;color:var(--ink-faint)}
-
-  .reveal{opacity:0;transform:translateY(26px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.8,.2,1)}
-  .reveal.in{opacity:1;transform:none}
-  @media(prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important}.reveal{opacity:1;transform:none}}
-</style>
-</head>
-<body>
-<div class="bg-grid"></div>
-<div class="bg-glow"><i class="v"></i><i class="s"></i></div>
-<div class="grain"></div>
-
-<nav id="nav">
-  <div class="wrap nav-in">
-    <a class="brand" href="/"><img src="/assets/icon.png" alt="Pounce" /> pounce</a>
-    <div class="nav-links">
-      <a class="lnk" href="/">Home</a>
-      <a class="lnk" href="/docs/getting-started">Docs</a>
-      <a class="lnk" href="/changelog">Changelog</a>
-      <a class="lnk" href="https://github.com/pounce-ai/pounce" target="_blank" rel="noopener">GitHub</a>
-      <a class="lnk" href="https://discord.gg/xK5MQ8KzQH" target="_blank" rel="noopener">Discord</a>
-      <a class="nav-cta" href="https://apps.apple.com/app/id6779601425" target="_blank" rel="noopener">Download</a>
-    </div>
-  </div>
-</nav>
-
-<header class="wrap hero">
-  <span class="kicker">set up in about 2 minutes</span>
-  <h1>How Pounce connects<br>to <em>your computer</em></h1>
-  <p class="lead">Pounce doesn't run your agents in the cloud — it's a remote control for the coding agents <b>already running on your own machine</b>. Install the app on your computer, scan one QR with your phone, and you're paired.</p>
-  <p class="fine">No account · no Pounce server in the middle · your code and conversations stay on your devices.</p>
-
-  <div class="needs">
-    <div class="need"><span class="ic">🖥️</span><div><h4>A computer</h4><p>Your Mac, Windows, or Linux machine running coding agents like Claude, Codex, Cursor, or opencode.</p></div></div>
-    <div class="need"><span class="ic">📱</span><div><h4>The Pounce app</h4><p>On your iPhone (live on the App Store) — Android is in testing on Google Play. It's the remote: it shows every agent and lets you steer them.</p></div></div>
-    <div class="need"><span class="ic">📶</span><div><h4>A network path</h4><p>Same Wi-Fi just works. Away from home, Pounce's own secure tunnel connects you — same QR, nothing to set up.</p></div></div>
-  </div>
-</header>
-
-<section style="padding-top:24px">
-  <div class="wrap">
-
-    <!-- STEP 1 -->
-    <div class="step-row reveal">
-      <div class="step-copy">
-        <div class="step-num">1</div>
-        <h3>Install it on your computer</h3>
-        <p>On a <b>Mac</b>, download the <b>Pounce desktop app</b>. On <b>Windows or Linux</b>, run the headless <b>Bridge</b>. Either one hosts the coding agents on that machine automatically — no terminal, no config files.</p>
-        <div class="tip"><span>⌨️</span><span>Terminal person? <b class="mono">npx use-pounce</b> does the same in one line — it even works over <b>SSH</b>, so you can pair a server you never sit in front of.</span></div>
-      </div>
-      <div class="step-visual">
-        <figure class="mac"><img src="/assets/desktop-app.png" alt="The Pounce desktop app on macOS — hosting the coding agents on this machine, ready to pair" /></figure>
-      </div>
-    </div>
-
-    <!-- STEP 2 -->
-    <div class="step-row flip reveal">
-      <div class="step-copy">
-        <div class="step-num">2</div>
-        <h3>A pairing code appears</h3>
-        <p>The app shows a QR code and the address it's listening on. This is the handshake — it carries the machine's address and a private, per-machine token so only your phone can connect.</p>
-        <div class="tip"><span>🔒</span><span>The token stays on your devices. Pairing once is enough — Pounce remembers the machine, and reaches it over its own secure tunnel when you're away.</span></div>
-      </div>
-      <div class="step-visual">
-        <div class="mac">
-          <div class="mac-bar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span><span class="mac-t">Pounce</span></div>
-          <div class="bridge">
-            <div style="display:flex;align-items:center;gap:8px"><span class="paw">🐾</span><span class="bt">Pounce</span></div>
-            <p class="sub">Scan with your phone to connect</p>
-            <div class="qrwrap"><img src="/assets/pair-qr.svg" alt="Pounce pairing QR code" /></div>
-            <div class="addr">pounce · Dirghas-Mac-mini</div>
-            <div class="status"><span class="sdot"></span><span>Waiting for your phone…</span></div>
-            <p class="hint">Open Pounce on your phone → Sync a device → Scan this code.</p>
-          </div>
+      <div class="needs">
+        <div class="need">
+          <h4>A computer</h4>
+          <p>Mac, Windows or Linux — wherever your coding agents actually run.</p>
+        </div>
+        <div class="need">
+          <h4>The Pounce app</h4>
+          <p>On iPhone, live on the App Store. Android is in testing on Google Play.</p>
+        </div>
+        <div class="need">
+          <h4>A network path</h4>
+          <p>Same wifi just works. Away from home, the built-in tunnel handles it.</p>
         </div>
       </div>
-    </div>
+    </header>
 
-    <!-- STEP 3 -->
-    <div class="step-row reveal">
-      <div class="step-copy">
-        <div class="step-num">3</div>
-        <h3>Scan it with Pounce</h3>
-        <p>Open Pounce on your phone, tap <b>Sync a device</b>, and point the camera at the code. That's the entire setup — no typing addresses, no copying tokens.</p>
-        <div class="tip"><span>📷</span><span>You can also scan with the built-in Camera app — it opens Pounce straight to the pairing screen.</span></div>
-      </div>
-      <div class="step-visual phone-stage">
-        <div class="phone-glow"></div>
-        <div class="phone">
-          <div class="screen">
-            <div class="scan">
-              <div class="scan-top"><div class="st">Sync a device</div><div class="ss">point at the code in the app window</div></div>
-              <div class="vf">
-                <span class="br tl2"></span><span class="br tr2"></span><span class="br bl2"></span><span class="br br2"></span>
-                <span class="scan-line"></span>
-                <img src="/assets/pair-qr.svg" alt="Scanning the pairing QR" />
+    <section>
+      <div class="wrap steps">
+        {
+          steps.map((s) => (
+            <article class="step reveal">
+              <div class="step-n">{s.n}</div>
+              <div>
+                <h3>{s.title}</h3>
+                <p>{s.body}</p>
+                <p class="tip" set:html={s.tip} />
               </div>
-              <div class="scan-foot">Pairing with <b>Dirghas-Mac-mini</b>…</div>
+            </article>
+          ))
+        }
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="sec-head reveal">
+          <span class="eyebrow">once you're paired</span>
+          <h2>Run the whole loop from your phone</h2>
+          <p class="lead">
+            Watch agents work live, answer what they're stuck on, review the diff, and ship — without
+            going back to your desk.
+          </p>
+        </div>
+        <div class="shots">
+          <figure class="reveal">
+            <div class="phone">
+              <img
+                src="/assets/app-session.png"
+                width="640"
+                height="1391"
+                alt="A live agent session streaming reasoning and tool calls"
+                loading="lazy"
+              />
             </div>
+            <figcaption><b>Watch it work.</b> Reasoning and tools, live.</figcaption>
+          </figure>
+          <figure class="reveal">
+            <div class="phone">
+              <img
+                src="/assets/app-changes.png"
+                width="640"
+                height="1391"
+                alt="Reviewing a diff and shipping from the phone"
+                loading="lazy"
+              />
+            </div>
+            <figcaption><b>Review and ship.</b> Commit, push, open a PR.</figcaption>
+          </figure>
+          <figure class="reveal">
+            <div class="phone">
+              <img
+                src="/assets/app-activity.png"
+                width="640"
+                height="1391"
+                alt="Token, spend and plan usage across every agent"
+                loading="lazy"
+              />
+            </div>
+            <figcaption><b>Watch the meter.</b> Tokens, spend, plan limits.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="sec-head reveal">
+          <span class="eyebrow">where your data goes</span>
+          <h2>A direct line to your own machine</h2>
+          <p class="lead">
+            Nothing is routed through a Pounce server. The app talks straight to the app or bridge on
+            your computer, which talks to the agents running there.
+          </p>
+        </div>
+
+        <div class="flow reveal">
+          <div class="node">
+            <div class="nt">Pounce app</div>
+            <div class="nm">your phone — the remote</div>
+          </div>
+          <div class="link"><span>same wifi, or the built-in tunnel</span></div>
+          <div class="node">
+            <div class="nt">The app / bridge</div>
+            <div class="nm">runs on your computer</div>
+          </div>
+          <div class="link"><span>localhost</span></div>
+          <div class="node">
+            <div class="nt">Your agents</div>
+            <div class="nm">Claude · Codex · Cursor · opencode</div>
           </div>
         </div>
+        <p class="flow-note">
+          <b>No Pounce cloud.</b> Your code, diffs and conversations never pass through us — read the
+          <a href="/privacy.html">privacy policy</a>.
+        </p>
       </div>
-    </div>
+    </section>
 
-    <!-- STEP 4 -->
-    <div class="step-row flip reveal">
-      <div class="step-copy">
-        <div class="step-num">4</div>
-        <h3>You're connected</h3>
-        <p>Your machine's sessions sync instantly. Every coding agent, across every computer you've paired, shows up in one list — with the ones that <b>need your input first</b>.</p>
-        <div class="tip"><span>🐾</span><span>Pair more machines the same way. They all live in one fleet — filter by device or agent and jump between them.</span></div>
-      </div>
-      <div class="step-visual phone-stage">
-        <div class="phone-glow"></div>
-        <div class="phone">
-          <div class="screen"><img src="/assets/shot-home.png" alt="Pounce home — every coding agent across all your machines, on one screen" /></div>
+    <section>
+      <div class="wrap">
+        <div class="sec-head reveal">
+          <span class="eyebrow">good to know</span>
+          <h2>Common questions</h2>
+        </div>
+        <div class="faq">
+          {
+            faq.map((f) => (
+              <div class="qa reveal">
+                <h4>{f.q}</h4>
+                <p set:html={f.a} />
+              </div>
+            ))
+          }
         </div>
       </div>
-    </div>
+    </section>
 
-  </div>
-</section>
-
-<!-- once paired -->
-<section>
-  <div class="wrap">
-    <div class="reveal center">
-      <span class="kicker eyebrow">once you're paired</span>
-      <h2 class="sec-title">Run the whole loop from your phone</h2>
-      <p class="sec-lead">Watch agents work live, filter to what needs you, review the diff, and ship — without going back to your desk.</p>
-    </div>
-    <div class="shots">
-      <figure class="reveal"><div class="device"><img src="/assets/shot-session.png" alt="Live agent session streaming in real time" /></div><figcaption><b>Watch it work.</b> Reasoning &amp; tools, live.</figcaption></figure>
-      <figure class="reveal"><div class="device"><img src="/assets/shot-filters.png" alt="Filter the fleet by device, agent, status, branch or project" /></div><figcaption><b>Filter the fleet.</b> By device, agent or branch.</figcaption></figure>
-      <figure class="reveal"><div class="device"><img src="/assets/shot-changes.png" alt="Review the diff and open a PR from your phone" /></div><figcaption><b>Review &amp; ship.</b> Commit, push, open a PR.</figcaption></figure>
-    </div>
-  </div>
-</section>
-
-<!-- data flow -->
-<section>
-  <div class="wrap">
-    <div class="reveal center">
-      <span class="kicker eyebrow">where your data goes</span>
-      <h2 class="sec-title">A direct line to your own machine</h2>
-      <p class="sec-lead">Nothing is routed through a Pounce server. The app talks straight to the app/Bridge on your computer, which talks to the agents running there.</p>
-    </div>
-    <div class="flow reveal">
-      <div class="node"><div class="nic">📱</div><div class="nt">Pounce app</div><div class="nm">your phone — the remote</div></div>
-      <div class="flow-link"><span>same Wi-Fi</span><span class="ln"></span><span>or Pounce tunnel</span></div>
-      <div class="node"><div class="nic">🐾</div><div class="nt">The app / Bridge</div><div class="nm">runs on your computer</div></div>
-      <div class="flow-link"><span>localhost</span><span class="ln"></span><span>on-device</span></div>
-      <div class="node"><div class="nic">🤖</div><div class="nt">Your agents</div><div class="nm">Claude · Codex · Cursor · opencode</div></div>
-    </div>
-    <p class="flow-note"><b>No Pounce cloud.</b> Your code, diffs and conversations never pass through us — read the <a href="/privacy">privacy policy</a>.</p>
-  </div>
-</section>
-
-<!-- faq -->
-<section>
-  <div class="wrap">
-    <div class="reveal center">
-      <span class="kicker eyebrow">good to know</span>
-      <h2 class="sec-title">Common questions</h2>
-    </div>
-    <div class="faq">
-      <div class="qa reveal"><h4>Which do I install — app, Bridge, or CLI?</h4><p>On a Mac, the <b>Pounce desktop app</b> (a signed DMG). On Windows or Linux, the headless <b>Bridge</b> bundle. Or run <b>npx use-pounce</b> in any terminal — all three do the same job: host your agents and show a pairing QR. <a href="https://github.com/pounce-ai/pounce/releases/latest" target="_blank" rel="noopener">Get them here.</a></p></div>
-      <div class="qa reveal"><h4>Phone and computer on different networks?</h4><p>Nothing to configure. Pounce opens its <b>own secure peer-to-peer tunnel</b> — pair once with the same QR and your phone reaches your machine over the internet. You can even <b>ssh</b> into a server, run <b>npx use-pounce</b> there, and pair it from anywhere. No VPN, no port-forwarding.</p></div>
-      <div class="qa reveal"><h4>Is the connection secure?</h4><p>Each machine pairs with its own private token, and off-network access uses a direct peer-to-peer identity to reach home. There's no shared cloud inbox for your sessions.</p></div>
-      <div class="qa reveal"><h4>What can it actually do?</h4><p>Stream every agent live, reply or redirect, approve permission prompts, and review diffs — then commit, push, or open a PR, all from the phone. See the <a href="/docs/getting-started">docs</a> for the full tour.</p></div>
-    </div>
-  </div>
-</section>
-
-<!-- cta -->
-<section>
-  <div class="wrap">
-    <div class="cta reveal">
-      <span class="kicker" style="justify-content:center">ready when you are</span>
-      <h2 style="margin-top:12px">Set it up in two minutes</h2>
-      <p>Grab the iPhone app, install the desktop app (Mac) or Bridge (Windows/Linux), and scan once.</p>
-      <div class="cta-row">
-        <a class="btn btn--app" href="https://apps.apple.com/app/id6779601425" target="_blank" rel="noopener" aria-label="Download Pounce on the App Store">
-          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.37 1.43c.07 1.06-.32 2.09-1 2.86-.71.79-1.86 1.4-2.98 1.31-.09-1.03.39-2.1 1.04-2.78.72-.78 1.97-1.36 2.94-1.39zM20.5 17.2c-.55 1.27-.82 1.84-1.53 2.96-.99 1.56-2.39 3.51-4.12 3.52-1.54.01-1.94-1-4.03-.99-2.09.01-2.53 1.01-4.07.99-1.73-.02-3.05-1.78-4.04-3.34C-.04 16.46-.34 11.34 1.36 8.62c1.2-1.93 3.1-3.06 4.89-3.06 1.82 0 2.96 1 4.46 1 1.46 0 2.35-1 4.46-1 1.59 0 3.28.87 4.48 2.37-3.94 2.16-3.3 7.78.85 9.27z"/></svg>
-          <span class="t"><small>Download on the</small><span>App Store</span></span>
-        </a>
-        <a class="btn btn--ghost" href="https://github.com/pounce-ai/pounce/releases/latest" target="_blank" rel="noopener">
-          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 16l-5-5 1.4-1.4L11 12.2V3h2v9.2l2.6-2.6L17 11l-5 5zM5 19h14v2H5z"/></svg>
-          <span class="t"><small class="acc">macOS · Windows · Linux</small><span>Desktop app &amp; Bridge</span></span>
-        </a>
+    <section>
+      <div class="wrap cta-band reveal">
+        <h2>Set it up in two minutes</h2>
+        <p>
+          Grab the iPhone app, install the desktop app or bridge on your computer, and scan once.
+        </p>
+        <div class="cta-row">
+          <a
+            class="btn btn--primary"
+            href="https://apps.apple.com/app/id6779601425"
+            target="_blank"
+            rel="noopener">Download for iPhone</a
+          >
+          <a
+            class="btn btn--ghost"
+            href="https://github.com/pounce-ai/pounce/releases/latest"
+            target="_blank"
+            rel="noopener">Desktop app &amp; bridge</a
+          >
+        </div>
       </div>
-    </div>
-  </div>
-</section>
+    </section>
 
-<footer>
-  <div class="wrap foot-in">
-    <a class="brand" href="/" style="font-size:18px"><img src="/assets/favicon.png" alt="" style="width:26px;height:26px" /> pounce</a>
-    <div class="foot-links">
-      <a href="/">Home</a>
-      <a href="/docs/getting-started">Docs</a>
-      <a href="/changelog">Changelog</a>
-      <a href="https://github.com/pounce-ai/pounce" target="_blank" rel="noopener">GitHub</a>
-      <a href="https://discord.gg/xK5MQ8KzQH" target="_blank" rel="noopener">Discord</a>
-      <a href="/privacy">Privacy</a>
-    </div>
-    <div class="foot-c">© 2026 Pounce AI</div>
-  </div>
-</footer>
+    <Footer />
 
-<script is:inline>
-  const nav=document.getElementById('nav');
-  addEventListener('scroll',()=>nav.classList.toggle('scrolled',scrollY>10),{passive:true});
-  const io=new IntersectionObserver((es)=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.12});
-  document.querySelectorAll('.reveal').forEach((el)=>io.observe(el));
-</script>
-</body>
+    <style>
+      .glow {
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        background:
+          radial-gradient(600px 500px at 86% -8%, var(--brand-wash), transparent 70%),
+          radial-gradient(480px 420px at 2% 6%, rgba(255, 122, 156, 0.08), transparent 68%);
+      }
+
+      .page-hero {
+        padding: 68px 24px 40px;
+        max-width: 900px;
+      }
+      .page-hero h1 {
+        font-size: clamp(36px, 5.2vw, 60px);
+        font-weight: 700;
+        margin: 16px 0 20px;
+        max-width: 17ch;
+      }
+      .lede {
+        font-size: clamp(17px, 1.8vw, 19.5px);
+        color: var(--ink-2);
+        max-width: 56ch;
+      }
+      .fine {
+        margin-top: 14px;
+        font-size: 14px;
+        color: var(--ink-3);
+      }
+
+      .needs {
+        margin-top: 40px;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+      }
+      .need {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 20px;
+        box-shadow: var(--shadow-sm);
+      }
+      .need h4 {
+        font-family: var(--body);
+        font-weight: 700;
+        font-size: 15.5px;
+        margin-bottom: 6px;
+      }
+      .need p {
+        color: var(--ink-2);
+        font-size: 14.5px;
+      }
+
+      section {
+        padding: 60px 0;
+      }
+      .sec-head {
+        max-width: 620px;
+        margin-bottom: 40px;
+      }
+      .sec-head h2 {
+        font-size: clamp(27px, 3.6vw, 40px);
+        margin: 12px 0 14px;
+      }
+      .lead {
+        color: var(--ink-2);
+        font-size: 17px;
+      }
+
+      .steps {
+        display: grid;
+        gap: 18px;
+      }
+      .step {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 22px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-lg);
+        padding: 28px 30px;
+        box-shadow: var(--shadow-sm);
+      }
+      .step-n {
+        width: 42px;
+        height: 42px;
+        border-radius: 13px;
+        display: grid;
+        place-items: center;
+        background: var(--brand-wash);
+        color: var(--brand-ink);
+        font-family: var(--display);
+        font-weight: 700;
+        font-size: 20px;
+      }
+      .step h3 {
+        font-size: 22px;
+        margin-bottom: 10px;
+      }
+      .step p {
+        color: var(--ink-2);
+        font-size: 16px;
+        max-width: 62ch;
+      }
+      .tip {
+        margin-top: 14px;
+        padding: 12px 16px;
+        border-radius: var(--radius-sm);
+        background: var(--brand-wash);
+        border: 1px solid var(--brand-edge);
+        font-size: 14.5px;
+        color: var(--ink-2);
+      }
+
+      .shots {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 26px;
+      }
+      .shots figure {
+        display: grid;
+        gap: 14px;
+      }
+      .phone {
+        border-radius: 28px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        background: var(--surface-2);
+        box-shadow: var(--shadow-lg);
+      }
+      .shots figcaption {
+        text-align: center;
+        font-size: 14.5px;
+        color: var(--ink-2);
+      }
+      .shots figcaption b {
+        color: var(--ink);
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr auto 1fr;
+        align-items: center;
+        gap: 14px;
+      }
+      .node {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 22px 20px;
+        text-align: center;
+        box-shadow: var(--shadow-sm);
+      }
+      .nt {
+        font-weight: 700;
+        font-size: 16.5px;
+      }
+      .nm {
+        color: var(--ink-3);
+        font-size: 13.5px;
+        margin-top: 4px;
+      }
+      .link {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--ink-3);
+        text-align: center;
+        max-width: 130px;
+      }
+      .link::before {
+        content: "";
+        display: block;
+        height: 1px;
+        background: var(--line);
+        margin-bottom: 8px;
+      }
+      .flow-note {
+        margin-top: 26px;
+        font-size: 15px;
+        color: var(--ink-2);
+      }
+      .flow-note a {
+        color: var(--brand-ink);
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+
+      .faq {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+      }
+      .qa {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 24px 26px;
+        box-shadow: var(--shadow-sm);
+      }
+      .qa h4 {
+        font-family: var(--body);
+        font-weight: 700;
+        font-size: 16.5px;
+        margin-bottom: 8px;
+      }
+      .qa p {
+        color: var(--ink-2);
+        font-size: 15px;
+      }
+      .qa a {
+        color: var(--brand-ink);
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+
+      .cta-band {
+        text-align: center;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-xl);
+        padding: 52px 30px;
+        box-shadow: var(--shadow-sm);
+      }
+      .cta-band h2 {
+        font-size: clamp(26px, 3.4vw, 38px);
+      }
+      .cta-band p {
+        color: var(--ink-2);
+        margin: 12px auto 24px;
+        max-width: 52ch;
+      }
+      .cta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        justify-content: center;
+      }
+
+      @media (max-width: 900px) {
+        .needs,
+        .shots,
+        .faq {
+          grid-template-columns: 1fr;
+        }
+        .flow {
+          grid-template-columns: 1fr;
+        }
+        .link {
+          max-width: none;
+        }
+        .step {
+          grid-template-columns: 1fr;
+          gap: 14px;
+        }
+      }
+    </style>
+
+    <script is:inline>
+      const io = new IntersectionObserver(
+        (entries) => {
+          for (const e of entries) {
+            if (e.isIntersecting) {
+              e.target.classList.add("in");
+              io.unobserve(e.target);
+            }
+          }
+        },
+        { rootMargin: "0px 0px -10% 0px" },
+      );
+      document.querySelectorAll(".reveal").forEach((el) => io.observe(el));
+    </script>
+  </body>
 </html>
