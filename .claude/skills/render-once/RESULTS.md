@@ -412,3 +412,62 @@ came out opposite ways and neither was predictable from reading the code.
 There is also no reliable way to drive a transcript scroll from automation on
 this build, so no scroll number here should be trusted until that harness
 exists.
+
+---
+
+# Desktop
+
+Every one of the 18 files changed above lives in `packages/app`, and
+`desktop/src/shell/Shell.tsx` imports the shared screens directly. So the
+desktop app inherits all of it with no work.
+
+The part that did need work was desktop's own shell. `Sidebar.tsx` read
+`useThreads()` and rendered `timeAgo(session.updatedAt)` at render time — kept
+current by the very sync rewrites the first pass deleted. **A shared data-layer
+fix silently broke another platform's UI**, and it fails as staleness rather
+than an error, so nothing would have caught it.
+
+Verified on a real macOS build (`rnc-cli run-macos`), 90s idle, two independent
+runs:
+
+| | Sidebar renders | TimeAgo renders |
+| --- | ---: | ---: |
+| Run 1 | 7 | 91 |
+| Run 2 | 8 | 105 |
+
+The labels update ~13× more often than the sidebar re-renders — which is the
+whole point, and was impossible before, since a timestamp could only refresh
+when the sidebar did.
+
+**When you cut renders in shared code, grep every consumer for wall-clock reads:**
+
+```bash
+grep -rnE "timeAgo\(|Date\.now\(\)" desktop/src packages/app/src
+```
+
+## Getting a desktop build to run YOUR code
+
+Two traps cost real time here, both worth knowing:
+
+- **Port collision across worktrees.** `bun run start` in `desktop/` failed with
+  "Port 8083 is running @pounce/desktop in another window" pointing at a
+  *different worktree*, then exited — leaving the app happily serving that other
+  worktree's JS. Symptom: your edits never appear. Check the Metro log actually
+  says it started, and confirm with `curl localhost:<port>/status`.
+- **Embedded bundles.** A DerivedData app can attach to Metro for debugging
+  while still running its own embedded bundle. Being connected is not the same
+  as loading from Metro.
+
+The fix for both: start Metro on a free port, `defaults write com.pounce.desktop
+RCT_jsLocation -string "localhost:<port>"`, relaunch, then prove it by reading a
+`__DEV__` counter over CDP (`curl localhost:<port>/json/list` → websocket →
+`Runtime.evaluate`).
+
+## Desktop, still unmeasured
+
+`TabStrip.tsx`, `OpenIn.tsx` and `Sidebar.tsx` each call `useThreads()` at the
+top, and the sidebar's `LegendList` uses inline `keyExtractor`/`renderItem` with
+whole `session` objects — the Home pattern before its fix. Worth the setter-count
+check before converting. Note `Sidebar`'s `useDevices()` is NOT the
+`useDeviceCount` case: it filters on `online` and looks up names, so it genuinely
+needs the collection.
