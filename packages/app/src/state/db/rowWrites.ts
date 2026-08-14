@@ -4,6 +4,8 @@
  * Kept free of RN / MMKV imports so the rules here — above all "don't write a
  * row that hasn't changed" — are unit-testable without a device runtime.
  */
+import { deepEqual } from "../equality";
+
 /** The subset of the collection API these ops need — keeps callers generic.
  *  Mutation params are `any` so any of our differently-typed row collections is
  *  assignable (their concrete `insert(T | T[])` signatures otherwise clash). */
@@ -39,33 +41,6 @@ function assignWouldChange(draft: unknown, row: object): boolean {
     if (!deepEqual((draft as Record<string, unknown>)[k], v)) return true;
   }
   return false;
-}
-
-/** Structural equality for sync payloads: JSON-shaped values only (primitives,
- *  plain objects, arrays). Bails to `false` on anything exotic rather than
- *  guessing, so an unrecognised shape re-writes as before. */
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true; // fast path: identical refs and equal primitives
-  if (typeof a !== typeof b) return false;
-  if (a === null || b === null || typeof a !== "object") return false;
-  const aArr = Array.isArray(a);
-  if (aArr !== Array.isArray(b)) return false;
-  if (aArr) {
-    const x = a as unknown[];
-    const y = b as unknown[];
-    if (x.length !== y.length) return false;
-    for (let i = 0; i < x.length; i++) if (!deepEqual(x[i], y[i])) return false;
-    return true;
-  }
-  if (Object.getPrototypeOf(a) !== Object.prototype) return false; // Date/Map/Set/class
-  const x = a as Record<string, unknown>;
-  const y = b as Record<string, unknown>;
-  const xk = Object.keys(x);
-  if (xk.length !== Object.keys(y).length) return false;
-  for (const k of xk) {
-    if (!Object.hasOwn(y, k) || !deepEqual(x[k], y[k])) return false;
-  }
-  return true;
 }
 
 /** Insert new rows and overwrite existing ones (matched by `id`), in as few
