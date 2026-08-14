@@ -1,11 +1,15 @@
 /**
- * Device-setup card — desktop implementation.
+ * Device-setup cards — desktop implementation.
  *
  * The desktop app runs ON the agent host and pairs with its own bridge
- * automatically, so there is nothing to scan. This card manages this machine
- * instead: force a fresh resync, or reset local app data (device configs +
- * cached threads) — the heartbeat re-adopts the local bridge within seconds.
- * Adding ANOTHER machine's bridge stays available via manual entry.
+ * automatically, so there is nothing to scan. What's left is three separate
+ * subjects, and they render as three cards: this machine (resync, or reset the
+ * local app data — the heartbeat re-adopts the local bridge within seconds),
+ * adding another machine over SSH, and pasting an address and code by hand.
+ *
+ * They were one card until the last two were folded away behind an "Add another
+ * machine…" link inside "This Mac" — which filed the thing you came to do under
+ * the thing you didn't, and hid it.
  */
 import { useState } from "react";
 import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from "react-native";
@@ -15,6 +19,7 @@ import { useRouter } from "expo-router";
 import { addDeviceConfig, clearBridgeConfig, syncLiveData } from "../services/bridge";
 import { allCollections, clearCollection } from "../state/db/collections";
 import { SettingsCard } from "./settings/primitives";
+import { Chevron, Reveal } from "./Disclosure";
 
 /** This Mac's own bridge (same convention as the desktop shell's localBridge). */
 const LOCAL_URL = `http://127.0.0.1:${process.env.EXPO_PUBLIC_BRIDGE_PORT ?? "8099"}`;
@@ -122,7 +127,10 @@ export function DeviceSetupCard({
     );
   };
 
-  return (
+  // Three subjects, three cards. They used to be one, with everything but the
+  // resync buttons hidden behind a toggle — which is fine for a detail and
+  // wrong for the two things this screen exists to do.
+  const thisMac = (
     <SettingsCard>
       <View style={s.body}>
         <Text style={s.cardTitle}>This Mac</Text>
@@ -167,33 +175,60 @@ export function DeviceSetupCard({
             <Text style={s.resetText}>Reset app data</Text>
           </Pressable>
         </View>
+      </View>
+    </SettingsCard>
+  );
+
+  // Adding a machine is its own subject. It used to live inside This Mac behind
+  // an "Add another machine…" toggle, which made the headline feature of the
+  // screen — Pounce sets a server up for you — something you had to already
+  // know was there to find.
+  const addOverSsh = (
+    <SettingsCard>
+      <View style={s.body}>
+        <Text style={s.cardTitle}>Add a machine</Text>
+        <Pressable
+          onPress={() => router.push("/add-machine")}
+          style={({ pressed }) => [s.sshBtn, pressed && s.pressed90]}
+        >
+          <Ionicons name="terminal-outline" size={15} color={COLOR.onAccent} />
+          <View style={s.grow}>
+            <Text style={s.sshTitle}>Set it up over SSH</Text>
+            <Text style={s.sshBody}>
+              Any server you can ssh into. Works from your phone afterwards too.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={14} color={COLOR.onAccent} />
+        </Pressable>
+      </View>
+    </SettingsCard>
+  );
+
+  // The fallback, and it reads as one: pasting is what's left when you can't
+  // SSH in, or already have a code in hand. Still folded away by default — two
+  // fields are noise for everyone who doesn't need them — but the fold is now
+  // over this card alone rather than over the SSH route with it.
+  const pasteCode = (
+    <SettingsCard>
+      <View style={s.body}>
         <Pressable
           onPress={() => setManual((m) => !m)}
-          style={({ pressed }) => [s.manualToggle, pressed && s.pressed60]}
+          style={({ pressed }) => [s.rowBetween, pressed && s.pressed60]}
         >
-          <Text style={s.manualToggleText}>{manual ? "Hide" : "Add another machine…"}</Text>
+          <View style={s.grow}>
+            <Text style={s.cardTitle}>Paste an address and code</Text>
+            {manual ? null : (
+              <Text style={s.cardBody}>For a machine that already prints a pairing code.</Text>
+            )}
+          </View>
+          {/* Turns rather than swapping glyph — see Disclosure.tsx. */}
+          <Chevron open={manual} turn={180}>
+            <Ionicons name="chevron-down" size={14} color={COLOR.fgFaint} />
+          </Chevron>
         </Pressable>
 
         {manual ? (
-          <View style={s.section}>
-            {/* Two ways to add a machine, and they are the same work: SSH in,
-                install Pounce, bring back the address and code. Pounce can do
-                that itself, so that's the offer — pasting is what's left when
-                you can't SSH (or already have a code in hand). */}
-            <Pressable
-              onPress={() => router.push("/add-machine")}
-              style={({ pressed }) => [s.sshBtn, pressed && s.pressed90]}
-            >
-              <Ionicons name="terminal-outline" size={15} color={COLOR.onAccent} />
-              <View style={s.grow}>
-                <Text style={s.sshTitle}>Set it up over SSH</Text>
-                <Text style={s.sshBody}>
-                  Any server you can ssh into. Works from your phone afterwards too.
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={14} color={COLOR.onAccent} />
-            </Pressable>
-            <Text style={s.orLine}>or paste its address and code</Text>
+          <Reveal style={s.section}>
             <Text style={s.fieldLabel}>Address</Text>
             <TextInput
               {...INPUT_TWEAKS}
@@ -228,10 +263,18 @@ export function DeviceSetupCard({
               {busy ? <ActivityIndicator size="small" color={COLOR.fgMuted} /> : null}
               <Text style={s.syncText}>{busy ? "Connecting…" : "Sync"}</Text>
             </Pressable>
-          </View>
+          </Reveal>
         ) : null}
       </View>
     </SettingsCard>
+  );
+
+  return (
+    <>
+      {thisMac}
+      {addOverSsh}
+      {pasteCode}
+    </>
   );
 }
 
@@ -284,15 +327,7 @@ const s = StyleSheet.create((theme) => ({
   },
   sshTitle: { fontSize: 13, fontWeight: "600", color: theme.colors.onAccent },
   sshBody: { marginTop: 1, fontSize: 11.5, lineHeight: 15, color: theme.colors.onAccent },
-  orLine: { alignSelf: "center", fontSize: 12, color: theme.colors.fgFaint },
   rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  updateCopy: { flex: 1, paddingRight: 12 },
-  updateTitle: { fontSize: 14, fontWeight: "500", color: theme.colors.fg },
-  updateBody: { fontSize: 12, lineHeight: 17, color: theme.colors.fgMuted },
-  checkNow: { alignSelf: "flex-start" },
-  checkNowText: { fontSize: 13, fontWeight: "500", color: theme.colors.accent },
-  manualToggle: { alignSelf: "center", paddingTop: 4 },
-  manualToggleText: { fontSize: 13, color: theme.colors.fgMuted },
   fieldLabel: {
     fontSize: 12,
     textTransform: "uppercase",
