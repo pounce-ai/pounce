@@ -21,6 +21,21 @@ export interface DeviceIdentity {
   readonly bridgeId?: string;
 }
 
+/**
+ * The host part of a bridge URL, or null if it isn't one.
+ *
+ * Lives here rather than in each caller because everything that reaches for it
+ * also has to decide what an unparseable URL means, and three callers had three
+ * answers. The null is the honest one; pick your own fallback at the call site.
+ */
+export function hostFromUrl(url: string): string | null {
+  try {
+    return new URL(url).hostname || null;
+  } catch {
+    return null;
+  }
+}
+
 /** Identity for a paired machine. Falls back to the URL-derived form for
  *  bridges too old to name themselves, so those keep working unchanged. */
 export function deviceId(url: string, bridgeId?: string | null): string {

@@ -17,6 +17,7 @@
  * SSH at all.
  */
 import { addDeviceConfig, type DeviceConfig } from "./bridge";
+import { machineName } from "./sshHosts";
 import { local, localToken, mine, minePost } from "./ownBridge";
 import { streamTurn } from "./streamTurn";
 
@@ -165,15 +166,19 @@ export function streamSsh(id: string, onFrame: (frame: SshFrame) => void): () =>
 /**
  * Save the machine.
  *
- * Its `hostName` becomes the device's name: we learned it on the far side, and
- * "gpu-box" reads better than the LAN IP the URL would otherwise be named
- * after — an address that, for a remote machine, nothing here can even reach.
+ * The name comes from `machineName`, which weighs the target you dialled
+ * against the one the far side reports; `namePinned` is what stops the next
+ * sync overwriting that with whatever the bridge calls itself. `sshHost` keeps
+ * the target, which is how the suggestion list knows this machine is already
+ * added.
  */
-export function saveSshDevice(device: SshDevice): Promise<DeviceConfig> {
+export function saveSshDevice(device: SshDevice, sshHost?: string): Promise<DeviceConfig> {
   return addDeviceConfig(device.url, device.token, {
     nodeId: device.nodeId,
     relay: device.relay,
-    name: device.hostName,
+    name: machineName(sshHost, device.hostName),
+    namePinned: true,
+    sshHost: sshHost?.trim() || undefined,
     // Remembered, not guessed. Without it a server added this way is
     // indistinguishable in Settings from a Mac on the same Wi-Fi — same icon,
     // same bare "Offline" — when in fact it is only ever reachable through its

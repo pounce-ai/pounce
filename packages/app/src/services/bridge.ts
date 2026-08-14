@@ -37,7 +37,13 @@ import {
   upsertHosts,
 } from "../state/stores";
 import { type ActivityPage, mergeActivity } from "./activity";
-import { applyBridgeToken, deviceId, resolveAdoption, resolvePairing } from "./deviceIdentity";
+import {
+  applyBridgeToken,
+  deviceId,
+  hostFromUrl,
+  resolveAdoption,
+  resolvePairing,
+} from "./deviceIdentity";
 import { addedViaFor, type AddedVia } from "./deviceProvenance";
 import type { SettleOverrides } from "../state/settled";
 import { clearNotify, notifyOnce } from "./notify";
@@ -133,16 +139,36 @@ export interface DeviceConfig extends BridgeConfig {
    * only path that sets it.
    */
   readonly addedVia?: AddedVia;
+  /**
+   * The SSH target we reached it at — the alias or address as typed, not the
+   * name the machine gave back.
+   *
+   * Recorded because those two are routinely different and nothing else can
+   * bridge them: you add `pneucons-prod` and the machine calls itself
+   * `ip-172-31-45-115`, so the Add-a-machine list has no way to tell that the
+   * host it is offering has already been added. Provenance again beats
+   * guessing — see `addedVia`. Absent on everything added before this, and on
+   * every machine that didn't arrive over SSH.
+   */
+  readonly sshHost?: string;
+  /**
+   * Keep `name` — don't take the one the bridge reports.
+   *
+   * A bridge answers `/v1/status` with its own hostname on every sync, which is
+   * right for a machine you paired by QR and wrong for one whose name was
+   * settled when it was added: it would quietly rename `pneucons-prod` back to
+   * `ip-172-31-45-115` seconds later, and the name would never survive. Set as
+   * a plain property of the row rather than inferred from `addedVia`, so the
+   * next path that settles a name at add time doesn't have to teach the sync
+   * loop about itself.
+   */
+  readonly namePinned?: boolean;
 }
 
 const DEVICES_KEY = "pounce.devices";
 
 function nameFromUrl(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return "device";
-  }
+  return hostFromUrl(url) ?? "device";
 }
 
 /**
@@ -227,7 +253,7 @@ async function writeDeviceConfigs(list: DeviceConfig[]): Promise<void> {
  *  machine is reachable at all and which beats naming a server after its IP. */
 type DeviceExtras = Pick<
   DeviceConfig,
-  "nodeId" | "relay" | "tunnelToken" | "grant" | "name" | "addedVia"
+  "nodeId" | "relay" | "tunnelToken" | "grant" | "name" | "addedVia" | "sshHost" | "namePinned"
 >;
 
 export async function addDeviceConfig(
@@ -876,7 +902,7 @@ export async function syncLiveDataStreaming(): Promise<{
           get<{ status: BridgeStatus }>(cfg, "/v1/status"),
           get<{ agents: BridgeAgent[] }>(cfg, "/v1/agents"),
         ]);
-        deviceName = status?.device || cfg.name;
+        deviceName = cfg.namePinned ? cfg.name : status?.device || cfg.name;
         agentsReported = (agents || []).length;
         agentsAvail = (agents || []).filter((a) => a.available).map((a) => a.id);
         for (const a of agents || []) if (a.capabilities) setAgentCaps(a.id, a.capabilities);
@@ -981,7 +1007,7 @@ export async function syncLiveData(opts?: {
           get<{ agents: BridgeAgent[] }>(cfg, `/v1/agents${q}`),
           get<{ threads: BridgeThread[] }>(cfg, `/v1/threads${q}`),
         ]);
-        deviceName = status?.device || cfg.name;
+        deviceName = cfg.namePinned ? cfg.name : status?.device || cfg.name;
         agentsReported = (agents || []).length;
         agentsAvail = (agents || []).filter((a) => a.available).map((a) => a.id);
         // Record per-agent capabilities so the composer can gate its controls.
