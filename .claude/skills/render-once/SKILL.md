@@ -363,6 +363,28 @@ Run through this for the screen being optimized:
       a value the component only needs at call time? → imperative read.
 - [ ] Any context whose `value` is an object literal? → make it an observable.
 
+## Two rules the measurements kept teaching
+
+**Extraction is not optimization.** Moving state into a custom hook cannot move
+a render — the state still belongs to the calling component. If a change didn't
+alter *where the subscription lives*, expect it to measure flat, and don't
+report it as a win.
+
+**Verify the interaction happened before trusting the counter.** A render count
+taken from a gesture that silently did nothing is indistinguishable from a real
+measurement. Check the scroll actually moved, the field actually received the
+text, the row actually changed — then read the number.
+
+Two corollaries for picking targets:
+
+- To decide **whether** a cluster is worth converting, count the SETTER calls,
+  not renders. Names lie: `scrollDir`/`atBottom` sound continuous and fire once
+  per scroll session.
+- To measure **whether a conversion worked**, count renders of the one component
+  under test (`if (__DEV__) globalThis.__X__++` at the top of it). Aggregate
+  fiber counts are unusable here — a live agent session churns the app enough to
+  swamp the signal.
+
 ## The one that bites back: wall-clock reads
 
 **Before removing renders from a screen, find every value it derives from

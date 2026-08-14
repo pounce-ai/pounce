@@ -320,9 +320,95 @@ noted in its own doc comment.
 `tsc` clean, 938 tests pass, no new lint errors, zero console errors or warnings
 on device. Space confirmed rendering and staying live.
 
+---
+
+# Fourth pass — the Session screen
+
+Session is the app's biggest component (1,835 lines, 20 `useState`, 18
+`useEffect`) and the obvious suspect. Measuring it first was again the right
+call: two of its three interactions were already fine, and the one that wasn't
+is not the one anyone would have guessed.
+
+## Measure the interaction, not the screen
+
+| Session interaction | Result |
+| --- | --- |
+| Idle, 20s | **0 renders** |
+| Transcript scroll | see the caveat below |
+| Composer typing, 30 chars | 0 commits over 16ms — `Composer` owns its own draft behind a ref, so the screen is never involved |
+| **In-thread search typing** | **2 renders of the whole screen per keystroke** |
+
+The composer being already isolated is Jay's A6 applied by whoever built it: an
+imperative handle instead of lifted state. Only the search box had its state
+sitting in the screen.
+
+## The fix, and the thing that isn't the fix
+
+The first attempt moved the search cluster into a `useThreadSearch` hook and
+measured flat. That was **not** a null result to shrug at — it was the wrong
+change. A custom hook's state still belongs to the calling component, so moving
+code between files cannot move a render. Extraction buys readability; it is not
+render-once.
+
+The second attempt actually applied the pattern:
+
+- `useObservable` creates the query, hits, index and searching flag **without
+  subscribing**, so the screen doesn't re-render when they change;
+- a new `ThreadSearchBar` leaf reads them with `useSelector` and re-renders
+  itself;
+- `useObserveEffect` drives the debounced search by reading `threadQuery$`
+  directly, so the search runs with no render behind it at all;
+- the screen subscribes to exactly one thing — the highlight — which changes per
+  jump, not per keystroke.
+
+| 10 keystrokes in the search field | `SessionScreen` renders |
+| --- | ---: |
+| Before | **21** |
+| After | **0** |
+
+Verified on device: "antigravity" gives 1/3, two taps of next gives 3/3, and the
+matched event is scrolled to and highlighted.
+
+## Measure the setters, not the renders
+
+The aggregate fiber counts were unreadable for this work — 874/299/328 against
+485/295/473, ranges fully overlapping, because a live agent session churns the
+app in the background. Counting renders of the one component under test cut
+straight through that.
+
+Better still, for deciding **whether** to convert a cluster: count the setter
+calls. The scroll cluster looked like the obvious next target — `atBottom`,
+`scrollDir`, `newWhileAway`, `visibleIndex` all sound like they fire constantly
+while scrolling. They don't:
+
+| During 8 scroll swipes | Calls |
+| --- | ---: |
+| `setAtBottom` | 1 |
+| `setScrollDir` | 0 |
+| `setVisibleIndex` | 0 (mobile-gated) |
+
+Edge-triggered, not continuous. Converting it would save about one render per
+scroll session, so it was left alone — the same call made for the Sessions list
+in pass three.
+
+> **A retraction, recorded on purpose.** An earlier draft of this section
+> reported "~6 renders per scroll, the rest is history pagination". Both halves
+> were wrong. The list never actually moved under the synthetic swipes — five
+> gesture profiles, identical pixels every time — so the renders were the screen
+> settling after open, not scrolling. And there is no scroll-triggered
+> pagination on this screen at all: `fullQ` fetches the whole history in one
+> query. A render count taken from a gesture that silently did nothing looks
+> exactly like a real measurement. **Verify the interaction happened before
+> trusting the counter.**
+
 ## What is left
 
-Nothing measured and unfixed. The screens not profiled at all are the ones
-reached less often — Metric, Disk, Diagnostics, Context, Changes — and the
-Session transcript, which was profiled in pass one and showed no problem of its
-own.
+Nothing measured and unfixed. Not profiled at all: the less-travelled screens
+(Metric, Disk, Diagnostics, Context, Changes), and Session's remaining clusters
+— send/queue, timeline, usage, model/permission, markers, diff. Each should get
+the setter-count check before anyone converts it; the clusters tested so far
+came out opposite ways and neither was predictable from reading the code.
+
+There is also no reliable way to drive a transcript scroll from automation on
+this build, so no scroll number here should be trusted until that harness
+exists.
