@@ -55,6 +55,9 @@ and `desktop`. Everything needed is exported from `@legendapp/state/react`:
 | Global state without subscribing | `observable(initial)` (already used across `state/`) |
 | Subscribe (at the leaf) | `use$(obs$)` / `useValue(obs$)` / `useSelector(obs$)` — all the same function |
 | Subscribe to a *derived* value | `use$(() => a$.x.get() === id)` |
+| One thread row, at the leaf | `useThreadRow(id)` (`state/db/hooks`) |
+| Hold a derived value's identity still | `useStable(value)` (`state/equality`) |
+| A relative timestamp that keeps itself current | `<TimeAgo iso={…} />` (`ui`) |
 | Effect that re-runs on state change, no render | `useObserveEffect(() => …)` |
 | Read a value without subscribing | `obs$.get()` |
 | Subscribe a whole component | `observer(Component)` |
@@ -359,6 +362,33 @@ Run through this for the screen being optimized:
 - [ ] Any `useWindowDimensions` / `useSafeAreaInsets` / `useIsFocused` used for
       a value the component only needs at call time? → imperative read.
 - [ ] Any context whose `value` is an object literal? → make it an observable.
+
+## The one that bites back: wall-clock reads
+
+**Before removing renders from a screen, find every value it derives from
+`Date.now()` at render time.** In this codebase that has bitten three times, on
+three separate screens.
+
+`timeAgo(iso)` reads the clock during render, so its answer goes stale with no
+state change behind it. Wasted re-renders were the only thing keeping those
+labels current — remove them and a row reading "43m" still says 43m two minutes
+later. The bug looks nothing like the change that caused it.
+
+Cutting renders and auditing wall-clock reads are the same task here.
+
+```bash
+# run this over any screen before/after cutting its renders
+grep -nE "Date\.now\(\)|timeAgo\(|new Date\(\)" <file>
+```
+
+The fix is never "put the renders back". Put the clock at the leaf: a shared
+ticker whose `useSyncExternalStore` snapshot is the **formatted label**, so the
+component re-renders when its displayed value changes and not once per tick. Use
+the existing `<TimeAgo iso={…} />` from `ui/index.tsx`. If a prop is typed
+`string` and needs to carry one, widen it to `ReactNode`.
+
+Verify on device by waiting, not by reasoning: screenshot, wait ~100s,
+screenshot again, and check the labels actually moved.
 
 ## Guardrails
 

@@ -244,8 +244,85 @@ device — including a live search (`antigravity` → "1 MATCH", correct card, a
 the in-messages footer), which exercises the memoized slots and the id-based
 list together.
 
+---
+
+# Third pass — Space and Sessions
+
+The two screens flagged as "unmeasured, so unclaimed" at the end of the second
+pass. Measuring first was the right call: one of them was the worst offender
+found so far, and the other turned out to be fine.
+
+Same deterministic probe as the second pass — five single-field writes to one
+thread, injected from a temporary dev handle, with the screen under test open.
+
+## Space — the worst commit found so far
+
+| Metric (5 writes, Space open) | Before | After | Δ |
+| --- | ---: | ---: | ---: |
+| Fiber renders | 3,053 | 1,885 | **−38%** |
+| Commits ≥16ms | **5** | **1** | −80% |
+
+Paired runs with near-identical commit totals (103 and 101), so this is a fair
+comparison rather than two different background conditions.
+
+Every one of the five writes produced a commit over 16ms. `SpaceDetail` was
+re-rendering at ~5ms each, cascading into 28 Pressables, 72 Texts, the cadence
+rows and both charts — for a title change on one thread in a list this screen
+doesn't even show.
+
+**Root cause: both of `SpaceDetail`'s props were new objects every time.**
+`space` comes from `deriveSpaces`, which runs over every thread; `sessions` was
+an inline `.filter()` in the JSX, which is fresh on every render regardless of
+data. Memoization can't help with either — the React Compiler included, because
+the props genuinely changed identity. Holding both still with `useStable` lets
+`SpaceDetail` bail out.
+
+**And the timestamp trap again.** Space had two plain `timeAgo()` calls that
+were being kept current by exactly the re-renders this change removes — the
+third time this pattern has appeared. They became live `<TimeAgo/>` elements in
+the same commit, and `CadenceLine`'s `figure` widened to a node to carry one.
+Verified on device: "active 48s" still advances to "active 2m" on its own.
+
+> Worth stating as a rule: **in this app, cutting renders and auditing
+> wall-clock reads are the same task.** Anything derived from `Date.now()` at
+> render time is silently riding on renders it didn't ask for.
+
+## Sessions — measured, and left almost alone
+
+No problem found. Five writes produced about **nine** card renders, against 190
+on Home before its fix. `LegendList` absorbs an unstable `renderItem` far better
+than `FlatList` does, and this screen is a modal that only exists while open.
+
+Its `keyExtractor` and `renderItem` were still inline arrows, so they were
+hoisted — three lines, for consistency with the two lists either side of it that
+already do this and carry comments explaining why. **That is hygiene, not a
+measured win**, and the commit says so.
+
+The leaf-subscription refactor was *not* applied here. The measurement didn't
+justify the complexity, and applying it anyway would have been cargo-culting the
+previous pass.
+
+## Shared groundwork
+
+`deepEqual` moved out of `db/rowWrites.ts` into `state/equality.ts`, since the
+write path and the screens now ask the same question. `rowWrites` imports it;
+its 11 tests still cover the write path, and 7 new ones cover the function
+directly — including the cases a looser implementation gets wrong: a missing key
+versus an undefined one, `0` versus `false`, and Date/Map/Set bailing out rather
+than guessing.
+
+`useStable(value)` sits beside it. It deliberately hands back a stale-but-equal
+reference, so it is only safe for values fully described by the comparison —
+noted in its own doc comment.
+
+## Verification
+
+`tsc` clean, 938 tests pass, no new lint errors, zero console errors or warnings
+on device. Space confirmed rendering and staying live.
+
 ## What is left
 
-Home and Search are done. The same pattern would apply to `Space.tsx` and the
-Sessions list, which still pass whole `Session` objects — neither was measured
-here, so neither is claimed as a problem.
+Nothing measured and unfixed. The screens not profiled at all are the ones
+reached less often — Metric, Disk, Diagnostics, Context, Changes — and the
+Session transcript, which was profiled in pass one and showed no problem of its
+own.
