@@ -147,14 +147,105 @@ only that one `<Text>` re-renders instead of the screen containing it.
 - Home, Activity, Search, Settings and a Session transcript all confirmed
   rendering correctly on device, with live data still flowing.
 
+---
+
+# Second pass — pushing the lists to the leaf
+
+The first pass left one structural problem: a *genuine* thread change still
+re-rendered all of Home rather than the one card that changed. This pass fixed
+it, for Home and Search.
+
+## Method
+
+Idle profiling can't see this — it needs a thread to actually change. So the
+trigger was made deterministic: a temporary `__DEV__` handle on the collections,
+and five single-field writes to one known thread, injected from the debugger.
+Everything else about the app is held constant, and every render in the window
+is attributable to those five writes.
+
+The handle was removed before committing.
+
+Both sides were measured back-to-back by stashing the changes, because the app
+is running a live agent whose own thread churns the list — an earlier attempt to
+compare against a number taken twenty minutes prior was polluted by exactly that
+(190 commits against 108 for identical code), and was thrown away.
+
+## Result — five changes to one thread
+
+| Metric | Before | After | Δ |
+| --- | ---: | ---: | ---: |
+| Fiber renders | 3,127 | 1,472 | **−53%** |
+| React commits | 103 | 99 | — |
+| Card bodies rendered | 190 | 12 | **−94%** |
+
+The card figure is from the paired run taken mid-way, where both sides still
+produced data the per-component query could read. See the caveat below.
+
+Before, changing one thread's title re-rendered **38 session cards, 27 cells and
+two full screens** — including Search, a tab that wasn't even visible. After, the
+work is proportional to what's actually on screen.
+
+Liveness was verified explicitly, not assumed: with the probe thread visible on
+Home, the injected title change still appears on screen.
+
+> **A measurement caveat worth recording.** `react-profiler-analyze` stores
+> nothing when no commit crosses its 16ms floor, and `profiler-commit-query` then
+> reports zero renders for every component — including components that
+> demonstrably rendered, since the screen visibly updated. Those zeros are an
+> artifact of the tooling, not a result. The fiber-render totals above come
+> straight from `react-profiler-stop` and are the trustworthy figure.
+
+## The changes
+
+### 4. A card that reads its own row
+
+`useThreadRow(id)` watches a single key via the collection's `subscribeChanges`,
+rather than building a filtered live query per caller — cheap enough to run once
+per visible row. `collection.get` returns a stable reference until the row is
+actually rewritten, which is what makes it safe as a `useSyncExternalStore`
+snapshot; that was verified against the running app before the hook was written.
+
+`LiveSessionCard` wraps the presentational `SessionCard` with it. The plain card
+is unchanged, so callers that already hold a `Session` keep working.
+
+### 5. Ids in the rows, and a list identity that holds still
+
+Two halves of one change, neither of which works alone.
+
+Home's rows now carry a `sessionId` instead of a whole `Session`, so a thread's
+contents no longer appear in the row list. Most rebuilds therefore come out
+identical, and `sameRows` hands LegendList back the *previous* array rather than
+an equal one — so it doesn't churn a single realised cell.
+
+Carrying ids is what makes reusing the array safe. Reusing it while the rows
+still held whole sessions would have shown stale cards.
+
+The memo still reads every thread — ordering, grouping and attention counts all
+depend on their contents — so it still recomputes on any change. What changed is
+that recomputing is now nearly free of downstream cost.
+
+### 6. Search's inline list slots
+
+Search got the same id-based treatment, but the bigger find was beside it.
+
+`Search.tsx` already carried a note to keep every `FlatList` prop referentially
+stable — and yet `ListHeaderComponent`, `ListFooterComponent` and
+`ListEmptyComponent` were all inline JSX. Each got a fresh identity on every
+render, re-rendering every realised cell of a list that usually sits offscreen
+behind Home. Memoized on what they actually read.
+
+A note that says "keep these stable" is worth re-reading against the props that
+arrived after it was written.
+
+## Verification
+
+`tsc` clean, 931 tests pass, no new lint errors. Home and Search confirmed on
+device — including a live search (`antigravity` → "1 MATCH", correct card, and
+the in-messages footer), which exercises the memoized slots and the id-based
+list together.
+
 ## What is left
 
-The largest remaining structural issue is the one Scenario C exposes: the tab
-screens subscribe to whole collections at their top level, so a *genuine* thread
-change still re-renders all of Home rather than the one card that changed. The
-skill's A1/A2 fix — the list subscribes to ordered ids, each `SessionCard`
-subscribes to its own row — would push that to the leaf too.
-
-It was not attempted here because `Home.tsx` is 953 lines with non-trivial
-grouping and filtering, and the measured cost after these three changes no
-longer justifies the risk in the same pass.
+Home and Search are done. The same pattern would apply to `Space.tsx` and the
+Sessions list, which still pass whole `Session` objects — neither was measured
+here, so neither is claimed as a problem.
