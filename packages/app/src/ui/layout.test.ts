@@ -4,7 +4,7 @@
  * at the 264pt it was given on a laptop.
  */
 import { describe, expect, it } from "vitest";
-import { scaledWidth } from "./layout";
+import { SHEET_FRACTION, scaledWidth, sheetContentHeight } from "./layout";
 
 // Copies of the shipped bounds, not imports: the real ones live beside their
 // call sites in Dashboard.tsx and metrics.ts, and importing either would pull
@@ -52,5 +52,43 @@ describe("the returned width", () => {
   it("is a whole number, so a layout never lands on a half point", () => {
     expect(scaledWidth(1777, CONTENT)).toBe(Math.round(1777 * CONTENT.fraction));
     expect(Number.isInteger(scaledWidth(1777, SIDEBAR))).toBe(true);
+  });
+});
+
+/**
+ * The reported bug: the Changes sheet's commit field and its Commit/Push/Draft
+ * PR row were sliced in half by the bottom of the screen. The route sized its
+ * content to `windowHeight * 0.99` while the sheet itself can only ever reach
+ * the top safe area, so the content was taller than its own sheet and the
+ * excess fell off the bottom.
+ */
+describe("sizing a full-height sheet's content", () => {
+  // An iPhone 17: 874pt tall, 59pt of notch, 34pt of home indicator.
+  const WINDOW = 874;
+  const TOP = 59;
+
+  it("never exceeds the sheet's own maximum height", () => {
+    const sheetMax = (WINDOW - TOP) * SHEET_FRACTION;
+    expect(sheetContentHeight(WINDOW, TOP)).toBeLessThanOrEqual(Math.ceil(sheetMax));
+  });
+
+  it("is shorter than the naive window-based height that shipped the bug", () => {
+    expect(sheetContentHeight(WINDOW, TOP)).toBeLessThan(WINDOW * SHEET_FRACTION);
+  });
+
+  it("leaves enough room that a ~78pt footer stays on screen", () => {
+    // Footer = 34pt inset + 8 padding + 36pt button row. Under the old rule
+    // this landed 58pt below the sheet; it must now sit inside it.
+    const overflow = WINDOW * SHEET_FRACTION - sheetContentHeight(WINDOW, TOP);
+    expect(overflow).toBeGreaterThan(50);
+  });
+
+  it("treats a device with no top inset as the full window", () => {
+    expect(sheetContentHeight(WINDOW, 0)).toBe(Math.round(WINDOW * SHEET_FRACTION));
+  });
+
+  it("reports 0 rather than a negative height before the first layout", () => {
+    expect(sheetContentHeight(0, 0)).toBe(0);
+    expect(sheetContentHeight(0, 59)).toBe(0);
   });
 });

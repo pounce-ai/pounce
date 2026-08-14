@@ -1,6 +1,10 @@
 ---
 import { getCollection, render } from "astro:content";
 import { fetchReleases, releaseKey } from "../lib/releases";
+import BaseHead from "../components/BaseHead.astro";
+import Nav from "../components/Nav.astro";
+import Footer from "../components/Footer.astro";
+import "../styles/brand.css";
 
 const entries = (await getCollection("changelog")).sort(
   (a, b) => b.data.date.valueOf() - a.data.date.valueOf(),
@@ -64,165 +68,189 @@ const fmt = (d: Date) =>
 ---
 
 <html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Pounce — Changelog</title>
-<meta name="description" content="What's new in Pounce — releases and features across the iPhone and Android apps, the desktop app, the Bridge, and the use-pounce CLI." />
-<link rel="canonical" href="https://use-pounce.com/changelog" />
-<meta name="robots" content="index, follow" />
-<meta name="theme-color" content="#0b0b0e" />
-<meta property="og:site_name" content="Pounce" />
-<meta property="og:type" content="website" />
-<meta property="og:url" content="https://use-pounce.com/changelog" />
-<meta property="og:title" content="Pounce — Changelog" />
-<meta property="og:description" content="What's new in Pounce — releases and features across the apps, the Bridge, and the CLI." />
-<meta property="og:image" content="https://use-pounce.com/assets/icon.png" />
-<meta property="og:image:alt" content="Pounce" />
-<meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="Pounce — Changelog" />
-<meta name="twitter:description" content="What's new in Pounce — releases and features across the apps, the Bridge, and the CLI." />
-<meta name="twitter:image" content="https://use-pounce.com/assets/icon.png" />
-<link rel="icon" href="/assets/favicon.png" />
-<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-<style is:global>
-  :root{
-    --bg:#0b0b0e; --bg-2:#0e0e13; --panel:#121218;
-    --ink:#f5f4ef; --ink-dim:#a7a5b0; --ink-faint:#726f7d;
-    --violet:#7c5cff; --violet-bright:#9d86ff; --signal:#4fe6a4; --amber:#ffcf5c;
-    --line:rgba(245,244,239,.09); --line-2:rgba(245,244,239,.055);
-    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
-    --disp:"Bricolage Grotesque",-apple-system,system-ui,sans-serif;
-    --body:"Hanken Grotesk",-apple-system,system-ui,sans-serif;
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  html{scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--ink);font-family:var(--body);line-height:1.66;font-size:17px;-webkit-font-smoothing:antialiased;overflow-x:hidden}
-  .bg-grid{position:fixed;inset:0;z-index:-3;background-image:linear-gradient(var(--line-2) 1px,transparent 1px),linear-gradient(90deg,var(--line-2) 1px,transparent 1px);background-size:64px 64px;mask-image:radial-gradient(ellipse 90% 55% at 50% -5%,#000 35%,transparent 78%)}
-  .bg-glow{position:fixed;inset:0;z-index:-2;overflow:hidden;pointer-events:none}
-  .bg-glow i{position:absolute;display:block;width:560px;height:560px;border-radius:50%;filter:blur(120px);background:radial-gradient(circle,rgba(124,92,255,.22),transparent 62%);top:-240px;left:-140px}
-  .grain{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5;mix-blend-mode:overlay;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.42'/%3E%3C/svg%3E")}
-  a{color:inherit;text-decoration:none}
-  h1,h2,h3{font-family:var(--disp);letter-spacing:-.02em;line-height:1.1}
+  <head>
+    <BaseHead
+      title="Pounce — Changelog"
+      description="What's new in Pounce — releases and features across the iPhone and Android apps, the desktop app, the bridge, and the use-pounce CLI."
+      path="/changelog"
+    />
+  </head>
 
-  nav{position:sticky;top:0;z-index:60;backdrop-filter:blur(16px);background:linear-gradient(180deg,rgba(11,11,14,.82),rgba(11,11,14,.55));border-bottom:1px solid transparent;transition:border-color .3s}
-  nav.scrolled{border-color:var(--line)}
-  .nav-in{max-width:1100px;margin:0 auto;padding:0 26px;display:flex;align-items:center;justify-content:space-between;height:70px}
-  .brand{display:flex;align-items:center;gap:11px;font-family:var(--disp);font-weight:800;font-size:20px}
-  .brand img{width:30px;height:30px;border-radius:8px;box-shadow:0 0 0 1px var(--line)}
-  .nav-links{display:flex;align-items:center;gap:28px;font-family:var(--mono);font-size:13px;color:var(--ink-dim)}
-  .nav-links a.lnk:hover{color:var(--ink)}
-  .nav-cta{padding:9px 17px;border-radius:10px;background:var(--ink);color:#0b0b0e!important;font-weight:600;font-family:var(--body);transition:transform .2s}
-  .nav-cta:hover{transform:translateY(-2px)}
-  @media(max-width:640px){.nav-links a.lnk{display:none}}
+  <body>
+    <Nav active="changelog" />
 
-  .wrap{max-width:820px;margin:0 auto;padding:64px 24px 96px}
-  .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.06em;color:var(--violet-bright);display:inline-flex;align-items:center;gap:9px}
-  .kicker::before{content:"›";color:var(--ink-faint)}
-  .page-h h1{font-size:clamp(34px,5vw,52px);font-weight:800;margin:16px 0 12px}
-  .page-h p{color:var(--ink-dim);font-size:18px;max-width:560px}
+    <main class="wrap page">
+      <div class="page-h">
+        <span class="eyebrow">what's new</span>
+        <h1>Changelog</h1>
+        <p>
+          Releases and features across the iPhone and Android apps, the desktop app, the bridge, and
+          the <span class="mono">use-pounce</span> CLI.
+        </p>
+      </div>
 
-  .log{margin-top:56px;position:relative;padding-left:30px}
-  .log::before{content:"";position:absolute;left:5px;top:8px;bottom:8px;width:1px;background:linear-gradient(180deg,var(--violet),var(--line) 30%,var(--line))}
-  .entry{position:relative;padding-bottom:52px}
-  .entry:last-child{padding-bottom:0}
-  .entry::before{content:"";position:absolute;left:-30px;top:7px;width:11px;height:11px;border-radius:50%;
-    background:var(--bg);border:2px solid var(--violet-bright);box-shadow:0 0 0 4px rgba(124,92,255,.14)}
-  .entry .meta{display:flex;flex-wrap:wrap;align-items:center;gap:10px;font-family:var(--mono);font-size:12.5px;color:var(--ink-faint)}
-  .entry .meta time{color:var(--ink-dim)}
-  .chip{padding:3px 9px;border:1px solid var(--line);border-radius:999px;font-size:11px;letter-spacing:.04em;background:var(--panel)}
-  .chip.ios,.chip.android{color:var(--violet-bright);border-color:rgba(124,92,255,.35)}
-  .chip.desktop{color:var(--signal);border-color:rgba(79,230,164,.3)}
-  .chip.bridge,.chip.tunnel{color:var(--amber);border-color:rgba(255,207,92,.3)}
-  .chip.cli{color:var(--signal);border-color:rgba(79,230,164,.3)}
-  .chip.site{color:var(--ink-dim)}
-  .ver{color:var(--ink-faint)}
-  .entry h2{font-size:clamp(20px,2.6vw,25px);font-weight:700;margin:10px 0 10px}
-  .entry h2 a{border-bottom:1px solid transparent;transition:border-color .2s}
-  .entry h2 a:hover{border-color:var(--violet-bright);color:var(--violet-bright)}
-  .entry .body{color:var(--ink-dim);font-size:15.5px;max-width:640px}
-  .entry .body p{margin:8px 0}
-  .entry .body b,.entry .body strong{color:var(--ink);font-weight:600}
-  .entry .body ul{padding-left:20px;margin:10px 0}
-  .entry .body li{margin:6px 0}
-  .entry .body a{color:var(--violet-bright);text-decoration:underline;text-underline-offset:2px}
-  .entry .body code{font-family:var(--mono);font-size:.88em;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:1.5px 6px}
+      <div class="log">
+        {
+          items.map((item) => (
+            <article class="entry" id={item.id}>
+              <div class="meta">
+                <time datetime={item.date.toISOString().slice(0, 10)}>{fmt(item.date)}</time>
+                <span class={`chip chip--${item.component}`}>
+                  {COMPONENT_LABELS[item.component] ?? item.component}
+                </span>
+                {item.version && <span class="ver">v{item.version}</span>}
+              </div>
+              <h2>
+                {item.link ? (
+                  <a href={item.link} target="_blank" rel="noopener">
+                    {item.title}
+                  </a>
+                ) : (
+                  item.title
+                )}
+              </h2>
+              <div class="body">
+                {item.Content ? <item.Content /> : <Fragment set:html={item.html} />}
+              </div>
+            </article>
+          ))
+        }
+      </div>
+    </main>
 
-  footer{border-top:1px solid var(--line);padding:40px 0}
-  .foot-in{max-width:1100px;margin:0 auto;padding:0 26px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:18px}
-  .foot-links{display:flex;gap:24px;font-family:var(--mono);font-size:13px;color:var(--ink-dim)}
-  .foot-links a:hover{color:var(--ink)}
-  .foot-c{font-family:var(--mono);font-size:12.5px;color:var(--ink-faint)}
-</style>
-</head>
-<body>
-<div class="bg-grid"></div>
-<div class="bg-glow"><i></i></div>
-<div class="grain"></div>
+    <Footer />
 
-<nav id="nav">
-  <div class="nav-in">
-    <a class="brand" href="/"><img src="/assets/icon.png" alt="Pounce" /> pounce</a>
-    <div class="nav-links">
-      <a class="lnk" href="/">Home</a>
-      <a class="lnk" href="/docs/getting-started">Docs</a>
-      <a class="lnk" href="/how-it-works">How it works</a>
-      <a class="lnk" href="https://github.com/pounce-ai/pounce" target="_blank" rel="noopener">GitHub</a>
-      <a class="lnk" href="https://discord.gg/xK5MQ8KzQH" target="_blank" rel="noopener">Discord</a>
-      <a class="nav-cta" href="https://apps.apple.com/app/id6779601425" target="_blank" rel="noopener">Download</a>
-    </div>
-  </div>
-</nav>
+    <style>
+      .page {
+        max-width: 860px;
+        padding-top: 60px;
+        padding-bottom: 30px;
+      }
+      .page-h {
+        margin-bottom: 46px;
+      }
+      .page-h h1 {
+        font-size: clamp(36px, 5.4vw, 56px);
+        font-weight: 700;
+        margin: 14px 0 12px;
+      }
+      .page-h p {
+        color: var(--ink-2);
+        font-size: 17.5px;
+        max-width: 56ch;
+      }
 
-<div class="wrap">
-  <div class="page-h">
-    <span class="kicker">what's new</span>
-    <h1>Changelog</h1>
-    <p>Releases and features across the iPhone and Android apps, the desktop app, the Bridge, and the <span style="font-family:var(--mono);font-size:.92em">use-pounce</span> CLI.</p>
-  </div>
+      .log {
+        display: grid;
+        gap: 18px;
+      }
+      .entry {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-lg);
+        padding: 28px 30px;
+        box-shadow: var(--shadow-sm);
+        scroll-margin-top: 90px;
+      }
+      .entry:target {
+        border-color: var(--brand-edge);
+        box-shadow: var(--shadow);
+      }
 
-  <div class="log">
-    {items.map((item) => (
-      <article class="entry" id={item.id}>
-        <div class="meta">
-          <time datetime={item.date.toISOString().slice(0, 10)}>{fmt(item.date)}</time>
-          <span class={`chip ${item.component}`}>{COMPONENT_LABELS[item.component] ?? item.component}</span>
-          {item.version && <span class="ver">v{item.version}</span>}
-        </div>
-        <h2>
-          {item.link
-            ? <a href={item.link} target="_blank" rel="noopener">{item.title}</a>
-            : item.title}
-        </h2>
-        <div class="body">
-          {item.Content ? <item.Content /> : <Fragment set:html={item.html} />}
-        </div>
-      </article>
-    ))}
-  </div>
-</div>
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--ink-3);
+      }
+      .chip {
+        padding: 3px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--brand-edge);
+        color: var(--brand-ink);
+        background: var(--brand-wash);
+      }
+      /* The mobile apps are what most people mean by "Pounce", so they get the
+         warm accents; everything else stays on the brand purple. */
+      .chip--ios,
+      .chip--android {
+        color: var(--pink-ink);
+        border-color: rgba(255, 122, 156, 0.34);
+        background: rgba(255, 122, 156, 0.12);
+      }
+      .chip--cli,
+      .chip--tunnel {
+        color: var(--orange-ink);
+        border-color: rgba(252, 171, 63, 0.36);
+        background: rgba(252, 171, 63, 0.14);
+      }
+      .ver {
+        color: var(--ink-2);
+      }
 
-<footer>
-  <div class="foot-in">
-    <a class="brand" href="/" style="font-size:18px"><img src="/assets/favicon.png" alt="" style="width:26px;height:26px" /> pounce</a>
-    <div class="foot-links">
-      <a href="/">Home</a>
-      <a href="/docs/getting-started">Docs</a>
-      <a href="/how-it-works">How it works</a>
-      <a href="https://github.com/pounce-ai/pounce" target="_blank" rel="noopener">GitHub</a>
-      <a href="https://discord.gg/xK5MQ8KzQH" target="_blank" rel="noopener">Discord</a>
-      <a href="/privacy">Privacy</a>
-    </div>
-    <div class="foot-c">© 2026 Pounce AI</div>
-  </div>
-</footer>
+      .entry h2 {
+        font-size: clamp(21px, 2.6vw, 27px);
+        margin: 14px 0 12px;
+      }
+      .entry h2 a:hover {
+        color: var(--brand-ink);
+      }
 
-<script is:inline>
-  const nav=document.getElementById('nav');
-  addEventListener('scroll',()=>nav.classList.toggle('scrolled',scrollY>10),{passive:true});
-</script>
-</body>
+      .body {
+        color: var(--ink-2);
+        font-size: 16px;
+      }
+      .body :global(p) {
+        margin-bottom: 12px;
+      }
+      .body :global(ul),
+      .body :global(ol) {
+        margin: 0 0 12px 20px;
+        display: grid;
+        gap: 8px;
+      }
+      .body :global(h2),
+      .body :global(h3) {
+        font-size: 18px;
+        margin: 20px 0 10px;
+        color: var(--ink);
+      }
+      .body :global(a) {
+        color: var(--brand-ink);
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+      .body :global(strong) {
+        color: var(--ink);
+      }
+      .body :global(code) {
+        font-family: var(--mono);
+        font-size: 0.88em;
+        background: var(--brand-wash);
+        border: 1px solid var(--line-soft);
+        border-radius: 6px;
+        padding: 1px 6px;
+      }
+      .body :global(pre) {
+        background: var(--surface-2);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        padding: 14px 16px;
+        overflow-x: auto;
+        margin-bottom: 12px;
+      }
+      .body :global(pre code) {
+        background: none;
+        border: 0;
+        padding: 0;
+      }
+      .body :global(img) {
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--line);
+      }
+    </style>
+  </body>
 </html>

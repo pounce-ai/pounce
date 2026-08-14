@@ -1,0 +1,75 @@
+---
+/**
+ * A screenshot that follows the site's theme.
+ *
+ * Every app screenshot exists twice — captured from the real app in its own
+ * light and dark appearance — because a dark dashboard on a cream page (or the
+ * reverse) reads as a foreign object dropped into the layout.
+ *
+ * Both variants are emitted and CSS picks one. It cannot be a `<picture>` with
+ * a `prefers-color-scheme` source: the theme picker sets `data-theme` on the
+ * root, and media queries can't see an attribute, so an explicit choice would
+ * leave the images showing the OS's preference instead of the visitor's.
+ *
+ * BaseHead guarantees `data-theme` is always "light" or "dark" before first
+ * paint, so one pair of mutually exclusive selectors covers every case.
+ *
+ * The off-theme variant still downloads. That is the price of switching without
+ * a flash of the wrong image, and it is why `loading` is passed through — only
+ * the hero pair is eager.
+ */
+interface Props {
+  /** Asset base name: `app-home` resolves to app-home-light.png / -dark.png. */
+  name: string;
+  alt: string;
+  width: number;
+  height: number;
+  loading?: "eager" | "lazy";
+  fetchpriority?: "high" | "auto";
+  class?: string;
+}
+
+const {
+  name,
+  alt,
+  width,
+  height,
+  loading = "lazy",
+  fetchpriority,
+  class: className,
+} = Astro.props;
+---
+
+<img
+  class:list={["shot", "shot--light", className]}
+  src={`/assets/${name}-light.png`}
+  width={width}
+  height={height}
+  alt={alt}
+  loading={loading}
+  fetchpriority={fetchpriority}
+/>
+<img
+  class:list={["shot", "shot--dark", className]}
+  src={`/assets/${name}-dark.png`}
+  width={width}
+  height={height}
+  alt={alt}
+  loading={loading}
+  fetchpriority={fetchpriority}
+/>
+<!-- Both carry the same alt and neither is aria-hidden: `display: none` already
+     takes the off-theme variant out of the accessibility tree, so exactly one is
+     ever announced. Marking the dark one aria-hidden would mute the *visible*
+     image for anyone browsing in dark mode. -->
+
+<style is:global>
+  /* Exactly one rule decides, off the one attribute that is always present.
+     The previous version also matched prefers-color-scheme, so in system mode
+     the two variants could both resolve to visible and the page rendered the
+     screenshot twice. Two mutually exclusive selectors cannot do that. */
+  :root[data-theme="light"] .shot--dark,
+  :root[data-theme="dark"] .shot--light {
+    display: none;
+  }
+</style>

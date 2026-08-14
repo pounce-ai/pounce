@@ -34,7 +34,7 @@ So asking happens twice:
 
 1. **"Can I see what's there?"** The owner approves a short **preview**, good for
    nothing but a catalog: project names with thread counts and dates, plus a
-   search over thread *names*. No messages, no file paths, no branches. It
+   search over thread _names_. No messages, no file paths, no branches. It
    expires in five minutes.
 2. **"Can I read these?"** Built from what the preview turned up. The owner
    approves the scope and sets the clock.
@@ -59,7 +59,7 @@ On the Mac app, the sidebar has a **network icon** next to the pairing button.
 When it's approved, the other machine appears as a device and its threads sync
 into your sidebar like any other.
 
-Requests coming *to* you show up as a **bell in the sidebar's top row**, with a
+Requests coming _to_ you show up as a **bell in the sidebar's top row**, with a
 count. It only appears when something is waiting.
 
 ## Doing it from a browser
@@ -93,13 +93,13 @@ pounce revoke e1f71ab0        # take access away
 
 Useful flags:
 
-| Flag | What it does |
-| --- | --- |
-| `--spaces a,b` | Limit to these projects — on `ask` and on `approve` |
-| `--all` | Ask for everything they're willing to give |
-| `--hours <n>` | How long it lasts (default 24) |
-| `--forever` | No expiry |
-| `--note "text"` | A line for the person approving |
+| Flag            | What it does                                        |
+| --------------- | --------------------------------------------------- |
+| `--spaces a,b`  | Limit to these projects — on `ask` and on `approve` |
+| `--all`         | Ask for everything they're willing to give          |
+| `--hours <n>`   | How long it lasts (default 24)                      |
+| `--forever`     | No expiry                                           |
+| `--note "text"` | A line for the person approving                     |
 
 Requests are addressed by their six-digit code, so you can read it off the other
 screen and type it.
@@ -113,8 +113,8 @@ you've asked it to.
 
 Make it visible wherever you are:
 
-- **App** — the switch at the top of *Nearby machines*
-- **Browser** — *Make visible* on `http://127.0.0.1:8099/peers`
+- **App** — the switch at the top of _Nearby machines_
+- **Browser** — _Make visible_ on `http://127.0.0.1:8099/peers`
 - **Terminal** — `pounce peers --visible on`
 
 It's remembered, takes effect straight away, and `--visible off` hides it again.

@@ -20,7 +20,7 @@ useful when the machine in question is in another room, or another country.
 
 It reports whether the Bridge is reachable, which agents it can see and which
 it can only read history for, and where each one's sessions live on disk. An
-agent showing as *history only* means Pounce can read its past work but can't
+agent showing as _history only_ means Pounce can read its past work but can't
 start new turns — usually its command isn't on the Bridge's `PATH`. See [An
 agent doesn't show up](#an-agent-doesnt-show-up).
 
