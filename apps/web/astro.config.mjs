@@ -37,22 +37,9 @@ export default defineConfig({
      */
     sitemap({
       filter: (page) => !page.includes("/404") && !page.includes("/og/"),
-      /**
-       * Match the canonical URLs exactly.
-       *
-       * `build.format: "file"` means every page is served from a flat
-       * `.html` file and that is what each page declares as its canonical, but
-       * the sitemap defaults to the extensionless form. Listing a URL that
-       * canonicalises somewhere else is a conflicting signal — a crawler is
-       * being told two different things about the same page — so the trailing
-       * `.html` is put back here rather than re-canonicalising the site, which
-       * would move URLs that the App Store and Play Console already point at.
-       */
-      serialize(item) {
-        const { origin, pathname } = new URL(item.url);
-        item.url = pathname === "/" ? `${origin}/` : `${origin}${pathname}.html`;
-        return item;
-      },
+      // The default extensionless form is already what every page declares as
+      // its canonical and the only form Cloudflare answers with a 200 — the
+      // `.html` paths 307 to it. See `BaseHead.astro`.
     }),
     starlight({
       /**

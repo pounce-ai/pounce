@@ -28,17 +28,18 @@ const { title, description, path, ogTitle, ogDescription, ogSlug } = Astro.props
 const site = Astro.site ?? new URL("https://use-pounce.com/");
 
 /**
- * Canonicalise on the flat `.html` file, which is what `build.format: "file"`
- * actually emits.
+ * Canonicalise on the extensionless URL, because that is the one that answers
+ * with the page.
  *
- * Starlight already declares its sixteen docs pages that way, so leaving these
- * four extensionless meant the site canonicalised the same kind of page two
- * different ways and the sitemap could only agree with one of them. Both forms
- * still resolve, and internal links keep using the pretty one — this only
- * settles which of the two a crawler should treat as the original.
+ * `build.format: "file"` emits `privacy.html`, and the store listings point at
+ * that path, but Cloudflare serves the flat files under their bare names and
+ * **307s `/privacy.html` to `/privacy`**. A canonical pointing at the `.html`
+ * form therefore names a URL that redirects away from itself, which is
+ * self-defeating: a crawler follows the redirect and canonicalises where it
+ * lands. The `.html` links keep working — they just aren't the original.
  */
-const canonicalPath = path === "/" || path.includes(".") ? path : `${path}.html`;
-const url = new URL(canonicalPath, site).href;
+const canonicalPath = path.replace(/\.html$/, "");
+const url = new URL(canonicalPath || "/", site).href;
 
 // Anything that hasn't claimed a card of its own falls back to the landing
 // hero rather than to no image, which is what a scraper gets if `og:image`
