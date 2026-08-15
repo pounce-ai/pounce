@@ -8,6 +8,9 @@
  * bundle loads — so it cannot be deferred, bundled, or moved to the body.
  */
 import { ClientRouter } from "astro:transitions";
+import { OG_HEIGHT, OG_WIDTH } from "../lib/og";
+import { DEFAULT_OG_SLUG, MARKETING_CARDS, ogImagePath } from "../lib/ogPages";
+import { siteGraph } from "../lib/structuredData";
 import { THEME_BOOTSTRAP } from "../lib/themeBootstrap";
 
 interface Props {
@@ -16,11 +19,33 @@ interface Props {
   path: string;
   ogTitle?: string;
   ogDescription?: string;
+  /** Which card in `ogPages.ts` this page unfurls with. */
+  ogSlug?: string;
 }
 
-const { title, description, path, ogTitle, ogDescription } = Astro.props;
-const url = new URL(path, "https://use-pounce.com/").href;
-const image = "https://use-pounce.com/assets/icon.png";
+const { title, description, path, ogTitle, ogDescription, ogSlug } = Astro.props;
+
+const site = Astro.site ?? new URL("https://use-pounce.com/");
+
+/**
+ * Canonicalise on the flat `.html` file, which is what `build.format: "file"`
+ * actually emits.
+ *
+ * Starlight already declares its sixteen docs pages that way, so leaving these
+ * four extensionless meant the site canonicalised the same kind of page two
+ * different ways and the sitemap could only agree with one of them. Both forms
+ * still resolve, and internal links keep using the pretty one — this only
+ * settles which of the two a crawler should treat as the original.
+ */
+const canonicalPath = path === "/" || path.includes(".") ? path : `${path}.html`;
+const url = new URL(canonicalPath, site).href;
+
+// Anything that hasn't claimed a card of its own falls back to the landing
+// hero rather than to no image, which is what a scraper gets if `og:image`
+// points at a path the build never emitted.
+const slug = ogSlug && ogSlug in MARKETING_CARDS ? ogSlug : DEFAULT_OG_SLUG;
+const image = new URL(ogImagePath(slug), site).href;
+const imageAlt = MARKETING_CARDS[slug]?.title ?? "Pounce";
 ---
 
 <meta charset="UTF-8" />
@@ -32,15 +57,23 @@ const image = "https://use-pounce.com/assets/icon.png";
 
 <meta property="og:site_name" content="Pounce" />
 <meta property="og:type" content="website" />
+<meta property="og:locale" content="en" />
 <meta property="og:url" content={url} />
 <meta property="og:title" content={ogTitle ?? title} />
 <meta property="og:description" content={ogDescription ?? description} />
 <meta property="og:image" content={image} />
-<meta property="og:image:alt" content="Pounce — your coding agents, in your pocket" />
+<!-- Dimensions and type let a scraper lay the card out before it has finished
+     downloading the image; without them X in particular has been known to fall
+     back to `summary` and render a small square. -->
+<meta property="og:image:width" content={String(OG_WIDTH)} />
+<meta property="og:image:height" content={String(OG_HEIGHT)} />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:alt" content={imageAlt} />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content={ogTitle ?? title} />
 <meta name="twitter:description" content={ogDescription ?? description} />
 <meta name="twitter:image" content={image} />
+<meta name="twitter:image:alt" content={imageAlt} />
 
 <!-- Cream, matching the light ground in brand.css. Light is the site's default
      and the theme script sets the rest; a prefers-color-scheme pair here would
@@ -58,5 +91,7 @@ const image = "https://use-pounce.com/assets/icon.png";
 />
 
 <ClientRouter />
+
+<script type="application/ld+json" is:inline set:html={JSON.stringify(siteGraph())} />
 
 <script is:inline set:html={THEME_BOOTSTRAP} />

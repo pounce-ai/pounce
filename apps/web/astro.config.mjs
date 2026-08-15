@@ -1,4 +1,5 @@
 // @ts-check
+import sitemap from "@astrojs/sitemap";
 import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 import { THEME_BOOTSTRAP } from "./src/lib/themeBootstrap";
@@ -26,6 +27,33 @@ export default defineConfig({
    */
   prefetch: { prefetchAll: true, defaultStrategy: "hover" },
   integrations: [
+    /**
+     * Nothing pointed the crawlers at the full page list before this — the docs
+     * are only reachable by following the sidebar, and the changelog entries
+     * are anchors on one page rather than routes of their own.
+     *
+     * `/404` is dropped because `build.format: "file"` emits it as a real page,
+     * and the OG cards are assets rather than documents.
+     */
+    sitemap({
+      filter: (page) => !page.includes("/404") && !page.includes("/og/"),
+      /**
+       * Match the canonical URLs exactly.
+       *
+       * `build.format: "file"` means every page is served from a flat
+       * `.html` file and that is what each page declares as its canonical, but
+       * the sitemap defaults to the extensionless form. Listing a URL that
+       * canonicalises somewhere else is a conflicting signal — a crawler is
+       * being told two different things about the same page — so the trailing
+       * `.html` is put back here rather than re-canonicalising the site, which
+       * would move URLs that the App Store and Play Console already point at.
+       */
+      serialize(item) {
+        const { origin, pathname } = new URL(item.url);
+        item.url = pathname === "/" ? `${origin}/` : `${origin}${pathname}.html`;
+        return item;
+      },
+    }),
     starlight({
       /**
        * The docs run Starlight's ThemeProvider, which falls back to the OS when
@@ -66,6 +94,9 @@ export default defineConfig({
         { icon: "discord", label: "Discord", href: "https://discord.gg/xK5MQ8KzQH" },
       ],
       customCss: ["./src/styles/starlight.css"],
+      // Adds the per-page social card Starlight has no config hook for; see
+      // the component for why an override is the only place this can go.
+      components: { Head: "./src/components/DocsHead.astro" },
       sidebar: [
         {
           label: "Start here",

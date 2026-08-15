@@ -37,7 +37,7 @@
     },
     "apps/cli": {
       "name": "use-pounce",
-      "version": "0.5.3",
+      "version": "0.6.0",
       "bin": {
         "pounce": "bin/pounce.mjs",
       },
@@ -135,7 +135,10 @@
       "name": "@pounce/web",
       "version": "0.1.0",
       "dependencies": {
+        "@astrojs/sitemap": "^3.7.3",
         "@astrojs/starlight": "^0.41.3",
+        "@takumi-rs/core": "^2.9.2",
+        "@takumi-rs/helpers": "^2.9.2",
         "astro": "^7.1.1",
         "marked": "^18.0.9",
         "sharp": "^0.35.3",
@@ -1244,6 +1247,26 @@
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
     "@swmansion/argent": ["@swmansion/argent@0.20.0", "", { "dependencies": { "@fails-components/webtransport": "^1.6.3", "@fails-components/webtransport-transport-http3-quiche": "^1.6.3", "@modelcontextprotocol/sdk": "^1.20.0", "tree-sitter": "^0.21.1", "tree-sitter-typescript": "^0.23.2" }, "optionalDependencies": { "electron": "^42.5.0", "node-pty": "^1.1.0" }, "bin": { "argent": "dist/cli.js", "argent-simulator-server": "bin/argent-simulator-server.cjs" } }, "sha512-MQMmfCKufi2MPZHsBuQ9hRiLVhtbt2G9SRBEprVFNceCCb1UeNNLKwNAdsjOXR0lX21CCs18xb6ICYJKekD//A=="],
+
+    "@takumi-rs/core": ["@takumi-rs/core@2.9.2", "", { "dependencies": { "@takumi-rs/helpers": "2.9.2" }, "optionalDependencies": { "@takumi-rs/core-darwin-arm64": "2.9.2", "@takumi-rs/core-darwin-x64": "2.9.2", "@takumi-rs/core-linux-arm64-gnu": "2.9.2", "@takumi-rs/core-linux-arm64-musl": "2.9.2", "@takumi-rs/core-linux-x64-gnu": "2.9.2", "@takumi-rs/core-linux-x64-musl": "2.9.2", "@takumi-rs/core-win32-arm64-msvc": "2.9.2", "@takumi-rs/core-win32-x64-msvc": "2.9.2" }, "peerDependencies": { "csstype": "*" }, "optionalPeers": ["csstype"] }, "sha512-vBbe9JNRjXWqbFZSFGlyG5o4JWdFLqyFQV3sIDar10/60RdIZT3qdlIUGzTSn+Pu01mfR8buJzDBzU0+z5OcnA=="],
+
+    "@takumi-rs/core-darwin-arm64": ["@takumi-rs/core-darwin-arm64@2.9.2", "", { "os": "darwin", "cpu": "arm64" }, "sha512-VlY4H1d3LY4lHIT2gXnBfZM1J2YEsOc0W9gZd8pT3nsDK7c0OJs5EDojW/2u4cFgNMTvspWRscu9zBot4FnScA=="],
+
+    "@takumi-rs/core-darwin-x64": ["@takumi-rs/core-darwin-x64@2.9.2", "", { "os": "darwin", "cpu": "x64" }, "sha512-xbmIZ9MliN3ALclmyccYwnPvO7yVT6K+QNoE4bt9WX4MHoTgi+DTu9y+HDRAPW5SUkGpZZuOuoVfOTqWTFUlOg=="],
+
+    "@takumi-rs/core-linux-arm64-gnu": ["@takumi-rs/core-linux-arm64-gnu@2.9.2", "", { "os": "linux", "cpu": "arm64" }, "sha512-tEX+qyLciGkA5MZTvVO+6xMjIfPKvQ6Y3mnYTEOvw1bV35ICMdJNCzIwSmXnf9rY5i+ILVfLSljhJjVh1Edrag=="],
+
+    "@takumi-rs/core-linux-arm64-musl": ["@takumi-rs/core-linux-arm64-musl@2.9.2", "", { "os": "linux", "cpu": "arm64" }, "sha512-nNEGRD3q/ylMlMeuK70Xc97l71vptRAfR4WBQ1iVj+ngtDrer+/MDaUl5b9EumIzv0CDdEVm06231dcSXGwuFw=="],
+
+    "@takumi-rs/core-linux-x64-gnu": ["@takumi-rs/core-linux-x64-gnu@2.9.2", "", { "os": "linux", "cpu": "x64" }, "sha512-dvZ923YoKyA4JH/tMIvWz5aJCyI8AXBNyhvQxukRiql2DfUbEg92kaow8HNKcXrpXvgRNQdXdBaIRGekEF25xA=="],
+
+    "@takumi-rs/core-linux-x64-musl": ["@takumi-rs/core-linux-x64-musl@2.9.2", "", { "os": "linux", "cpu": "x64" }, "sha512-Y0rtIbI8SysFmJtSZod76NF7l4BBGPcBjeOVyFL4skuhVy7eakJIQRB5eXWyoiubHHNyVVUZNYEpL1IK8I6shQ=="],
+
+    "@takumi-rs/core-win32-arm64-msvc": ["@takumi-rs/core-win32-arm64-msvc@2.9.2", "", { "os": "win32", "cpu": "arm64" }, "sha512-o9Q7RvsluRfGzcDcuKQroUGiUhQxXRwCzMya3sm71JU8IM1GI74P4NV1S/WMjazkQOvC2PQFNBua+eY3qn6/HA=="],
+
+    "@takumi-rs/core-win32-x64-msvc": ["@takumi-rs/core-win32-x64-msvc@2.9.2", "", { "os": "win32", "cpu": "x64" }, "sha512-kSHGDWJiK8O7JgLLK8WMlhXY3BESO5sDQ3loAttegOFKETyrBtIOj4a6j6akZpIPGO77fNPJ/aKtqankok8tOA=="],
+
+    "@takumi-rs/helpers": ["@takumi-rs/helpers@2.9.2", "", { "peerDependencies": { "preact": "^10.0.0", "react": "^18.0.0 || ^19.0.0" }, "optionalPeers": ["preact", "react"] }, "sha512-z4PlCBVBZMsxGUV+yfBLl+KASVFsS6byS1g/02tsv9TLeb8NHGpWm0OaENDvInDCv7N2o52eyRNsxaFVBKGqhw=="],
 
     "@tanstack/db": ["@tanstack/db@0.6.14", "", { "dependencies": { "@standard-schema/spec": "^1.1.0", "@tanstack/db-ivm": "0.1.18", "@tanstack/pacer-lite": "^0.2.1" }, "peerDependencies": { "typescript": ">=4.7" } }, "sha512-Kqma/PcWhn2e21iJPM/FMKwdMuJUYII9zkKPUsD42/ceEOYRtimbBSe+xll7EY805xE2HuQ3NGSSU8UiYXpHUw=="],
 
