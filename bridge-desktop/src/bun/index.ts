@@ -46,7 +46,28 @@ try {
   console.warn("[pty] zigpty unavailable:", e);
 }
 
-const info = await startBridge({ port: PORT, quiet: true, appVersion: (pkg as { version?: string }).version });
+// The bundled web app (the full Pounce UI — sidebar, tabs, transcripts),
+// built by `sync-web` and copied to views/web. The bridge serves it at GET /
+// so it is same-origin with /v1; the pairing page moves to /pair. Absent in
+// plain local dev builds (same guard as pounce-tunnel in electrobun.config.ts),
+// where / stays the pairing page and everything behaves as before.
+const webDir = await (async () => {
+  try {
+    const { fileURLToPath } = await import("node:url");
+    const { existsSync } = await import("node:fs");
+    const dir = fileURLToPath(new URL("../views/web", import.meta.url));
+    return existsSync(`${dir}/index.html`) ? dir : null;
+  } catch {
+    return null;
+  }
+})();
+
+const info = await startBridge({
+  port: PORT,
+  quiet: true,
+  appVersion: (pkg as { version?: string }).version,
+  webDir,
+});
 if (info?.error && !info.alreadyRunning) {
   console.error("Pounce could not start:", info.error);
 } else if (info?.alreadyRunning) {
@@ -55,15 +76,29 @@ if (info?.error && !info.alreadyRunning) {
 
 let win: BrowserWindow | null = null;
 function openWindow() {
-  // Load the UI straight from the bridge so /ui and /qr.svg are same-origin and
-  // the port is implicit. The server is already listening (awaited above).
+  // Load the UI straight from the bridge so everything is same-origin and the
+  // port is implicit. With a bundled web app, / is the full Pounce UI and the
+  // window is sized like an app; without one it's the pairing QR card.
   win = new BrowserWindow({
     title: "Pounce",
     url: `http://127.0.0.1:${PORT}/`,
-    frame: { width: 460, height: 640, x: 240, y: 120 },
+    frame: webDir
+      ? { width: 1280, height: 820, x: 120, y: 80 }
+      : { width: 460, height: 640, x: 240, y: 120 },
   });
 }
 openWindow();
+
+// The pairing QR in its own small window. Only offered when / is the web app —
+// otherwise the main window IS the pairing page and this would duplicate it.
+let pairWin: BrowserWindow | null = null;
+function openPairWindow() {
+  pairWin = new BrowserWindow({
+    title: "Pair a device",
+    url: `http://127.0.0.1:${PORT}/pair`,
+    frame: { width: 460, height: 640, x: 300, y: 140 },
+  });
+}
 
 // Set the image in the constructor so the `template` flag is honored — macOS
 // then renders the paw adaptively (white on a dark menu bar, dark on a light
@@ -123,7 +158,8 @@ function renderMenu() {
     // that matters, but not every agent meters a window.
     ...(quotaLabel ? [{ type: "normal" as const, label: quotaLabel, enabled: false }] : []),
     { type: "divider" },
-    { type: "normal", label: "Show pairing window", action: "show" },
+    { type: "normal", label: webDir ? "Open Pounce" : "Show pairing window", action: "show" },
+    ...(webDir ? [{ type: "normal" as const, label: "Show pairing QR", action: "pair" }] : []),
     { type: "normal", label: updateLabel, action: "check-update", enabled: !checking },
     { type: "divider" },
     { type: "normal", label: "Quit Pounce", action: "quit" },
@@ -135,6 +171,9 @@ tray.on("tray-clicked", (event: any) => {
   switch (event.data?.action) {
     case "show":
       openWindow();
+      break;
+    case "pair":
+      openPairWindow();
       break;
     case "check-update":
       void checkForUpdateNow();

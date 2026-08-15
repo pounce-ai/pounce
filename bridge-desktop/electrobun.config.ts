@@ -75,6 +75,11 @@ export default {
       // pounce-tunnel (iroh p2p, off-LAN access) — built per-platform by CI
       // into assets/; absent in plain local dev builds, hence the guard.
       ...(existsSync("assets/pounce-tunnel") ? { "assets/pounce-tunnel": "views/pounce-tunnel" } : {}),
+      // The web app (the full Pounce UI) — built by `bun run sync-web` from
+      // apps/mobile's Expo web export. The bridge serves it at GET / so the
+      // window shows the real app; absent, the window falls back to the
+      // pairing QR page (same guard style as pounce-tunnel above).
+      ...(existsSync("web/index.html") ? { web: "views/web" } : {}),
       // zigpty's native PTY addon for this host — see zigptyPrebuilds() above.
       ...zigptyPrebuilds(),
       "assets/tray.png": "views/tray.png",

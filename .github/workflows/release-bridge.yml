@@ -107,6 +107,14 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: bun install --ignore-scripts
 
+      # The web app (the full Pounce UI). One platform-independent Expo web
+      # export, bundled into every app; the bridge serves it at GET / so the
+      # window shows the real app instead of the pairing QR (which moves to
+      # /pair). Pure Metro output — needs only the workspace install above.
+      - name: Build web app
+        working-directory: ${{ github.workspace }}/bridge-desktop
+        run: bun run sync-web
+
       # pounce-tunnel (apps/tunnel): iroh p2p tunnel for off-LAN access. Built
       # per-platform and bundled with the app; on first run the shell installs
       # it to ~/.pounce/bin where the bridge auto-spawns it.

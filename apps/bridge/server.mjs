@@ -120,6 +120,13 @@ const { token: TOKEN, legacyUntil: LEGACY_UNTIL } = bridgeToken();
 // desktop shell passes it to startBridge() from its package.json; env is the
 // fallback for standalone `node server.mjs` runs.
 let APP_VERSION = process.env.BRIDGE_APP_VERSION || null;
+// Where the built web app lives (the Expo web export — index.html + _expo/ +
+// assets/). When set, GET / serves the app and the pairing page moves to
+// /pair; when absent (npx installs, plain `node server.mjs`), / stays the
+// pairing page and nothing changes. The desktop shell passes it to
+// startBridge() from its bundle; env is the standalone fallback.
+let WEB_DIR = process.env.POUNCE_WEB_DIR || null;
+const webAppAvailable = () => !!WEB_DIR && existsSync(path.join(WEB_DIR, "index.html"));
 const host = createHost({ version: () => APP_VERSION });
 // Full-text history search (ctx-backed). When ctx is missing, bootstrap it
 // automatically — pinned release, checksum-verified, dropped in ~/.pounce/bin
@@ -1377,11 +1384,23 @@ function isLoopback(req) {
   return a === "127.0.0.1" || a === "::1" || a === "::ffff:127.0.0.1";
 }
 
-/** Is this request from a page THIS bridge served? Loopback socket AND an Origin
- *  naming our own address and port — both, so neither can be claimed alone. */
+/**
+ * Is this request from a page THIS bridge served?
+ *
+ * Two ways to qualify:
+ *  - The Origin is exactly `http://<Host>` as the browser fetched us. This is
+ *    the web app served to LAN browsers: a same-origin page's Origin always
+ *    equals the URL it was loaded from. The caller checks hostIsAddress FIRST,
+ *    so Host is a bare IP address — a DNS-rebound page can never match, because
+ *    its Origin carries the attacker's hostname, and a random website's Origin
+ *    is its own domain. Neither header is attacker-settable from a browser.
+ *  - The original loopback rule (loopback socket AND a 127.0.0.1/localhost
+ *    Origin naming our port) — the desktop window's case, kept as-is.
+ */
 function isOwnOrigin(req) {
-  if (!isLoopback(req)) return false;
   const o = req.headers.origin;
+  if (o === `http://${req.headers.host}`) return true;
+  if (!isLoopback(req)) return false;
   return o === `http://127.0.0.1:${PORT}` || o === `http://localhost:${PORT}`;
 }
 
@@ -1979,10 +1998,63 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // The web app — the full Pounce UI, served by the bridge itself so it is
+  // same-origin with /v1 (the Origin gate above requires exactly that; a page
+  // served from anywhere else cannot talk to this bridge). LAN-reachable on
+  // purpose: the page carries no secrets — it is inert until paired, either
+  // via a ?url&token connect link or, from this machine only, /ui.
+  if (webAppAvailable() && req.method === "GET") {
+    // "/connect" too: pairing links carry ?url&token as query params, and the
+    // web app reads them from any path at boot (see WebApp.pairFromUrl) — so a
+    // link written for the mobile deep-link shape still lands in the app.
+    if (url.pathname === "/" || url.pathname === "/connect") {
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+      });
+      return res.end(readFileSync(path.join(WEB_DIR, "index.html")));
+    }
+    if (url.pathname.startsWith("/_expo/") || url.pathname.startsWith("/assets/")) {
+      // Resolve inside WEB_DIR only — a `..` in the URL must not escape it.
+      const rel = decodeURIComponent(url.pathname.slice(1));
+      const file = path.resolve(WEB_DIR, rel);
+      if (!file.startsWith(path.resolve(WEB_DIR) + path.sep) || !existsSync(file)) {
+        return send(res, 404, { error: "not found" });
+      }
+      const TYPES = {
+        ".js": "text/javascript",
+        ".css": "text/css",
+        ".html": "text/html; charset=utf-8",
+        ".json": "application/json",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".svg": "image/svg+xml",
+        ".ico": "image/x-icon",
+        ".ttf": "font/ttf",
+        ".otf": "font/otf",
+        ".woff": "font/woff",
+        ".woff2": "font/woff2",
+        ".wasm": "application/wasm",
+        ".map": "application/json",
+      };
+      res.writeHead(200, {
+        "content-type": TYPES[path.extname(file)] || "application/octet-stream",
+        "content-length": statSync(file).size,
+        // Every file under _expo/ and assets/ is content-hashed by the export,
+        // so it can be cached forever; a new build references new names.
+        "cache-control": "public, max-age=31536000, immutable",
+      });
+      return createReadStream(file).pipe(res);
+    }
+  }
+
   // Localhost-only UI surface for the desktop app: pairing QR + live status.
-  // Gated to loopback because it exposes the pairing token.
+  // Gated to loopback because it exposes the pairing token. `/` is the pairing
+  // page only when no web app is bundled (npx installs); with one, the page
+  // lives at /pair and the desktop tray links to it.
   if (
     url.pathname === "/" ||
+    url.pathname === "/pair" ||
     url.pathname === "/ui" ||
     url.pathname === "/qr.svg" ||
     url.pathname === "/peers"
@@ -1995,7 +2067,7 @@ const server = http.createServer(async (req, res) => {
       });
       return res.end(PEERS_HTML);
     }
-    if (url.pathname === "/") {
+    if (url.pathname === "/" || url.pathname === "/pair") {
       res.writeHead(200, {
         "content-type": "text/html; charset=utf-8",
         "cache-control": "no-store",
@@ -3428,8 +3500,16 @@ function portInUse(port) {
  * Used by both the CLI (`node server.mjs`) and the desktop app (Electrobun),
  * which calls it in-process and renders the returned deepLink as a QR.
  */
-export async function startBridge({ port = PORT, quiet = false, appVersion = null } = {}) {
+export async function startBridge({
+  port = PORT,
+  quiet = false,
+  appVersion = null,
+  webDir = null,
+} = {}) {
   if (appVersion) APP_VERSION = appVersion;
+  // The desktop shell hands us its bundled web export; GET / then serves the
+  // full Pounce UI instead of the pairing page (which moves to /pair).
+  if (webDir) WEB_DIR = webDir;
   // Idempotent: when this file is bundled into a launcher, the `isMain`
   // self-start below and the launcher's explicit call both fire — the second
   // one must not listen() again.

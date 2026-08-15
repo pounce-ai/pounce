@@ -4,3 +4,4 @@ dist/
 artifacts/
 *.tsbuildinfo
 server/
+web/
