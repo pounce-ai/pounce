@@ -90,9 +90,22 @@ jobs:
 
       # Workspace deps at the repo root so `sync-server` can bundle the bridge's
       # workspace imports (e.g. @litter/transcript) into a self-contained server.mjs.
+      #
+      # --ignore-scripts, because the linux-arm64 runner cannot build them and
+      # nothing here needs them built. The root package has no runtime deps at
+      # all: the only packages with install scripts that reach it are
+      # @swmansion/argent's native ones (tree-sitter, node-pty, electron), and
+      # argent is agent tooling that no shipped artifact touches. Compiling
+      # tree-sitter through node-gyp is what failed the arm64 leg of
+      # bridge-v1.1.6 twice — once on a missing bunx node-gyp, once on
+      # "failed copying files from cache" for tar — while x64, macOS and Windows
+      # passed the identical step. Every dependency the bridge actually bundles
+      # (zigpty, @wterm/core, node-machine-id) ships prebuilt and has no install
+      # script, so the resolved tree is unchanged; only the native compile of
+      # tooling we don't ship goes away.
       - name: Install workspace deps
         working-directory: ${{ github.workspace }}
-        run: bun install
+        run: bun install --ignore-scripts
 
       # pounce-tunnel (apps/tunnel): iroh p2p tunnel for off-LAN access. Built
       # per-platform and bundled with the app; on first run the shell installs
