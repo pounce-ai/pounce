@@ -20,6 +20,17 @@ In testing on Google Play now — public release soon. The
 
 ## Computer
 
+### Not sure which? Let it decide
+
+```sh
+npx use-pounce configure
+```
+
+One command on any machine with Node.js. It works out what the machine is — OS,
+chip, whether there's a screen, whether you're on the other end of an SSH
+connection — then offers you the desktop app or a Bridge that starts at login,
+and installs the one you pick. Everything below is the same thing done by hand.
+
 ### macOS — the desktop app
 
 [Download `Pounce.dmg`](https://github.com/pounce-ai/pounce/releases/latest)

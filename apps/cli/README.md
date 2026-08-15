@@ -17,6 +17,7 @@ The bridge keeps running after you close the terminal.
 ```
 pounce            start the bridge (background) + show the pairing QR + wait
 pounce qr         same, but don't wait for the phone
+pounce configure  set this machine up for good — the app, or a login-time bridge
 pounce status     bridge / tunnel / phone status
 pounce stop       stop the background bridge and its tunnel
 pounce logs [-f]  show (or follow) the bridge log
@@ -27,6 +28,42 @@ pounce mcp        serve this machine's agent history over MCP (stdio)
 --lan             skip the tunnel — QR pairs on this Wi-Fi only
 --foreground      run the bridge attached to this terminal
 ```
+
+## Setting a machine up for good
+
+`npx use-pounce` is perfect for a one-off, but the bridge only lives as long as
+you leave it running. `pounce configure` makes it permanent:
+
+```sh
+npx use-pounce configure
+```
+
+It looks at the machine you're on — OS, chip, whether there's a screen, whether
+you're at the far end of an SSH connection — and offers only what can actually
+run there:
+
+- **The desktop app.** The whole Pounce UI with the bridge built in and the
+  pairing QR in the window. Downloads and installs the right build for you:
+  `Pounce.dmg` on Apple Silicon Macs, the installer on Windows, a `.deb` or the
+  tarball on Linux. Not offered on an Intel Mac, on macOS 13 or older, or on a
+  machine with no desktop session — with the reason shown, not just hidden.
+- **The background bridge.** No window. A launchd agent on macOS, a systemd
+  user service on Linux, a scheduled task on Windows: starts at login, restarts
+  on crash. The recommendation on a headless box or over SSH.
+
+Answer with flags to skip the question:
+
+```
+--desktop     install the desktop app
+--bridge      install the background bridge as a login service
+--remove      take that login service back off again
+-y, --yes     don't ask — take the recommendation for this machine
+```
+
+Run through `npx`, the bridge service can't point at the npx cache (npm prunes
+it), so `--bridge` installs its own copy of `use-pounce` under `~/.pounce/app`
+and runs that. The pairing token is whatever this machine already uses, so
+phones that paired before keep working.
 
 Installed globally (`npm i -g use-pounce`), the command is just `pounce`.
 

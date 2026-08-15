@@ -17,19 +17,20 @@ Installed globally (`npm i -g use-pounce`), the command is just `pounce`.
 
 ## Commands
 
-| Command                     | What it does                                               |
-| --------------------------- | ---------------------------------------------------------- |
-| `pounce`                    | Start the Bridge (background) + show the pairing QR + wait |
-| `pounce qr`                 | Same, but don't wait for the phone                         |
-| `pounce status`             | Bridge / tunnel / phone status                             |
-| `pounce stop`               | Stop the background Bridge and its tunnel                  |
-| `pounce logs [-f]`          | Show (or follow) the Bridge log                            |
-| `pounce peers`              | Machines nearby, who's asking, who has access              |
-| `pounce peers --visible on` | Let other computers here find this one                     |
-| `pounce ask <machine>`      | Ask another computer to share its threads with you         |
-| `pounce approve <code>`     | Let a machine in                                           |
-| `pounce deny <code>`        | Turn a request down                                        |
-| `pounce revoke <id>`        | Take access away again                                     |
+| Command                     | What it does                                                   |
+| --------------------------- | -------------------------------------------------------------- |
+| `pounce`                    | Start the Bridge (background) + show the pairing QR + wait     |
+| `pounce qr`                 | Same, but don't wait for the phone                             |
+| `pounce configure`          | Set this machine up for good — the app, or a login-time Bridge |
+| `pounce status`             | Bridge / tunnel / phone status                                 |
+| `pounce stop`               | Stop the background Bridge and its tunnel                      |
+| `pounce logs [-f]`          | Show (or follow) the Bridge log                                |
+| `pounce peers`              | Machines nearby, who's asking, who has access                  |
+| `pounce peers --visible on` | Let other computers here find this one                         |
+| `pounce ask <machine>`      | Ask another computer to share its threads with you             |
+| `pounce approve <code>`     | Let a machine in                                               |
+| `pounce deny <code>`        | Turn a request down                                            |
+| `pounce revoke <id>`        | Take access away again                                         |
 
 ## Flags
 
@@ -39,6 +40,15 @@ Installed globally (`npm i -g use-pounce`), the command is just `pounce`.
 | `--token <t>`  | Pairing token (default: random, kept in `~/.pounce`) |
 | `--lan`        | Skip the tunnel — the QR pairs on this Wi-Fi only    |
 | `--foreground` | Run the Bridge attached to this terminal             |
+
+Setup flags (see [Setting a machine up for good](#setting-a-machine-up-for-good)):
+
+| Flag        | Meaning                                              |
+| ----------- | ---------------------------------------------------- |
+| `--desktop` | Install the desktop app                              |
+| `--bridge`  | Install the background Bridge as a login service     |
+| `--remove`  | Take that login service back off                     |
+| `-y`        | Don't ask — take the recommendation for this machine |
 
 Sharing flags (see [Sharing with another machine](/docs/sharing)):
 
@@ -50,6 +60,44 @@ Sharing flags (see [Sharing with another machine](/docs/sharing)):
 | `--forever`         | No expiry                                                      |
 | `--note "text"`     | A line for the person approving                                |
 | `--visible on\|off` | Let other computers here find this one — **hidden by default** |
+
+## Setting a machine up for good
+
+`npx use-pounce` is perfect for a one-off, but the Bridge only lives as long as
+you leave it running. One command makes it permanent:
+
+```sh
+npx use-pounce configure
+```
+
+It looks at the machine you're on — OS, chip, whether there's a screen, whether
+you're at the far end of an SSH connection — and offers only what can actually
+run there:
+
+- **The desktop app** — the whole Pounce UI with the Bridge built in and the
+  pairing QR in the window. It downloads and installs the right build for you:
+  `Pounce.dmg` on an Apple Silicon Mac, the installer on Windows, a `.deb` (or
+  the tarball) on Linux. Not offered on an Intel Mac, on macOS 13 or older, or
+  on a machine with no desktop session — and it tells you why rather than
+  quietly leaving the option out.
+- **The background Bridge** — no window at all. A launchd agent on macOS, a
+  systemd user service on Linux, a scheduled task on Windows: it starts at
+  login and restarts on crash. This is the recommendation on a headless box or
+  when you're connected over SSH.
+
+Skip the question with a flag — handy in a provisioning script:
+
+```sh
+npx use-pounce configure --bridge      # a Bridge that starts at login
+npx use-pounce configure --desktop     # the app, where it can run
+npx use-pounce configure --remove      # take the login service back off
+```
+
+The login service reuses whatever pairing token this machine already has, so
+phones that paired before keep working. Run through `npx`, it installs its own
+copy of `use-pounce` under `~/.pounce/app` and points the service at that —
+npm prunes its `npx` cache, and a service pointed there would stop working the
+day it did.
 
 ## Sharing with another machine
 
@@ -94,3 +142,8 @@ It's read-only — see [MCP server](/docs/mcp) for the tools and setup.
 
 Everything lives under `~/.pounce/` — run `pounce stop` and delete that
 directory to remove all of it.
+
+`pounce configure --bridge` adds one thing outside it: the login service —
+`~/Library/LaunchAgents/com.pounce.bridge.plist` on macOS,
+`~/.config/systemd/user/pounce-bridge.service` on Linux, a `PounceBridge`
+scheduled task on Windows. `pounce configure --remove` takes it away again.

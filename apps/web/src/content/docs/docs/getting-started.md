@@ -22,6 +22,10 @@ npx use-pounce
 That's the fastest path, and it works in any terminal — even over SSH to a
 server on the other side of the world.
 
+To make it permanent rather than one-off, run `npx use-pounce configure`: it
+detects what this machine is and offers you the desktop app or a Bridge that
+starts at login, then installs whichever you pick.
+
 Prefer an app? On a **Mac**, [download the desktop app](https://github.com/pounce-ai/pounce/releases/latest)
 (`Pounce.dmg`) — the Bridge is built in and the QR appears in the window. On
 **Windows or Linux**, grab the headless Bridge bundle from the same page. See

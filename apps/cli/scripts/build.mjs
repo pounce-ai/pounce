@@ -59,4 +59,18 @@ execFileSync(
   ],
   { stdio: "inherit", cwd: PKG },
 );
-console.log("built dist/launcher.mjs + dist/mcp.mjs");
+// `pounce configure` — same story again. Node built-ins only, so nothing here
+// is external; it's bundled purely so `files: [bin, dist]` carries it.
+execFileSync(
+  process.env.BUN_BIN || "bun",
+  [
+    "build",
+    path.join(PKG, "src/configure.mjs"),
+    "--target=node",
+    ...EXTERNAL.flatMap((e) => ["--external", e]),
+    "--outfile",
+    path.join(PKG, "dist/configure.mjs"),
+  ],
+  { stdio: "inherit", cwd: PKG },
+);
+console.log("built dist/launcher.mjs + dist/mcp.mjs + dist/configure.mjs");
