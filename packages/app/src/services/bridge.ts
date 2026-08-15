@@ -1826,6 +1826,53 @@ export async function fetchSkills(hostId: string, cwd: string): Promise<SkillsRe
   }
 }
 
+/** One slash command the agent really offers, as the composer renders it. */
+export interface AgentCommand {
+  /** Includes the leading slash, e.g. "/code-review". */
+  cmd: string;
+  desc: string;
+  /** Argument hint the agent published, e.g. "[low|medium|high]". */
+  hint?: string;
+}
+
+export interface CommandsReport {
+  agent: string;
+  cwd: string;
+  /** Which transport enumerated the list — and therefore which one it is valid
+   *  for. "acp" carries descriptions and argument hints; "cli" is names only.
+   *  "static" means neither could answer and `commands` is empty, so the caller
+   *  must keep its own fallback rather than render nothing. */
+  source: "acp" | "cli" | "static";
+  commands: AgentCommand[];
+}
+
+/**
+ * The agent's real slash commands in a project. Null when the host can't answer.
+ *
+ * Both transports enumerate — ACP pushes `available_commands_update`, the CLI
+ * carries the list on its `system`/`init` envelope — and the host answers for
+ * whichever one this session will run on. The sets genuinely differ (`/clear`
+ * runs under -p and is refused over ACP), which is why the caller must not
+ * merge them or cache across a transport change.
+ */
+export async function fetchCommands(
+  hostId: string,
+  cwd: string,
+  agent: string,
+): Promise<CommandsReport | null> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) return null;
+  try {
+    return await get<CommandsReport>(
+      cfg,
+      `/v1/commands?cwd=${encodeURIComponent(cwd)}&agent=${encodeURIComponent(agent)}`,
+      20_000,
+    );
+  } catch {
+    return null;
+  }
+}
+
 /** One skill's SKILL.md. The host only serves a directory it just listed for
  *  this cwd, so an unknown path is a 404 rather than a file read. */
 export async function fetchSkillDoc(

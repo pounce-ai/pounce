@@ -35,6 +35,7 @@ import {
 } from "./events.mjs";
 import { agentEnv, binPath } from "./env.mjs";
 import { binOverride } from "./config.mjs";
+import { normalizeAcpCommands, rememberCommands } from "./commands.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -80,13 +81,26 @@ function spawnSpec(agent) {
     // has no node_modules); fall back to node_modules resolution in dev.
     const bundled = new URL(`./adapters/${a.bundle}.mjs`, import.meta.url).pathname;
     if (existsSync(bundled)) return { command: process.execPath, args: [bundled] };
+    // Resolve via the package's OWN manifest, not a bare require.resolve of the
+    // package name. Two reasons that never worked, which silently disabled ACP
+    // in dev (acpAvailable() was false however BRIDGE_ACP was set):
+    //   1. Both adapters declare `exports["."]` with only `import`/`types` — no
+    //      `require` condition — so createRequire().resolve() throws
+    //      ERR_PACKAGE_PATH_NOT_EXPORTED before finding anything.
+    //   2. That entry is `dist/lib.js`, the LIBRARY. The ACP server is the bin
+    //      (`dist/index.js`); spawning the library would start no server.
+    // `exports["./*"]` lets us reach package.json, and the bin is the contract.
     let entry;
     try {
-      entry = require.resolve(a.pkg);
+      const manifestPath = require.resolve(`${a.pkg}/package.json`);
+      const bin = require(manifestPath).bin;
+      const rel = typeof bin === "string" ? bin : Object.values(bin || {})[0];
+      if (!rel) return null;
+      entry = new URL(rel, `file://${manifestPath}`).pathname;
     } catch {
       return null;
     }
-    return { command: process.execPath, args: [entry] };
+    return existsSync(entry) ? { command: process.execPath, args: [entry] } : null;
   }
   // Direct-CLI adapter (opencode) — honor a user-pinned binary path.
   return { command: binPath(a.cmd), args: a.args || [] };
@@ -95,6 +109,100 @@ function spawnSpec(agent) {
 /** Whether an ACP turn can run for this agent right now. */
 export function acpAvailable(agent) {
   return spawnSpec(agent) != null;
+}
+
+/**
+ * Env for an adapter child. Both adapters shell out to their agent's CLI and
+ * neither searches PATH the way we do, so the executable is pinned here — see
+ * the per-agent notes below. Shared by turns and by readAcpCommands().
+ */
+function adapterEnv(agent) {
+  const env = agentEnv();
+  // The claude ACP adapter uses @anthropic-ai/claude-agent-sdk, which needs an
+  // explicit path to the claude executable (it doesn't search PATH). When
+  // bundled (desktop) the SDK's native binary isn't present, so point it at the
+  // same claude the stream-json path uses.
+  if (agent === "claude" && !env.CLAUDE_CODE_EXECUTABLE) {
+    // A user-pinned claude path wins; otherwise resolve off PATH.
+    const found = binOverride("claude") || resolveBin("claude", env);
+    if (found) env.CLAUDE_CODE_EXECUTABLE = found;
+  }
+  // The codex ACP adapter spawns the codex CLI. Without CODEX_PATH it
+  // require-resolves @openai/codex — a package the bundled (desktop) adapter
+  // doesn't ship, which crashed every codex ACP turn with MODULE_NOT_FOUND.
+  // Point it at the same codex the exec path uses.
+  if (agent === "codex" && !env.CODEX_PATH) {
+    const found = binOverride("codex") || resolveBin("codex", env);
+    if (found) env.CODEX_PATH = found;
+  }
+  return env;
+}
+
+/**
+ * Spawn a short-lived adapter purely to read its command list. The composer
+ * needs the menu BEFORE the first message, and the turn runner's adapter only
+ * lives for the duration of a turn — so a session with no turns yet would
+ * otherwise have nothing to offer. Cheap enough at the caller's cache TTL
+ * (one spawn, ~1s); callers should not hit this per keystroke.
+ *
+ * No prompt is sent, so this costs no tokens. See commands.mjs for why the
+ * result is kept per transport.
+ */
+export function readAcpCommands(agent, cwd, { timeoutMs = 15_000 } = {}) {
+  const spec = spawnSpec(agent);
+  if (!spec) return Promise.resolve([]);
+  const dir = cwd && existsSync(cwd) ? cwd : process.env.HOME;
+  const child = spawn(spec.command, spec.args, {
+    cwd: dir,
+    env: adapterEnv(agent),
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  child.stderr.resume(); // drain; a full pipe would stall the adapter
+  const stream = ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout));
+  const app = client({ name: "pounce-bridge", version: "0.1.0" });
+
+  let commands = null;
+  app.onNotification("session/update", (ctx) => {
+    const u = ctx.params?.update;
+    if (u?.sessionUpdate === "available_commands_update")
+      commands = normalizeAcpCommands(u.availableCommands);
+  });
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        child.kill();
+      } catch {}
+      const out = commands || [];
+      rememberCommands("acp", agent, dir, out);
+      resolve(out);
+    };
+    const timer = setTimeout(finish, timeoutMs).unref?.();
+    app
+      .connectWith(stream, async (ctx) => {
+        await ctx.request("initialize", {
+          protocolVersion: PROTOCOL_VERSION,
+          clientCapabilities: {
+            fs: { readTextFile: false, writeTextFile: false },
+            terminal: false,
+          },
+          clientInfo: { name: "pounce-bridge", version: "0.1.0" },
+        });
+        // The push follows session/new; nothing else is needed, and no prompt is
+        // sent, so this costs no tokens.
+        await ctx.request("session/new", { cwd: dir, mcpServers: [] });
+        // The adapter emits the notification around the session/new response —
+        // give the loop a beat to deliver it before tearing the child down.
+        for (let i = 0; i < 40 && !commands; i++)
+          await new Promise((r) => setTimeout(r, 50).unref?.());
+      })
+      .then(finish, finish);
+  });
 }
 
 /** Resolve a binary's absolute path via the given env's PATH (sync, cheap). */
@@ -178,24 +286,7 @@ export function startAcpTurn(
   const fresh = !threadId || !/^[0-9a-f]{8}-/i.test(threadId);
   const dir = cwd && existsSync(cwd) ? cwd : process.env.HOME;
 
-  const env = agentEnv();
-  // The claude ACP adapter uses @anthropic-ai/claude-agent-sdk, which needs an
-  // explicit path to the claude executable (it doesn't search PATH). When
-  // bundled (desktop) the SDK's native binary isn't present, so point it at the
-  // same claude the stream-json path uses.
-  if (agent === "claude" && !env.CLAUDE_CODE_EXECUTABLE) {
-    // A user-pinned claude path wins; otherwise resolve off PATH.
-    const found = binOverride("claude") || resolveBin("claude", env);
-    if (found) env.CLAUDE_CODE_EXECUTABLE = found;
-  }
-  // The codex ACP adapter spawns the codex CLI. Without CODEX_PATH it
-  // require-resolves @openai/codex — a package the bundled (desktop) adapter
-  // doesn't ship, which crashed every codex ACP turn with MODULE_NOT_FOUND.
-  // Point it at the same codex the exec path uses.
-  if (agent === "codex" && !env.CODEX_PATH) {
-    const found = binOverride("codex") || resolveBin("codex", env);
-    if (found) env.CODEX_PATH = found;
-  }
+  const env = adapterEnv(agent);
   // The requested model. `model` was accepted on the wire and then dropped on
   // the floor here, so every LIVE turn ran on the agent's default however the
   // app's picker was set — the stream-json path pushes `--model`, but nothing
@@ -296,11 +387,18 @@ export function startAcpTurn(
 
   app.onNotification("session/update", (ctx) => {
     const u = ctx.params?.update;
-    if (u?.sessionUpdate) {
-      try {
-        onUpdate(u);
-      } catch {}
+    if (!u?.sessionUpdate) return;
+    // Refresh the composer's command list for free. Deliberately OUTSIDE the
+    // `forwarding` gate in onUpdate: the first push lands right after
+    // session/new, before the prompt, so gating it would drop the one that
+    // matters — and a mid-turn push (skills discovered in a subdirectory) is
+    // exactly the change we want to keep.
+    if (u.sessionUpdate === "available_commands_update") {
+      rememberCommands("acp", agent, dir, normalizeAcpCommands(u.availableCommands));
     }
+    try {
+      onUpdate(u);
+    } catch {}
   });
   const myRequests = new Set(); // requestIds parked by this turn (cleanup on stop)
   // Relay the prompt to the app and wait for its choice. A generous timeout
