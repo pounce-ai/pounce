@@ -19,6 +19,28 @@ import { breadcrumbs } from "../lib/structuredData";
 const route = Astro.locals.starlightRoute;
 const site = Astro.site ?? new URL("https://use-pounce.com/");
 
+/**
+ * Strip `.html` from Starlight's canonical and `og:url` before the default
+ * renders them.
+ *
+ * Starlight derives both from `Astro.url`, which under `build.format: "file"`
+ * ends in `.html` — but Cloudflare serves those flat files under their bare
+ * names and 307s `/docs/x.html` to `/docs/x`. Left alone, all sixteen docs
+ * pages declare a canonical that redirects away from itself. Starlight exposes
+ * no option for this, and `Head.astro` is a plain render of this array, so
+ * rewriting the entries is the supported seam.
+ */
+for (const tag of route?.head ?? []) {
+  const attrs = tag.attrs as Record<string, unknown> | undefined;
+  if (!attrs) continue;
+  if (tag.tag === "link" && attrs.rel === "canonical" && typeof attrs.href === "string") {
+    attrs.href = attrs.href.replace(/\.html$/, "");
+  }
+  if (tag.tag === "meta" && attrs.property === "og:url" && typeof attrs.content === "string") {
+    attrs.content = attrs.content.replace(/\.html$/, "");
+  }
+}
+
 // `entry.id` is the same key `allOgCards()` renders under, but Starlight routes
 // that aren't collection entries (the 404) reach here too, so it is checked
 // against the emitted set rather than trusted.
