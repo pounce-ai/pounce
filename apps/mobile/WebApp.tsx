@@ -19,6 +19,7 @@ import { useEffect } from "react";
 import { AppState } from "react-native";
 import { useUnistyles } from "react-native-unistyles";
 import { Providers } from "@pounce/app/components/Providers";
+import { MarkdownImageLightbox } from "@pounce/app/components/MarkdownImageLightbox";
 import { Shell } from "../../desktop/src/shell/Shell";
 import { applyAppearance } from "@pounce/app/state/appearance";
 import { bootstrap } from "@pounce/app/services/runtime";
@@ -136,6 +137,7 @@ export default function WebApp() {
   return (
     <Providers>
       <Shell />
+      <MarkdownImageLightbox />
     </Providers>
   );
 }

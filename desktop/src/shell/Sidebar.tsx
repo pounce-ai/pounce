@@ -271,10 +271,15 @@ export function Sidebar() {
           the desktop through the window. An absolute-fill backdrop (content
           stays in ordinary Views above it); non-macOS/stale binaries paint the
           old opaque bgElevated instead. */}
+      {/* No fallbackColor: both platform variants already default to
+          bgElevated, and passing COLOR.bgElevated here CAPTURES the hex as a
+          prop at this component's render — the sidebar is render-once, so a
+          theme flip left the whole backdrop painted in the previous theme
+          (dark text on a stale dark panel read as "the sidebar went blank").
+          GlassSurface subscribes to the theme itself; let it. */}
       <GlassSurface
         material="sidebar"
         blendingMode="behindWindow"
-        fallbackColor={COLOR.bgElevated}
         style={StyleSheet.absoluteFill}
       />
 
@@ -1381,7 +1386,7 @@ const s = StyleSheet.create((theme) => ({
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
-  draftTitle: { flex: 1, fontSize: 12.5, color: COLOR.fgMuted },
+  draftTitle: { flex: 1, fontSize: 12.5, color: theme.colors.fgMuted },
   /* A SHELF: Drafts and Settled are the same shape — the two ends of the live
      list, pinned so neither has to be hunted for. One vocabulary rather than
      two, so they cannot drift apart. */
@@ -1391,7 +1396,7 @@ const s = StyleSheet.create((theme) => ({
     // the Settled shelf's rule lands within about forty points of the account
     // row's — two heavy full-width lines stacked at the foot of the sidebar.
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: COLOR.border,
+    borderTopColor: theme.colors.border,
     paddingTop: 6,
     paddingBottom: 2,
   },
@@ -1413,12 +1418,17 @@ const s = StyleSheet.create((theme) => ({
     fontWeight: "600",
     textTransform: "uppercase",
     letterSpacing: 0.5,
-    color: COLOR.fgFaint,
+    color: theme.colors.fgFaint,
   },
   /* Destructive, so it reads as a word rather than hiding behind a glyph. */
-  shelfAction: { fontSize: 11, fontWeight: "600", color: COLOR.fgMuted },
-  shelfEmpty: { paddingHorizontal: 14, paddingVertical: 4, fontSize: 11.5, color: COLOR.fgFaint },
-  shelfCount: { fontFamily: "JetBrainsMono", fontSize: 11, color: COLOR.fgFaint },
+  shelfAction: { fontSize: 11, fontWeight: "600", color: theme.colors.fgMuted },
+  shelfEmpty: {
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    fontSize: 11.5,
+    color: theme.colors.fgFaint,
+  },
+  shelfCount: { fontFamily: "JetBrainsMono", fontSize: 11, color: theme.colors.fgFaint },
   /* Compact and quiet: settled rows are a record, not a feed. One line, no
      agent mark, no branch — everything that made the active row scannable is
      what would make this list compete with it. */
@@ -1430,7 +1440,7 @@ const s = StyleSheet.create((theme) => ({
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  settledTitle: { flex: 1, fontSize: 12, color: COLOR.fgMuted },
+  settledTitle: { flex: 1, fontSize: 12, color: theme.colors.fgMuted },
   emptyBox: { alignItems: "center", paddingHorizontal: 20, paddingVertical: 40 },
   emptyTitle: {
     marginTop: 8,

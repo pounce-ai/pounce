@@ -87,7 +87,16 @@ let foregroundSyncStarted = false;
  * (desktop/src/services/heartbeat.ts); this only runs on mobile.
  */
 export function startForegroundSync(): void {
-  if (foregroundSyncStarted || Platform.OS === "macos" || Platform.OS === "windows") return;
+  // Web has its own heartbeat too (apps/mobile/WebApp.tsx, mirroring desktop's)
+  // — running this alongside it would double the sync cadence.
+  if (
+    foregroundSyncStarted ||
+    Platform.OS === "macos" ||
+    Platform.OS === "windows" ||
+    Platform.OS === "web"
+  ) {
+    return;
+  }
   foregroundSyncStarted = true;
   let timer: ReturnType<typeof setInterval> | null = null;
   const start = () => {

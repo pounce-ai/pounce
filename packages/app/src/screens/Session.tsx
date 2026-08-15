@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // the only clipboard already inside shipped binaries (OTA-safe).
 import { ActivityIndicator, Clipboard, Pressable, Text, TextInput, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { Platform } from "react-native";
 import Animated, { FadeIn, FadeOut, ZoomIn, ZoomOut } from "../components/animation";
 import {
   ChatKeyboardSticky,
@@ -101,7 +100,10 @@ import { useThreadSearch } from "../hooks/useThreadSearch";
 /** Desktop renders this screen in a wide pane: pickers use Alert instead of
  *  ActionSheetIOS (which doesn't exist there) and the transcript is capped at
  *  a readable column width. */
-const DESKTOP = Platform.OS === "macos" || Platform.OS === "windows";
+// The shared "is the desktop shell hosting this screen" flag — includes web,
+// where the same shell renders the tabs/sidebar, so the mobile back-button
+// header must not appear there either (it fought the tab system).
+const DESKTOP = IS_DESKTOP;
 
 /** One size for every control in the thread header — back, agent mark, search
  *  and more. They had drifted to 22/18/18/20, which reads as a wobble along a

@@ -17,8 +17,13 @@
  */
 import { observable } from "@legendapp/state";
 import { useSelector } from "@legendapp/state/react";
-import { Dimensions } from "react-native";
+import { Dimensions, Platform } from "react-native";
 import { TRAFFIC_LIGHT_INSET } from "@pounce/app/ui/native/DragRegion";
+
+/** A browser tab has no traffic lights, ever — web is the full-screen case
+ *  permanently, and reserving 78pt for absent buttons reads as a dead gap
+ *  left of the first tab whenever the sidebar is hidden. */
+const NEVER_HAS_LIGHTS = Platform.OS === "web";
 
 const fullscreen$ = observable(false);
 
@@ -45,5 +50,6 @@ export function reportWindowHeight(height: number): void {
  * inset that lines their first control up with their own content.
  */
 export function useTrafficLightInset(whenFullScreen = 0): number {
-  return useSelector(() => fullscreen$.get()) ? whenFullScreen : TRAFFIC_LIGHT_INSET;
+  const fullscreen = useSelector(() => fullscreen$.get());
+  return NEVER_HAS_LIGHTS || fullscreen ? whenFullScreen : TRAFFIC_LIGHT_INSET;
 }
