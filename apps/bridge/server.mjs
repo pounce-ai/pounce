@@ -1395,7 +1395,7 @@ function isOwnOrigin(req) {
 const UI_HTML = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Pounce Bridge</title>
+<title>Pounce</title>
 <style>
 :root{--bg:#faf7fb;--fg:#1a1320;--muted:#6b6472;--faint:#9a93a1;--accent:#7c3aed;--ok:#16a34a;--warn:#d97706;--border:#ece7f0}
 *{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased;user-select:none}
@@ -1450,7 +1450,7 @@ function set(id,t){document.getElementById(id).textContent = t;}
 function tick(){
   fetch('/ui',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
     set('addr', d.pairUrl || '-');
-    var ver = 'Pounce Bridge' + (d.appVersion ? ' v' + d.appVersion : '');
+    var ver = 'Pounce' + (d.appVersion ? ' v' + d.appVersion : '');
     if(d.daemon && d.daemon.version) ver += '  ·  agent host v' + d.daemon.version;
     set('ver', ver);
     var dot = document.getElementById('dot');
