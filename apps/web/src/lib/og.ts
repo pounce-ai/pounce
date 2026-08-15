@@ -119,7 +119,11 @@ function clamp(value: string, max: number) {
   if (value.length <= max) return value;
   const cut = value.slice(0, max);
   const space = cut.lastIndexOf(" ");
-  return `${(space > max * 0.6 ? cut.slice(0, space) : cut).trimEnd()}…`;
+  const kept = space > max * 0.6 ? cut.slice(0, space) : cut;
+  // Trailing punctuation is dropped before the ellipsis: cutting mid-sentence
+  // often lands just after a full stop, and "worktree disk.…" reads as a typo
+  // rather than as a continuation.
+  return `${kept.replace(/[\s.,;:—–-]+$/, "")}…`;
 }
 
 /**

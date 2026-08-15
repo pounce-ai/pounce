@@ -27,8 +27,10 @@ export const MARKETING_CARDS: Record<string, OgCard> = {
   index: {
     eyebrow: "Pounce",
     title: "Spreading love among your coding agents.",
+    // Kept under the card's clamp so the hero — the one card most people see —
+    // ends on a full stop rather than an ellipsis.
     description:
-      "Scoped, expiring, read-only access grants. Your cross-agent history over MCP. Tokens, spend, plan limits and worktree disk. Free and open source.",
+      "Scoped, expiring, read-only access grants. Your cross-agent history over MCP. Tokens, spend, plan limits and worktree disk.",
   },
   "how-it-works": {
     eyebrow: "How it works",
