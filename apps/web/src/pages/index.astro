@@ -112,15 +112,18 @@ const benefits = [
           <a class="btn btn--ghost" href="#how">See how it works</a>
         </div>
 
-        <button class="npx" id="npx-copy" type="button" aria-label="Copy npx use-pounce">
-          <span class="ps">$</span><span class="cmd">npx use-pounce</span>
+        <button class="npx" id="npx-copy" type="button" aria-label="Copy npx use-pounce configure">
+          <span class="ps">$</span><span class="cmd">npx use-pounce configure</span>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
             ><rect x="9" y="9" width="11" height="11" rx="2"></rect><path
               d="M5 15V5a2 2 0 0 1 2-2h8"></path></svg
           >
           <span class="copied">copied</span>
         </button>
-        <p class="npx-note">One command on the machine your agents run on. That's the setup.</p>
+        <p class="npx-note">
+          One command on the machine your agents run on. It works out what that machine is, then
+          sets it up. That's the whole setup.
+        </p>
 
         <ul class="trust">
           <li>Free &amp; MIT licensed</li>
@@ -1289,7 +1292,7 @@ const benefits = [
       const npx = document.getElementById("npx-copy");
       npx?.addEventListener("click", async () => {
         try {
-          await navigator.clipboard.writeText("npx use-pounce");
+          await navigator.clipboard.writeText("npx use-pounce configure");
           npx.classList.add("ok");
           setTimeout(() => npx.classList.remove("ok"), 1600);
         } catch (_) {
