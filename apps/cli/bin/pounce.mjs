@@ -10,6 +10,7 @@
  *
  *   pounce            start + QR + wait for the phone
  *   pounce qr         start + QR, don't wait
+ *   pounce configure  detect this machine, then install the app or the bridge
  *   pounce mcp        serve this machine's agent history over MCP (stdio)
  *   pounce status     bridge/tunnel/phone status
  *   pounce stop       stop the background bridge (and its tunnel)
@@ -753,6 +754,10 @@ function parseArgs(argv) {
     all: false,
     note: null,
     visible: null,
+    // `pounce configure` — which half to install, and whether to ask at all.
+    want: null,
+    yes: false,
+    remove: false,
   };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
@@ -768,6 +773,10 @@ function parseArgs(argv) {
     else if (a === "--all") opts.all = true;
     else if (a === "--note") opts.note = argv[++i];
     else if (a === "--visible" || a === "--discoverable") opts.visible = argv[++i];
+    else if (a === "--desktop" || a === "--app") opts.want = "desktop";
+    else if (a === "--bridge") opts.want = "bridge";
+    else if (a === "--yes" || a === "-y") opts.yes = true;
+    else if (a === "--remove" || a === "--uninstall") opts.remove = true;
     else if (a === "--help" || a === "-h") rest.unshift("help");
     else if (a === "--version" || a === "-V") rest.unshift("version");
     else rest.push(a);
@@ -781,6 +790,8 @@ ${bold("pounce")} — pair your phone with this machine ${dim(`(use-pounce v${PK
 
   ${bold("pounce")}            start the bridge (background) + show the pairing QR + wait
   ${bold("pounce qr")}         same, but don't wait for the phone
+  ${bold("pounce configure")}  set this machine up for good — the app, or a bridge that
+                    starts at login ${dim("(it works out which ones can run here)")}
   ${bold("pounce status")}     bridge / tunnel / phone status
   ${bold("pounce stop")}       stop the background bridge and its tunnel
   ${bold("pounce logs")} [-f]  show (or follow) the bridge log
@@ -801,6 +812,13 @@ ${bold("Sharing with another computer")} ${dim("— read-only, scoped, and it ex
   --visible on|off   let other computers here find this one ${dim("(hidden by default)")}
 
   Or open ${bold("http://127.0.0.1:8099/peers")} in a browser for the same thing with buttons.
+
+${bold("Setting this machine up")} ${dim("— pounce configure")}
+
+  --desktop       install the desktop app          ${dim("(where it can run)")}
+  --bridge        install the background bridge as a login service
+  --remove        take that login service back off
+  -y, --yes       don't ask — take the recommendation
 
   --port <n>      bridge port                      ${dim("(default 8099)")}
   --token <t>     pairing token                    ${dim("(default: random, kept in ~/.pounce)")}
@@ -833,7 +851,23 @@ try {
   else if (cmd === "approve") await cmdApprove(opts, args[0]);
   else if (cmd === "deny") await cmdDeny(opts, args[0]);
   else if (cmd === "revoke") await cmdRevoke(opts, args[0]);
-  else if (cmd === "mcp") {
+  else if (cmd === "configure" || cmd === "setup") {
+    // Lazy for the same reason as `mcp` below: pairing is the hot path and
+    // shouldn't load the installer.
+    const entry = [
+      path.join(HERE, "..", "dist", "configure.mjs"),
+      path.join(HERE, "..", "src", "configure.mjs"),
+    ].find(existsSync);
+    if (!entry) throw new Error("configure missing — run `bun run build` in apps/cli");
+    const { runConfigure } = await import(pathToFileURL(entry).href);
+    await runConfigure({
+      port: opts.port,
+      version: PKG.version,
+      want: opts.want,
+      yes: opts.yes,
+      remove: opts.remove,
+    });
+  } else if (cmd === "mcp") {
     // Import lazily: the MCP SDK is only needed for this one command, and
     // pairing (the hot path) shouldn't pay to load it.
     // dist/ in the published package, src/ when run from the monorepo —
