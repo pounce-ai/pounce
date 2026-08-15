@@ -13,22 +13,32 @@ module.exports = function (api) {
     plugins: [
       // react-native-boost: build-time optimization of RN core components. Must run
       // before other plugins, so keep it first in the list.
-      "react-native-boost/plugin",
+      //
+      // Native-only: it rewrites <Text>/<View> to react-native/Libraries/Text/
+      // TextNativeComponent and .../View/ViewNativeComponent, which on web drags
+      // the real RN core in alongside react-native-web. Its InitializeCore then
+      // reaches for a TurboModule and dies on "__fbBatchedBridgeConfig is not
+      // set" before anything renders.
+      ...(isWeb ? [] : ["react-native-boost/plugin"]),
       // react-native-unistyles: rewrites StyleSheet.create((theme) => …) sheets
       // with dependency metadata and swaps RN components for self-updating ones
       // (theme flips repaint via ShadowTree, no re-render/activity restart).
       // `root` covers the router files in app/; autoProcessPaths reaches the
       // shared @pounce/app sources, which live OUTSIDE this project root
       // (Metro transforms them under their real ../../packages/app path).
-      // Native-only: the web bundle is just the Expo DOM components.
-      ...(isWeb
-        ? []
-        : [
-            [
-              "react-native-unistyles/plugin",
-              { root: "app", autoProcessPaths: ["packages/app/src"] },
-            ],
-          ]),
+      // All platforms. This was native-only back when the web bundle was just
+      // the Expo DOM components; the web bundle is now the whole app, and
+      // without the plugin every themed sheet resolves to nothing — the app
+      // renders as unstyled flow text. Unistyles supports web itself (`browser`
+      // export condition, and the plugin rewrites react-native-web/dist/exports
+      // components the same way it rewrites the RN ones).
+      // desktop/src is in the list for WEB, which mounts the desktop Shell
+      // (see index.web.ts) — its themed sheets need the same rewrite. Native
+      // never imports desktop/src, so the extra path is inert there.
+      [
+        "react-native-unistyles/plugin",
+        { root: "app", autoProcessPaths: ["packages/app/src", "desktop/src"] },
+      ],
       // Web = the Expo DOM components (only PatchDiffDOM). @pierre/diffs → shiki
       // lazy-loads its highlighter/wasm via static import(); Metro splits those
       // into an async __common-*.js chunk that Expo's DOM HTML serializer never
