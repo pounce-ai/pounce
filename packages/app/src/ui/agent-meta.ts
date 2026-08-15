@@ -78,12 +78,24 @@ export const REASONING_EFFORTS: { value: ReasoningEffort; label: string }[] = [
   { value: "xhigh", label: "Max" },
 ];
 
-/** Common slash commands offered in the composer (best-effort text passthrough). */
-export const SLASH_COMMANDS: { cmd: string; desc: string }[] = [
+/**
+ * Fallback slash commands, for hosts too old to enumerate their agent's real
+ * ones (best-effort text passthrough).
+ *
+ * Both transports report the true list — the composer prefers it via
+ * fetchCommands() and only falls back here when the host answers `static`.
+ * Every entry below is verified present on the stream-json transport, which is
+ * what such a host runs; `/clear` is deliberately kept even though ACP refuses
+ * it, because a host reaching this list is not on ACP.
+ *
+ * Don't grow this by hand. It was six entries for a long time, of which two
+ * (`/help`, `/review`) existed on NEITHER transport and had been bouncing
+ * silently — which is the argument against maintaining it as a guess at all.
+ */
+export const SLASH_COMMANDS: { cmd: string; desc: string; hint?: string }[] = [
   { cmd: "/clear", desc: "Clear context" },
   { cmd: "/compact", desc: "Compact the conversation" },
-  { cmd: "/review", desc: "Review current changes" },
+  { cmd: "/code-review", desc: "Review current changes" },
   { cmd: "/model", desc: "Switch model" },
   { cmd: "/init", desc: "Initialize project memory" },
-  { cmd: "/help", desc: "List commands" },
 ];

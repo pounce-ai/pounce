@@ -31,6 +31,7 @@ import {
 } from "./events.mjs";
 import { agentEnv, binVersion, binPath, liveAgentCwds } from "./env.mjs";
 import { recordTurn, threadTotals } from "./cost-ledger.mjs";
+import { normalizeCliCommands, rememberCommands } from "./commands.mjs";
 import { noUsage, usageResult } from "./usage.mjs";
 
 const CLAUDE_HOME = path.join(os.homedir(), ".claude");
@@ -955,6 +956,15 @@ export class ClaudeAdapter {
     const handle = (o) => {
       if (o.type === "system" && o.subtype === "init") {
         if (o.session_id) this.turns.alias(entry, "claude", o.session_id);
+        // The init envelope is the CLI's own command list for THIS cwd — the
+        // only enumeration the stream-json transport offers. Free here, so the
+        // composer's menu stays current without a probe spawn.
+        rememberCommands(
+          "cli",
+          "claude",
+          dir,
+          normalizeCliCommands(o.slash_commands, o.terminal_slash_commands),
+        );
         return;
       }
       if (o.type === "stream_event") {

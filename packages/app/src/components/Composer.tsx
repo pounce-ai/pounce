@@ -22,13 +22,25 @@ import { TurnMeter } from "./TurnMeter";
 import type { IoniconName } from "../ui/native/icon-map";
 import type { AgentCapabilities, RunImage } from "@pounce/shared";
 import { SLASH_COMMANDS } from "../ui/agent-meta";
-import { fetchFiles, type RepoEntry, type ThreadUsage } from "../services/bridge";
+import {
+  fetchCommands,
+  fetchFiles,
+  type AgentCommand,
+  type RepoEntry,
+  type ThreadUsage,
+} from "../services/bridge";
 import { ContextRing } from "./ContextRing";
 import { isVoiceAvailable, startDictation, type Dictation } from "../services/voice";
 import { AgentStatusIcon, COLOR, IS_DESKTOP, pickSheet } from "../ui";
 import { useThemeHex } from "../ui/useThemeHex";
 
 const MENTION_RE = /((?:^|\s))@([^\s@]*)$/;
+
+/** Rows the slash menu will show. The hand-kept fallback list is six long, but
+ *  a real agent reports ~90 (every plugin, skill, and project command), and a
+ *  bare "/" matches all of them — so the menu is capped like the mention list
+ *  rather than growing into a full-screen overlay. */
+const SLASH_MENU_MAX = 8;
 
 /** The daemon has no document channel, so a text file is embedded inline in the
  *  message. Cap the inline size — bigger files should be referenced with @path. */
@@ -319,12 +331,36 @@ export function Composer({
   // Stop the mic if the composer unmounts mid-dictation.
   useEffect(() => () => dictationRef.current?.stop(), []);
 
+  // The agent's real command list, as the transport this session runs on will
+  // accept it (see fetchCommands — both ACP and the CLI enumerate, and their
+  // sets differ). SLASH_COMMANDS is only for hosts too old to answer at all:
+  // a hand-kept guess, and not a correct one for either transport.
+  const [agentCommands, setAgentCommands] = useState<AgentCommand[] | null>(null);
+  useEffect(() => {
+    if (!hostId || !cwd) {
+      setAgentCommands(null);
+      return;
+    }
+    let cancelled = false;
+    // Fetched once per session/cwd rather than on "/" — the host caches, but a
+    // cold cwd costs a probe spawn, which must never sit in a keystroke.
+    void fetchCommands(hostId, cwd, agent).then((r) => {
+      if (!cancelled)
+        setAgentCommands(r && r.source !== "static" && r.commands.length ? r.commands : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [hostId, cwd, agent]);
+
   // Inline slash menu — triggered by a leading "/" while typing the command
   // token (before the first space), like a coding harness.
   const slashQuery =
     !disabled && draft.startsWith("/") && !/\s/.test(draft) ? draft.toLowerCase() : null;
   const slashMatches = slashQuery
-    ? SLASH_COMMANDS.filter((c) => c.cmd.toLowerCase().startsWith(slashQuery))
+    ? (agentCommands ?? SLASH_COMMANDS)
+        .filter((c) => c.cmd.toLowerCase().startsWith(slashQuery))
+        .slice(0, SLASH_MENU_MAX)
     : [];
   const applySlash = (cmd: string) => setInput(`${cmd} `);
 
@@ -553,6 +589,7 @@ export function Composer({
               ]}
             >
               <Text style={s.slashCmd}>{c.cmd}</Text>
+              {c.hint ? <Text style={s.slashHint}>{c.hint}</Text> : null}
               <Text numberOfLines={1} style={s.slashDesc}>
                 {c.desc}
               </Text>
@@ -920,6 +957,7 @@ const s = StyleSheet.create((theme) => ({
     color: theme.colors.fgFaint,
   },
   slashCmd: { fontFamily: "JetBrainsMono", fontSize: 13, color: theme.colors.accent },
+  slashHint: { fontFamily: "JetBrainsMono", fontSize: 11, color: theme.colors.fgMuted },
   slashDesc: { flex: 1, fontSize: 12, color: theme.colors.fgMuted },
   mentionPath: { flex: 1, fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fg },
   mentionFaint: { color: theme.colors.fgFaint },

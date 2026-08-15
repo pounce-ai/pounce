@@ -46,7 +46,8 @@ import { baseName, createWorktreeIndex, normPath } from "./agents/worktrees.mjs"
 import { forgetSize, readDisk, removeWorktree } from "./agents/disk.mjs";
 import { readSkillDoc, readSkills } from "./agents/skills.mjs";
 import { toAtif } from "./agents/atif.mjs";
-import { resolvePermission } from "./agents/acp.mjs";
+import { acpAvailable, readAcpCommands, resolvePermission } from "./agents/acp.mjs";
+import { cachedCommands, readCliCommands } from "./agents/commands.mjs";
 import {
   startInteractiveSession,
   answerPrompt,
@@ -1301,7 +1302,16 @@ async function guardScopedParams(req, url) {
   }
   // Routes addressed by a directory: allowed only inside a granted thread's
   // checkout or worktree.
-  if (["/v1/context", "/v1/git/changes", "/v1/git/checks", "/v1/skills", "/v1/skill"].includes(p)) {
+  if (
+    [
+      "/v1/context",
+      "/v1/git/changes",
+      "/v1/git/checks",
+      "/v1/skills",
+      "/v1/skill",
+      "/v1/commands",
+    ].includes(p)
+  ) {
     // `/v1/skill` also takes a `dir`, but that one is checked against the
     // skills this very cwd resolves to (see readSkillDoc) — so the cwd gate is
     // the only one a grant needs, and a guest can't read a skill outside it.
@@ -2804,6 +2814,34 @@ const server = http.createServer(async (req, res) => {
       const cwd = url.searchParams.get("cwd");
       if (!cwd) return send(res, 400, { error: "cwd required" });
       return send(res, 200, await cached(`skills:${cwd}`, 60_000, () => readSkills({ cwd })));
+    }
+    // The slash commands this agent really has in `cwd`. Only ACP can answer:
+    // the stream-json path can't enumerate, and answers an unsupported command
+    // with a flat "isn't available in this environment" (see agents/acp.mjs).
+    // `source` tells the app whether to trust the list or keep its static
+    // fallback — an ACP-less bridge runs turns over the CLI, where this list
+    // would not be the truth.
+    if (url.pathname === "/v1/commands") {
+      const cwd = url.searchParams.get("cwd");
+      const agent = url.searchParams.get("agent") || "claude";
+      if (!cwd) return send(res, 400, { error: "cwd required" });
+      // Answer for the transport this session will REALLY run on — the two
+      // accept different sets (`/clear` runs under -p, ACP refuses it), so the
+      // menu has to match the transport or it offers commands that bounce.
+      const transport = process.env.BRIDGE_ACP === "1" && acpAvailable(agent) ? "acp" : "cli";
+      // A live turn refreshes this for free on either transport; serve that
+      // instantly and only pay for a probe spawn on a cold cwd.
+      const seen = cachedCommands(transport, agent, cwd);
+      if (seen) return send(res, 200, { agent, cwd, source: transport, commands: seen });
+      const commands = await cached(`commands:${transport}:${agent}:${cwd}`, 300_000, () =>
+        transport === "acp" ? readAcpCommands(agent, cwd) : readCliCommands(agent, cwd),
+      );
+      return send(res, 200, {
+        agent,
+        cwd,
+        source: commands.length ? transport : "static",
+        commands,
+      });
     }
     // One skill's SKILL.md. `dir` is checked against what readSkills returns
     // for this cwd, so it can only ever read a skill — see readSkillDoc.
