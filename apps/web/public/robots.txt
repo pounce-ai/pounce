@@ -1,0 +1,5 @@
+# use-pounce.com — everything here is public marketing and documentation.
+User-agent: *
+Allow: /
+
+Sitemap: https://use-pounce.com/sitemap-index.xml

@@ -1,0 +1,52 @@
+---
+/**
+ * Starlight's `<Head>` with a social card added.
+ *
+ * Starlight emits `twitter:card="summary_large_image"` and then no image, so
+ * every docs page advertised a large card and unfurled bare. It has no config
+ * hook for a per-page image — the `head` array in `astro.config.mjs` is static
+ * and shared by all sixteen pages — so the component override is the only
+ * place a page can point at its own card.
+ *
+ * The default is rendered first and its tags left alone; this only adds what
+ * was missing.
+ */
+import Default from "@astrojs/starlight/components/Head.astro";
+import { OG_HEIGHT, OG_WIDTH } from "../lib/og";
+import { ogImagePath, resolveOgSlug } from "../lib/ogPages";
+import { breadcrumbs } from "../lib/structuredData";
+
+const route = Astro.locals.starlightRoute;
+const site = Astro.site ?? new URL("https://use-pounce.com/");
+
+// `entry.id` is the same key `allOgCards()` renders under, but Starlight routes
+// that aren't collection entries (the 404) reach here too, so it is checked
+// against the emitted set rather than trusted.
+const slug = await resolveOgSlug(route?.entry?.id);
+const image = new URL(ogImagePath(slug), site).href;
+const title = route?.entry?.data?.title ?? "Pounce Docs";
+
+// The 404 resolves to the hero card and is not a place in the docs tree, so it
+// gets no trail — a breadcrumb claiming it sits under /docs would be a lie in
+// the one place a reader is already lost.
+const isDocsPage = slug === "docs" || slug.startsWith("docs/");
+const trail = isDocsPage
+  ? breadcrumbs([
+      { name: "Pounce", path: "/" },
+      { name: "Docs", path: "/docs" },
+      ...(slug === "docs" ? [] : [{ name: title, path: `/${slug}` }]),
+    ])
+  : undefined;
+---
+
+<Default><slot /></Default>
+
+<meta property="og:image" content={image} />
+<meta property="og:image:width" content={String(OG_WIDTH)} />
+<meta property="og:image:height" content={String(OG_HEIGHT)} />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:alt" content={title} />
+<meta name="twitter:image" content={image} />
+<meta name="twitter:image:alt" content={title} />
+
+{trail && <script type="application/ld+json" is:inline set:html={JSON.stringify(trail)} />}

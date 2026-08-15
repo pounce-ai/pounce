@@ -12,7 +12,10 @@
     "deploy": "alchemy deploy"
   },
   "dependencies": {
+    "@astrojs/sitemap": "^3.7.3",
     "@astrojs/starlight": "^0.41.3",
+    "@takumi-rs/core": "^2.9.2",
+    "@takumi-rs/helpers": "^2.9.2",
     "astro": "^7.1.1",
     "marked": "^18.0.9",
     "sharp": "^0.35.3"
