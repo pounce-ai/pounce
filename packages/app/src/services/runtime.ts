@@ -3,7 +3,8 @@
  * selection lives behind the ./transport seam (Iroh-or-HTTP on mobile,
  * HTTP-only on desktop). Pairing payloads go to the secure store, never MMKV.
  */
-import { AppState, Platform } from "react-native";
+import { AppState } from "react-native";
+import { IS_DESKTOP } from "../ui/platform";
 import * as SecureStore from "./secureStore";
 import { PounceRuntime } from "@pounce/runtime";
 import type { PairPayload } from "@pounce/shared";
@@ -87,16 +88,9 @@ let foregroundSyncStarted = false;
  * (desktop/src/services/heartbeat.ts); this only runs on mobile.
  */
 export function startForegroundSync(): void {
-  // Web has its own heartbeat too (apps/mobile/WebApp.tsx, mirroring desktop's)
-  // — running this alongside it would double the sync cadence.
-  if (
-    foregroundSyncStarted ||
-    Platform.OS === "macos" ||
-    Platform.OS === "windows" ||
-    Platform.OS === "web"
-  ) {
-    return;
-  }
+  // The desktop-shell roots run their own heartbeat cadence (desktop/App.tsx,
+  // apps/mobile/WebApp.tsx) — this alongside it would double the sync rate.
+  if (foregroundSyncStarted || IS_DESKTOP) return;
   foregroundSyncStarted = true;
   let timer: ReturnType<typeof setInterval> | null = null;
   const start = () => {

@@ -9,9 +9,9 @@
  * <Text> with "View config getter callback for component 'RCTText' must be a
  * function". Side-effect deep imports dodge both babel rewrites.
  *
- * Lives in its own module so web can opt out via registerViewConfigs.web.ts —
- * these are deep react-native imports, and on web they pull the real
- * react-native in beside react-native-web.
+ * NATIVE ONLY: these deep imports pull the real react-native in beside
+ * react-native-web (see metro.config.js). Web never loads this — boot.web.ts
+ * replaces the whole boot sequence.
  */
 import "react-native/Libraries/Text/TextNativeComponent";
 import "react-native/Libraries/Components/View/ViewNativeComponent";

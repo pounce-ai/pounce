@@ -12,13 +12,9 @@ module.exports = function (api) {
     presets: [["babel-preset-expo", { native: { worklets: false } }]],
     plugins: [
       // react-native-boost: build-time optimization of RN core components. Must run
-      // before other plugins, so keep it first in the list.
-      //
-      // Native-only: it rewrites <Text>/<View> to react-native/Libraries/Text/
-      // TextNativeComponent and .../View/ViewNativeComponent, which on web drags
-      // the real RN core in alongside react-native-web. Its InitializeCore then
-      // reaches for a TurboModule and dies on "__fbBatchedBridgeConfig is not
-      // set" before anything renders.
+      // before other plugins, so keep it first in the list. Native-only: its
+      // RN-internal rewrites pull the real RN core in beside react-native-web
+      // (see metro.config.js for the failure mode).
       ...(isWeb ? [] : ["react-native-boost/plugin"]),
       // react-native-unistyles: rewrites StyleSheet.create((theme) => …) sheets
       // with dependency metadata and swaps RN components for self-updating ones
@@ -26,15 +22,11 @@ module.exports = function (api) {
       // `root` covers the router files in app/; autoProcessPaths reaches the
       // shared @pounce/app sources, which live OUTSIDE this project root
       // (Metro transforms them under their real ../../packages/app path).
-      // All platforms. This was native-only back when the web bundle was just
-      // the Expo DOM components; the web bundle is now the whole app, and
-      // without the plugin every themed sheet resolves to nothing — the app
-      // renders as unstyled flow text. Unistyles supports web itself (`browser`
-      // export condition, and the plugin rewrites react-native-web/dist/exports
-      // components the same way it rewrites the RN ones).
-      // desktop/src is in the list for WEB, which mounts the desktop Shell
-      // (see index.web.ts) — its themed sheets need the same rewrite. Native
-      // never imports desktop/src, so the extra path is inert there.
+      // All platforms — without the plugin every themed sheet resolves to
+      // nothing on web and the app renders as unstyled flow text (unistyles
+      // rewrites react-native-web components the same way it rewrites RN's).
+      // desktop/src is in the list for web, which mounts the desktop Shell;
+      // native never imports it, so the extra path is inert there.
       [
         "react-native-unistyles/plugin",
         { root: "app", autoProcessPaths: ["packages/app/src", "desktop/src"] },

@@ -46,40 +46,29 @@ try {
   console.warn("[pty] zigpty unavailable:", e);
 }
 
-// The bundled web app (the full Pounce UI — sidebar, tabs, transcripts),
-// built by `sync-web` and copied to views/web. The bridge serves it at GET /
-// so it is same-origin with /v1; the pairing page moves to /pair. Absent in
-// plain local dev builds AND in macOS bundles (electrobun.config.ts skips the
-// copy there — on a Mac the native desktop app is the real UI and this app is
-// its companion tray), in which case / stays the pairing page and everything
-// behaves as before.
-const webDir = await (async () => {
-  try {
-    const { fileURLToPath } = await import("node:url");
-    const { existsSync } = await import("node:fs");
-    const dir = fileURLToPath(new URL("../views/web", import.meta.url));
-    return existsSync(`${dir}/index.html`) ? dir : null;
-  } catch {
-    return null;
-  }
-})();
+// The bundled web app (sync-web → views/web), served by the bridge at GET /.
+// Absent in dev builds and macOS bundles (see electrobun.config.ts), where /
+// stays the pairing page.
+const { existsSync } = await import("node:fs");
+const { fileURLToPath } = await import("node:url");
+const webRoot = fileURLToPath(new URL("../views/web", import.meta.url));
+const webDir = existsSync(`${webRoot}/index.html`) ? webRoot : null;
 
-const info = await startBridge({
+const info = (await startBridge({
   port: PORT,
   quiet: true,
   appVersion: (pkg as { version?: string }).version,
   webDir,
-});
-// The port the bridge actually LISTENS on. Differs from PORT when a foreign
-// program squats the default and startBridge fell back to the next free port
-// (a real Pounce on the port is the alreadyRunning case instead — then this
-// app attaches to it). Every URL below must use this, not PORT.
-const LIVE_PORT = (info as { port?: number })?.port ?? PORT;
+})) as { port?: number; error?: string; alreadyRunning?: boolean; fallbackFrom?: number } | null;
+// The port the bridge actually LISTENS on — PORT unless a foreign program
+// squatted it and startBridge fell back to the next free port (a real Pounce
+// on the port is the alreadyRunning case: this app attaches to it instead).
+const LIVE_PORT = info?.port ?? PORT;
 if (info?.error && !info.alreadyRunning) {
   console.error("Pounce could not start:", info.error);
 } else if (info?.alreadyRunning) {
   console.log(`A Pounce is already running on ${PORT}; showing its status.`);
-} else if ((info as { fallbackFrom?: number })?.fallbackFrom) {
+} else if (info?.fallbackFrom) {
   console.warn(`Port ${PORT} is taken by another program — running on ${LIVE_PORT} instead.`);
 }
 

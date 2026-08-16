@@ -100,10 +100,6 @@ import { useThreadSearch } from "../hooks/useThreadSearch";
 /** Desktop renders this screen in a wide pane: pickers use Alert instead of
  *  ActionSheetIOS (which doesn't exist there) and the transcript is capped at
  *  a readable column width. */
-// The shared "is the desktop shell hosting this screen" flag — includes web,
-// where the same shell renders the tabs/sidebar, so the mobile back-button
-// header must not appear there either (it fought the tab system).
-const DESKTOP = IS_DESKTOP;
 
 /** One size for every control in the thread header — back, agent mark, search
  *  and more. They had drifted to 22/18/18/20, which reads as a wobble along a
@@ -434,7 +430,7 @@ export default function SessionScreen() {
   const pendingPrompt = useSelector(() => pendingPrompts$[id!].get());
   const presentedPromptRef = useRef<string | null>(null);
   useEffect(() => {
-    if (DESKTOP || !pendingPrompt) return;
+    if (IS_DESKTOP || !pendingPrompt) return;
     if (presentedPromptRef.current === pendingPrompt.promptId) return;
     presentedPromptRef.current = pendingPrompt.promptId;
     router.push(`/prompt/${id}`);
@@ -659,7 +655,7 @@ export default function SessionScreen() {
       // Desktop skips the menu entirely — long-press toggles the marker
       // directly, since a two-item NSAlert for one verb is more chrome than
       // choice.
-      if (DESKTOP) {
+      if (IS_DESKTOP) {
         toggle();
         return;
       }
@@ -1098,12 +1094,12 @@ export default function SessionScreen() {
             tab strip carries search and "…". A header here would just say all
             of it a second time. Only the find-in-thread bar remains, and only
             while it's open. */}
-        <View style={[s.header, DESKTOP ? s.headerDesktop : s.headerPad]}>
-          {!DESKTOP ? (
+        <View style={[s.header, IS_DESKTOP ? s.headerDesktop : s.headerPad]}>
+          {!IS_DESKTOP ? (
             <View style={s.headerRow}>
               {/* Desktop's sidebar is always visible — a back button has nothing
               to go back to, so it's mobile-only. */}
-              {!DESKTOP ? (
+              {!IS_DESKTOP ? (
                 <Pressable
                   onPress={() => router.back()}
                   style={({ pressed }) => [s.iconBtn, pressed && s.pressed60]}
@@ -1115,7 +1111,7 @@ export default function SessionScreen() {
                 </Pressable>
               ) : null}
               <View style={s.flex1}>
-                {!DESKTOP ? (
+                {!IS_DESKTOP ? (
                   <Text numberOfLines={1} style={s.headerTitle}>
                     {session.title}
                   </Text>
@@ -1174,7 +1170,7 @@ export default function SessionScreen() {
           {/* One readable column for every transcript-area state. Desktop:
             proportional (92% of the pane, capped) so the chat adapts to the
             window; mobile: full width, unchanged. */}
-          <View style={[s.flex1, DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }]}>
+          <View style={[s.flex1, IS_DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }]}>
             {(loading || seeding) && events.length === 0 ? (
               // One quiet line, centered. The bubble skeleton that used to sit
               // here promised a shape the Timeline doesn't actually render —
@@ -1437,7 +1433,7 @@ export default function SessionScreen() {
                 instead of it being cut off against the opaque bar. */}
             {COMPOSER_OVERLAYS_LIST ? <ComposerScrim /> : null}
             <View style={[s.composerBar, s.composerBarPad]}>
-              <View style={DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }}>
+              <View style={IS_DESKTOP ? { width: "92%", maxWidth: 900 } : { width: "100%" }}>
                 {!canSend ? (
                   <Text style={s.archivedNote}>
                     Archived session — worktree was removed. Read-only.
@@ -1581,9 +1577,9 @@ function ThreadSearchBar({
   const hitColor = hits.length ? theme.colors.fgMuted : theme.colors.fgFaint;
 
   return (
-    <View style={[s.searchRow, DESKTOP && s.searchRowDesktop]}>
-      <View style={[s.searchField, DESKTOP && s.searchFieldDesktop]}>
-        <PounceIcon name="search" size={DESKTOP ? 14 : 16} color={theme.colors.fgFaint} />
+    <View style={[s.searchRow, IS_DESKTOP && s.searchRowDesktop]}>
+      <View style={[s.searchField, IS_DESKTOP && s.searchFieldDesktop]}>
+        <PounceIcon name="search" size={IS_DESKTOP ? 14 : 16} color={theme.colors.fgFaint} />
         <TextInput
           {...INPUT_TWEAKS}
           value={query}
@@ -1593,7 +1589,7 @@ function ThreadSearchBar({
           autoFocus
           autoCapitalize="none"
           autoCorrect={false}
-          style={[s.searchInput, DESKTOP && s.searchInputDesktop]}
+          style={[s.searchInput, IS_DESKTOP && s.searchInputDesktop]}
         />
         {searching ? (
           <ActivityIndicator size="small" color={theme.colors.fgFaint} />
@@ -1604,21 +1600,21 @@ function ThreadSearchBar({
       <Pressable
         disabled={!hits.length}
         onPress={() => goToHit(hits, hitIdx - 1, query.trim())}
-        style={({ pressed }) => [s.hitBtn, DESKTOP && s.hitBtnDesktop, pressed && s.pressed60]}
+        style={({ pressed }) => [s.hitBtn, IS_DESKTOP && s.hitBtnDesktop, pressed && s.pressed60]}
       >
-        <PounceIcon name="chevron-up" size={DESKTOP ? 14 : 17} color={hitColor} />
+        <PounceIcon name="chevron-up" size={IS_DESKTOP ? 14 : 17} color={hitColor} />
       </Pressable>
       <Pressable
         disabled={!hits.length}
         onPress={() => goToHit(hits, hitIdx + 1, query.trim())}
-        style={({ pressed }) => [s.hitBtn, DESKTOP && s.hitBtnDesktop, pressed && s.pressed60]}
+        style={({ pressed }) => [s.hitBtn, IS_DESKTOP && s.hitBtnDesktop, pressed && s.pressed60]}
       >
-        <PounceIcon name="chevron-down" size={DESKTOP ? 14 : 17} color={hitColor} />
+        <PounceIcon name="chevron-down" size={IS_DESKTOP ? 14 : 17} color={hitColor} />
       </Pressable>
       {/* Desktop needs its own dismiss: the toggle that opened this lives up in
           the tab strip, which is a long way to travel to close a bar that's
           right here. */}
-      {DESKTOP ? (
+      {IS_DESKTOP ? (
         <Pressable
           onPress={onClose}
           style={({ pressed }) => [s.hitBtn, s.hitBtnDesktop, pressed && s.pressed60]}

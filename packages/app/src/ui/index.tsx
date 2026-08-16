@@ -35,14 +35,8 @@ export { AgentLogo };
 export const INPUT_TWEAKS: Record<string, unknown> =
   Platform.OS === "macos" || Platform.OS === "windows" ? { enableFocusRing: false } : {};
 
-/** True where the DESKTOP SHELL hosts the screens — macOS/Windows, and web,
- *  which mounts the same shell (apps/mobile/WebApp.tsx). Layout forks only:
- *  the sidebar is always visible so screens drop their back buttons and
- *  headers, menus anchor to the pointer instead of rising as sheets, labels
- *  are mouse-selectable. macOS-native quirks (enableFocusRing, PlatformColor)
- *  keep their own explicit platform checks — web must not inherit those. */
-export const IS_DESKTOP =
-  Platform.OS === "macos" || Platform.OS === "windows" || Platform.OS === "web";
+import { IS_DESKTOP } from "./platform";
+export { IS_DESKTOP };
 
 /**
  * `selectable={SELECT_TEXT}` on a label a user will want to copy — a path, a

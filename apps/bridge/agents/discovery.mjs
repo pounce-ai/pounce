@@ -67,7 +67,8 @@ const MAX_MSG = 512;
 /**
  * @param {object} opts
  * @param {string}  opts.bridgeId  this machine's stable id (identity.mjs)
- * @param {number}  opts.port      the bridge's HTTP port, so peers know where to knock
+ * @param {number|(() => number)} opts.port  the bridge's HTTP port, so peers know
+ *   where to knock — a thunk when the port can move after load (collision fallback)
  * @param {() => (string|null)} [opts.version] app version, read late (it is set after boot)
  * @param {boolean} [opts.announcing] whether to announce from the moment it starts
  */
@@ -83,7 +84,7 @@ export function createDiscovery({ bridgeId, port, version = () => null, announci
     bridgeId,
     hostName: os.hostname().replace(/\.local$/, ""),
     platform: process.platform,
-    port,
+    port: typeof port === "function" ? port() : port,
     version: version(),
   });
 

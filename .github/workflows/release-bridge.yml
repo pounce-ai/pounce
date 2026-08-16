@@ -107,12 +107,9 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: bun install --ignore-scripts
 
-      # The web app (the full Pounce UI). One platform-independent Expo web
-      # export; the bridge serves it at GET / so the window shows the real app
-      # instead of the pairing QR (which moves to /pair). Linux/Windows only:
-      # on macOS the native desktop app is the real UI and this app stays the
-      # companion tray + QR (electrobun.config.ts skips the copy there too —
-      # this condition just saves the export time on that leg).
+      # Expo web export, served by the bridge at GET /. Skipped on macOS where
+      # the native app is the UI (electrobun.config.ts skips the copy there
+      # too — this condition just saves the export time).
       - name: Build web app
         if: ${{ matrix.slug != 'macos-arm64' }}
         working-directory: ${{ github.workspace }}/bridge-desktop

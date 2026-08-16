@@ -112,13 +112,12 @@ const IS_WIN = process.platform === "win32";
 // via the native agent host (./agents). Off-LAN access rides pounce-tunnel
 // (apps/tunnel), an iroh p2p byte tunnel the phone dials by node id.
 const DEFAULT_PORT = 8099;
-const PORT = Number(process.env.BRIDGE_PORT || DEFAULT_PORT);
-// The port actually LISTENED on. Same as PORT except after a collision
-// fallback (a foreign program squatting the requested port — see startBridge),
-// where it moves to the next free port. Everything that names the live bridge
-// (loopback origin, /v1/hello, grant-tunnel targets, eligibility checks) must
-// read this, not PORT: on fallback, PORT names the SQUATTER.
-let ACTIVE_PORT = PORT;
+const REQUESTED_PORT = Number(process.env.BRIDGE_PORT || DEFAULT_PORT);
+// The port actually LISTENED on — REQUESTED_PORT until a collision fallback
+// moves it. Everything that names the live bridge (loopback origin, /v1/hello,
+// tunnel targets, eligibility) must read this: on fallback, REQUESTED_PORT
+// names the SQUATTER.
+let ACTIVE_PORT = REQUESTED_PORT;
 // How often the background watcher polls for state transitions to push.
 const WATCH_MS = Number(process.env.PUSH_WATCH_MS || 25_000);
 const { token: TOKEN, legacyUntil: LEGACY_UNTIL } = bridgeToken();
@@ -126,13 +125,37 @@ const { token: TOKEN, legacyUntil: LEGACY_UNTIL } = bridgeToken();
 // desktop shell passes it to startBridge() from its package.json; env is the
 // fallback for standalone `node server.mjs` runs.
 let APP_VERSION = process.env.BRIDGE_APP_VERSION || null;
-// Where the built web app lives (the Expo web export — index.html + _expo/ +
-// assets/). When set, GET / serves the app and the pairing page moves to
-// /pair; when absent (npx installs, plain `node server.mjs`), / stays the
-// pairing page and nothing changes. The desktop shell passes it to
-// startBridge() from its bundle; env is the standalone fallback.
-let WEB_DIR = process.env.POUNCE_WEB_DIR || null;
-const webAppAvailable = () => !!WEB_DIR && existsSync(path.join(WEB_DIR, "index.html"));
+// The built web app (Expo web export). When set, GET / serves the app and the
+// pairing page moves to /pair; absent (npx installs), / stays the pairing
+// page. Set by startBridge (desktop shell) or POUNCE_WEB_DIR (standalone).
+let WEB_DIR = null;
+let WEB_ROOT = null; // resolved WEB_DIR, for the traversal guard
+let WEB_INDEX = null; // index.html buffer, read once — the export changes only with the app
+/** Adopt a web-app directory (or ignore it if there's no index.html). Called
+ *  from module init (env) and startBridge (the desktop shell's bundle). */
+function setWebDir(dir) {
+  if (!dir || !existsSync(path.join(dir, "index.html"))) return;
+  WEB_DIR = dir;
+  WEB_ROOT = path.resolve(dir);
+  WEB_INDEX = readFileSync(path.join(dir, "index.html"));
+}
+setWebDir(process.env.POUNCE_WEB_DIR || null);
+const STATIC_MIME = {
+  ".js": "text/javascript",
+  ".css": "text/css",
+  ".html": "text/html; charset=utf-8",
+  ".json": "application/json",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".wasm": "application/wasm",
+  ".map": "application/json",
+};
 const host = createHost({ version: () => APP_VERSION });
 // Full-text history search (ctx-backed). When ctx is missing, bootstrap it
 // automatically — pinned release, checksum-verified, dropped in ~/.pounce/bin
@@ -1174,7 +1197,7 @@ const discoveryEligible = () =>
 // leave alone.
 const discovery = createDiscovery({
   bridgeId: machineBridgeId(),
-  port: PORT,
+  port: () => ACTIVE_PORT,
   version: () => APP_VERSION,
   announcing: discoveryEligible() && discoveryWanted(),
 });
@@ -2010,7 +2033,7 @@ const server = http.createServer(async (req, res) => {
   // served from anywhere else cannot talk to this bridge). LAN-reachable on
   // purpose: the page carries no secrets — it is inert until paired, either
   // via a ?url&token connect link or, from this machine only, /ui.
-  if (webAppAvailable() && req.method === "GET") {
+  if (WEB_INDEX && req.method === "GET") {
     // "/connect" too: pairing links carry ?url&token as query params, and the
     // web app reads them from any path at boot (see WebApp.pairFromUrl) — so a
     // link written for the mobile deep-link shape still lands in the app.
@@ -2019,34 +2042,21 @@ const server = http.createServer(async (req, res) => {
         "content-type": "text/html; charset=utf-8",
         "cache-control": "no-store",
       });
-      return res.end(readFileSync(path.join(WEB_DIR, "index.html")));
+      return res.end(WEB_INDEX);
     }
     if (url.pathname.startsWith("/_expo/") || url.pathname.startsWith("/assets/")) {
       // Resolve inside WEB_DIR only — a `..` in the URL must not escape it.
-      const rel = decodeURIComponent(url.pathname.slice(1));
-      const file = path.resolve(WEB_DIR, rel);
-      if (!file.startsWith(path.resolve(WEB_DIR) + path.sep) || !existsSync(file)) {
-        return send(res, 404, { error: "not found" });
+      const file = path.resolve(WEB_DIR, decodeURIComponent(url.pathname.slice(1)));
+      let stat = null;
+      if (file.startsWith(WEB_ROOT + path.sep)) {
+        try {
+          stat = statSync(file);
+        } catch {}
       }
-      const TYPES = {
-        ".js": "text/javascript",
-        ".css": "text/css",
-        ".html": "text/html; charset=utf-8",
-        ".json": "application/json",
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".svg": "image/svg+xml",
-        ".ico": "image/x-icon",
-        ".ttf": "font/ttf",
-        ".otf": "font/otf",
-        ".woff": "font/woff",
-        ".woff2": "font/woff2",
-        ".wasm": "application/wasm",
-        ".map": "application/json",
-      };
+      if (!stat) return send(res, 404, { error: "not found" });
       res.writeHead(200, {
-        "content-type": TYPES[path.extname(file)] || "application/octet-stream",
-        "content-length": statSync(file).size,
+        "content-type": STATIC_MIME[path.extname(file)] || "application/octet-stream",
+        "content-length": stat.size,
         // Every file under _expo/ and assets/ is content-hashed by the export,
         // so it can be cached forever; a new build references new names.
         "cache-control": "public, max-age=31536000, immutable",
@@ -3524,7 +3534,7 @@ function portInUse(port) {
  * which calls it in-process and renders the returned deepLink as a QR.
  */
 export async function startBridge({
-  port = PORT,
+  port = REQUESTED_PORT,
   quiet = false,
   appVersion = null,
   webDir = null,
@@ -3532,7 +3542,7 @@ export async function startBridge({
   if (appVersion) APP_VERSION = appVersion;
   // The desktop shell hands us its bundled web export; GET / then serves the
   // full Pounce UI instead of the pairing page (which moves to /pair).
-  if (webDir) WEB_DIR = webDir;
+  if (webDir) setWebDir(webDir);
   // Idempotent: when this file is bundled into a launcher, the `isMain`
   // self-start below and the launcher's explicit call both fire — the second
   // one must not listen() again.
@@ -3640,7 +3650,7 @@ export async function startBridge({
       // the bridge.
       setInterval(reapShells, 5 * 60_000).unref?.();
       restoreGrantTunnels();
-      resolve({ server, token: TOKEN, ...PAIR, ...(fallbackFrom ? { fallbackFrom } : {}) });
+      resolve({ server, token: TOKEN, ...PAIR, fallbackFrom });
     });
   });
 }

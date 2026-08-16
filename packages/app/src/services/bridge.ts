@@ -1179,13 +1179,21 @@ export async function searchMessages(
  * untouched. Applied on both the settled fetch and the live SSE stream, so a
  * screenshot renders mid-turn, not just after the next sync.
  */
+/** A host file as a loadable, token-authed URL (same shape as the Read-tool
+ *  previews below). */
+const hostedFileUrl = (base: string, token: string, filePath: string) =>
+  `${base}/v1/file?path=${encodeURIComponent(filePath)}&token=${encodeURIComponent(token)}`;
+
 function withHostedMarkdownImages(e: TimelineEvent, base: string, token: string): TimelineEvent {
   if (e.type !== "assistant_message" && e.type !== "user_message") return e;
-  if (!e.text.includes("![")) return e;
+  // Cheap pre-filter — this runs per SSE frame on the live path, and streaming
+  // events carry the full accumulated text. http(s)/data: image targets don't
+  // need rewriting, so only absolute-path/file:// candidates pay for the regex.
+  if (!e.text.includes("](/") && !e.text.includes("](file://")) return e;
   const text = e.text.replace(
-    /(!\[[^\]\n]*\]\()\s*(?:file:\/\/)?(\/[^)\s]+)\s*(\))/g,
+    /(!\[[^\]\n]*\]\()(?:file:\/\/)?(\/[^)\s]+)(\))/g,
     (_m, open: string, path: string, close: string) =>
-      `${open}${base}/v1/file?path=${encodeURIComponent(path)}&token=${encodeURIComponent(token)}${close}`,
+      `${open}${hostedFileUrl(base, token, path)}${close}`,
   );
   return text === e.text ? e : { ...e, text };
 }
@@ -1236,7 +1244,7 @@ export async function fetchMessages(
           ...e,
           call: {
             ...e.call,
-            previewUri: `${base}/v1/file?path=${encodeURIComponent(fp)}&token=${encodeURIComponent(cfg.token)}`,
+            previewUri: hostedFileUrl(base, cfg.token, fp),
           },
         };
       }

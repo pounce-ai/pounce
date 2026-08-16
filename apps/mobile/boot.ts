@@ -1,7 +1,6 @@
 /**
- * Native boot sequence. (Web boots differently — see boot.web.ts; the split
- * lives here rather than in index.ts because Expo does not platform-resolve
- * the package.json "main" entry itself, only the modules it imports.)
+ * Native boot sequence — web boots differently (boot.web.ts; see index.ts for
+ * why the split lives here).
  *
  * Order is load-bearing:
  *  1. registerViewConfigs — RCTText/RCTView view configs before first render

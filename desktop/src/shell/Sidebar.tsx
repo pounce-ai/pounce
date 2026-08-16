@@ -271,12 +271,10 @@ export function Sidebar() {
           the desktop through the window. An absolute-fill backdrop (content
           stays in ordinary Views above it); non-macOS/stale binaries paint the
           old opaque bgElevated instead. */}
-      {/* No fallbackColor: both platform variants already default to
-          bgElevated, and passing COLOR.bgElevated here CAPTURES the hex as a
-          prop at this component's render — the sidebar is render-once, so a
-          theme flip left the whole backdrop painted in the previous theme
-          (dark text on a stale dark panel read as "the sidebar went blank").
-          GlassSurface subscribes to the theme itself; let it. */}
+      {/* No fallbackColor: passing COLOR.bgElevated here CAPTURES the hex as
+          a prop at this render-once component's render, so a theme flip left
+          the backdrop painted in the previous theme. GlassSurface subscribes
+          to the theme itself and defaults to bgElevated; let it. */}
       <GlassSurface
         material="sidebar"
         blendingMode="behindWindow"
