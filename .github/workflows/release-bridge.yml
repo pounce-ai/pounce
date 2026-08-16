@@ -107,6 +107,14 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: bun install --ignore-scripts
 
+      # Expo web export, served by the bridge at GET /. Skipped on macOS where
+      # the native app is the UI (electrobun.config.ts skips the copy there
+      # too — this condition just saves the export time).
+      - name: Build web app
+        if: ${{ matrix.slug != 'macos-arm64' }}
+        working-directory: ${{ github.workspace }}/bridge-desktop
+        run: bun run sync-web
+
       # pounce-tunnel (apps/tunnel): iroh p2p tunnel for off-LAN access. Built
       # per-platform and bundled with the app; on first run the shell installs
       # it to ~/.pounce/bin where the bridge auto-spawns it.

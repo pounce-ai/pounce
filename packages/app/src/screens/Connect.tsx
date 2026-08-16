@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { connectBridge } from "../services/bridge";
-import { pairingHostName } from "../services/pairing";
-import { savePairing } from "../services/runtime";
+import { pairFromParams } from "../services/pairing";
 
 /**
  * Deep-link target for `pounce://connect?url=…&token=…[&node=…&relay=…&host=…]`
@@ -35,15 +33,7 @@ export default function ConnectScreen() {
         setError("This pairing link is missing its address or token.");
         return;
       }
-      if (node) {
-        await savePairing({
-          nodeId: node,
-          token,
-          hostName: pairingHostName({ url, token, hostName: host }),
-          relay: relay ?? null,
-        });
-      }
-      const ok = await connectBridge({ url, token });
+      const ok = await pairFromParams({ url, token, node, relay, host });
       if (ok) {
         const { registerForPush } = await import("../services/push");
         void registerForPush();

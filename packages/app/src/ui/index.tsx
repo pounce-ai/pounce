@@ -35,8 +35,8 @@ export { AgentLogo };
 export const INPUT_TWEAKS: Record<string, unknown> =
   Platform.OS === "macos" || Platform.OS === "windows" ? { enableFocusRing: false } : {};
 
-/** True on the desktop platforms (macOS/Windows) — for tiny layout forks. */
-export const IS_DESKTOP = Platform.OS === "macos" || Platform.OS === "windows";
+import { IS_DESKTOP } from "./platform";
+export { IS_DESKTOP };
 
 /**
  * `selectable={SELECT_TEXT}` on a label a user will want to copy — a path, a

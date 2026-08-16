@@ -17,8 +17,13 @@
  */
 import { observable } from "@legendapp/state";
 import { useSelector } from "@legendapp/state/react";
-import { Dimensions } from "react-native";
+import { Dimensions, Platform } from "react-native";
 import { TRAFFIC_LIGHT_INSET } from "@pounce/app/ui/native/DragRegion";
+
+/** Traffic lights are a macOS-only fixture. A browser tab has none, and
+ *  Windows draws its window controls on the RIGHT — on both, reserving 78pt of
+ *  left clearance reads as a dead gap beside the first control. */
+const HAS_LIGHTS = Platform.OS === "macos";
 
 const fullscreen$ = observable(false);
 
@@ -45,5 +50,6 @@ export function reportWindowHeight(height: number): void {
  * inset that lines their first control up with their own content.
  */
 export function useTrafficLightInset(whenFullScreen = 0): number {
-  return useSelector(() => fullscreen$.get()) ? whenFullScreen : TRAFFIC_LIGHT_INSET;
+  const fullscreen = useSelector(() => fullscreen$.get());
+  return !HAS_LIGHTS || fullscreen ? whenFullScreen : TRAFFIC_LIGHT_INSET;
 }

@@ -1170,6 +1170,34 @@ export async function searchMessages(
       );
 }
 
+/**
+ * Markdown image references by ABSOLUTE PATH — `![shot](/var/folders/…)` in an
+ * assistant reply — name files on the THREAD'S HOST. Every other device (phone,
+ * another Mac, the web shell) resolves that path against itself and draws a
+ * broken image. Same answer as the Read-tool previews: point the reference at
+ * the host's token-authed /v1/file. http(s)/data: targets pass through
+ * untouched. Applied on both the settled fetch and the live SSE stream, so a
+ * screenshot renders mid-turn, not just after the next sync.
+ */
+/** A host file as a loadable, token-authed URL (same shape as the Read-tool
+ *  previews below). */
+const hostedFileUrl = (base: string, token: string, filePath: string) =>
+  `${base}/v1/file?path=${encodeURIComponent(filePath)}&token=${encodeURIComponent(token)}`;
+
+function withHostedMarkdownImages(e: TimelineEvent, base: string, token: string): TimelineEvent {
+  if (e.type !== "assistant_message" && e.type !== "user_message") return e;
+  // Cheap pre-filter — this runs per SSE frame on the live path, and streaming
+  // events carry the full accumulated text. http(s)/data: image targets don't
+  // need rewriting, so only absolute-path/file:// candidates pay for the regex.
+  if (!e.text.includes("](/") && !e.text.includes("](file://")) return e;
+  const text = e.text.replace(
+    /(!\[[^\]\n]*\]\()(?:file:\/\/)?(\/[^)\s]+)(\))/g,
+    (_m, open: string, path: string, close: string) =>
+      `${open}${hostedFileUrl(base, token, path)}${close}`,
+  );
+  return text === e.text ? e : { ...e, text };
+}
+
 /** Fetch a session's real message history from its device. */
 export async function fetchMessages(
   hostId: string,
@@ -1193,6 +1221,7 @@ export async function fetchMessages(
   const base = await bridgeBase(cfg);
   const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|heic|svg)$/i;
   return events.map((e) => {
+    e = withHostedMarkdownImages(e, base, cfg.token);
     if (e.type === "user_message" && e.images?.length) {
       const images = e.images.map((img) =>
         img.ref && !img.uri
@@ -1215,7 +1244,7 @@ export async function fetchMessages(
           ...e,
           call: {
             ...e.call,
-            previewUri: `${base}/v1/file?path=${encodeURIComponent(fp)}&token=${encodeURIComponent(cfg.token)}`,
+            previewUri: hostedFileUrl(base, cfg.token, fp),
           },
         };
       }
@@ -2382,6 +2411,7 @@ export async function streamLiveMessage(
 ): Promise<{ threadId: string | null }> {
   const cfg = await deviceForHost(hostId);
   if (!cfg) throw new Error("device not found");
+  const base = await bridgeBase(cfg);
   let buf = "";
   let realThreadId: string | null = threadId;
   let finished = false;
@@ -2407,7 +2437,7 @@ export async function streamLiveMessage(
           done?: boolean;
           threadId?: string;
         };
-        if (data.event) onEvent(data.event);
+        if (data.event) onEvent(withHostedMarkdownImages(data.event, base, cfg.token));
         if (data.done) {
           if (data.threadId) realThreadId = data.threadId;
           finished = true;
@@ -2418,7 +2448,7 @@ export async function streamLiveMessage(
     return finished;
   };
   const turn = streamTurn(
-    `${await bridgeBase(cfg)}/v1/turn/stream`,
+    `${base}/v1/turn/stream`,
     {
       headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
       body: JSON.stringify({

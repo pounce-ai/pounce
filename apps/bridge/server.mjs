@@ -112,7 +112,12 @@ const IS_WIN = process.platform === "win32";
 // via the native agent host (./agents). Off-LAN access rides pounce-tunnel
 // (apps/tunnel), an iroh p2p byte tunnel the phone dials by node id.
 const DEFAULT_PORT = 8099;
-const PORT = Number(process.env.BRIDGE_PORT || DEFAULT_PORT);
+const REQUESTED_PORT = Number(process.env.BRIDGE_PORT || DEFAULT_PORT);
+// The port actually LISTENED on — REQUESTED_PORT until a collision fallback
+// moves it. Everything that names the live bridge (loopback origin, /v1/hello,
+// tunnel targets, eligibility) must read this: on fallback, REQUESTED_PORT
+// names the SQUATTER.
+let ACTIVE_PORT = REQUESTED_PORT;
 // How often the background watcher polls for state transitions to push.
 const WATCH_MS = Number(process.env.PUSH_WATCH_MS || 25_000);
 const { token: TOKEN, legacyUntil: LEGACY_UNTIL } = bridgeToken();
@@ -120,6 +125,37 @@ const { token: TOKEN, legacyUntil: LEGACY_UNTIL } = bridgeToken();
 // desktop shell passes it to startBridge() from its package.json; env is the
 // fallback for standalone `node server.mjs` runs.
 let APP_VERSION = process.env.BRIDGE_APP_VERSION || null;
+// The built web app (Expo web export). When set, GET / serves the app and the
+// pairing page moves to /pair; absent (npx installs), / stays the pairing
+// page. Set by startBridge (desktop shell) or POUNCE_WEB_DIR (standalone).
+let WEB_DIR = null;
+let WEB_ROOT = null; // resolved WEB_DIR, for the traversal guard
+let WEB_INDEX = null; // index.html buffer, read once — the export changes only with the app
+/** Adopt a web-app directory (or ignore it if there's no index.html). Called
+ *  from module init (env) and startBridge (the desktop shell's bundle). */
+function setWebDir(dir) {
+  if (!dir || !existsSync(path.join(dir, "index.html"))) return;
+  WEB_DIR = dir;
+  WEB_ROOT = path.resolve(dir);
+  WEB_INDEX = readFileSync(path.join(dir, "index.html"));
+}
+setWebDir(process.env.POUNCE_WEB_DIR || null);
+const STATIC_MIME = {
+  ".js": "text/javascript",
+  ".css": "text/css",
+  ".html": "text/html; charset=utf-8",
+  ".json": "application/json",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".wasm": "application/wasm",
+  ".map": "application/json",
+};
 const host = createHost({ version: () => APP_VERSION });
 // Full-text history search (ctx-backed). When ctx is missing, bootstrap it
 // automatically — pinned release, checksum-verified, dropped in ~/.pounce/bin
@@ -1053,7 +1089,7 @@ let PAIR = null; // { ip, port, pairUrl, deepLink } — set once we're listening
  *  dev bridge on another port must never advertise it — a phone dialing that
  *  node id would reach the default bridge, not this one. */
 function tunnelEligible() {
-  return PORT === DEFAULT_PORT || process.env.POUNCE_TUNNEL === "1";
+  return ACTIVE_PORT === DEFAULT_PORT || process.env.POUNCE_TUNNEL === "1";
 }
 
 /** The tunnel's Iroh identity, written to ~/.pounce/tunnel.json by
@@ -1153,14 +1189,15 @@ function discoveryWanted() {
   if (process.env.POUNCE_DISCOVERY === "1") return true;
   return readConfig().discoverable === true;
 }
-const discoveryEligible = () => PORT === DEFAULT_PORT || process.env.POUNCE_DISCOVERY === "1";
+const discoveryEligible = () =>
+  ACTIVE_PORT === DEFAULT_PORT || process.env.POUNCE_DISCOVERY === "1";
 
 // Announcing is flipped on demand, so the toggle takes effect without
 // restarting the bridge — a setting you have to reboot for is a setting people
 // leave alone.
 const discovery = createDiscovery({
   bridgeId: machineBridgeId(),
-  port: PORT,
+  port: () => ACTIVE_PORT,
   version: () => APP_VERSION,
   announcing: discoveryEligible() && discoveryWanted(),
 });
@@ -1377,12 +1414,24 @@ function isLoopback(req) {
   return a === "127.0.0.1" || a === "::1" || a === "::ffff:127.0.0.1";
 }
 
-/** Is this request from a page THIS bridge served? Loopback socket AND an Origin
- *  naming our own address and port — both, so neither can be claimed alone. */
+/**
+ * Is this request from a page THIS bridge served?
+ *
+ * Two ways to qualify:
+ *  - The Origin is exactly `http://<Host>` as the browser fetched us. This is
+ *    the web app served to LAN browsers: a same-origin page's Origin always
+ *    equals the URL it was loaded from. The caller checks hostIsAddress FIRST,
+ *    so Host is a bare IP address — a DNS-rebound page can never match, because
+ *    its Origin carries the attacker's hostname, and a random website's Origin
+ *    is its own domain. Neither header is attacker-settable from a browser.
+ *  - The original loopback rule (loopback socket AND a 127.0.0.1/localhost
+ *    Origin naming our port) — the desktop window's case, kept as-is.
+ */
 function isOwnOrigin(req) {
-  if (!isLoopback(req)) return false;
   const o = req.headers.origin;
-  return o === `http://127.0.0.1:${PORT}` || o === `http://localhost:${PORT}`;
+  if (o === `http://${req.headers.host}`) return true;
+  if (!isLoopback(req)) return false;
+  return o === `http://127.0.0.1:${ACTIVE_PORT}` || o === `http://localhost:${ACTIVE_PORT}`;
 }
 
 // The DNS-rebinding gate is hostIsAddress, imported from agents/host-guard.mjs
@@ -1395,7 +1444,7 @@ function isOwnOrigin(req) {
 const UI_HTML = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Pounce Bridge</title>
+<title>Pounce</title>
 <style>
 :root{--bg:#faf7fb;--fg:#1a1320;--muted:#6b6472;--faint:#9a93a1;--accent:#7c3aed;--ok:#16a34a;--warn:#d97706;--border:#ece7f0}
 *{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased;user-select:none}
@@ -1450,7 +1499,7 @@ function set(id,t){document.getElementById(id).textContent = t;}
 function tick(){
   fetch('/ui',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
     set('addr', d.pairUrl || '-');
-    var ver = 'Pounce Bridge' + (d.appVersion ? ' v' + d.appVersion : '');
+    var ver = 'Pounce' + (d.appVersion ? ' v' + d.appVersion : '');
     if(d.daemon && d.daemon.version) ver += '  ·  agent host v' + d.daemon.version;
     set('ver', ver);
     var dot = document.getElementById('dot');
@@ -1974,15 +2023,55 @@ const server = http.createServer(async (req, res) => {
       bridgeId: machineBridgeId(),
       hostName: os.hostname().replace(/\.local$/, ""),
       platform: process.platform,
-      port: PORT,
+      port: ACTIVE_PORT,
       appVersion: APP_VERSION,
     });
   }
 
+  // The web app — the full Pounce UI, served by the bridge itself so it is
+  // same-origin with /v1 (the Origin gate above requires exactly that; a page
+  // served from anywhere else cannot talk to this bridge). LAN-reachable on
+  // purpose: the page carries no secrets — it is inert until paired, either
+  // via a ?url&token connect link or, from this machine only, /ui.
+  if (WEB_INDEX && req.method === "GET") {
+    // "/connect" too: pairing links carry ?url&token as query params, and the
+    // web app reads them from any path at boot (see WebApp.pairFromUrl) — so a
+    // link written for the mobile deep-link shape still lands in the app.
+    if (url.pathname === "/" || url.pathname === "/connect") {
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+      });
+      return res.end(WEB_INDEX);
+    }
+    if (url.pathname.startsWith("/_expo/") || url.pathname.startsWith("/assets/")) {
+      // Resolve inside WEB_DIR only — a `..` in the URL must not escape it.
+      const file = path.resolve(WEB_DIR, decodeURIComponent(url.pathname.slice(1)));
+      let stat = null;
+      if (file.startsWith(WEB_ROOT + path.sep)) {
+        try {
+          stat = statSync(file);
+        } catch {}
+      }
+      if (!stat) return send(res, 404, { error: "not found" });
+      res.writeHead(200, {
+        "content-type": STATIC_MIME[path.extname(file)] || "application/octet-stream",
+        "content-length": stat.size,
+        // Every file under _expo/ and assets/ is content-hashed by the export,
+        // so it can be cached forever; a new build references new names.
+        "cache-control": "public, max-age=31536000, immutable",
+      });
+      return createReadStream(file).pipe(res);
+    }
+  }
+
   // Localhost-only UI surface for the desktop app: pairing QR + live status.
-  // Gated to loopback because it exposes the pairing token.
+  // Gated to loopback because it exposes the pairing token. `/` is the pairing
+  // page only when no web app is bundled (npx installs); with one, the page
+  // lives at /pair and the desktop tray links to it.
   if (
     url.pathname === "/" ||
+    url.pathname === "/pair" ||
     url.pathname === "/ui" ||
     url.pathname === "/qr.svg" ||
     url.pathname === "/peers"
@@ -1995,7 +2084,7 @@ const server = http.createServer(async (req, res) => {
       });
       return res.end(PEERS_HTML);
     }
-    if (url.pathname === "/") {
+    if (url.pathname === "/" || url.pathname === "/pair") {
       res.writeHead(200, {
         "content-type": "text/html; charset=utf-8",
         "cache-control": "no-store",
@@ -3406,6 +3495,22 @@ function localIp() {
   return primaryLanIp();
 }
 
+/** Is the thing on this port a Pounce bridge? /v1/hello is unauthenticated and
+ *  answers with a bridgeId; anything else — connection refused, HTML, a
+ *  different JSON shape — is some other program that happens to hold the port. */
+async function isBridgeOnPort(port) {
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/v1/hello`, {
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!r.ok) return false;
+    const d = await r.json();
+    return !!(d && d.ok && d.bridgeId);
+  } catch {
+    return false;
+  }
+}
+
 // True if something already accepts connections on the port (a running bridge).
 function portInUse(port) {
   return new Promise((resolve) => {
@@ -3428,8 +3533,16 @@ function portInUse(port) {
  * Used by both the CLI (`node server.mjs`) and the desktop app (Electrobun),
  * which calls it in-process and renders the returned deepLink as a QR.
  */
-export async function startBridge({ port = PORT, quiet = false, appVersion = null } = {}) {
+export async function startBridge({
+  port = REQUESTED_PORT,
+  quiet = false,
+  appVersion = null,
+  webDir = null,
+} = {}) {
   if (appVersion) APP_VERSION = appVersion;
+  // The desktop shell hands us its bundled web export; GET / then serves the
+  // full Pounce UI instead of the pairing page (which moves to /pair).
+  if (webDir) setWebDir(webDir);
   // Idempotent: when this file is bundled into a launcher, the `isMain`
   // self-start below and the launcher's explicit call both fire — the second
   // one must not listen() again.
@@ -3438,10 +3551,45 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
   // Never call listen() on a busy port: Bun's node:http shim throws an
   // uncatchable async error on EADDRINUSE (on top of emitting "error"), which
   // would crash the desktop app instead of falling back to the running bridge.
+  let fallbackFrom = null;
   if (await portInUse(port)) {
-    if (!quiet) console.error(`Could not bind port ${port}: EADDRINUSE`);
-    return { error: "EADDRINUSE", alreadyRunning: true, port };
+    // Who holds it? A Pounce answers /v1/hello with a bridgeId; then the right
+    // move is to ATTACH — the caller points its UI at the existing bridge and
+    // two instances collapse into one. Anything else is a foreign squatter,
+    // and "a Pounce is already running" would have pointed the window at it —
+    // hunt the next free port instead and stay usable.
+    if (await isBridgeOnPort(port)) {
+      if (!quiet) console.error(`A Pounce bridge is already running on port ${port}.`);
+      return { error: "EADDRINUSE", alreadyRunning: true, port };
+    }
+    let free = null;
+    for (let p = port + 1; p <= port + 10; p++) {
+      if (!(await portInUse(p))) {
+        free = p;
+        break;
+      }
+    }
+    if (free == null) {
+      if (!quiet) {
+        console.error(`Port ${port} is taken by another program, and no nearby port is free.`);
+      }
+      return { error: "EADDRINUSE", alreadyRunning: false, port, squatter: true };
+    }
+    if (!quiet) {
+      console.warn(`Port ${port} is taken by another program — using ${free} instead.`);
+      console.warn(
+        "  (On this port the bridge skips LAN discovery and the machine tunnel; QR pairing carries the port and works as always.)",
+      );
+    }
+    fallbackFrom = port;
+    port = free;
   }
+  // Everything that names the live bridge follows the port we actually bind:
+  // on fallback the ORIGINAL port belongs to the squatter, and eligibility
+  // (tunnel identity, discovery beacon) keys off this being non-default —
+  // the existing dev-bridge rule, now protecting this case too.
+  ACTIVE_PORT = port;
+  syncDiscovery();
   return new Promise((resolve) => {
     server.once("error", (err) => {
       // A bridge is likely already running on this port — let the caller point
@@ -3502,7 +3650,7 @@ export async function startBridge({ port = PORT, quiet = false, appVersion = nul
       // the bridge.
       setInterval(reapShells, 5 * 60_000).unref?.();
       restoreGrantTunnels();
-      resolve({ server, token: TOKEN, ...PAIR });
+      resolve({ server, token: TOKEN, ...PAIR, fallbackFrom });
     });
   });
 }
@@ -3560,7 +3708,7 @@ function startGrantTunnel(grantId) {
         "--token",
         secret,
         "--target",
-        `127.0.0.1:${PORT}`,
+        `127.0.0.1:${ACTIVE_PORT}`,
         "--key",
         path.join(GRANT_DIR, `${grantId}.key`),
         "--info",
@@ -3675,7 +3823,7 @@ function ensureTunnel() {
   // bridge on another port would hijack the identity and blackhole the phone's
   // off-LAN traffic into its own (soon-dead) port. Set POUNCE_TUNNEL=1 to opt
   // a non-default bridge in deliberately.
-  if (PORT !== DEFAULT_PORT && process.env.POUNCE_TUNNEL !== "1") return;
+  if (ACTIVE_PORT !== DEFAULT_PORT && process.env.POUNCE_TUNNEL !== "1") return;
   const bin = tunnelBinary();
   if (!bin) return; // no tunnel installed — LAN-only
   // (b) Sweep stale instances before claiming the identity: crashed/killed
@@ -3694,7 +3842,7 @@ function ensureTunnel() {
     } catch {} // exit 1 = no matches
   }
   try {
-    tunnelChild = spawn(bin, ["serve", "--token", TOKEN, "--target", `127.0.0.1:${PORT}`], {
+    tunnelChild = spawn(bin, ["serve", "--token", TOKEN, "--target", `127.0.0.1:${ACTIVE_PORT}`], {
       stdio: ["ignore", "ignore", "ignore"],
       windowsHide: true,
     });

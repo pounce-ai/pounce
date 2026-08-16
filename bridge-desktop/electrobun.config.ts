@@ -38,7 +38,7 @@ export default {
   app: {
     name: "Pounce",
     identifier: "app.pounce.bridge",
-    version: "1.1.6",
+    version: "1.2.0",
   },
   // Auto-update: the app checks this URL on launch and self-updates (tiny BSDIFF
   // deltas, full bundle fallback).
@@ -66,15 +66,25 @@ export default {
     exitOnLastWindowClosed: false,
   },
   build: {
-    // No `views`: the window loads the BRIDGE's own pairing page over http
-    // (see src/bun/index.ts), so there is no webview bundle to build. The copy
-    // table below still populates views/ with the binaries and icons the bun
-    // process resolves at runtime.
+    // No Electrobun `views` build: the window loads pages the BRIDGE serves
+    // over http (the web app on Linux/Windows, the pairing page elsewhere —
+    // see src/bun/index.ts). The copy table below populates views/ with the
+    // files the bun process resolves at runtime.
     bun: { entrypoint: "src/bun/index.ts" },
     copy: {
       // pounce-tunnel (iroh p2p, off-LAN access) — built per-platform by CI
       // into assets/; absent in plain local dev builds, hence the guard.
       ...(existsSync("assets/pounce-tunnel") ? { "assets/pounce-tunnel": "views/pounce-tunnel" } : {}),
+      // The web app (the full Pounce UI) — built by `bun run sync-web` from
+      // apps/mobile's Expo web export. The bridge serves it at GET / so the
+      // window shows the real app; absent, the window falls back to the
+      // pairing QR page (same guard style as pounce-tunnel above).
+      //
+      // Linux/Windows ONLY: there this app IS Pounce on the desktop. On macOS
+      // the native app (desktop/) is the real experience and this one is its
+      // companion tray — bundling a second, webview-grade UI there would just
+      // compete with the better one and add 19MB doing it.
+      ...(platform() !== "darwin" && existsSync("web/index.html") ? { web: "views/web" } : {}),
       // zigpty's native PTY addon for this host — see zigptyPrebuilds() above.
       ...zigptyPrebuilds(),
       "assets/tray.png": "views/tray.png",

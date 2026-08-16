@@ -66,18 +66,18 @@ async function fetchWithTimeout(url: string, ms: number): Promise<Response> {
  * credential that's wrong, and the app reports "0 devices online" while the
  * bridge is running perfectly well two inches away.
  */
-export async function ensureLocalBridge(): Promise<boolean> {
+export async function ensureLocalBridge(base: string = LOCAL_URL): Promise<boolean> {
   try {
     const devices = await listDeviceConfigs();
-    const configured = devices.some((d) => d.url === LOCAL_URL);
-    const res = await fetchWithTimeout(`${LOCAL_URL}/ui`, 2500);
+    const configured = devices.some((d) => d.url === base);
+    const res = await fetchWithTimeout(`${base}/ui`, 2500);
     // Bridge not answering: keep whatever is configured rather than treating
     // silence as evidence the pairing is wrong.
     if (!res.ok) return configured;
     const { token } = (await res.json()) as { token?: string };
     if (!token) return configured;
-    if (configured) await adoptBridgeToken(LOCAL_URL, token);
-    else await addDeviceConfig(LOCAL_URL, token);
+    if (configured) await adoptBridgeToken(base, token);
+    else await addDeviceConfig(base, token);
     return true;
   } catch {
     // Bridge not up yet — bootstrap continues with whatever is configured;

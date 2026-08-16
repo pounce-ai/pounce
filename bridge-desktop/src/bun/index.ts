@@ -46,24 +46,57 @@ try {
   console.warn("[pty] zigpty unavailable:", e);
 }
 
-const info = await startBridge({ port: PORT, quiet: true, appVersion: (pkg as { version?: string }).version });
+// The bundled web app (sync-web → views/web), served by the bridge at GET /.
+// Absent in dev builds and macOS bundles (see electrobun.config.ts), where /
+// stays the pairing page.
+const { existsSync } = await import("node:fs");
+const { fileURLToPath } = await import("node:url");
+const webRoot = fileURLToPath(new URL("../views/web", import.meta.url));
+const webDir = existsSync(`${webRoot}/index.html`) ? webRoot : null;
+
+const info = (await startBridge({
+  port: PORT,
+  quiet: true,
+  appVersion: (pkg as { version?: string }).version,
+  webDir,
+})) as { port?: number; error?: string; alreadyRunning?: boolean; fallbackFrom?: number } | null;
+// The port the bridge actually LISTENS on — PORT unless a foreign program
+// squatted it and startBridge fell back to the next free port (a real Pounce
+// on the port is the alreadyRunning case: this app attaches to it instead).
+const LIVE_PORT = info?.port ?? PORT;
 if (info?.error && !info.alreadyRunning) {
   console.error("Pounce could not start:", info.error);
 } else if (info?.alreadyRunning) {
   console.log(`A Pounce is already running on ${PORT}; showing its status.`);
+} else if (info?.fallbackFrom) {
+  console.warn(`Port ${PORT} is taken by another program — running on ${LIVE_PORT} instead.`);
 }
 
 let win: BrowserWindow | null = null;
 function openWindow() {
-  // Load the UI straight from the bridge so /ui and /qr.svg are same-origin and
-  // the port is implicit. The server is already listening (awaited above).
+  // Load the UI straight from the bridge so everything is same-origin and the
+  // port is implicit. With a bundled web app, / is the full Pounce UI and the
+  // window is sized like an app; without one it's the pairing QR card.
   win = new BrowserWindow({
     title: "Pounce",
-    url: `http://127.0.0.1:${PORT}/`,
-    frame: { width: 460, height: 640, x: 240, y: 120 },
+    url: `http://127.0.0.1:${LIVE_PORT}/`,
+    frame: webDir
+      ? { width: 1280, height: 820, x: 120, y: 80 }
+      : { width: 460, height: 640, x: 240, y: 120 },
   });
 }
 openWindow();
+
+// The pairing QR in its own small window. Only offered when / is the web app —
+// otherwise the main window IS the pairing page and this would duplicate it.
+let pairWin: BrowserWindow | null = null;
+function openPairWindow() {
+  pairWin = new BrowserWindow({
+    title: "Pair a device",
+    url: `http://127.0.0.1:${LIVE_PORT}/pair`,
+    frame: { width: 460, height: 640, x: 300, y: 140 },
+  });
+}
 
 // Set the image in the constructor so the `template` flag is honored — macOS
 // then renders the paw adaptively (white on a dark menu bar, dark on a light
@@ -123,7 +156,8 @@ function renderMenu() {
     // that matters, but not every agent meters a window.
     ...(quotaLabel ? [{ type: "normal" as const, label: quotaLabel, enabled: false }] : []),
     { type: "divider" },
-    { type: "normal", label: "Show pairing window", action: "show" },
+    { type: "normal", label: webDir ? "Open Pounce" : "Show pairing window", action: "show" },
+    ...(webDir ? [{ type: "normal" as const, label: "Show pairing QR", action: "pair" }] : []),
     { type: "normal", label: updateLabel, action: "check-update", enabled: !checking },
     { type: "divider" },
     { type: "normal", label: "Quit Pounce", action: "quit" },
@@ -135,6 +169,9 @@ tray.on("tray-clicked", (event: any) => {
   switch (event.data?.action) {
     case "show":
       openWindow();
+      break;
+    case "pair":
+      openPairWindow();
       break;
     case "check-update":
       void checkForUpdateNow();
@@ -152,7 +189,7 @@ let lastLabel = "";
 async function pollStatus() {
   let label = "○ Ready to pair";
   try {
-    const r = await fetch(`http://127.0.0.1:${PORT}/ui`, { signal: AbortSignal.timeout(2500) });
+    const r = await fetch(`http://127.0.0.1:${LIVE_PORT}/ui`, { signal: AbortSignal.timeout(2500) });
     const d: any = await r.json();
     if (d.connected) {
       const n = d.devices && d.devices > 0 ? d.devices : 1;
@@ -177,7 +214,7 @@ setInterval(() => void pollStatus(), 3000);
 let token: string | null = null;
 async function bridgeJson(path: string, auth = true): Promise<any | null> {
   try {
-    const r = await fetch(`http://127.0.0.1:${PORT}${path}`, {
+    const r = await fetch(`http://127.0.0.1:${LIVE_PORT}${path}`, {
       signal: AbortSignal.timeout(3000),
       headers: auth && token ? { authorization: `Bearer ${token}` } : {},
     });
@@ -247,7 +284,7 @@ async function checkForUpdate() {
 async function applyUpdateIfIdle() {
   if (!updatePending) return;
   try {
-    const r = await fetch(`http://127.0.0.1:${PORT}/ui`, { signal: AbortSignal.timeout(2000) });
+    const r = await fetch(`http://127.0.0.1:${LIVE_PORT}/ui`, { signal: AbortSignal.timeout(2000) });
     if ((await r.json())?.connected) return; // a phone is active — wait
   } catch { /* treat unreachable as idle */ }
   updatePending = false;

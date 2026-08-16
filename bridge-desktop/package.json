@@ -1,11 +1,12 @@
 {
   "name": "pounce-bridge-app",
   "private": true,
-  "version": "1.1.6",
+  "version": "1.2.0",
   "type": "module",
   "description": "Pounce — a tiny double-click desktop app that runs the bridge and shows a pairing QR.",
   "scripts": {
     "sync-server": "mkdir -p server && bun build ../apps/bridge/server.mjs --target=node --outfile server/server.mjs",
+    "sync-web": "cd ../apps/mobile && bunx expo export -p web --output-dir ../../bridge-desktop/web",
     "dev": "bun run sync-server && electrobun dev",
     "build": "bun run sync-server && electrobun build",
     "build:stable": "bun run sync-server && electrobun build --env=stable"

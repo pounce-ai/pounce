@@ -72,3 +72,33 @@ export function pairingHostName(p: ParsedPairing): string {
     return p.url;
   }
 }
+
+/**
+ * Pair from a connect link's parameters (`?url=…&token=…[&node=…&relay=…&host=…]`)
+ * — the shared core of the mobile /connect screen and the web shell's URL
+ * pairing. Saves the tunnel identity first when the link carries one, so the
+ * pairing works from any network, then connects. Resolves with whether the
+ * bridge answered.
+ */
+export async function pairFromParams(p: {
+  url: string;
+  token: string;
+  node?: string | null;
+  relay?: string | null;
+  host?: string | null;
+}): Promise<boolean> {
+  // Late imports keep this module a leaf for its pure helpers (parse/hostName)
+  // — runtime pulls in stores and persistence, which the QR-scan path that
+  // only parses must not load.
+  const { savePairing } = await import("./runtime");
+  const { connectBridge } = await import("./bridge");
+  if (p.node) {
+    await savePairing({
+      nodeId: p.node,
+      token: p.token,
+      hostName: pairingHostName({ url: p.url, token: p.token, hostName: p.host ?? undefined }),
+      relay: p.relay ?? null,
+    });
+  }
+  return connectBridge({ url: p.url, token: p.token });
+}
