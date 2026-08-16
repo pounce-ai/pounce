@@ -43,6 +43,8 @@
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "mobile": "bun run --filter @pounce/mobile start",
+    "play:promote": "node scripts/play-release.mjs promote",
+    "play:status": "node scripts/play-release.mjs status",
     "publish:android": "bash scripts/publish-testflight.sh android",
     "publish:ios": "bash scripts/publish-testflight.sh ios",
     "test": "bun run --filter '*' test",
