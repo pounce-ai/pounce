@@ -70,10 +70,17 @@ const info = await startBridge({
   appVersion: (pkg as { version?: string }).version,
   webDir,
 });
+// The port the bridge actually LISTENS on. Differs from PORT when a foreign
+// program squats the default and startBridge fell back to the next free port
+// (a real Pounce on the port is the alreadyRunning case instead — then this
+// app attaches to it). Every URL below must use this, not PORT.
+const LIVE_PORT = (info as { port?: number })?.port ?? PORT;
 if (info?.error && !info.alreadyRunning) {
   console.error("Pounce could not start:", info.error);
 } else if (info?.alreadyRunning) {
   console.log(`A Pounce is already running on ${PORT}; showing its status.`);
+} else if ((info as { fallbackFrom?: number })?.fallbackFrom) {
+  console.warn(`Port ${PORT} is taken by another program — running on ${LIVE_PORT} instead.`);
 }
 
 let win: BrowserWindow | null = null;
@@ -83,7 +90,7 @@ function openWindow() {
   // window is sized like an app; without one it's the pairing QR card.
   win = new BrowserWindow({
     title: "Pounce",
-    url: `http://127.0.0.1:${PORT}/`,
+    url: `http://127.0.0.1:${LIVE_PORT}/`,
     frame: webDir
       ? { width: 1280, height: 820, x: 120, y: 80 }
       : { width: 460, height: 640, x: 240, y: 120 },
@@ -97,7 +104,7 @@ let pairWin: BrowserWindow | null = null;
 function openPairWindow() {
   pairWin = new BrowserWindow({
     title: "Pair a device",
-    url: `http://127.0.0.1:${PORT}/pair`,
+    url: `http://127.0.0.1:${LIVE_PORT}/pair`,
     frame: { width: 460, height: 640, x: 300, y: 140 },
   });
 }
@@ -193,7 +200,7 @@ let lastLabel = "";
 async function pollStatus() {
   let label = "○ Ready to pair";
   try {
-    const r = await fetch(`http://127.0.0.1:${PORT}/ui`, { signal: AbortSignal.timeout(2500) });
+    const r = await fetch(`http://127.0.0.1:${LIVE_PORT}/ui`, { signal: AbortSignal.timeout(2500) });
     const d: any = await r.json();
     if (d.connected) {
       const n = d.devices && d.devices > 0 ? d.devices : 1;
@@ -218,7 +225,7 @@ setInterval(() => void pollStatus(), 3000);
 let token: string | null = null;
 async function bridgeJson(path: string, auth = true): Promise<any | null> {
   try {
-    const r = await fetch(`http://127.0.0.1:${PORT}${path}`, {
+    const r = await fetch(`http://127.0.0.1:${LIVE_PORT}${path}`, {
       signal: AbortSignal.timeout(3000),
       headers: auth && token ? { authorization: `Bearer ${token}` } : {},
     });
@@ -288,7 +295,7 @@ async function checkForUpdate() {
 async function applyUpdateIfIdle() {
   if (!updatePending) return;
   try {
-    const r = await fetch(`http://127.0.0.1:${PORT}/ui`, { signal: AbortSignal.timeout(2000) });
+    const r = await fetch(`http://127.0.0.1:${LIVE_PORT}/ui`, { signal: AbortSignal.timeout(2000) });
     if ((await r.json())?.connected) return; // a phone is active — wait
   } catch { /* treat unreachable as idle */ }
   updatePending = false;

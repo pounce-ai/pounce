@@ -113,6 +113,12 @@ const IS_WIN = process.platform === "win32";
 // (apps/tunnel), an iroh p2p byte tunnel the phone dials by node id.
 const DEFAULT_PORT = 8099;
 const PORT = Number(process.env.BRIDGE_PORT || DEFAULT_PORT);
+// The port actually LISTENED on. Same as PORT except after a collision
+// fallback (a foreign program squatting the requested port — see startBridge),
+// where it moves to the next free port. Everything that names the live bridge
+// (loopback origin, /v1/hello, grant-tunnel targets, eligibility checks) must
+// read this, not PORT: on fallback, PORT names the SQUATTER.
+let ACTIVE_PORT = PORT;
 // How often the background watcher polls for state transitions to push.
 const WATCH_MS = Number(process.env.PUSH_WATCH_MS || 25_000);
 const { token: TOKEN, legacyUntil: LEGACY_UNTIL } = bridgeToken();
@@ -1060,7 +1066,7 @@ let PAIR = null; // { ip, port, pairUrl, deepLink } — set once we're listening
  *  dev bridge on another port must never advertise it — a phone dialing that
  *  node id would reach the default bridge, not this one. */
 function tunnelEligible() {
-  return PORT === DEFAULT_PORT || process.env.POUNCE_TUNNEL === "1";
+  return ACTIVE_PORT === DEFAULT_PORT || process.env.POUNCE_TUNNEL === "1";
 }
 
 /** The tunnel's Iroh identity, written to ~/.pounce/tunnel.json by
@@ -1160,7 +1166,8 @@ function discoveryWanted() {
   if (process.env.POUNCE_DISCOVERY === "1") return true;
   return readConfig().discoverable === true;
 }
-const discoveryEligible = () => PORT === DEFAULT_PORT || process.env.POUNCE_DISCOVERY === "1";
+const discoveryEligible = () =>
+  ACTIVE_PORT === DEFAULT_PORT || process.env.POUNCE_DISCOVERY === "1";
 
 // Announcing is flipped on demand, so the toggle takes effect without
 // restarting the bridge — a setting you have to reboot for is a setting people
@@ -1401,7 +1408,7 @@ function isOwnOrigin(req) {
   const o = req.headers.origin;
   if (o === `http://${req.headers.host}`) return true;
   if (!isLoopback(req)) return false;
-  return o === `http://127.0.0.1:${PORT}` || o === `http://localhost:${PORT}`;
+  return o === `http://127.0.0.1:${ACTIVE_PORT}` || o === `http://localhost:${ACTIVE_PORT}`;
 }
 
 // The DNS-rebinding gate is hostIsAddress, imported from agents/host-guard.mjs
@@ -1993,7 +2000,7 @@ const server = http.createServer(async (req, res) => {
       bridgeId: machineBridgeId(),
       hostName: os.hostname().replace(/\.local$/, ""),
       platform: process.platform,
-      port: PORT,
+      port: ACTIVE_PORT,
       appVersion: APP_VERSION,
     });
   }
@@ -3478,6 +3485,22 @@ function localIp() {
   return primaryLanIp();
 }
 
+/** Is the thing on this port a Pounce bridge? /v1/hello is unauthenticated and
+ *  answers with a bridgeId; anything else — connection refused, HTML, a
+ *  different JSON shape — is some other program that happens to hold the port. */
+async function isBridgeOnPort(port) {
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/v1/hello`, {
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!r.ok) return false;
+    const d = await r.json();
+    return !!(d && d.ok && d.bridgeId);
+  } catch {
+    return false;
+  }
+}
+
 // True if something already accepts connections on the port (a running bridge).
 function portInUse(port) {
   return new Promise((resolve) => {
@@ -3518,10 +3541,45 @@ export async function startBridge({
   // Never call listen() on a busy port: Bun's node:http shim throws an
   // uncatchable async error on EADDRINUSE (on top of emitting "error"), which
   // would crash the desktop app instead of falling back to the running bridge.
+  let fallbackFrom = null;
   if (await portInUse(port)) {
-    if (!quiet) console.error(`Could not bind port ${port}: EADDRINUSE`);
-    return { error: "EADDRINUSE", alreadyRunning: true, port };
+    // Who holds it? A Pounce answers /v1/hello with a bridgeId; then the right
+    // move is to ATTACH — the caller points its UI at the existing bridge and
+    // two instances collapse into one. Anything else is a foreign squatter,
+    // and "a Pounce is already running" would have pointed the window at it —
+    // hunt the next free port instead and stay usable.
+    if (await isBridgeOnPort(port)) {
+      if (!quiet) console.error(`A Pounce bridge is already running on port ${port}.`);
+      return { error: "EADDRINUSE", alreadyRunning: true, port };
+    }
+    let free = null;
+    for (let p = port + 1; p <= port + 10; p++) {
+      if (!(await portInUse(p))) {
+        free = p;
+        break;
+      }
+    }
+    if (free == null) {
+      if (!quiet) {
+        console.error(`Port ${port} is taken by another program, and no nearby port is free.`);
+      }
+      return { error: "EADDRINUSE", alreadyRunning: false, port, squatter: true };
+    }
+    if (!quiet) {
+      console.warn(`Port ${port} is taken by another program — using ${free} instead.`);
+      console.warn(
+        "  (On this port the bridge skips LAN discovery and the machine tunnel; QR pairing carries the port and works as always.)",
+      );
+    }
+    fallbackFrom = port;
+    port = free;
   }
+  // Everything that names the live bridge follows the port we actually bind:
+  // on fallback the ORIGINAL port belongs to the squatter, and eligibility
+  // (tunnel identity, discovery beacon) keys off this being non-default —
+  // the existing dev-bridge rule, now protecting this case too.
+  ACTIVE_PORT = port;
+  syncDiscovery();
   return new Promise((resolve) => {
     server.once("error", (err) => {
       // A bridge is likely already running on this port — let the caller point
@@ -3582,7 +3640,7 @@ export async function startBridge({
       // the bridge.
       setInterval(reapShells, 5 * 60_000).unref?.();
       restoreGrantTunnels();
-      resolve({ server, token: TOKEN, ...PAIR });
+      resolve({ server, token: TOKEN, ...PAIR, ...(fallbackFrom ? { fallbackFrom } : {}) });
     });
   });
 }
@@ -3640,7 +3698,7 @@ function startGrantTunnel(grantId) {
         "--token",
         secret,
         "--target",
-        `127.0.0.1:${PORT}`,
+        `127.0.0.1:${ACTIVE_PORT}`,
         "--key",
         path.join(GRANT_DIR, `${grantId}.key`),
         "--info",
@@ -3755,7 +3813,7 @@ function ensureTunnel() {
   // bridge on another port would hijack the identity and blackhole the phone's
   // off-LAN traffic into its own (soon-dead) port. Set POUNCE_TUNNEL=1 to opt
   // a non-default bridge in deliberately.
-  if (PORT !== DEFAULT_PORT && process.env.POUNCE_TUNNEL !== "1") return;
+  if (ACTIVE_PORT !== DEFAULT_PORT && process.env.POUNCE_TUNNEL !== "1") return;
   const bin = tunnelBinary();
   if (!bin) return; // no tunnel installed — LAN-only
   // (b) Sweep stale instances before claiming the identity: crashed/killed
@@ -3774,7 +3832,7 @@ function ensureTunnel() {
     } catch {} // exit 1 = no matches
   }
   try {
-    tunnelChild = spawn(bin, ["serve", "--token", TOKEN, "--target", `127.0.0.1:${PORT}`], {
+    tunnelChild = spawn(bin, ["serve", "--token", TOKEN, "--target", `127.0.0.1:${ACTIVE_PORT}`], {
       stdio: ["ignore", "ignore", "ignore"],
       windowsHide: true,
     });
