@@ -49,8 +49,10 @@ try {
 // The bundled web app (the full Pounce UI — sidebar, tabs, transcripts),
 // built by `sync-web` and copied to views/web. The bridge serves it at GET /
 // so it is same-origin with /v1; the pairing page moves to /pair. Absent in
-// plain local dev builds (same guard as pounce-tunnel in electrobun.config.ts),
-// where / stays the pairing page and everything behaves as before.
+// plain local dev builds AND in macOS bundles (electrobun.config.ts skips the
+// copy there — on a Mac the native desktop app is the real UI and this app is
+// its companion tray), in which case / stays the pairing page and everything
+// behaves as before.
 const webDir = await (async () => {
   try {
     const { fileURLToPath } = await import("node:url");

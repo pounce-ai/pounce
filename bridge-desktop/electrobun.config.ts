@@ -79,7 +79,12 @@ export default {
       // apps/mobile's Expo web export. The bridge serves it at GET / so the
       // window shows the real app; absent, the window falls back to the
       // pairing QR page (same guard style as pounce-tunnel above).
-      ...(existsSync("web/index.html") ? { web: "views/web" } : {}),
+      //
+      // Linux/Windows ONLY: there this app IS Pounce on the desktop. On macOS
+      // the native app (desktop/) is the real experience and this one is its
+      // companion tray — bundling a second, webview-grade UI there would just
+      // compete with the better one and add 19MB doing it.
+      ...(platform() !== "darwin" && existsSync("web/index.html") ? { web: "views/web" } : {}),
       // zigpty's native PTY addon for this host — see zigptyPrebuilds() above.
       ...zigptyPrebuilds(),
       "assets/tray.png": "views/tray.png",
