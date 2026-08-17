@@ -75,16 +75,30 @@ it buries real changes in churn.
   adapter (`apps/bridge/agents/opencode.mjs`) probes `sqlite_master` and prefers v2.
   Symptom of reading only legacy: opencode sessions silently vanish from the bridge/MCP.
 
-## Release (README's `bridge-v*` section is STALE — that workflow was deleted in #55)
+## Release
 
-Real flow is `.github/workflows/desktop-release.yml`, **manual `workflow_dispatch` only**:
+One version, one tag, one release, every platform. `.github/workflows/release.yml`,
+**manual `workflow_dispatch` only**:
 
-1. Bump `CFBundleShortVersionString` + `CFBundleVersion` in
-   `desktop/macos/PounceDesktop-macOS/Info.plist` in a PR, merge.
-2. Run the workflow from main (`dry_run` to skip publishing).
-3. It tags `desktop-v*`, builds/signs/notarizes the DMG, packs the cross-platform bridge
-   bundle, and publishes one GitHub Release with the Sparkle `appcast.xml`. The release
-   **must remain "latest"** — Sparkle polls `releases/latest/download/appcast.xml`.
+1. `bun run version:set <version>` in a PR, merge. It stamps `version.json` into the phone
+   app, the macOS `Info.plist` and the Electrobun app; CI's `version:check` fails on drift.
+   Build counters (`CFBundleVersion`, `ios.buildNumber`, `android.versionCode`) are separate
+   and still bumped per upload.
+2. Run **Release Pounce** from main (`dry_run` to build without publishing).
+3. It calls `build-macos-app.yml` and `build-windows-linux-app.yml`, then publishes one
+   Release tagged `v<version>` titled `Pounce <version>` with every installer.
+
+Two things that break silently if you change them:
+
+- The release **must remain "latest"** and **must carry `appcast.xml`** — Sparkle polls
+  `releases/latest/download/appcast.xml`, and that URL is baked into every shipped macOS
+  build. `build-macos-app.yml`'s `DOWNLOAD_URL_PREFIX` must match the published tag.
+- Only `downloads/` plus the DMG/appcast/bridge zip get published; Electrobun's `stable-*`
+  files go to the rolling `bridge-latest` release. Publishing the whole artifact directory
+  is what buried the installers under update plumbing.
+
+The tunnel (`tunnel-v*`) and npm CLI version independently — deliberately, so their numbers
+still mean something.
 
 Phones: `bun run publish:ios` (TestFlight) and `bun run publish:android` (Play
 internal track) — both `scripts/publish-testflight.sh`, EAS production with

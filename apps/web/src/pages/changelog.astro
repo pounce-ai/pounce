@@ -54,6 +54,10 @@ const items: Item[] = [
 ].sort((a, b) => b.date.valueOf() - a.date.valueOf());
 
 const COMPONENT_LABELS: Record<string, string> = {
+  // A unified `v*` release — every platform at once. The narrower labels below
+  // it are the pre-unification history and the parts that still ship on their
+  // own schedule.
+  app: "All platforms",
   ios: "iPhone",
   android: "Android",
   desktop: "Desktop",

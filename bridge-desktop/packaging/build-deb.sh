@@ -137,11 +137,15 @@ EOF
 
 nfpm package --config "$STAGE/nfpm.yaml" --packager deb --target "$OUT_DIR"
 
-# nfpm names it pounce_<version>_<arch>.deb; keep a stable download name too so
-# /releases/latest/download/ links don't move between versions.
+# nfpm names it pounce_<version>_<arch>.deb. The published download gets a
+# clearer name and lands in downloads/, which is the only directory the release
+# job uploads — publishing OUT_DIR wholesale is how the same package ended up on
+# the releases page twice under two names, byte for byte identical.
 DEB="$(ls -t "$OUT_DIR"/pounce_*_"$DEB_ARCH".deb | head -1)"
-cp "$DEB" "$OUT_DIR/Pounce-Linux-$ARCH.deb"
-echo "✓ $(basename "$DEB")  →  Pounce-Linux-$ARCH.deb"
+VERSION="$(node -p "require('$HERE/../package.json').version")"
+mkdir -p "$OUT_DIR/downloads"
+cp "$DEB" "$OUT_DIR/downloads/Pounce-$VERSION-Linux-$ARCH.deb"
+echo "✓ $(basename "$DEB")  →  downloads/Pounce-$VERSION-Linux-$ARCH.deb"
 
 # NOTE: the app installed from this .deb lives under root-owned /opt, so
 # Electrobun's in-place self-update cannot write to it. Updating means

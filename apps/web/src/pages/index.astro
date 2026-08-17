@@ -3,7 +3,13 @@ import BaseHead from "../components/BaseHead.astro";
 import Nav from "../components/Nav.astro";
 import Footer from "../components/Footer.astro";
 import Shot from "../components/Shot.astro";
+import { fetchDownloads, formatSize, RELEASES_PAGE } from "../lib/downloads.ts";
 import "../styles/brand.css";
+
+// Resolved at build time so every platform gets a real, direct download link
+// instead of being sent to the releases page to guess. See lib/downloads.ts.
+const dl = await fetchDownloads();
+const dlVersion = dl.version;
 
 /**
  * The four benefit blocks, in the order a real day hits you: the agent stops
@@ -456,41 +462,79 @@ const benefits = [
             <span class="pill pill--live">Live on the App Store</span>
           </a>
 
-          <div class="plat reveal" aria-disabled="true">
-            <h3>Android</h3>
-            <p>The same remote, in testing on Google Play right now.</p>
-            <span class="pill pill--wait">In testing</span>
-          </div>
-
           <a
             class="plat reveal"
-            href="https://github.com/pounce-ai/pounce/releases/latest"
+            href="https://play.google.com/store/apps/details?id=com.pounce.app"
             target="_blank"
             rel="noopener"
           >
-            <h3>macOS</h3>
-            <p>Desktop app with the bridge built in. Signed and notarized, macOS 14+ on Apple Silicon.</p>
-            <span class="pill pill--get">Download the DMG</span>
+            <h3>Android</h3>
+            <p>The same remote — live sessions, voice, diffs and shipping.</p>
+            <span class="pill pill--live">Live on Google Play</span>
           </a>
 
-          <a
-            class="plat reveal"
-            href="https://github.com/pounce-ai/pounce/releases/latest"
-            target="_blank"
-            rel="noopener"
-          >
-            <h3>Windows &amp; Linux</h3>
+          <a class="plat reveal" data-os="mac" href={dl.macos.url} target="_blank" rel="noopener">
+            <h3>macOS</h3>
+            <p>The desktop app, with the bridge built in. Signed and notarized, macOS 14+ on Apple Silicon.</p>
+            <span class="pill pill--get">
+              Download for Mac
+              {formatSize(dl.macos.size) && <em class="pill-sub">{formatSize(dl.macos.size)}</em>}
+            </span>
+          </a>
+
+          <a class="plat reveal" data-os="windows" href={dl.windows.url} target="_blank" rel="noopener">
+            <h3>Windows</h3>
+            <p>The same desktop app, with the bridge built in. Installer for 64-bit Windows.</p>
+            <span class="pill pill--get">
+              Download for Windows
+              {formatSize(dl.windows.size) && <em class="pill-sub">{formatSize(dl.windows.size)}</em>}
+            </span>
+          </a>
+
+          <a class="plat reveal" data-os="linux" href={dl.linuxDeb.url} target="_blank" rel="noopener">
+            <h3>Linux</h3>
             <p>
-              A real installer — <span class="mono">.exe</span>, <span class="mono">.deb</span> or a
-              tarball. Lives in the tray and shows the pairing QR.
+              The same desktop app. <span class="mono">.deb</span> for Ubuntu and Debian; a
+              self-installing tarball for everything else.
             </p>
-            <span class="pill pill--get">Get the bridge</span>
+            <span class="pill pill--get">
+              Download for Linux
+              {formatSize(dl.linuxDeb.size) && <em class="pill-sub">.deb · {formatSize(dl.linuxDeb.size)}</em>}
+            </span>
           </a>
         </div>
 
+        <!-- The builds that aren't the headline pick for any platform, kept
+             close by rather than hidden on the releases page: the wrong-arch
+             Linux packages, the non-Debian tarballs, and the headless bridge
+             for a server with no desktop at all. -->
+        <details class="more-builds reveal">
+          <summary>Other builds — Arm, non-Debian Linux, headless servers</summary>
+          <ul>
+            <li>
+              <a href={dl.linuxDebArm.url} target="_blank" rel="noopener">Linux Arm64 <span class="mono">.deb</span></a>
+              <span class="mono dim">{formatSize(dl.linuxDebArm.size) ?? "on the releases page"}</span>
+            </li>
+            <li>
+              <a href={dl.linuxTar.url} target="_blank" rel="noopener">Linux x64 tarball</a>
+              <span class="mono dim">{formatSize(dl.linuxTar.size) ?? "on the releases page"}</span>
+            </li>
+            <li>
+              <a href={dl.linuxTarArm.url} target="_blank" rel="noopener">Linux Arm64 tarball</a>
+              <span class="mono dim">{formatSize(dl.linuxTarArm.size) ?? "on the releases page"}</span>
+            </li>
+            <li>
+              <a href={dl.bridge.url} target="_blank" rel="noopener">Headless bridge</a>
+              <span class="mono dim">no GUI · needs Node.js</span>
+            </li>
+          </ul>
+        </details>
+
         <p class="get-foot">
-          Prefer the terminal? <span class="mono">npx use-pounce</span> on any machine — including one
-          you only reach over SSH — pairs it the same way.
+          {dlVersion && <>Latest release <span class="mono">{dlVersion}</span> — the same version on every platform. </>}
+          Prefer the terminal? <span class="mono">npx use-pounce configure</span> sets up any machine —
+          including one you only reach over SSH.
+          <a href={RELEASES_PAGE} target="_blank" rel="noopener">All releases</a>.
         </p>
       </div>
     </section>
@@ -1121,9 +1165,12 @@ const benefits = [
       }
 
       /* ------------------------------------------------------- platforms */
+      /* Five platforms now (two phones, three desktops), so this auto-fits
+         rather than pinning a column count — at four-across the fifth card was
+         stranded alone on its own row. */
       .plat-grid {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
         gap: 18px;
       }
       .plat {
@@ -1172,6 +1219,52 @@ const benefits = [
         color: var(--brand-ink);
         border-color: var(--brand-edge);
       }
+      .pill-sub {
+        font-style: normal;
+        opacity: 0.65;
+        margin-left: 7px;
+      }
+
+      /* The card matching the visitor's own OS, marked up by the script at the
+         end of this page. Progressive: without JS every platform is simply
+         shown equally, which is the correct fallback rather than a broken one. */
+      .plat[data-current] {
+        border-color: var(--brand-edge);
+        box-shadow: var(--shadow);
+      }
+      .plat[data-current] .pill--get {
+        background: var(--brand-wash);
+      }
+
+      .more-builds {
+        margin-top: 22px;
+        border-top: 1px solid var(--line);
+        padding-top: 16px;
+      }
+      .more-builds summary {
+        cursor: pointer;
+        color: var(--ink-2);
+        font-size: 14.5px;
+      }
+      .more-builds ul {
+        list-style: none;
+        margin: 14px 0 0;
+        padding: 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 10px 24px;
+      }
+      .more-builds li {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 14px;
+      }
+      .more-builds .dim {
+        color: var(--ink-3);
+        font-size: 12px;
+      }
+
       .get-foot {
         margin-top: 26px;
         color: var(--ink-3);
@@ -1301,6 +1394,27 @@ const benefits = [
              command is right there to select by hand, so say nothing */
         }
       });
+
+      // Point the visitor at their own platform's download. Every card stays
+      // visible and clickable — this only marks which one is theirs, so a
+      // wrong guess costs nothing and no-JS costs nothing either.
+      const ua = navigator.userAgent;
+      const platform = navigator.userAgentData?.platform || navigator.platform || "";
+      const currentOs = /Win/i.test(platform) || /Windows/i.test(ua)
+        ? "windows"
+        // Order matters: an iPhone's UA contains "Mac" on iPadOS, and Android's
+        // contains "Linux". Rule both out before trusting either keyword.
+        : /Android|iPhone|iPad|iPod/i.test(ua)
+          ? null
+          : /Mac/i.test(platform) || /Mac OS X/i.test(ua)
+            ? "mac"
+            : /Linux|X11/i.test(platform) || /Linux/i.test(ua)
+              ? "linux"
+              : null;
+      if (currentOs) {
+        const card = document.querySelector(`.plat[data-os="${currentOs}"]`);
+        card?.setAttribute("data-current", "");
+      }
 
       // Reveal on scroll. Anything already on screen at load reveals immediately.
       const io = new IntersectionObserver(

@@ -34,7 +34,12 @@ const API = `https://api.github.com/repos/${REPO}/releases?per_page=50`;
 const MAX_RELEASES = 12;
 
 /** Tag prefix → which part of Pounce it is. Anything else is skipped: an
- *  unrecognised tag is more likely a mistake than a thing to publish. */
+ *  unrecognised tag is more likely a mistake than a thing to publish.
+ *
+ *  These are all legacy now. Releases were unified onto a bare `v<version>` tag
+ *  covering every platform at once (see .github/workflows/release.yml); the
+ *  prefixed tags are what the repo published before that and still need to
+ *  render. */
 const COMPONENT_BY_PREFIX: Record<string, string> = {
   desktop: "desktop",
   tunnel: "tunnel",
@@ -54,8 +59,18 @@ export interface ReleaseEntry {
   html: string;
 }
 
-/** `desktop-v1.0.30` → { component: "desktop", version: "1.0.30" } */
+/**
+ * `v1.5.1` → the unified app release; `desktop-v1.0.30` → a legacy one.
+ *
+ * The bare `v*` case is not cosmetic: every Windows/Linux release the repo has
+ * ever published used that tag, and because this function only recognised
+ * prefixed tags they were all silently dropped from the changelog. The site
+ * showed a macOS-only history of a cross-platform app.
+ */
 function parseTag(tag: string): { component: string; version?: string } | null {
+  const unified = tag.match(/^v(\d[^\s]*)$/);
+  if (unified) return { component: "app", version: unified[1] };
+
   const m = tag.match(/^([a-z]+)-v?(.+)$/i);
   if (!m) return null;
   const component = COMPONENT_BY_PREFIX[m[1].toLowerCase()];

@@ -1,0 +1,4 @@
+{
+  "$comment": "The Pounce app version. One number for the phone app and the desktop app on all three platforms. Change it with `bun run version:set <version>`, never by hand — scripts/set-app-version.mjs stamps it into every manifest that carries it, and CI fails if they drift. The tunnel and the npm CLI are versioned independently: they are consumed on their own terms, so pinning them to the app's number would make their versions meaningless.",
+  "app": "1.5.1"
+}

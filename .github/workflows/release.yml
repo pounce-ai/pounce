@@ -1,0 +1,188 @@
+name: Release Pounce
+
+# One version, one tag, one release, every platform.
+#
+# Pounce used to publish two release lines that no visitor could tell apart:
+# `desktop-v1.0.46` ("Pounce Desktop 1.0.46") held the macOS app, and `v1.2.0`
+# ("Pounce v1.2.0") held Windows and Linux — while ALSO shipping a second,
+# different `Pounce.dmg` that existed only to feed legacy auto-updaters. Two
+# release lines, two version schemes, two files with the same name, and the
+# generic-looking `v*` tag on the one that wasn't the flagship. Whichever a
+# visitor opened, they had no way to know whether it was the newest or even the
+# right one.
+#
+# So: this workflow is the only thing that publishes. It calls the two builders,
+# collects their artifacts, and cuts a single `v<version>` release titled
+# `Pounce <version>` containing exactly the files a person might want to
+# download. The version comes from version.json — the same number the phone app
+# carries — and CI already fails if any manifest has drifted from it.
+#
+# Two constraints on the publish step that are easy to break and expensive to
+# discover:
+#
+#   1. `make_latest: true` is load-bearing. Sparkle's SUFeedURL is baked into
+#      every shipped macOS build and resolves through releases/latest/download/
+#      appcast.xml. If the newest release isn't "latest", or doesn't carry
+#      appcast.xml, macOS auto-update stops for everyone already running the app
+#      and there is no way to fix it retroactively. This is also why the DMG and
+#      the appcast are published in ONE API call — the feed can never advertise
+#      a build that isn't up yet.
+#   2. Only `downloads/` and the macOS DMG/appcast are published. Electrobun's
+#      `stable-*` files (update manifests, BSDIFF patches, .tar.zst payloads)
+#      go to the rolling `bridge-latest` release instead. Uploading the whole
+#      artifact directory is what buried four installers under fourteen files
+#      nobody was meant to click.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build everything but do NOT publish a release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  # Single source of truth for the number, read once and handed to both builders
+  # so they cannot disagree about what they are building.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: |
+          V=$(node -p "require('./version.json').app")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Releasing Pounce $V"
+      # Cheap here, and it saves an hour of four-platform builds that could only
+      # end in a mismatch error.
+      - name: Every manifest agrees
+        run: node scripts/set-app-version.mjs --check
+
+  macos:
+    needs: version
+    uses: ./.github/workflows/build-macos-app.yml
+    secrets: inherit
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  windows-linux:
+    needs: version
+    uses: ./.github/workflows/build-windows-linux-app.yml
+    secrets: inherit
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  publish:
+    needs: [version, macos, windows-linux]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    env:
+      V: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # Fail before publishing rather than shipping a release that silently
+      # lacks a platform. A visitor who finds no installer for their OS assumes
+      # Pounce doesn't support it.
+      - name: Check every platform is present
+        run: |
+          cd artifacts
+          missing=0
+          for f in \
+            Pounce.dmg \
+            appcast.xml \
+            pounce-bridge.zip \
+            "downloads/Pounce-$V-Windows-x64.zip" \
+            "downloads/Pounce-$V-Linux-x64.deb" \
+            "downloads/Pounce-$V-Linux-arm64.deb" \
+            "downloads/Pounce-$V-Linux-x64.tar.gz" \
+            "downloads/Pounce-$V-Linux-arm64.tar.gz"
+          do
+            if [ -f "$f" ]; then
+              printf '  ✓ %-44s %s\n' "$f" "$(du -h "$f" | cut -f1)"
+            else
+              echo "::error::missing release asset $f"; missing=1
+            fi
+          done
+          [ "$missing" = 0 ]
+          # The Electrobun macOS build is update plumbing, not a download. If it
+          # ever reappears as an installer the releases page has two different
+          # files called Pounce.dmg again, and this is the only place that
+          # notices.
+          if [ -f downloads/Pounce.dmg ] || ls downloads/*macos* >/dev/null 2>&1; then
+            echo "::error::a macOS artifact leaked into downloads/ — the DMG must come from the native app only"
+            exit 1
+          fi
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.V }}
+          name: Pounce ${{ env.V }}
+          # See constraint 1 in the header before changing this.
+          make_latest: true
+          body: |
+            Pounce ${{ env.V }} — the same app on every platform.
+
+            **macOS** (14+, Apple Silicon) — `Pounce.dmg`
+            Signed and notarized. Open it, drag Pounce to Applications, launch. Updates itself from here on.
+
+            **Windows** (x64) — `Pounce-${{ env.V }}-Windows-x64.zip`
+            Extract it, then run `Pounce-Setup.exe` from the extracted folder — it needs the `.installer` folder beside it. Unsigned for now, so if SmartScreen appears choose *More info → Run anyway*. Updates itself.
+
+            **Ubuntu / Debian** (x64, arm64) — `Pounce-${{ env.V }}-Linux-<arch>.deb`
+            `sudo apt install ./Pounce-${{ env.V }}-Linux-<arch>.deb`, then launch Pounce from your applications menu. Installs to root-owned `/opt`, which the in-place updater can't write to — update by installing a newer `.deb`.
+
+            **Other Linux** (x64, arm64) — `Pounce-${{ env.V }}-Linux-<arch>.tar.gz`
+            Extract and run `./installer`. Installs under `~/.local/share`, adds a desktop entry, and self-updates.
+
+            **Any machine, including one you only reach over SSH** — no download needed:
+
+            ```
+            npx use-pounce configure
+            ```
+
+            **Headless / server** — `pounce-bridge.zip`
+            Unzip, then `install.sh` (Linux/macOS) or `install.ps1` (Windows). Needs Node.js on the host. No GUI; pair from the phone app.
+
+            The phone apps ship separately on the App Store and Google Play.
+
+            `appcast.xml` is the macOS update feed, not a download.
+          files: |
+            artifacts/Pounce.dmg
+            artifacts/appcast.xml
+            artifacts/pounce-bridge.zip
+            artifacts/downloads/*
+          fail_on_unmatched_files: true
+
+      # The rolling pointer Electrobun's updater actually reads. One release,
+      # re-uploaded every time, holding only auto-update artifacts — `--clobber`
+      # replaces the previous build's files in place. Electrobun builds its
+      # BSDIFF delta by fetching the *previous* .tar.zst from this same URL, so
+      # these must be replaced here rather than accumulated under version tags.
+      #
+      # Kept off "latest" deliberately: that belongs to the release above, whose
+      # appcast.xml Sparkle depends on finding there.
+      - name: Refresh the rolling update channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view bridge-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create bridge-latest \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Auto-update channel (not a download)" \
+              --notes "Internal update channel for the Windows/Linux app. Not a download — see the latest release for installers." \
+              --latest=false
+          fi
+          gh release upload bridge-latest \
+            --repo "$GITHUB_REPOSITORY" --clobber \
+            artifacts/stable-*
+          gh release edit bridge-latest --repo "$GITHUB_REPOSITORY" \
+            --notes "Internal update channel for the Windows/Linux app — currently $V. Not a download; see the latest release for installers."

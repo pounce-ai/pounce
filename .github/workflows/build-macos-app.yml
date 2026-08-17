@@ -1,10 +1,12 @@
-name: Release Desktop
+name: Build macOS app
 
-# Build, sign, notarize, and publish the Pounce desktop app (desktop/) from CI,
-# plus the headless cross-platform bridge bundle. Manual only — no accidental
-# releases. The version comes from desktop/macos/PounceDesktop-macOS/Info.plist,
-# so bump it (CFBundleShortVersionString + CFBundleVersion) in a PR first, merge,
-# then run this workflow from main.
+# Builds, signs and notarizes the macOS Pounce app (desktop/), plus the headless
+# cross-platform bridge bundle. It does NOT publish: release.yml calls this,
+# calls the Windows/Linux builder alongside it, and publishes everything as one
+# release. Nothing here decides a version or a tag — both arrive as inputs from
+# release.yml, which reads version.json.
+#
+# Runnable on its own from the Actions tab to check a build without releasing.
 #
 # Required repo secrets (the macOS signing/notarization ones already exist from
 # release-bridge.yml):
@@ -18,15 +20,21 @@ name: Release Desktop
 #                            desktop/macos/Pods/Sparkle/bin/generate_keys -x key.txt
 #                            and paste key.txt's contents as the secret.
 on:
+  workflow_call:
+    inputs:
+      version:
+        description: "App version, from version.json — decides the appcast's download URLs"
+        type: string
+        required: true
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: "Build + sign + notarize but do NOT publish a release"
-        type: boolean
-        default: false
+      version:
+        description: "App version to build as (defaults to version.json)"
+        type: string
+        required: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   # Cross-platform bridge bundle (repo-free; needs only Node on the target host).
@@ -197,14 +205,24 @@ jobs:
           fi
           echo "POUNCE_BRIDGE_BIN=$OUT" >> "$GITHUB_ENV"
 
-      - name: Read app version
+      # version.json is the source of truth for every Pounce app; the plist is a
+      # stamped copy (scripts/set-app-version.mjs). Disagreement here means the
+      # stamp was skipped, and the appcast would advertise a version the app
+      # doesn't claim — so stop before spending 20 minutes on a build.
+      - name: Read and verify app version
         id: ver
         run: |
           PLIST=desktop/macos/PounceDesktop-macOS/Info.plist
           V=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST")
           B=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST")
+          WANT="${{ inputs.version }}"
+          [ -n "$WANT" ] || WANT=$(node -p "require('./version.json').app")
+          if [ "$V" != "$WANT" ]; then
+            echo "::error::Info.plist says $V but the release is $WANT — run 'bun run version:set $WANT'"
+            exit 1
+          fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
-          echo "Desktop $V (build $B)"
+          echo "Pounce $V (macOS build $B)"
 
       - name: Import signing certificate
         env:
@@ -253,7 +271,9 @@ jobs:
           NOTARY_ISSUER: ${{ secrets.ELECTROBUN_APPLEAPIISSUER }}
           GENERATE_APPCAST: desktop/macos/Pods/Sparkle/bin/generate_appcast
           SPARKLE_KEY_FILE: /tmp/sparkle_ed_key.txt
-          DOWNLOAD_URL_PREFIX: https://github.com/${{ github.repository }}/releases/download/desktop-v${{ steps.ver.outputs.version }}/
+          # Must match the tag release.yml publishes, or Sparkle's appcast points
+          # at a URL that 404s and macOS auto-update silently stops.
+          DOWNLOAD_URL_PREFIX: https://github.com/${{ github.repository }}/releases/download/v${{ steps.ver.outputs.version }}/
         run: |
           mkdir -p dist
           bash scripts/desktop/release.sh
@@ -269,46 +289,3 @@ jobs:
             dist/Pounce.dmg
             dist/appcast.xml
           if-no-files-found: error
-
-  # Publish the release: DMG + bridge bundle + appcast, in one shot.
-  #
-  # appcast.xml ships as a release asset, and Sparkle polls it via the tag-less
-  # releases/latest/download/ URL (see SUFeedURL in Info.plist). That keeps the
-  # feed and the DMG its enclosure points at atomic — they are published by the
-  # same API call, so the feed can never advertise a build that isn't up yet.
-  release:
-    needs: [bridge, desktop]
-    if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: desktop-v${{ needs.desktop.outputs.version }}
-          name: Pounce Desktop ${{ needs.desktop.outputs.version }}
-          # Load-bearing: SUFeedURL resolves through releases/latest/download/,
-          # so a release that isn't "latest" is invisible to auto-update.
-          #
-          # This repo has a second updater — the Windows/Linux tray app in
-          # bridge-desktop/ — and only one release can be "latest". Sparkle wins
-          # because SUFeedURL is baked into every shipped desktop build and
-          # cannot be changed retroactively. The bridge therefore reads a
-          # rolling `bridge-latest` release instead (see release-bridge.yml) and
-          # publishes with make_latest: false. Do not "fix" that to true: it
-          # would 404 this appcast and silently kill desktop auto-update.
-          make_latest: true
-          body: |
-            Desktop app ${{ needs.desktop.outputs.version }}. Auto-updates via Sparkle; requires macOS 14+.
-
-            - **macOS:** `Pounce.dmg` — signed + notarized. Open, drag Pounce to Applications, launch.
-            - **Windows / Linux (headless bridge):** `pounce-bridge.zip` — unzip, then `install.sh` (Linux/macOS) or `install.ps1` (Windows). Needs Node.js on the host; pair from the mobile app on the same Wi‑Fi.
-          files: |
-            artifacts/Pounce.dmg
-            artifacts/pounce-bridge.zip
-            artifacts/appcast.xml
-          fail_on_unmatched_files: true

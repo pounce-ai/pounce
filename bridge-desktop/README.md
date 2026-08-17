@@ -34,18 +34,34 @@ packaging/build-deb.sh x64   # Linux only: .deb from the stable build
 
 ## Release
 
-Bump the version in **both** `package.json` and `electrobun.config.ts`, merge,
-then push a `bridge-v<version>` tag. CI builds all four targets and publishes a
-release tagged `v<version>`; every platform must succeed or nothing ships (a
-release missing one platform's `update.json` strands that platform's updaters).
+This app doesn't release on its own — it ships as part of Pounce. Set the
+version with `bun run version:set <version>` at the repo root (it stamps
+`package.json` and `electrobun.config.ts` from `version.json`), merge, then run
+**Release Pounce** from the Actions tab. That builds this app alongside the
+macOS one and publishes both under a single `v<version>` release. Every platform
+must succeed or nothing ships — a release missing one platform's `update.json`
+strands that platform's updaters.
 
-Artifacts: `Pounce.dmg` (signed + notarized), `Pounce-Setup-Windows.exe`,
-`Pounce-Linux-<arch>.deb`, `Pounce-Setup-Linux-<arch>.tar.gz`.
+User-facing artifacts from here: `Pounce-<version>-Windows-x64.zip`,
+`Pounce-<version>-Linux-<arch>.deb`, `Pounce-<version>-Linux-<arch>.tar.gz`.
 
-To rehearse without publishing, run **Release Bridge** from the Actions tab —
-`dry_run` defaults to on, so it builds every platform and uploads the artifacts
-for inspection while skipping the release job entirely. Merging to `main` never
-publishes anything; only the tag or a `dry_run: false` manual run does.
+Two things this build produces that are **not** downloads:
+
+- The macOS `.dmg`. macOS ships the native app from `desktop/`; this one exists
+  only so the auto-update channel has a macOS `update.json` for installs that
+  predate it. It was briefly published as a second `Pounce.dmg` beside the real
+  one, which nobody could tell apart — `release.yml` now fails the build if a
+  macOS artifact reaches the downloads directory.
+- The `stable-*` files. Those are update manifests and BSDIFF payloads, and go
+  to the rolling `bridge-latest` release.
+
+The Windows download is the **zip**, not the `Pounce-Setup.exe` inside it: that
+exe is a ~400KB launcher and the app lives in the `.installer` folder beside it,
+so on its own it installs nothing.
+
+To rehearse without publishing, run **Build Windows/Linux app** from the Actions
+tab — it builds every platform and uploads the artifacts for inspection, and has
+no publish step at all. Merging to `main` never publishes anything.
 
 ### Two updaters, one "latest"
 
