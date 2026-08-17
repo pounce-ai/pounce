@@ -22,79 +22,37 @@
  * activity-index.mjs is untouched, because blocks only ever look at the last
  * few days.
  */
-import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
-
-/** Claude Code's transcript root: ~/.claude/projects/<slug>/<session>.jsonl. */
-const CLAUDE_ROOT = path.join(os.homedir(), ".claude", "projects");
+import {
+  HOUR_MS,
+  SYNTHETIC_MODEL,
+  readTailLines,
+  recentTranscripts,
+  tailFor,
+} from "./claude-transcripts.mjs";
 
 /** Claude's session window. Not a wall-clock boundary: it opens at the first
  *  message and runs from there, which is why blocks are derived from data
  *  rather than bucketed by hour. */
 export const BLOCK_HOURS = 5;
-const HOUR_MS = 3_600_000;
 
-/** Claude Code's marker for a turn it wrote itself — no API call, no usage. */
-const SYNTHETIC_MODEL = "<synthetic>";
-
-/**
- * How much of each transcript's END to read.
- *
- * Transcripts are append-only, so recent turns are always at the tail — but
- * they run past 100MB, and reading whole files made a 30-day scan cost ~950ms.
- * 24MB is far more than a five-hour window can produce while still covering
- * weeks of ordinary use; anything older isn't what this measures.
- * (`quota.mjs` reads Codex rollouts the same way, for the same reason.)
- */
-const TAIL_BYTES = 24 * 1024 * 1024;
-
-/** Read `{ts, tokens}` samples out of a Claude transcript's tail.
- *  Only lines at or after `sinceMs` matter, but JSONL has no index, so the file
- *  is streamed — cheaply, since callers pre-filter by mtime. */
-async function claudeSamples(file, sinceMs, out) {
-  let start = 0;
-  try {
-    const { size } = statSync(file);
-    // Start mid-file on a big transcript. The first line read is then usually a
-    // fragment, which fails JSON.parse and is skipped — the cost of not seeking
-    // to a line boundary we have no index for.
-    if (size > TAIL_BYTES) start = size - TAIL_BYTES;
-  } catch {
-    return;
-  }
-  let buf = null;
-  for await (const chunk of createReadStream(file, { start })) {
-    buf = buf && buf.length ? Buffer.concat([buf, chunk]) : chunk;
-    let idx;
-    while ((idx = buf.indexOf(0x0a)) !== -1) {
-      const line = buf.subarray(0, idx).toString("utf8");
-      buf = buf.subarray(idx + 1);
-      if (!line.trim()) continue;
-      // Cheap reject before JSON.parse — most lines are user turns and tool
-      // results, and parsing every one of a 40MB transcript is the whole cost.
-      if (!line.includes('"assistant"') || !line.includes('"usage"')) continue;
-      let o;
-      try {
-        o = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (o.type !== "assistant") continue;
-      const u = o.message?.usage;
-      if (!u || o.message.model === SYNTHETIC_MODEL) continue;
-      const ms = Date.parse(o.timestamp ?? "");
-      if (!Number.isFinite(ms) || ms < sinceMs) continue;
-      out.push({
-        ms,
-        tokens:
-          (u.input_tokens || 0) +
-          (u.output_tokens || 0) +
-          (u.cache_read_input_tokens || 0) +
-          (u.cache_creation_input_tokens || 0),
-      });
-    }
-  }
+/** Collect `{ms, tokens}` samples from one transcript's tail. The reading is
+ *  shared (see claude-transcripts.mjs); only this predicate is ours. */
+async function claudeSamples(file, size, tailBytes, sinceMs, out) {
+  await readTailLines(file, size, tailBytes, (o) => {
+    if (o.type !== "assistant") return;
+    const u = o.message?.usage;
+    if (!u || o.message.model === SYNTHETIC_MODEL) return;
+    const ms = Date.parse(o.timestamp ?? "");
+    if (!Number.isFinite(ms) || ms < sinceMs) return;
+    out.push({
+      ms,
+      tokens:
+        (u.input_tokens || 0) +
+        (u.output_tokens || 0) +
+        (u.cache_read_input_tokens || 0) +
+        (u.cache_creation_input_tokens || 0),
+    });
+  });
 }
 
 /**
@@ -120,38 +78,6 @@ export function foldBlocks(samples, blockMs = BLOCK_HOURS * HOUR_MS) {
 
 const iso = (ms) => new Date(ms).toISOString();
 
-/** Transcript files touched since `sinceMs`. A file untouched since the window
- *  opened cannot hold a sample inside it, so it's never read. */
-function recentTranscripts(sinceMs) {
-  const out = [];
-  let projects;
-  try {
-    projects = readdirSync(CLAUDE_ROOT, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const p of projects) {
-    if (!p.isDirectory()) continue;
-    const dir = path.join(CLAUDE_ROOT, p.name);
-    let files;
-    try {
-      files = readdirSync(dir);
-    } catch {
-      continue;
-    }
-    for (const f of files) {
-      if (!f.endsWith(".jsonl")) continue;
-      const full = path.join(dir, f);
-      try {
-        if (statSync(full).mtimeMs >= sinceMs) out.push(full);
-      } catch {
-        // Rotated away mid-scan — skip.
-      }
-    }
-  }
-  return out;
-}
-
 /**
  * Current window, burn rate and the peak on record for one agent.
  *
@@ -168,13 +94,16 @@ export async function readBlocks({ agent = "claude", days = 7, now = Date.now() 
   // client payload and drops `filePath` (a local path is nobody's business over
   // the wire), and this way blocks don't wait on the thread cache either.
   const files = recentTranscripts(sinceMs);
+  // Sized to the range asked for. A flat 24MB left the default 7-day scan
+  // under-reading its six largest transcripts (the largest 93MB), which made
+  // `peak` and the weekly total quietly too low.
+  const tailBytes = tailFor(days * 24);
 
   const samples = [];
   await Promise.all(
-    files.map(async (f) => {
-      if (!existsSync(f)) return;
-      await claudeSamples(f, sinceMs, samples).catch(() => {});
-    }),
+    files.map(({ file, size }) =>
+      claudeSamples(file, size, tailBytes, sinceMs, samples).catch(() => {}),
+    ),
   );
   if (!samples.length) return null;
 

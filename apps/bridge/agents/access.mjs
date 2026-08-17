@@ -228,8 +228,14 @@ const READ_ROUTES = new Set([
  * /v1/activity is here rather than filtered because it returns a daily SERIES —
  * totals already summed across every thread on the host. There is no per-thread
  * row left to drop, so "filtering" it would be a fiction.
+ *
+ * /v1/attribution is the same shape of answer one level down: it names the
+ * tools and shell commands that filled a window across every thread on the
+ * machine. Narrowing it to a grant would mean re-running the scan per thread,
+ * and leaving it ungated would let a grant for one repo enumerate the work done
+ * in all the others.
  */
-const FULL_ONLY_ROUTES = new Set(["/v1/quota", "/v1/activity", "/v1/disk"]);
+const FULL_ONLY_ROUTES = new Set(["/v1/quota", "/v1/activity", "/v1/disk", "/v1/attribution"]);
 
 export function grantAllowsRoute(grant, method, pathname) {
   // Read-only is enforced by the verb as well as the path: several allowed

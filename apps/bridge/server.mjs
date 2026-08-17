@@ -75,6 +75,8 @@ import { createHistorySearch } from "./agents/search.mjs";
 import { createActivityIndex } from "./agents/activity-index.mjs";
 import { readQuota } from "./agents/quota.mjs";
 import { readBlocks } from "./agents/blocks.mjs";
+import { readAttribution } from "./agents/attribution.mjs";
+import { chooseSavePath, defaultSaveDir } from "./agents/save-dialog.mjs";
 import { dailyCost, resetCostCache } from "./agents/admin-cost.mjs";
 import {
   dailyCost as estimatedDailyCost,
@@ -219,6 +221,40 @@ function gitList(cwd, args) {
     p.stdout.on("data", (d) => (buf += d));
     p.on("close", () => resolve(buf ? buf.split("\n").filter(Boolean) : []));
     p.on("error", () => resolve([]));
+  });
+}
+
+/**
+ * Resolve an attribution range from whatever the caller asked for.
+ *
+ * Shared by the GET and the export POST because the two must never disagree
+ * about what "this window" means — the 140M-token discrepancy this feature was
+ * fixed for was exactly that kind of disagreement, and two copies of the clamp
+ * is two places for it to come back.
+ *
+ * `window=block` is the agent's OWN rolling window: it opens at your first
+ * message rather than N hours ago. A year is the ceiling, and asking for one
+ * does not manufacture one — Claude prunes its transcripts, so a long range
+ * returns whatever is still on disk and reports `earliestAt` so the page can
+ * name the span it actually found.
+ */
+function attributionWindow(window, hours) {
+  const asBlock = window === "block";
+  const h = Math.min(24 * 365, Math.max(1, Number(hours) || 5));
+  return { asBlock, hours: h, key: `attribution:${asBlock ? "block" : h}` };
+}
+
+/** The report for a resolved range, memoised — the scan reads up to 192MB per
+ *  transcript, so it must not run twice for one question. */
+function attributionReport({ asBlock, hours, key }) {
+  return cached(key, 60_000, async () => {
+    let since = null;
+    if (asBlock) {
+      const blocks = await readBlocks().catch(() => null);
+      const started = Date.parse(blocks?.current?.startedAt ?? "");
+      if (Number.isFinite(started)) since = started;
+    }
+    return { attribution: await readAttribution({ windowHours: hours, since }).catch(() => null) };
   });
 }
 
@@ -2890,6 +2926,57 @@ const server = http.createServer(async (req, res) => {
           return { quota };
         }),
       );
+    }
+    // What FILLED a window — the breakdown behind the `blocks` figure above.
+    // Claude only: nothing else records per-message usage in its transcripts.
+    //
+    // The finished tree is returned, never the transcript it was read from: a
+    // phone asking this over the tunnel must not receive file contents or local
+    // paths. Cached separately from /v1/quota because the scan is a much
+    // heavier parse (every content block, not just `usage`) and the quota card
+    // refreshes far more often than anyone opens the report.
+    if (url.pathname === "/v1/attribution") {
+      const want = attributionWindow(url.searchParams.get("window"), url.searchParams.get("hours"));
+      if (url.searchParams.get("fresh") === "1") cache.delete(want.key);
+      return send(res, 200, await attributionReport(want));
+    }
+    // Write the report to a file on THIS machine and say where it landed.
+    //
+    // Saved host-side rather than handed back as a download because that is
+    // where it is useful: the file is about this machine's usage, and anything
+    // that might analyse it — an agent, a script, a spreadsheet — runs here.
+    // It also means one code path for the phone and the desktop, instead of a
+    // share sheet on one and nothing on the other.
+    if (url.pathname === "/v1/attribution/export" && req.method === "POST") {
+      const body = await readBody(req);
+      const want = attributionWindow(body.window, body.hours);
+      // Through the SAME cache the page just filled: "open the report, press
+      // Download" would otherwise re-walk every transcript seconds later.
+      const { attribution: report } = await attributionReport(want);
+      if (!report) return send(res, 404, { error: "nothing in range" });
+      const range = want.asBlock ? "window" : `${want.hours}h`;
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const name = `pounce-attribution-${range}-${stamp}.json`;
+      const { downloads, fallback } = defaultSaveDir();
+      const dir = existsSync(downloads) ? downloads : fallback;
+
+      let file = path.join(dir, name);
+      if (body.choose) {
+        // Let the person pick, using the OS's own panel. It opens on THIS
+        // machine, which is the one the report is about and the one the file
+        // has to land on to be useful.
+        const chosen = await chooseSavePath(name, dir);
+        if (chosen.canceled) return send(res, 200, { canceled: true });
+        if (chosen.error) return send(res, 500, { error: chosen.error });
+        file = chosen.path;
+      }
+      try {
+        mkdirSync(path.dirname(file), { recursive: true });
+        writeFileSync(file, JSON.stringify(report, null, 2));
+      } catch (e) {
+        return send(res, 500, { error: String(e?.message || e) });
+      }
+      return send(res, 200, { path: file });
     }
     // What the agents have left on disk, worktree by worktree. Sizing a tree is
     // the expensive part and the answer barely moves, so this is cached hard;

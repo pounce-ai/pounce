@@ -1622,6 +1622,132 @@ export async function fetchQuota(): Promise<AgentQuota[]> {
     .sort((a, b) => (b.windows[0]?.usedPercent ?? 0) - (a.windows[0]?.usedPercent ?? 0));
 }
 
+/**
+ * One node of the attribution tree, at any depth.
+ *
+ * The tree is deliberately uniform so the chart can drill without special cases:
+ * a line item, a tool inside it, and that tool's own detail are all this shape.
+ * Today it runs three deep — `Shell commands → git → status`,
+ * `Tools · content read in → Read → *.ts` — and a node with nothing under it
+ * simply carries an empty `children`.
+ *
+ * `folded` counts the rows a labelled "other" stands in for; such a node is
+ * always a leaf, because its members came from different parents and there is
+ * no honest breakdown to offer under the merge.
+ */
+export interface AttributionNode {
+  key: string;
+  tokens: number;
+  perRequest: number;
+  children: AttributionNode[];
+  folded?: number;
+}
+
+/**
+ * What filled a window — the breakdown behind the `blocks` figure on the Claude
+ * quota card.
+ *
+ * Every total here is exact; only the SPLIT across line items is apportioned,
+ * because Claude publishes no per-segment token counts. The report must say so,
+ * which is what `preambleFittedShare` and `unattributed` are for: the first is
+ * how much of the preamble was solved for rather than assumed, the second is
+ * the rounding the breakdown failed to place.
+ */
+export interface Attribution {
+  agent: string;
+  windowHours: number;
+  /** The instant the requested range starts at. Not the same as what was
+   *  FOUND — see `earliestAt`. */
+  windowStartedAt: string;
+  /** The oldest turn actually billed to this report, or null when the range is
+   *  empty. Asking for a year does not create a year: Claude prunes its own
+   *  transcripts, so this is the span the page is entitled to claim. */
+  earliestAt: string | null;
+  /** True when the range is the agent's own rolling block (what the quota card
+   *  reports) rather than a plain trailing window. */
+  windowIsBlock: boolean;
+  /** What the scan actually read. `truncated > 0` means some transcripts were
+   *  too large to read in full for this range, so their oldest turns are not in
+   *  the totals — measured rather than assumed, so the page can say so. */
+  coverage: { files: number; truncated: number; unreadBytes: number };
+  scannedSessions: number;
+  requests: number;
+  items: AttributionNode[];
+  total: number;
+  billedInput: number;
+  billedOutput: number;
+  unattributed: number;
+  cacheRead: number;
+  cacheWrite1h: number;
+  cacheWrite5m: number;
+  /** 1 when every contributing session's preamble was measured; below 1 when
+   *  some fell back to a fixed ratio. The UI marks anything under 1 estimated. */
+  preambleFittedShare: number;
+  preamblePerRequest: number;
+  /** How many times the model's own output was re-billed as input. Null when
+   *  nothing was carried. */
+  carryMultiplier: number | null;
+}
+
+/**
+ * Attribution for ONE host. Deliberately not merged across devices: each
+ * machine has its own transcripts, its own preamble and its own window, and
+ * summing them would repeat the double-count trap that per-host cost totals
+ * already have to avoid.
+ */
+export async function fetchAttribution(
+  hostId: string,
+  /** `"block"` asks for the agent's OWN rolling window — the one the quota card
+   *  reports, which opens at your first message rather than N hours ago. A
+   *  number is a plain trailing window in hours. */
+  window: "block" | number = "block",
+): Promise<Attribution | null> {
+  const cfg = (await hostsToQuery()).find((d) => d.id === hostId);
+  if (!cfg) return null;
+  const q = window === "block" ? "window=block" : `hours=${window}`;
+  const { attribution } = await get<{ attribution: Attribution | null }>(
+    cfg,
+    `/v1/attribution?${q}`,
+    30_000,
+  );
+  return attribution ?? null;
+}
+
+/**
+ * Write the attribution report to a file on the machine it describes, and
+ * return where it landed.
+ *
+ * Host-side rather than a download because that is where the file is useful —
+ * anything that might read it (an agent, a script) runs there — and because it
+ * gives the phone and the desktop one behaviour instead of a share sheet on one
+ * and nothing on the other.
+ */
+export async function exportAttribution(
+  hostId: string,
+  window: "block" | number = "block",
+): Promise<string | null> {
+  const cfg = await deviceForHost(hostId);
+  if (!cfg) throw new Error("That machine isn't paired any more.");
+  const res = await fetch(`${await bridgeBase(cfg)}/v1/attribution/export`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      ...(window === "block" ? { window: "block" } : { hours: window }),
+      // Put up the OS save panel rather than picking a folder for them. It
+      // opens on the machine the report is about, which is where the file has
+      // to land anyway. The request stays open while the panel does.
+      choose: true,
+    }),
+    // A save panel waits on a person, so this one request must not be raced by
+    // the usual timeouts.
+    signal: AbortSignal.timeout(10 * 60_000),
+  });
+  if (!res.ok) throw new Error(`bridge /v1/attribution/export -> ${res.status}`);
+  const body = (await res.json()) as { path?: string; canceled?: boolean };
+  // Dismissing the panel is an ordinary outcome, not a failure.
+  return body.canceled ? null : (body.path ?? null);
+}
+
 /** One selectable model for an agent, from the daemon's model/list. */
 export interface ModelInfo {
   id: string;
