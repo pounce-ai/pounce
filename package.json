@@ -49,7 +49,9 @@
     "publish:ios": "bash scripts/publish-testflight.sh ios",
     "test": "bun run --filter '*' test",
     "testflight": "bash scripts/publish-testflight.sh",
-    "typecheck": "bun run --filter '*' typecheck"
+    "typecheck": "bun run --filter '*' typecheck",
+    "version:check": "node scripts/set-app-version.mjs --check",
+    "version:set": "node scripts/set-app-version.mjs"
   },
   "workspaces": [
     "apps/*",

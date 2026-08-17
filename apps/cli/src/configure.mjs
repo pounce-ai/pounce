@@ -172,12 +172,21 @@ export function desktopOption(det) {
     if (det.arch !== "arm64")
       return { available: false, why: "the Mac app needs Apple Silicon — this is an Intel Mac" };
     if (det.macTooOld) return { available: false, why: "the Mac app needs macOS 14 or later" };
-    return { available: true, kind: "dmg", assetName: "Pounce.dmg", tag: "desktop" };
+    return { available: true, kind: "dmg", asset: /^Pounce\.dmg$/, macOnly: true };
   }
   if (det.platform === "win32") {
     if (det.arch !== "x64")
       return { available: false, why: `no Windows build for ${det.arch} yet` };
-    return { available: true, kind: "exe", assetName: "Pounce-Setup-Windows.exe", tag: "app" };
+    // The zip, never the bare .exe. See installDesktop's "zip" branch: the
+    // published `Pounce-Setup-Windows.exe` is a launcher with no payload, and
+    // running it installs nothing. `stable-win-x64-Pounce-Setup.zip` is the
+    // same bytes under the auto-update channel's naming, and is the only
+    // complete Windows download on releases published before that was fixed.
+    return {
+      available: true,
+      kind: "zip",
+      asset: /^(?:Pounce-(?:Setup-Windows|[\d.]+-Windows-x64)|stable-win-x64-Pounce-Setup)\.zip$/,
+    };
   }
   if (det.platform === "linux") {
     const slug = { x64: "x64", arm64: "arm64" }[det.arch];
@@ -185,12 +194,15 @@ export function desktopOption(det) {
     if (det.headless)
       return { available: false, why: "there's no desktop session on this machine to show it on" };
     return has("dpkg")
-      ? { available: true, kind: "deb", assetName: `Pounce-Linux-${slug}.deb`, tag: "app" }
+      ? {
+          available: true,
+          kind: "deb",
+          asset: new RegExp(`^Pounce-(?:[\\d.]+-)?Linux-${slug}\\.deb$`),
+        }
       : {
           available: true,
           kind: "tar",
-          assetName: `Pounce-Setup-Linux-${slug}.tar.gz`,
-          tag: "app",
+          asset: new RegExp(`^Pounce-(?:Setup-Linux|[\\d.]+-Linux)-${slug}\\.tar\\.gz$`),
         };
   }
   return { available: false, why: `no desktop build for ${det.platform}` };
@@ -199,19 +211,32 @@ export function desktopOption(det) {
 // --- release downloads --------------------------------------------------------
 
 /**
- * Newest release carrying this asset. Two tag families are in play and they are
- * not interchangeable: the Mac app ships from `desktop-v*`, the Windows/Linux
- * app from the plain `v*` releases.
+ * Newest release carrying this asset.
+ *
+ * Releases are unified now: one `v<version>` tag per version holding every
+ * platform's installer. Older releases split across two tag families — the Mac
+ * app on `desktop-v*`, Windows and Linux on `v*` — and are still matched so a
+ * fresh CLI keeps working against them.
+ *
+ * macOS needs one extra guard. The pre-unification `v*` releases also carried a
+ * file called `Pounce.dmg`, but it was the Electrobun build that exists only to
+ * feed the auto-updater — not the app. Downloading it would install the wrong
+ * Pounce. `appcast.xml` is the discriminator: only releases carrying the real
+ * Mac app publish the Sparkle feed beside it, so requiring it is what keeps a
+ * legacy `v1.2.0` from answering a Mac request.
  */
-export async function resolveAsset({ assetName, tag }, version) {
+export async function resolveAsset({ asset, macOnly }, version) {
   const releases = await fetchJson(RELEASES_API, 15_000, version);
-  const wanted = tag === "desktop" ? (t) => t.startsWith("desktop-v") : (t) => /^v\d/.test(t);
   for (const r of releases) {
-    if (r.draft || r.prerelease || !wanted(r.tag_name || "")) continue;
-    const asset = (r.assets || []).find((a) => a.name === assetName);
-    if (asset) return { url: asset.browser_download_url, name: asset.name, tag: r.tag_name };
+    const tag = r.tag_name || "";
+    if (r.draft || r.prerelease) continue;
+    if (!/^v\d/.test(tag) && !tag.startsWith("desktop-v")) continue;
+    const assets = r.assets || [];
+    if (macOnly && !assets.some((a) => a.name === "appcast.xml")) continue;
+    const found = assets.find((a) => asset.test(a.name));
+    if (found) return { url: found.browser_download_url, name: found.name, tag };
   }
-  throw new Error(`no ${assetName} on any published release yet`);
+  throw new Error(`no download matching ${asset} on any published release yet`);
 }
 
 async function download(url, dest) {
@@ -283,11 +308,25 @@ async function installDesktop(det, opt, { version, confirm }) {
     return { launched: true, at: r.at };
   }
 
-  if (opt.kind === "exe") {
+  if (opt.kind === "zip") {
+    // Windows ships a zip, and the .exe inside it CANNOT be run on its own:
+    // it is a ~400KB launcher that reads the app payload from the `.installer`
+    // folder beside it. Extract the whole thing to a directory that outlives
+    // this process — the installer keeps running after we hand off — and start
+    // the launcher from in there.
+    const dir = path.join(DOWNLOADS, path.basename(file).replace(/\.zip$/i, ""));
+    rmSync(dir, { recursive: true, force: true });
+    run("powershell", [
+      "-NoProfile",
+      "-Command",
+      `Expand-Archive -Force -Path '${file}' -DestinationPath '${dir}'`,
+    ]);
+    const exe = path.join(dir, "Pounce-Setup.exe");
+    if (!existsSync(exe)) throw new Error(`no Pounce-Setup.exe inside ${path.basename(file)}`);
     // The installer owns the rest of the flow (and its own UI), so hand off and
     // get out of the way rather than trying to narrate it.
-    spawn("cmd", ["/c", "start", "", file], { detached: true, stdio: "ignore" }).unref();
-    return { launched: false, at: file, note: "the Windows installer is opening — follow it" };
+    spawn("cmd", ["/c", "start", "", exe], { cwd: dir, detached: true, stdio: "ignore" }).unref();
+    return { launched: false, at: exe, note: "the Windows installer is opening — follow it" };
   }
 
   if (opt.kind === "deb") {

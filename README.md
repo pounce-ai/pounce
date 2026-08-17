@@ -38,15 +38,25 @@ syncs — then keeps a direct identity to reach your machine afterward.
 
 ## Get the app
 
-Grab the Bridge for your computer from [**Releases**](https://github.com/pounce-ai/pounce/releases/latest),
-run it, and scan the QR:
+Every platform ships from one release, under one version. Grab yours from
+[**Releases**](https://github.com/pounce-ai/pounce/releases/latest) — or from
+[use-pounce.com](https://use-pounce.com/#get), which links each file directly — run it, and scan
+the QR:
 
-- **macOS (Apple Silicon):** `Pounce.dmg` (signed + notarized) — open, drag to Applications, launch.
-- **Windows (x64):** `Pounce-Setup-Windows.zip` — extract, run `Pounce-Setup.exe`. Unsigned for
-  now: if SmartScreen appears, choose _More info → Run anyway_.
-- **Linux (x64 / arm64):** `Pounce-Setup-Linux-<arch>.tar.gz` — extract, run `./installer`
-  (installs to `~/.local/share` and adds a desktop entry).
-- **iOS / Android:** in private beta — see the [website](https://use-pounce.com/).
+- **macOS (Apple Silicon, 14+):** `Pounce.dmg` (signed + notarized) — open, drag to Applications,
+  launch.
+- **Windows (x64):** `Pounce-<version>-Windows-x64.zip` — extract, then run `Pounce-Setup.exe`
+  from the extracted folder; it needs the `.installer` folder beside it. Unsigned for now: if
+  SmartScreen appears, choose _More info → Run anyway_.
+- **Ubuntu / Debian (x64 / arm64):** `Pounce-<version>-Linux-<arch>.deb` —
+  `sudo apt install ./Pounce-<version>-Linux-<arch>.deb`.
+- **Other Linux (x64 / arm64):** `Pounce-<version>-Linux-<arch>.tar.gz` — extract, run
+  `./installer` (installs to `~/.local/share` and adds a desktop entry).
+- **iPhone / Android:** on the [App Store](https://apps.apple.com/app/id6779601425) and
+  [Google Play](https://play.google.com/store/apps/details?id=com.pounce.app).
+
+Or skip the download entirely — `npx use-pounce configure` sets up any machine, including one you
+only reach over SSH.
 
 ## Getting started (dev)
 
@@ -76,10 +86,16 @@ Pounce-specific recipe, including how to run a before/after that actually holds 
 
 ### Releasing the Bridge
 
-Tag `bridge-v*` (e.g. `git tag bridge-v1.0.8 && git push --tags`) and CI builds all
-platforms — macOS (signed + notarized), Windows, Linux x64/arm64 — and attaches every
-installer + auto-update artifact to one GitHub Release — see
-[`.github/workflows/release-bridge.yml`](.github/workflows/release-bridge.yml).
+Set the version once with `bun run version:set <version>` — it stamps
+[`version.json`](version.json) into the phone app, the macOS app and the Windows/Linux app, and
+CI fails if any of them drift. Merge that, then run the **Release Pounce** workflow
+([`.github/workflows/release.yml`](.github/workflows/release.yml)) from the Actions tab.
+
+It builds every platform — macOS (signed + notarized), Windows, Linux x64/arm64 — and publishes
+one GitHub Release tagged `v<version>` holding every installer. Auto-update artifacts go to the
+separate rolling `bridge-latest` release, so the download page stays readable.
+
+The tunnel and the npm CLI version independently and release on their own tags.
 
 For a macOS-only release from your machine:
 

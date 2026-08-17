@@ -35,6 +35,13 @@ jobs:
       - name: File naming
         run: bun run check:naming
 
+      # The phone app, the macOS app and the Windows/Linux app each keep the
+      # version in their own manifest. They drifted to 1.5.0 / 1.0.46 / 1.2.0
+      # and the releases page became unreadable as a result, so agreement with
+      # version.json is now enforced rather than remembered.
+      - name: App version agreement
+        run: bun run version:check
+
       # Incremental formatting: enforce oxfmt only on NEWLY ADDED files
       # (--diff-filter=A). Editing a pre-existing (unformatted) file must not
       # force a wholesale reformat of it — that buries real changes in mechanical
