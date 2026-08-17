@@ -66,6 +66,7 @@ import AddMachineScreen from "../screens/AddMachine";
 import AccessScreen from "../screens/Access";
 import SpaceScreen from "@pounce/app/screens/Space";
 import MetricScreen from "@pounce/app/screens/Metric";
+import AttributionScreen from "@pounce/app/screens/Attribution";
 import { FilterSheetContent } from "@pounce/app/components/FilterSheet";
 import {
   SETTINGS_ROUTES,
@@ -125,6 +126,7 @@ function FiltersModal() {
 const PANE_SCREENS: Record<string, ComponentType> = {
   "/space": SpaceScreen,
   "/metric": MetricScreen,
+  "/attribution": AttributionScreen,
   "/disk": DiskScreen,
   "/skill": SkillScreen,
   "/settings": SettingsScreen,

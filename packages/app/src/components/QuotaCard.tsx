@@ -1,5 +1,7 @@
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { AgentLogo, IS_DESKTOP } from "../ui";
 import { agentLabel } from "../ui/tokens";
 import { fmtTokens } from "../ui/format";
@@ -60,6 +62,7 @@ export function QuotaCard({
   agents?: readonly string[];
 }) {
   const { theme } = useUnistyles();
+  const router = useRouter();
   const now = Date.now();
   const byAgent = new Map(quotas.map((q) => [q.agent, q]));
   const order = agents?.length ? agents : quotas.map((q) => q.agent);
@@ -127,10 +130,27 @@ export function QuotaCard({
                 more than a fabricated gauge. Below the reported bars, because
                 it is the footnote to them and not the headline. */}
               {q.blocks?.current ? (
-                <View style={s.blockBox}>
+                // The block box is the TAP TARGET, not the whole card. It is
+                // the only part of the card the breakdown explains, and only
+                // Claude has one — so the other agents' cards read as
+                // deliberately static rather than as identical cards that
+                // mysteriously don't respond.
+                <Pressable
+                  onPress={() =>
+                    // `key`, not `hostId`: that is the param desktop's
+                    // `screenKey` remounts a pane on, so opening machine B's
+                    // report replaces machine A's rather than inheriting its
+                    // window selection and zoom.
+                    router.push({ pathname: "/attribution", params: { key: q.hostId } })
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel={`What filled this ${q.blocks.windowHours} hour window`}
+                  style={({ pressed }) => [s.blockBox, pressed && s.pressed]}
+                >
                   <View style={s.blockHead}>
                     <Text style={s.blockLabel}>This {q.blocks.windowHours}h window</Text>
                     <Text style={s.blockValue}>{fmtTokens(q.blocks.current.tokens)}</Text>
+                    <Ionicons name="chevron-forward" size={12} color={theme.colors.fgFaint} />
                   </View>
                   <Text style={s.blockSub}>
                     {fmtTokens(q.blocks.current.tokensPerMin)}/min
@@ -141,7 +161,7 @@ export function QuotaCard({
                   <Text style={s.blockSub}>
                     busiest on record {fmtTokens(q.blocks.peak.tokens)}
                   </Text>
-                </View>
+                </Pressable>
               ) : null}
               {/* Agents that name a plan but publish no meter say so, rather than
                 being left out — an absent row reads as "unused", which is a
@@ -208,6 +228,7 @@ const s = StyleSheet.create((theme) => ({
   stale: { marginLeft: "auto", fontSize: 10, color: theme.colors.fgFaint },
   note: { fontSize: 11.5, color: theme.colors.fgFaint },
   blockBox: { gap: 2 },
+  pressed: { opacity: 0.7 },
   blockHead: { flexDirection: "row", alignItems: "baseline", gap: 6 },
   blockLabel: { fontSize: 12, color: theme.colors.fgMuted },
   blockValue: {

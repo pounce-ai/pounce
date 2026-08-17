@@ -397,6 +397,18 @@ describe("route allowlist", () => {
     }
   });
 
+  it("keeps machine-wide spend aggregates behind a full grant", () => {
+    // A grant for one repo is a statement about some threads, not a licence to
+    // read what every other project on the machine has been doing. Attribution
+    // names the tools and shell commands behind a whole window, so a scoped
+    // grant must not reach it.
+    for (const p of ["/v1/quota", "/v1/activity", "/v1/disk", "/v1/attribution"]) {
+      expect(grantAllowsRoute(full, "GET", p)).toBe(true);
+      expect(grantAllowsRoute(read, "GET", p)).toBe(false);
+      expect(grantAllowsRoute(preview, "GET", p)).toBe(false);
+    }
+  });
+
   it("lets a connected machine browse the catalog to ask for more", () => {
     // A peer holding a live read grant can list names and dates, so "ask for
     // more space" is a picker rather than a second stranger handshake. Scoped
