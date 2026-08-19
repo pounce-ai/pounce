@@ -184,6 +184,11 @@ export function toDevice(payload, { hostName, host }) {
       token: payload.token,
       nodeId: payload.tunnel.nodeId,
       relay: payload.tunnel.relay ?? null,
+      // The tunnel's secret is no longer the bearer token, and this machine is
+      // reached over its tunnel by definition — so carry it across. Falls back
+      // to the token for a remote bridge that predates the split, where the
+      // two are still the same value.
+      tunnelToken: payload.tunnelToken ?? payload.token,
       hostName: hostName || host,
     },
   };

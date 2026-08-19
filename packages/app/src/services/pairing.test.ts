@@ -22,6 +22,38 @@ describe("parsePairing", () => {
     });
   });
 
+  it("parses the one-time-code deep link (what bridges emit now)", () => {
+    const link =
+      "pounce://connect?url=http%3A%2F%2F192.168.1.6%3A8099&code=6e90cfc2b457f32fc4bcd469593dde4d" +
+      "&node=ab12cd34ef&host=dirgha-mbp";
+    expect(parsePairing(link)).toEqual({
+      url: "http://192.168.1.6:8099",
+      code: "6e90cfc2b457f32fc4bcd469593dde4d",
+      nodeId: "ab12cd34ef",
+      hostName: "dirgha-mbp",
+    });
+  });
+
+  it("never reports a code as a token", () => {
+    // The two are spent differently — a token is a bearer credential, a code
+    // buys exactly one adopt — so a caller must not be able to confuse them.
+    const p = parsePairing("pounce://connect?url=http%3A%2F%2Fa%3A1&code=abc");
+    expect(p?.token).toBeUndefined();
+    expect(p?.code).toBe("abc");
+  });
+
+  it("prefers the code when a link somehow carries both", () => {
+    const p = parsePairing("pounce://connect?url=http%3A%2F%2Fa%3A1&token=t&code=c");
+    expect(p).toEqual({ url: "http://a:1", code: "c" });
+  });
+
+  it("parses raw JSON carrying a code", () => {
+    expect(parsePairing('{"url":"http://a:1","code":"c"}')).toEqual({
+      url: "http://a:1",
+      code: "c",
+    });
+  });
+
   it("ignores relay/host without a node id", () => {
     const p = parsePairing("pounce://connect?url=http%3A%2F%2Fa%3A1&token=t&relay=r&host=h");
     expect(p).toEqual({ url: "http://a:1", token: "t" });
@@ -44,7 +76,7 @@ describe("parsePairing", () => {
   });
 
   it("rejects incomplete or unrelated codes", () => {
-    expect(parsePairing("pounce://connect?url=http%3A%2F%2Fa%3A1")).toBeNull(); // no token
+    expect(parsePairing("pounce://connect?url=http%3A%2F%2Fa%3A1")).toBeNull(); // no token or code
     expect(parsePairing("https://example.com")).toBeNull();
     expect(parsePairing("WIFI:S:MyNetwork;T:WPA;P:hunter2;;")).toBeNull();
     expect(parsePairing("{}")).toBeNull();

@@ -11,7 +11,29 @@ const TOKEN = process.env.BRIDGE_TOKEN || "pounce-bridge-local";
 const ip = primaryLanIp() || "localhost";
 
 const url = `http://${ip}:${PORT}`;
-let deepLink = `pounce://connect?url=${encodeURIComponent(url)}&token=${encodeURIComponent(TOKEN)}`;
+
+/**
+ * A one-time pairing code from the running bridge, so this dev QR carries what
+ * every other QR carries. Falls back to the token when no bridge is up to ask
+ * (this script builds the link out-of-band and can run before one starts) —
+ * still a working link, just the old shape that puts the token on the wire.
+ */
+async function pairSecret() {
+  try {
+    const r = await fetch(`http://127.0.0.1:${PORT}/v1/pair/code`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+      signal: AbortSignal.timeout(1500),
+    });
+    if (r.ok) {
+      const { code } = await r.json();
+      if (code) return { param: "code", value: code };
+    }
+  } catch {}
+  return { param: "token", value: TOKEN };
+}
+
+const { param, value } = await pairSecret();
+let deepLink = `pounce://connect?url=${encodeURIComponent(url)}&${param}=${encodeURIComponent(value)}`;
 
 // Include the tunnel identity when pounce-tunnel has run on this machine — the
 // QR then pairs from any network, not just this Wi-Fi. Default port only: the

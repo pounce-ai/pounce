@@ -153,7 +153,57 @@ export function legacyAllows(method, pathname) {
   return !LEGACY_DENY.has(pathname);
 }
 
+const TUNNEL_SECRET_FILE = path.join(POUNCE_DIR, "tunnel-secret.json");
+let cachedTunnelSecret = null;
+
+/**
+ * The secret `pounce-tunnel serve` accepts, kept SEPARATE from the bridge token.
+ *
+ * It used to be the bridge token itself (`serve --token TOKEN`), which is what
+ * turned a sniffed LAN request into permanent off-LAN access: the token on that
+ * plaintext `Authorization` header was also the tunnel's password, and the
+ * tunnel is reachable from any network forever. Splitting them means the value
+ * a device replays on every request is no longer the value that dials the
+ * machine from the outside.
+ *
+ * A device receives this exactly once, in the `/v1/device/adopt` response, and
+ * no route hands it out again — so it crosses the LAN in one message at
+ * pairing rather than being derivable from any later one. On a hostile network
+ * that single message is still sniffable; bounding the exposure is the point,
+ * eliminating it needs transport encryption, not a different secret.
+ *
+ * Its own file, deliberately: token.json's read path treats a damaged file as
+ * "keep it, serve a token for this run only", and a tunnel secret that changed
+ * per run would silently strand every paired device's off-LAN access.
+ */
+export function tunnelSecret({ file = TUNNEL_SECRET_FILE } = {}) {
+  if (cachedTunnelSecret) return cachedTunnelSecret;
+  try {
+    const saved = JSON.parse(readFileSync(file, "utf8"));
+    if (typeof saved?.secret === "string" && saved.secret) {
+      cachedTunnelSecret = saved.secret;
+      return cachedTunnelSecret;
+    }
+  } catch {
+    // Absent or unreadable — mint below. Unlike the bridge token there is no
+    // "leave it alone" case: a device that cannot dial the tunnel falls back to
+    // the LAN and re-adopts, rather than being locked out.
+  }
+  const secret = randomBytes(32).toString("hex");
+  try {
+    writeToken(file, { secret });
+  } catch {
+    // Unwritable ~/.pounce: serve on a per-run secret. Off-LAN then needs a
+    // re-pair after a restart, which is strictly better than reusing the
+    // bridge token for it.
+    console.warn(`[pounce] could not persist ${file} — off-LAN access will need re-pairing.`);
+  }
+  cachedTunnelSecret = secret;
+  return cachedTunnelSecret;
+}
+
 /** Test seam — drops the memoised value so the file is consulted again. */
 export function _reset() {
   cached = null;
+  cachedTunnelSecret = null;
 }

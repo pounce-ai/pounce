@@ -131,14 +131,26 @@ describe("parsing the transcript", () => {
 
 describe("toDevice", () => {
   it("keeps the tunnel identity — that is what the phone will dial", () => {
-    const { device } = toDevice(GOOD_UI, { hostName: "gpu-box", host: "gpu-box" });
+    const { device } = toDevice(
+      { ...GOOD_UI, tunnelToken: "tunnel-secret" },
+      { hostName: "gpu-box", host: "gpu-box" },
+    );
     expect(device).toEqual({
       url: "http://10.0.0.4:8099",
       token: "tok-abc",
       nodeId: "node-xyz",
       relay: "https://relay.example",
+      tunnelToken: "tunnel-secret",
       hostName: "gpu-box",
     });
+  });
+
+  it("falls back to the token when the remote predates the tunnel-secret split", () => {
+    // An older bridge serves `serve --token TOKEN`, so there the bearer token
+    // IS the handshake secret. Carrying it keeps that machine dialable instead
+    // of storing a device with no way through its own tunnel.
+    const { device } = toDevice(GOOD_UI, { hostName: "gpu-box", host: "gpu-box" });
+    expect(device.tunnelToken).toBe("tok-abc");
   });
 
   it("refuses a LAN-only payload", () => {

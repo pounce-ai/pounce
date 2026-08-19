@@ -117,7 +117,7 @@ export function ConnectFlow() {
           state: "pending" as const,
         }));
         if (verdict.state === "approved" && verdict.token) {
-          await finishPairing(bridge, verdict.token, router);
+          await finishPairing(bridge, verdict.token, verdict.tunnelToken, router);
           return;
         }
         if (verdict.state === "denied" || verdict.state === "expired") {
@@ -222,15 +222,26 @@ export function ConnectFlow() {
 async function finishPairing(
   bridge: FoundBridge,
   token: string,
+  tunnelToken: string | undefined,
   router: ReturnType<typeof useRouter>,
 ) {
   const cfg = { url: bridge.url, token };
   try {
     await saveBridgeConfig(cfg);
-    const ok = await connectBridge(cfg);
+    // The approval already minted this device its own credential, so record it
+    // as adopted — and carry the tunnel secret it handed over on the same poll,
+    // since no route will disclose it again.
+    const ok = await connectBridge({
+      ...cfg,
+      adopted: true,
+      ...(tunnelToken ? { tunnelToken } : {}),
+    });
     if (!ok) throw new Error("Approved, but that computer stopped answering.");
     const pairing = await fetchPairing(cfg);
-    if (pairing?.nodeId) await savePairing(pairing);
+    // `/v1/pair` no longer discloses the secret to a network caller, so fill it
+    // from the approval rather than storing a pairing that cannot dial.
+    if (pairing?.nodeId)
+      await savePairing({ ...pairing, token: pairing.token ?? tunnelToken ?? null });
     router.navigate("/");
   } catch (e) {
     Alert.alert("Couldn't finish", e instanceof Error ? e.message : String(e));

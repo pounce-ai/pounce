@@ -58,9 +58,16 @@ import {
 import { ptyNative } from "./agents/pty.mjs";
 import { agentEnv, binPath, binVersion, primaryLanIp } from "./agents/env.mjs";
 import { publicConfig, readConfig, writeConfig } from "./agents/config.mjs";
-import { LEGACY_TOKEN, bridgeToken, legacyAllows, tokenMatches } from "./agents/token.mjs";
+import {
+  LEGACY_TOKEN,
+  bridgeToken,
+  legacyAllows,
+  tokenMatches,
+  tunnelSecret,
+} from "./agents/token.mjs";
 import { hostIsAddress } from "./agents/host-guard.mjs";
 import { createDevices } from "./agents/devices.mjs";
+import { createPairCodes } from "./agents/pair-codes.mjs";
 import { bridgeId as machineBridgeId } from "./agents/identity.mjs";
 import { createDiscovery } from "./agents/discovery.mjs";
 import {
@@ -123,6 +130,9 @@ let ACTIVE_PORT = REQUESTED_PORT;
 // How often the background watcher polls for state transitions to push.
 const WATCH_MS = Number(process.env.PUSH_WATCH_MS || 25_000);
 const { token: TOKEN, legacyUntil: LEGACY_UNTIL } = bridgeToken();
+// What `pounce-tunnel serve` accepts. Separate from TOKEN on purpose — see
+// tunnelSecret() in agents/token.mjs.
+const TUNNEL_SECRET = tunnelSecret();
 // The Bridge desktop app version, shown in the pairing window's footer. The
 // desktop shell passes it to startBridge() from its package.json; env is the
 // fallback for standalone `node server.mjs` runs.
@@ -1149,7 +1159,14 @@ function tunnelInfo() {
  *  unreachable. */
 function pairDeepLink() {
   if (!PAIR) return null;
-  let link = `pounce://connect?url=${encodeURIComponent(PAIR.pairUrl)}&token=${encodeURIComponent(TOKEN)}`;
+  // A one-time code, NOT the bridge token. The link is worth exactly one
+  // /v1/device/adopt; everything the phone uses afterwards it receives in that
+  // response. BRIDGE_PAIR_LEGACY_TOKEN=1 restores the old shape for a fleet
+  // whose apps predate code pairing — it puts the master token back on the
+  // wire, so it is opt-in and stays that way.
+  const secret = process.env.BRIDGE_PAIR_LEGACY_TOKEN === "1" ? TOKEN : pairCodes.current().code;
+  const param = process.env.BRIDGE_PAIR_LEGACY_TOKEN === "1" ? "token" : "code";
+  let link = `pounce://connect?url=${encodeURIComponent(PAIR.pairUrl)}&${param}=${encodeURIComponent(secret)}`;
   const t = tunnelEligible() ? tunnelInfo() : null;
   if (t) {
     link += `&node=${encodeURIComponent(t.nodeId)}&host=${encodeURIComponent(os.hostname().replace(/\.local$/, ""))}`;
@@ -1164,6 +1181,9 @@ function pairDeepLink() {
 // for the handshake and agents/discovery.mjs for the beacon.
 
 const access = createAccess();
+// The QR's one-time code. In memory, single-use, short-lived — see
+// agents/pair-codes.mjs for why it replaced putting TOKEN on the link.
+const pairCodes = createPairCodes();
 // One credential per paired device, so rotating the shared token — or an
 // upgrade whose migration window elapsed — cannot drop a phone. See devices.mjs.
 const devices = createDevices();
@@ -2141,6 +2161,12 @@ const server = http.createServer(async (req, res) => {
       deepLink: pairDeepLink(),
       tunnel: tunnelEligible() ? tunnelInfo() : null,
       token: TOKEN,
+      // The tunnel's handshake secret. Safe HERE and only here: /ui is
+      // loopback-gated, and the one remote reader is the SSH add-machine flow,
+      // which reads it over its own encrypted channel. Without it an
+      // SSH-added machine would hold a bearer token that no longer opens the
+      // tunnel, and would be unreachable the moment it left its own network.
+      tunnelToken: TUNNEL_SECRET,
       appVersion: APP_VERSION,
       daemonOk: !!(daemon && daemon.pid),
       daemon,
@@ -2185,7 +2211,18 @@ const server = http.createServer(async (req, res) => {
     // on this network any more.
     // Own identity first, then whatever the approval attached — the per-grant
     // tunnel must win over the machine-wide one, which a guest can't dial.
-    if (r.state === "approved" && r.token) r.bridge = { ...ownIdentity(), ...r.bridge };
+    if (r.state === "approved" && r.token) {
+      r.bridge = { ...ownIdentity(), ...r.bridge };
+      // A DEVICE approval is this machine's own phone, so it is entitled to the
+      // machine-wide tunnel — and needs the secret, which is no longer the
+      // bearer token it was just handed. Rides the same one-shot delivery as
+      // that token (access.poll clears it after this response).
+      //
+      // A GRANT must never see it: a guest gets a per-grant tunnel with a
+      // handshake secret of its own, and the machine-wide one would let it
+      // reach this bridge with full authority from any network.
+      if (r.kind === "device") r.tunnelToken = TUNNEL_SECRET;
+    }
     return send(res, 200, r);
   }
 
@@ -2200,7 +2237,21 @@ const server = http.createServer(async (req, res) => {
   // guest — but it survives that token being rotated, which is the whole reason
   // it exists. Checked before grants because it is the common case.
   const device = tokenMatches(auth, TOKEN) || legacyOk ? null : devices.forToken(auth);
-  if (!tokenMatches(auth, TOKEN) && !legacyOk && !device) {
+  /**
+   * A one-time pairing code off the QR (agents/pair-codes.mjs).
+   *
+   * It authenticates exactly one call — the adopt that trades it for this
+   * device's own credential — so it is scoped to that route HERE rather than
+   * being let through as a bearer token. Scoping it at the gate means a route
+   * added later cannot accidentally accept it, which is the same reason the
+   * grant scope check lives here too.
+   */
+  const pairCode =
+    !tokenMatches(auth, TOKEN) && !legacyOk && !device && pairCodes.peek(auth) ? auth : null;
+  if (pairCode && !(req.method === "POST" && url.pathname === "/v1/device/adopt")) {
+    return send(res, 403, { error: "pairing_code_scope" });
+  }
+  if (!tokenMatches(auth, TOKEN) && !legacyOk && !device && !pairCode) {
     // Not the owner's token and not a device's. It may still be a grant issued
     // to a peer — read-only, narrowed to a scope, stamped with an expiry.
     const hit = access.forToken(auth);
@@ -2225,7 +2276,15 @@ const server = http.createServer(async (req, res) => {
 
   // The migration itself: a client still holding the published default swaps it
   // for this install's real token, so the window closes on its next sync.
-  if (url.pathname === "/v1/token") return send(res, 200, { token: TOKEN });
+  //
+  // ONLY the legacy constant may. This route used to answer any authenticated
+  // caller, which made the master token reachable from a per-device credential
+  // — sniff one plaintext LAN request, ask for TOKEN, and every later rotation
+  // is moot. A device that needs durability adopts; it never needs this.
+  if (url.pathname === "/v1/token") {
+    if (!legacyOk) return send(res, 403, { error: "forbidden" });
+    return send(res, 200, { token: TOKEN });
+  }
 
   /**
    * Take out a credential of this device's own, so an update can never drop it.
@@ -2241,6 +2300,12 @@ const server = http.createServer(async (req, res) => {
    * A grant can't reach it either — grantAllowsRoute refuses every non-GET.
    */
   if (url.pathname === "/v1/device/adopt" && req.method === "POST") {
+    // Spend the code BEFORE minting anything. `claim` is the single-use gate,
+    // and two phones racing the same QR must not both walk away paired — the
+    // loser gets this 401 and rescans a code the bridge has already replaced.
+    if (pairCode && !pairCodes.claim(pairCode)) {
+      return send(res, 401, { error: "pairing_code_spent" });
+    }
     const { key, name, platform } = await readBody(req);
     const minted = devices.mint({ key, name, platform });
     // If the caller was ALREADY a device, that older row is now nobody's — it
@@ -2251,7 +2316,16 @@ const server = http.createServer(async (req, res) => {
     // (The two paths key differently — the app by its own row id, an approved
     // peer by bridgeId — so a phone that did both would otherwise orphan one.)
     if (device && device.id !== minted.id) devices.revoke(device.id);
-    return send(res, 200, { deviceId: minted.id, token: minted.token });
+    return send(res, 200, {
+      deviceId: minted.id,
+      token: minted.token,
+      // The tunnel's secret, handed over HERE and nowhere else. No route
+      // returns it to an already-paired caller, so it crosses the network in
+      // this one response instead of being derivable from any later request.
+      // (`tunnelToken` is already what the app prefers over its bearer token
+      // when dialling — see tunnelReach in services/bridge.ts.)
+      tunnelToken: TUNNEL_SECRET,
+    });
   }
   if (process.env.BRIDGE_DEBUG) console.log(`[req] ${req.method} ${url.pathname}${url.search}`);
 
@@ -3235,6 +3309,15 @@ const server = http.createServer(async (req, res) => {
       // to ~/.pounce/tunnel.json at its startup) + this bridge's token. The
       // phone dials the tunnel by node id and speaks this same HTTP API.
       const info = tunnelEligible() ? tunnelInfo() : null;
+      // The node id and relay are not secrets — dialling the tunnel needs the
+      // handshake secret as well, and that is issued once at adopt and never
+      // served here. A caller on the LAN therefore gets the identity it needs
+      // to route, and nothing it could use to reach this machine tomorrow.
+      //
+      // Loopback is the exception: `npx use-pounce` builds a pairing on this
+      // machine, over 127.0.0.1, for a phone that has not adopted yet — the
+      // one caller that legitimately needs the secret and the one that cannot
+      // be sniffed off a network to get it.
       return send(
         res,
         200,
@@ -3242,13 +3325,26 @@ const server = http.createServer(async (req, res) => {
           ? {
               pairing: {
                 nodeId: info.nodeId,
-                token: TOKEN,
+                token: isLoopback(req) ? TUNNEL_SECRET : null,
                 hostName: os.hostname().replace(/\.local$/, ""),
                 relay: info.relay,
               },
             }
           : { pairing: null, error: "tunnel not running" },
       );
+    }
+    /**
+     * A one-time pairing code, for a trusted local process rendering its own
+     * QR — `npx use-pounce` builds the link itself rather than reading /ui.
+     *
+     * Loopback-only. Off-machine this would be a route that mints pairing
+     * authority for anyone already holding a credential, which is the shape of
+     * escalation the code exists to remove.
+     */
+    if (url.pathname === "/v1/pair/code") {
+      if (!isLoopback(req)) return send(res, 403, { error: "local only" });
+      const { code, expiresAt } = pairCodes.current();
+      return send(res, 200, { code, expiresAt: new Date(expiresAt).toISOString() });
     }
     if (url.pathname === "/v1/tunnel/ensure") {
       // (Re)spawn pounce-tunnel if a binary is available and it isn't running —
@@ -3929,10 +4025,14 @@ function ensureTunnel() {
     } catch {} // exit 1 = no matches
   }
   try {
-    tunnelChild = spawn(bin, ["serve", "--token", TOKEN, "--target", `127.0.0.1:${ACTIVE_PORT}`], {
-      stdio: ["ignore", "ignore", "ignore"],
-      windowsHide: true,
-    });
+    tunnelChild = spawn(
+      bin,
+      ["serve", "--token", TUNNEL_SECRET, "--target", `127.0.0.1:${ACTIVE_PORT}`],
+      {
+        stdio: ["ignore", "ignore", "ignore"],
+        windowsHide: true,
+      },
+    );
     tunnelChild.on("close", () => {
       tunnelChild = null;
       // Respawn with backoff — a crashing tunnel must not loop hot.

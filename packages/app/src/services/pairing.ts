@@ -3,8 +3,15 @@
  * the `pounce://connect` deep link (Connect screen).
  *
  * A pairing code is either the deep link
- *   pounce://connect?url=…&token=…[&node=…&relay=…&host=…]
- * or raw JSON `{ url, token, nodeId?, relay?, hostName? }`.
+ *   pounce://connect?url=…&code=…[&node=…&relay=…&host=…]
+ * or raw JSON `{ url, code, nodeId?, relay?, hostName? }`.
+ *
+ * `code` is a ONE-TIME pairing code, traded once at /v1/device/adopt for this
+ * device's own credential. The older `token=` shape carried the bridge's own
+ * token, which the phone then replayed in plaintext on every LAN request — one
+ * sniffed header was the master credential. Links in that shape are still
+ * parsed (an older bridge, or BRIDGE_PAIR_LEGACY_TOKEN=1) but nothing emits
+ * them by default any more.
  *
  * `url`+`token` pair over the LAN. The optional `node`/`relay` carry the
  * host's Iroh tunnel identity so one scan also works from any other network:
@@ -15,7 +22,11 @@
 
 export interface ParsedPairing {
   url: string;
-  token: string;
+  /** Bearer token, when the link carries the legacy `token=` shape. */
+  token?: string;
+  /** One-time pairing code, when the link carries the current `code=` shape.
+   *  Exactly one of `token`/`code` is set. */
+  code?: string;
   /** Iroh node id of the host's pounce-tunnel, when the QR carries one. */
   nodeId?: string;
   /** Relay URL for hole-punching (only meaningful with nodeId). */
@@ -30,21 +41,19 @@ export function parsePairing(data: string): ParsedPairing | null {
       const u = new URL(data);
       const url = u.searchParams.get("url");
       const token = u.searchParams.get("token");
-      if (url && token) {
-        return withTunnel(
-          { url, token },
-          {
-            nodeId: u.searchParams.get("node"),
-            relay: u.searchParams.get("relay"),
-            hostName: u.searchParams.get("host"),
-          },
-        );
+      const code = u.searchParams.get("code");
+      if (url && (token || code)) {
+        return withTunnel(code ? { url, code } : { url, token: token as string }, {
+          nodeId: u.searchParams.get("node"),
+          relay: u.searchParams.get("relay"),
+          hostName: u.searchParams.get("host"),
+        });
       }
       return null;
     }
     const j = JSON.parse(data) as Partial<ParsedPairing>;
-    if (j.url && j.token) {
-      return withTunnel({ url: j.url, token: j.token }, j);
+    if (j.url && (j.token || j.code)) {
+      return withTunnel(j.code ? { url: j.url, code: j.code } : { url: j.url, token: j.token }, j);
     }
   } catch {}
   return null;
@@ -82,7 +91,8 @@ export function pairingHostName(p: ParsedPairing): string {
  */
 export async function pairFromParams(p: {
   url: string;
-  token: string;
+  token?: string | null;
+  code?: string | null;
   node?: string | null;
   relay?: string | null;
   host?: string | null;
@@ -91,14 +101,37 @@ export async function pairFromParams(p: {
   // — runtime pulls in stores and persistence, which the QR-scan path that
   // only parses must not load.
   const { savePairing } = await import("./runtime");
-  const { connectBridge } = await import("./bridge");
+  const { connectBridge, redeemPairCode } = await import("./bridge");
+
+  // Trade the one-time code for this device's own credential BEFORE anything
+  // is stored, so the code never lands in persisted config and a failed
+  // redemption leaves no half-pairing behind. The tunnel's handshake secret
+  // comes back in the same response and nowhere else.
+  let token = p.token ?? null;
+  let tunnelToken: string | null = null;
+  if (p.code) {
+    const redeemed = await redeemPairCode(p.url, p.code);
+    if (!redeemed) return false;
+    token = redeemed.token;
+    tunnelToken = redeemed.tunnelToken ?? null;
+  }
+  if (!token) return false;
+
   if (p.node) {
     await savePairing({
       nodeId: p.node,
-      token: p.token,
-      hostName: pairingHostName({ url: p.url, token: p.token, hostName: p.host ?? undefined }),
+      // The pairing's secret is the tunnel's, which is no longer the bearer
+      // token — fall back to it only for a legacy `token=` link, where they
+      // are still the same value.
+      token: tunnelToken ?? token,
+      hostName: pairingHostName({ url: p.url, hostName: p.host ?? undefined }),
       relay: p.relay ?? null,
     });
   }
-  return connectBridge({ url: p.url, token: p.token });
+  return connectBridge({
+    url: p.url,
+    token,
+    ...(p.code ? { adopted: true } : {}),
+    ...(tunnelToken ? { tunnelToken } : {}),
+  });
 }
