@@ -287,8 +287,17 @@ async function waitForTunnel(port, token, { timeoutMs = 25_000 } = {}) {
 }
 
 // --- pairing UI ---------------------------------------------------------------
-function deepLink({ pairUrl, token, tunnel }) {
-  let link = `pounce://connect?url=${encodeURIComponent(pairUrl)}&token=${encodeURIComponent(token)}`;
+/**
+ * The QR carries a one-time pairing CODE, not the bridge token — the token
+ * would otherwise be replayed on every request the phone ever makes, in
+ * plaintext over the LAN. `code` is worth a single /v1/device/adopt.
+ *
+ * `code` falls back to the token for a bridge that predates /v1/pair/code, so
+ * a new CLI against an old daemon still pairs.
+ */
+function deepLink({ pairUrl, token, tunnel, code }) {
+  const param = code ? "code" : "token";
+  let link = `pounce://connect?url=${encodeURIComponent(pairUrl)}&${param}=${encodeURIComponent(code || token)}`;
   if (tunnel?.nodeId) {
     link += `&node=${encodeURIComponent(tunnel.nodeId)}&host=${encodeURIComponent(os.hostname().replace(/\.local$/, ""))}`;
     if (tunnel.relay) link += `&relay=${encodeURIComponent(tunnel.relay)}`;
@@ -309,8 +318,8 @@ async function waitForPhone(port) {
 }
 
 // --- commands -----------------------------------------------------------------
-function printPairing(pairUrl, token, tunnel) {
-  const link = deepLink({ pairUrl, token, tunnel });
+function printPairing(pairUrl, token, tunnel, code) {
+  const link = deepLink({ pairUrl, token, tunnel, code });
   console.log(
     `\n  ${bold("Scan with the Pounce app")} ${dim("(Settings → Scan QR)")} ${bold("or your camera:")}\n`,
   );
@@ -363,7 +372,12 @@ async function cmdUp(opts, { wait }) {
       }
     }
   }
-  printPairing(pairUrl, token, tunnel);
+  // Best-effort: an older bridge 404s here and deepLink falls back to the token.
+  let pairCode = null;
+  try {
+    pairCode = (await getJson(`http://127.0.0.1:${opts.port}/v1/pair/code`, { token })).code;
+  } catch {}
+  printPairing(pairUrl, token, tunnel, pairCode);
 
   if (opts.lan) {
     console.log(

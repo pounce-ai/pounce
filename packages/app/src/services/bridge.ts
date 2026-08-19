@@ -253,7 +253,17 @@ async function writeDeviceConfigs(list: DeviceConfig[]): Promise<void> {
  *  machine is reachable at all and which beats naming a server after its IP. */
 type DeviceExtras = Pick<
   DeviceConfig,
-  "nodeId" | "relay" | "tunnelToken" | "grant" | "name" | "addedVia" | "sshHost" | "namePinned"
+  | "nodeId"
+  | "relay"
+  | "tunnelToken"
+  | "grant"
+  | "name"
+  | "addedVia"
+  | "sshHost"
+  | "namePinned"
+  // A device paired by one-time code adopted at redemption — recording it here
+  // stops the next sync spending a POST re-adopting what it already holds.
+  | "adopted"
 >;
 
 export async function addDeviceConfig(
@@ -327,9 +337,55 @@ export async function rotateLegacyToken(cfg: DeviceConfig): Promise<DeviceConfig
  * A device we reached through a GRANT is skipped — that credential is the
  * peer's to expire, read-only by construction, and not ours to replace.
  */
+/**
+ * Trade a one-time pairing code off the QR for this device's own credential.
+ *
+ * The code authenticates this single call and nothing else — the bridge scopes
+ * it to this route — so there is no window in which the app holds something
+ * replayable. What comes back is the per-device token every later request uses,
+ * plus the tunnel's handshake secret, which is issued here and by no other
+ * route.
+ *
+ * Deliberately no `key`: the app has no stable row for this machine yet (the id
+ * comes from the bridge's identity, resolved on connect). The next
+ * adoptDeviceToken re-mints under the proper key and the bridge revokes this
+ * placeholder row — see the revoke in /v1/device/adopt.
+ */
+export async function redeemPairCode(
+  url: string,
+  code: string,
+): Promise<{ token: string; tunnelToken?: string } | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15_000);
+  try {
+    const res = await fetch(`${url.replace(/\/$/, "")}/v1/device/adopt`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${code}`, "content-type": "application/json" },
+      // No name: the app has no label for itself yet either. The bridge
+      // defaults the row, and the next adopt (which knows cfg.name) fixes it.
+      body: JSON.stringify({ platform: Platform.OS }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { token?: string; tunnelToken?: string };
+    return typeof body?.token === "string" && body.token
+      ? { token: body.token, tunnelToken: body.tunnelToken }
+      : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function adoptDeviceToken(cfg: DeviceConfig): Promise<DeviceConfig> {
-  if (cfg.adopted || cfg.grant) return cfg;
+  // Re-adopt when the tunnel secret is missing: a device paired before the
+  // secret was split from the bridge token holds no `tunnelToken`, and its
+  // off-LAN dialling would keep presenting a value `serve` no longer accepts.
+  // One extra POST, once, and only for those rows.
+  if ((cfg.adopted && cfg.tunnelToken) || cfg.grant) return cfg;
   let fresh: string | null = null;
+  let freshTunnel: string | null = null;
   try {
     const base = await bridgeBase(cfg);
     const ctrl = new AbortController();
@@ -345,8 +401,9 @@ export async function adoptDeviceToken(cfg: DeviceConfig): Promise<DeviceConfig>
         signal: ctrl.signal,
       });
       if (res.ok) {
-        const body = (await res.json()) as { token?: string };
+        const body = (await res.json()) as { token?: string; tunnelToken?: string };
         fresh = typeof body?.token === "string" && body.token ? body.token : null;
+        freshTunnel = typeof body?.tunnelToken === "string" ? body.tunnelToken : null;
       }
     } finally {
       clearTimeout(timer);
@@ -356,7 +413,15 @@ export async function adoptDeviceToken(cfg: DeviceConfig): Promise<DeviceConfig>
   }
   if (!fresh) return cfg;
   const list = await listDeviceConfigs();
-  const next = { ...cfg, token: fresh, adopted: true };
+  // A bridge that predates the split answers without a tunnelToken; there the
+  // secret still IS the token we authenticated with, so record that rather than
+  // leaving the field empty and re-adopting on every sync forever.
+  const next = {
+    ...cfg,
+    token: fresh,
+    adopted: true,
+    tunnelToken: freshTunnel ?? cfg.tunnelToken ?? cfg.token,
+  };
   await writeDeviceConfigs(list.map((d) => (d.id === cfg.id ? next : d)));
   return next;
 }
@@ -552,8 +617,15 @@ async function tunnelReach(
     (await SecureStore.getItemAsync(PAIRING_KEY)) ??
     (await SecureStore.getItemAsync(LEGACY_PAIRING_KEY));
   const pairing = raw ? (JSON.parse(raw) as PairPayload) : null;
+  // The tunnel's secret is no longer the bearer token, so prefer what adopt
+  // issued us and fall back to the pairing's own copy before the bearer token —
+  // which is only still right for a pairing made before the two were split.
   return pairing?.nodeId
-    ? { nodeId: pairing.nodeId, relay: pairing.relay ?? null, token: cfg.token }
+    ? {
+        nodeId: pairing.nodeId,
+        relay: pairing.relay ?? null,
+        token: dev.tunnelToken ?? pairing.token ?? cfg.token,
+      }
     : null;
 }
 
@@ -2649,7 +2721,7 @@ export async function forgetSameHostDuplicates(keepId: string): Promise<void> {
 }
 
 /** Add a device (a machine's bridge) and load all devices' live data. */
-export async function connectBridge(cfg: BridgeConfig): Promise<boolean> {
+export async function connectBridge(cfg: BridgeConfig & Partial<DeviceExtras>): Promise<boolean> {
   connection$.status.set("connecting");
   const url = cfg.url.replace(/\/$/, "");
   // Only a brand-new pairing is rolled back on failure. An already-paired device
@@ -2664,7 +2736,8 @@ export async function connectBridge(cfg: BridgeConfig): Promise<boolean> {
   // identity coming from the bridge, the stored id may be neither.
   let added: DeviceConfig | null = null;
   try {
-    const dev = await addDeviceConfig(cfg.url, cfg.token);
+    const { url: _u, token: _t, ...extras } = cfg;
+    const dev = await addDeviceConfig(cfg.url, cfg.token, extras);
     added = dev;
     // Reachability (health) is the sole gate for "connected". Sync is best-effort:
     // a cold daemon returning nothing for a tick must not fail the connection or
@@ -2679,7 +2752,16 @@ export async function connectBridge(cfg: BridgeConfig): Promise<boolean> {
     // and /v1/pair is unreachable. Best-effort and non-blocking.
     void fetchPairing(dev)
       .then(async (p) => {
-        if (p?.nodeId) await SecureStore.setItemAsync(PAIRING_KEY, JSON.stringify(p));
+        if (!p?.nodeId) return;
+        // `/v1/pair` no longer discloses the tunnel secret to a network caller,
+        // so this refresh carries a null token. Overwriting with it would throw
+        // away the secret adopt issued us and silently kill off-LAN access —
+        // keep whichever one we already hold for this same node.
+        const raw = await SecureStore.getItemAsync(PAIRING_KEY);
+        const held = raw ? (JSON.parse(raw) as PairPayload) : null;
+        const token =
+          p.token ?? (held?.nodeId === p.nodeId ? held.token : null) ?? dev.tunnelToken ?? null;
+        await SecureStore.setItemAsync(PAIRING_KEY, JSON.stringify({ ...p, token }));
       })
       .catch(() => {});
     // Progressive connect: stream threads so the list fills in as pages land.

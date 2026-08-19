@@ -5,7 +5,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { pairFromParams } from "../services/pairing";
 
 /**
- * Deep-link target for `pounce://connect?url=…&token=…[&node=…&relay=…&host=…]`
+ * Deep-link target for `pounce://connect?url=…&code=…[&node=…&relay=…&host=…]`
  * (the bridge's pairing QR). Adds the device, connects, and drops into the app
  * — no manual setup. When the link carries the host's Iroh tunnel identity
  * (`node`/`relay`), it's saved before connecting so pairing works from any
@@ -13,9 +13,12 @@ import { pairFromParams } from "../services/pairing";
  * machine.
  */
 export default function ConnectScreen() {
-  const { url, token, node, relay, host } = useLocalSearchParams<{
+  const { url, token, code, node, relay, host } = useLocalSearchParams<{
     url?: string;
+    /** Legacy shape: the bridge's own token. Still accepted; nothing emits it. */
     token?: string;
+    /** Current shape: a one-time code, spent on this device's first adopt. */
+    code?: string;
     node?: string;
     relay?: string;
     host?: string;
@@ -29,11 +32,11 @@ export default function ConnectScreen() {
     if (done.current) return;
     done.current = true;
     void (async () => {
-      if (!url || !token) {
-        setError("This pairing link is missing its address or token.");
+      if (!url || !(token || code)) {
+        setError("This pairing link is missing its address or code.");
         return;
       }
-      const ok = await pairFromParams({ url, token, node, relay, host });
+      const ok = await pairFromParams({ url, token, code, node, relay, host });
       if (ok) {
         const { registerForPush } = await import("../services/push");
         void registerForPush();
@@ -46,7 +49,7 @@ export default function ConnectScreen() {
         );
       }
     })();
-  }, [url, token, node, relay, host]);
+  }, [url, token, code, node, relay, host]);
 
   return (
     <View style={s.root}>

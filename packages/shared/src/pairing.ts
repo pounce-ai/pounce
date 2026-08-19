@@ -19,8 +19,16 @@ export type NodeId = string;
 export interface PairPayload {
   /** Iroh public key the client dials. */
   readonly nodeId: NodeId;
-  /** Bearer token authenticating the paired session (maps to host.toml `token`). */
-  readonly token: string;
+  /**
+   * The tunnel's QUIC handshake secret.
+   *
+   * Null when the payload came from a NETWORK caller: `/v1/pair` discloses the
+   * secret only over loopback, because a route that hands it to anyone holding
+   * a bearer token turns one sniffed LAN request into permanent off-LAN access.
+   * A device receives it once, in the `/v1/device/adopt` response, and keeps it
+   * on its own config — see `tunnelToken` on DeviceConfig.
+   */
+  readonly token: string | null;
   /** Human label for the host machine, e.g. "dirgha-mbp". */
   readonly hostName: string;
   /** Relay URL used for hole-punching / fallback (n0 iroh relay). */

@@ -19,10 +19,8 @@ import {
 } from "../../state/stores";
 import { useDeviceOverrides, useDevices } from "../../state/db/hooks";
 import {
-  connectBridge,
   type DaemonInfo,
   fetchDaemon,
-  fetchPairing,
   listDeviceConfigs,
   loadBridgeConfig,
   removeDeviceConfig,
@@ -30,8 +28,7 @@ import {
   saveBridgeConfig,
   syncLiveData,
 } from "../../services/bridge";
-import { savePairing } from "../../services/runtime";
-import { type ParsedPairing, pairingHostName, parsePairing } from "../../services/pairing";
+import { type ParsedPairing, pairFromParams, parsePairing } from "../../services/pairing";
 import { DeviceSetupCard } from "../../components/DeviceSetupCard";
 import { ConnectFlow } from "../../components/ConnectFlow";
 import { TunnelFleet } from "../../components/settings/TunnelFleet";
@@ -111,27 +108,27 @@ export default function DevicesScreen() {
   const doSync = async (cfg: ParsedPairing) => {
     setBusy(true);
     try {
-      const clean = { url: cfg.url.trim().replace(/\/$/, ""), token: cfg.token.trim() };
-      await saveBridgeConfig(clean);
-      // A code that carries the host's tunnel identity pairs from anywhere:
-      // save it BEFORE connecting so bridgeBase() can fall back to the Iroh
-      // tunnel when the LAN address is unreachable (npx-on-a-server flow).
-      if (cfg.nodeId) {
-        await savePairing({
-          nodeId: cfg.nodeId,
-          token: clean.token,
-          hostName: pairingHostName(cfg),
-          relay: cfg.relay ?? null,
-        });
-      }
-      const ok = await connectBridge(clean);
+      const url = cfg.url.trim().replace(/\/$/, "");
+      // One shared path for every way a code arrives — scanner, manual entry,
+      // deep link — so redeeming a one-time code (and stowing the tunnel secret
+      // that comes back with it) cannot drift between them. It saves the tunnel
+      // identity before connecting, so the npx-on-a-server flow still pairs
+      // when the LAN address is unreachable.
+      const ok = await pairFromParams({
+        url,
+        token: cfg.token?.trim(),
+        code: cfg.code?.trim(),
+        node: cfg.nodeId ?? null,
+        relay: cfg.relay ?? null,
+        host: cfg.hostName ?? null,
+      });
       if (!ok)
         throw new Error(
           "Couldn't reach that computer. Make sure it's on and you're both on the same Wi-Fi.",
         );
-      // Also capture the host's direct-sync identity so it works off-Wi-Fi later.
-      const pairing = await fetchPairing(clean);
-      if (pairing?.nodeId) await savePairing(pairing);
+      // Back-compat single-config write, for the legacy token shape only: a
+      // one-time code is spent by now and is nobody's credential.
+      if (cfg.token) await saveBridgeConfig({ url, token: cfg.token.trim() });
       setManual(false); // collapse the manual-entry form now that it succeeded
       Alert.alert("Synced", "Your devices are connected.");
       router.navigate("/");

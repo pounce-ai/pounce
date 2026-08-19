@@ -84,6 +84,9 @@ export interface PairVerdict {
   state: PairState;
   /** Present exactly once, on the poll that first sees the approval. */
   token?: string;
+  /** The tunnel's handshake secret — no longer the same value as `token`, and
+   *  issued only to a device approval. Delivered on that same single poll. */
+  tunnelToken?: string;
 }
 
 /** Has it been approved yet? Authenticated by the claim, not by a token. */
@@ -96,6 +99,7 @@ export async function pollPairing(url: string, ask: PairAsk): Promise<PairVerdic
   const body = (await res.json().catch(() => null)) as {
     state?: PairState;
     token?: string;
+    tunnelToken?: string;
   } | null;
-  return { state: body?.state ?? "pending", token: body?.token };
+  return { state: body?.state ?? "pending", token: body?.token, tunnelToken: body?.tunnelToken };
 }

@@ -17,16 +17,19 @@ import { pairFromParams } from "@pounce/app/services/pairing";
 import { ensureLocalBridge } from "../../desktop/src/services/localBridge";
 import { startHeartbeatCadence } from "../../desktop/src/services/heartbeat";
 
-/** One-shot pairing from a `?url=…&token=…` connect link, then scrub the query
- *  so the token doesn't linger in the address bar or history. */
+/** One-shot pairing from a `?url=…&code=…` connect link, then scrub the query
+ *  so the credential doesn't linger in the address bar or history. `token=` is
+ *  the older shape and still works; nothing emits it by default. */
 async function pairFromUrl(): Promise<void> {
   const q = new URLSearchParams(window.location.search);
   const url = q.get("url");
   const token = q.get("token");
-  if (!url || !token) return;
+  const code = q.get("code");
+  if (!url || !(token || code)) return;
   await pairFromParams({
     url,
     token,
+    code,
     node: q.get("node"),
     relay: q.get("relay"),
     host: q.get("host"),
