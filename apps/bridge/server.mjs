@@ -56,7 +56,7 @@ import {
   sendInput,
 } from "./agents/pty-turn.mjs";
 import { ptyNative } from "./agents/pty.mjs";
-import { agentEnv, binPath, binVersion, primaryLanIp } from "./agents/env.mjs";
+import { agentEnv, binPath, binVersion, primaryLanIp, resetBinVersions } from "./agents/env.mjs";
 import { publicConfig, readConfig, writeConfig } from "./agents/config.mjs";
 import {
   LEGACY_TOKEN,
@@ -200,7 +200,28 @@ setInterval(() => {
 
 const inflight = new Map(); // key -> Promise (coalesces concurrent cache misses)
 
-async function cached(key, ttl, fn) {
+/**
+ * How long a refresh may run before it is abandoned.
+ *
+ * Not a nicety — it is what stops one hung read disabling a feature until the
+ * bridge is restarted. `inflight` coalesces concurrent misses onto ONE promise,
+ * and it is cleared in a `finally`; a `fn()` that never settles never reaches
+ * that `finally`, so every later request for that key joins the same dead
+ * promise, forever. Observed: after an agent CLI updated itself, `/v1/quota`
+ * returned nothing and the plan cards read "no plan detected" until the app was
+ * killed and restarted.
+ *
+ * Every read underneath here already has its own timeout. That is exactly why
+ * this is needed: `execFile`'s timeout kills the PROCESS, but the promise only
+ * settles once its stdio closes, so a CLI that leaves a child holding stdout —
+ * which is what an updater does — hangs past a timeout that looks watertight.
+ *
+ * Generous, because a slow answer is still a right answer: this exists to bound
+ * the pathological case, not to police normal latency.
+ */
+const CACHE_FN_TIMEOUT_MS = 120_000;
+
+async function cached(key, ttl, fn, { timeoutMs = CACHE_FN_TIMEOUT_MS } = {}) {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < ttl) return hit.value;
   // Coalesce: with a client syncing every ~10s and the warm loop every 15s, a
@@ -209,11 +230,25 @@ async function cached(key, ttl, fn) {
   const pending = inflight.get(key);
   if (pending) return pending;
   const run = (async () => {
+    let timer;
     try {
-      const value = await fn();
+      const value = await Promise.race([
+        fn(),
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`${key}: gave up after ${Math.round(timeoutMs / 1000)}s`)),
+            timeoutMs,
+          );
+        }),
+      ]);
       cache.set(key, { at: Date.now(), value });
       return value;
     } finally {
+      clearTimeout(timer);
+      // Cleared on the timeout path too, which is the whole point: the next
+      // request starts a fresh read instead of joining one that is never
+      // coming back. The abandoned `fn()` is left to finish or not on its own —
+      // it holds nothing but its own stack.
       inflight.delete(key);
     }
   })();
@@ -260,19 +295,27 @@ function attributionWindow(window, hours) {
 /** The report for a resolved range, memoised — the scan reads up to 192MB per
  *  transcript, so it must not run twice for one question. */
 function attributionReport({ asBlock, hours, key }, onProgress = null) {
-  return cached(key, 60_000, async () => {
-    let since = null;
-    if (asBlock) {
-      const blocks = await readBlocks().catch(() => null);
-      const started = Date.parse(blocks?.current?.startedAt ?? "");
-      if (Number.isFinite(started)) since = started;
-    }
-    return {
-      attribution: await readAttribution({ windowHours: hours, since, onProgress }).catch(
-        () => null,
-      ),
-    };
-  });
+  // A far longer bound than the default: reading a window walks every transcript
+  // it touched, which on a busy machine is minutes of honest work rather than a
+  // hang. See CACHE_FN_TIMEOUT_MS.
+  return cached(
+    key,
+    60_000,
+    async () => {
+      let since = null;
+      if (asBlock) {
+        const blocks = await readBlocks().catch(() => null);
+        const started = Date.parse(blocks?.current?.startedAt ?? "");
+        if (Number.isFinite(started)) since = started;
+      }
+      return {
+        attribution: await readAttribution({ windowHours: hours, since, onProgress }).catch(
+          () => null,
+        ),
+      };
+    },
+    { timeoutMs: 15 * 60_000 },
+  );
 }
 
 /** Run a command, capturing exit code + stdout + stderr. Optional kill
@@ -3081,6 +3124,18 @@ const server = http.createServer(async (req, res) => {
       const agent = body?.agent;
       if (!agent) return send(res, 400, { error: "agent required" });
       const result = await updateAgent(agent);
+      // Everything we had memoised about this machine's agents describes the
+      // binary that was just replaced. Left alone, the app shows the OLD plan,
+      // version and capabilities for up to a minute — and if a read hung while
+      // the binary was mid-swap, until the bridge restarted. Dropping them here
+      // means the next poll re-reads from disk, which is what the user expects
+      // pressing Update to do.
+      for (const k of [...cache.keys()]) {
+        if (/^(quota|agents|models|activity)/.test(k)) cache.delete(k);
+      }
+      // The version cache is keyed on mtime+size, which does not move when the
+      // CLI is reached through a wrapper script — see binVersion.
+      resetBinVersions();
       // The version is re-read from disk afterwards, so `changed` is the disk's
       // opinion rather than the updater's exit code.
       return send(res, result.ok ? 200 : 500, result);
