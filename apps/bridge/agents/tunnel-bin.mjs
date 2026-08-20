@@ -24,6 +24,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
@@ -149,6 +150,40 @@ function extractInto(buf, dir) {
   return path.join(dir, String(found));
 }
 
+/**
+ * Does this file actually behave like `pounce-tunnel`?
+ *
+ * Run it with no arguments: every real build prints its usage (which names
+ * `serve`) and exits non-zero. A stub, a text file, or a build for the wrong
+ * architecture prints nothing or fails to exec. Deliberately NOT `version` —
+ * that subcommand only exists from 0.2.0, and the 0.1.x binaries still in the
+ * field are perfectly good tunnels.
+ *
+ * Memoised per path+mtime+size: this is on the path of every install check, and
+ * the answer only changes when the file does.
+ */
+const runsCache = new Map();
+export function binaryRuns(bin) {
+  let key;
+  try {
+    const st = statSync(bin);
+    key = `${bin}:${st.mtimeMs}:${st.size}`;
+  } catch {
+    return false;
+  }
+  const hit = runsCache.get(key);
+  if (hit !== undefined) return hit;
+  let ok = false;
+  try {
+    const r = spawnSync(bin, [], { encoding: "utf8", timeout: 5000 });
+    ok = !r.error && `${r.stdout || ""}${r.stderr || ""}`.includes("serve");
+  } catch {
+    ok = false;
+  }
+  runsCache.set(key, ok);
+  return ok;
+}
+
 // --- what have we got? ---------------------------------------------------------
 
 /** The stamp we wrote when we installed, or null. */
@@ -235,7 +270,12 @@ export function compareVersions(a, b) {
  */
 export async function ensureTunnelBinary() {
   const have = tunnelBinary();
-  if (have) return have;
+  // A file at the path is not a tunnel. An update that was rolled back can leave
+  // a stub behind, and a binary copied from another machine can be the wrong
+  // arch — both exist, so both used to end this function right here, and no
+  // amount of re-running the installer would ever replace them. Treating an
+  // unusable binary as absent is what makes off-LAN self-heal.
+  if (have && binaryRuns(have)) return have;
   if (inFlight) return inFlight;
   inFlight = (async () => {
     try {
@@ -373,4 +413,35 @@ export function rollbackTunnel() {
   } catch {
     return false;
   }
+}
+
+// --- is the tunnel actually UP? ------------------------------------------------
+// A binary on disk is not a tunnel. This module's `tunnelBinary()` answers "have
+// we got one", and everything that reported off-LAN readiness used to stop
+// there — doctor's `tunnel.ok`, /ui, the pairing QR. That is how a `serve` that
+// died on every spawn went unnoticed for days: the file existed, so every
+// surface said "internet", while the phone off Wi-Fi could reach nothing.
+//
+// So whoever RUNS serve (the bridge's ensureTunnel) reports what happened, and
+// the readiness surfaces read that instead of stat()ing a file.
+//
+// `known: false` is the important third state: a doctor run outside the bridge,
+// or a dev bridge that never starts a tunnel, has nobody to report — there we
+// fall back to the binary check rather than claiming a tunnel is down when we
+// simply never looked.
+let serveState = { known: false, up: false, error: null };
+
+/** Called by the process that supervises `serve`. */
+export function reportServeState({ up, error = null }) {
+  serveState = { known: true, up: !!up, error: up ? null : error };
+}
+
+/** What we know about `serve` on this machine right now. */
+export function serveHealth() {
+  return serveState;
+}
+
+/** Test seam. */
+export function _resetServeState() {
+  serveState = { known: false, up: false, error: null };
 }

@@ -107,6 +107,7 @@ import {
   fetchTunnel,
   lastTunnelError,
   latestTunnelRelease,
+  reportServeState,
   rollbackTunnel,
   tunnelBinary,
   tunnelVersion,
@@ -1134,6 +1135,26 @@ let PAIR = null; // { ip, port, pairUrl, deepLink } — set once we're listening
  *  targets the default-port bridge (see ensureTunnel's singleton guard), so a
  *  dev bridge on another port must never advertise it — a phone dialing that
  *  node id would reach the default bridge, not this one. */
+/** When the current `serve` was spawned, so an instant death can be told from a
+ *  crash after hours of service. */
+let tunnelStartedAt = 0;
+/** Settle window. A `serve` that dies faster than this never got as far as
+ *  registering with the relay, so it was never reachable — that is a failed
+ *  START, not a crash to retry quietly. (A stub binary left behind by a rolled
+ *  back update exits in milliseconds; that is exactly the case this catches.) */
+const TUNNEL_SETTLE_MS = 5_000;
+/** Set once a serve has survived the settle window, cleared when one dies
+ *  inside it. This — not the presence of a file, and not a `tunnel.json` left
+ *  over from a previous run — is what the readiness surfaces report. */
+let tunnelUp = false;
+
+/** Is off-LAN access actually working right now? */
+function tunnelLive() {
+  return tunnelUp && !!tunnelChild;
+}
+/** The last failed start, for the surfaces that have to explain the outage. */
+let lastServeError = null;
+
 function tunnelEligible() {
   return ACTIVE_PORT === DEFAULT_PORT || process.env.POUNCE_TUNNEL === "1";
 }
@@ -1167,7 +1188,12 @@ function pairDeepLink() {
   const secret = process.env.BRIDGE_PAIR_LEGACY_TOKEN === "1" ? TOKEN : pairCodes.current().code;
   const param = process.env.BRIDGE_PAIR_LEGACY_TOKEN === "1" ? "token" : "code";
   let link = `pounce://connect?url=${encodeURIComponent(PAIR.pairUrl)}&${param}=${encodeURIComponent(secret)}`;
-  const t = tunnelEligible() ? tunnelInfo() : null;
+  // Only advertise off-LAN reach when `serve` is genuinely up: a QR carrying a
+  // node id nothing answers on pairs a phone that works on this Wi-Fi and
+  // nowhere else, with no sign anything is wrong. A tunnel still inside its
+  // settle window counts — it is coming up, not broken; a known-failed one
+  // does not.
+  const t = tunnelEligible() && !lastServeError ? tunnelInfo() : null;
   if (t) {
     link += `&node=${encodeURIComponent(t.nodeId)}&host=${encodeURIComponent(os.hostname().replace(/\.local$/, ""))}`;
     if (t.relay) link += `&relay=${encodeURIComponent(t.relay)}`;
@@ -2159,7 +2185,13 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, {
       ...(PAIR || {}),
       deepLink: pairDeepLink(),
-      tunnel: tunnelEligible() ? tunnelInfo() : null,
+      // The identity, only while `serve` is actually up. tunnel.json survives
+      // the process that wrote it, so reading the file alone reported off-LAN
+      // access as healthy for as long as the machine had ever had a tunnel.
+      tunnel: tunnelEligible() && tunnelLive() ? tunnelInfo() : null,
+      // ...and when it is NOT up, why — so the outage is visible here instead
+      // of only in a phone that stops working off Wi-Fi.
+      tunnelError: tunnelEligible() && !tunnelLive() ? (lastServeError ?? null) : null,
       token: TOKEN,
       // The tunnel's handshake secret. Safe HERE and only here: /ui is
       // loopback-gated, and the one remote reader is the SSH add-machine flow,
@@ -3359,9 +3391,13 @@ const server = http.createServer(async (req, res) => {
       const eligible = tunnelEligible();
       return send(res, 200, {
         eligible,
-        running: !!tunnelChild,
+        running: tunnelLive(),
+        // Spawned but still inside the settle window — a poller should keep
+        // polling rather than conclude off-LAN is broken.
+        starting: !!tunnelChild && !tunnelLive(),
+        error: lastServeError,
         binary: tunnelBinary(),
-        tunnel: eligible ? tunnelInfo() : null,
+        tunnel: eligible && tunnelLive() ? tunnelInfo() : null,
       });
     }
     // --- what tunnel is this machine running, and is it the newest? ------------
@@ -3374,7 +3410,8 @@ const server = http.createServer(async (req, res) => {
       const current = tunnelVersion();
       const body = {
         installed: !!tunnelBinary(),
-        running: !!tunnelChild,
+        running: tunnelLive(),
+        serveError: lastServeError,
         version: current?.version ?? null,
         proto: current?.proto ?? null,
         // How we know. `stamp` means the binary predates `version`; `unknown`
@@ -4033,17 +4070,65 @@ function ensureTunnel() {
         windowsHide: true,
       },
     );
-    tunnelChild.on("close", () => {
-      tunnelChild = null;
-      // Respawn with backoff — a crashing tunnel must not loop hot.
+    const child = tunnelChild;
+    // Stamped here rather than only in the "spawn" handler: a spawn that FAILS
+    // (a binary for the wrong arch, a path that vanished) never fires "spawn"
+    // but does fire "close", and a stale timestamp there would read as a serve
+    // that had been up for hours — the exact opposite of what happened.
+    tunnelStartedAt = Date.now();
+    // Without a listener Node re-throws a child's "error" as an uncaught
+    // exception, so a bad binary would take the whole bridge down with it.
+    child.on("error", () => {});
+    child.on("close", (code, signal) => {
+      const lived = Date.now() - tunnelStartedAt;
+      if (tunnelChild === child) tunnelChild = null;
+      if (lived < TUNNEL_SETTLE_MS) {
+        // Never got up. Say so ONCE per streak — the respawn loop runs for the
+        // life of the bridge and must not bury the log — because the only other
+        // way anyone finds out is a phone that quietly stops working the moment
+        // it leaves the Wi-Fi.
+        const detail = signal ? `signal ${signal}` : `exit ${code}`;
+        if (tunnelUp || !lastServeError) {
+          console.warn(
+            `[tunnel] ${bin} exited immediately (${detail}) — OFF-LAN ACCESS IS DOWN. ` +
+              `Devices can reach this machine on the local network only. ` +
+              `Check the binary (\`${bin} version\`) and reinstall it if it is not a working tunnel.`,
+          );
+        }
+        lastServeError = { bin, detail, at: new Date().toISOString() };
+        tunnelUp = false;
+        reportServeState({ up: false, error: lastServeError });
+      } else {
+        tunnelUp = false;
+        reportServeState({ up: false, error: null });
+      }
+      // Respawn with backoff — a crashing tunnel must not loop hot. The backoff
+      // is only reset by a serve that STAYS up (see the settle timer below);
+      // resetting it on spawn, as this used to, meant a binary that died every
+      // time was respawned every two seconds forever.
       setTimeout(ensureTunnel, Math.min((tunnelBackoffMs *= 2), 60_000)).unref();
     });
-    tunnelChild.on("spawn", () => {
-      tunnelBackoffMs = 1000;
+    child.on("spawn", () => {
+      tunnelStartedAt = Date.now();
+      // Up only once it has survived the settle window — and that is also the
+      // only thing that earns a backoff reset.
+      setTimeout(() => {
+        if (tunnelChild !== child) return;
+        tunnelBackoffMs = 1000;
+        tunnelUp = true;
+        lastServeError = null;
+        reportServeState({ up: true });
+      }, TUNNEL_SETTLE_MS).unref();
     });
     console.log(`[tunnel] started ${bin}`);
-  } catch {
+  } catch (e) {
     tunnelChild = null;
+    tunnelUp = false;
+    lastServeError = { bin, detail: e?.message || "spawn failed", at: new Date().toISOString() };
+    console.warn(
+      `[tunnel] could not start ${bin} (${lastServeError.detail}) — off-LAN access is down.`,
+    );
+    reportServeState({ up: false, error: lastServeError });
   }
 }
 // --- updating the tunnel binary underneath ourselves -----------------------------

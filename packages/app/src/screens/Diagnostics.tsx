@@ -330,7 +330,13 @@ export default function DiagnosticsScreen() {
               warn={!report.tunnel.ok}
               title="Remote access"
               detail={report.tunnel.mode === "internet" ? "internet" : "LAN only"}
-              hint="The off-LAN tunnel isn't installed, so your phone can reach this Mac only on the same Wi-Fi. On the same network it works now."
+              hint={
+                report.tunnel.running === false
+                  ? `Remote access is DOWN — this Mac is reachable on the local network only. The tunnel is installed but won't run${
+                      report.tunnel.error ? ` (${report.tunnel.error.detail})` : ""
+                    }. Re-run \`npx use-pounce up\` on this Mac to reinstall it.`
+                  : "The off-LAN tunnel isn't installed, so your phone can reach this Mac only on the same Wi-Fi. On the same network it works now."
+              }
             />
           ) : null}
 

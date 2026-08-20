@@ -8,7 +8,7 @@ import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { agentEnv, binVersion, lanIps } from "./env.mjs";
 import { binOverride, CONFIG_FILE } from "./config.mjs";
-import { tunnelBinary, tunnelVersion } from "./tunnel-bin.mjs";
+import { serveHealth, tunnelBinary, tunnelVersion } from "./tunnel-bin.mjs";
 
 const IS_WIN = process.platform === "win32";
 
@@ -88,6 +88,7 @@ export async function buildDoctorReport(adapters) {
   }
   const tunnelBin = tunnelBinary();
   const tunnelVer = tunnelBin ? tunnelVersion() : null;
+  const serve = serveHealth();
   const sessionsTotal = agents.reduce((s, a) => s + a.sessionCount, 0);
   const ips = lanIps();
   const port = Number(process.env.BRIDGE_PORT || 8099);
@@ -111,10 +112,21 @@ export async function buildDoctorReport(adapters) {
     // binary told us itself or we are reading the stamp we wrote when we
     // installed it, and `unknown` (an old binary with no `version`, no stamp)
     // is a real answer rather than a missing one.
+    //
+    // `ok` used to be `!!tunnelBin` — the existence of a FILE. A binary that
+    // cannot run (a stub left by a rolled back update, a build for the wrong
+    // arch) passed that check, so this row said "internet" while `serve` was
+    // dying on every spawn and the phone could reach nothing off Wi-Fi. It now
+    // asks the supervisor. `known: false` (no bridge supervising — a doctor run
+    // from the CLI, or a dev bridge that never starts one) falls back to the
+    // file check rather than reporting an outage nobody looked for.
     tunnel: {
-      ok: !!tunnelBin,
+      ok: serve.known ? serve.up : !!tunnelBin,
       path: tunnelBin,
-      mode: tunnelBin ? "internet" : "lan-only",
+      running: serve.known ? serve.up : null,
+      // Why it is down, when we know: `{ bin, detail, at }`.
+      error: serve.known ? serve.error : null,
+      mode: (serve.known ? serve.up : !!tunnelBin) ? "internet" : "lan-only",
       version: tunnelVer?.version ?? null,
       proto: tunnelVer?.proto ?? null,
       source: tunnelVer?.source ?? null,
