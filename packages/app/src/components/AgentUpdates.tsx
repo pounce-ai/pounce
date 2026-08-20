@@ -22,7 +22,7 @@
  * ran cleanly while changing nothing says so.
  */
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -93,7 +93,20 @@ export function useAgentUpdates(hostId: string | null) {
   return { versions, busy, update };
 }
 
-/** The badge for one agent. Renders nothing unless we can justify it. */
+/**
+ * The badge for one agent. Renders nothing unless we can justify it.
+ *
+ * An ICON, not a version string. This sits in a dense row whose other contents
+ * are token counts and a dollar figure, and a version number among those reads
+ * as one more stat — the first draft put `↑ 0.148.0` in a filled accent pill
+ * next to `1.2M  ~$4.20`, which was both the loudest thing in the row and the
+ * only number in it that wasn't usage. The version belongs in the confirmation,
+ * where it answers a question somebody is actually asking ("update to what?").
+ *
+ * Quiet by construction: an accent glyph on the card's own background, sized to
+ * the text beside it. It is ambient information — nothing here is urgent, and a
+ * CLI one patch behind should not out-shout the numbers the page is for.
+ */
 export function AgentUpdateBadge({
   version,
   busy,
@@ -107,31 +120,35 @@ export function AgentUpdateBadge({
   // null and false are both "say nothing" — see the header. Only a version we
   // actually ranked as behind earns pixels.
   if (!version || version.updateAvailable !== true) return null;
+  const confirm = () => {
+    // Ask first. This spawns a real installer on the machine, and one stray tap
+    // on a row you were only reading should not start replacing binaries.
+    Alert.alert(
+      `Update ${version.bin}?`,
+      `${version.installed} → ${version.latest}\n\nRuns \`${version.updateCommand}\` on that machine.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Update", onPress: onUpdate },
+      ],
+    );
+  };
   return (
     <Pressable
-      onPress={onUpdate}
+      onPress={confirm}
       accessibilityRole="button"
-      accessibilityLabel={`Update ${version.bin} to ${version.latest}`}
+      accessibilityLabel={`Update ${version.bin} from ${version.installed} to ${version.latest}`}
+      hitSlop={8}
       style={({ pressed }) => [s.badge, pressed && s.pressed]}
     >
-      <Ionicons name="arrow-up-circle" size={11} style={s.badgeIcon} />
-      <Text style={s.badgeText}>{version.latest}</Text>
+      <Ionicons name="arrow-up-circle" size={14} style={s.badgeIcon} />
     </Pressable>
   );
 }
 
 const s = StyleSheet.create((theme) => ({
-  badge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    borderRadius: 6,
-    borderCurve: "continuous",
-    backgroundColor: theme.colors.accent,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  badgeIcon: { color: theme.colors.onAccent },
-  badgeText: { fontSize: 10.5, fontWeight: "600", color: theme.colors.onAccent },
-  pressed: { opacity: 0.6 },
+  // No pill, no fill: the glyph alone, on the card's own ground. A filled
+  // accent chip here competed with the row's actual data for attention.
+  badge: { alignItems: "center", justifyContent: "center" },
+  badgeIcon: { color: theme.colors.accent },
+  pressed: { opacity: 0.5 },
 }));
