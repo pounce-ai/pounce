@@ -7,6 +7,7 @@ import { AgentLogo, IS_DESKTOP } from "../ui";
 import { agentLabel } from "../ui/tokens";
 import { fmtTokens } from "../ui/format";
 import { hostSupports, type AgentQuota } from "../services/bridge";
+import { AgentUpdateBadge, useAgentUpdates } from "./AgentUpdates";
 
 /** "in 4h 12m" / "in 2d" — how long until a window rolls over. */
 function untilReset(iso: string | null, now: number): string | null {
@@ -80,6 +81,22 @@ export function QuotaCard({
    */
   const [reportOk, setReportOk] = useState<Record<string, boolean>>({});
   const hostIds = quotas.map((r) => r.hostId).join(",");
+
+  /**
+   * Whether each agent CLI is behind, for the badge in the card header.
+   *
+   * It lives HERE rather than on the "By agent" list below, and the reason is
+   * coverage: that list is built from usage, so an agent you have installed but
+   * haven't run this period has no row there and could never show a badge. The
+   * plan cards are per agent regardless of usage — Cursor shows up on this card
+   * with "no local meter" and no row at all down there — so this is the only
+   * surface where all four can be told about.
+   */
+  const {
+    versionFor,
+    busy: updateBusy,
+    update: runUpdate,
+  } = useAgentUpdates(quotas.map((r) => r.hostId));
   useEffect(() => {
     let live = true;
     for (const id of hostIds ? hostIds.split(",") : []) {
@@ -120,6 +137,21 @@ export function QuotaCard({
                 <Text style={s.agentName}>{agentLabel(q.agent)}</Text>
                 {q.planType ? <Text style={s.plan}>{q.planType}</Text> : null}
                 {stale ? <Text style={s.stale}>stale</Text> : null}
+                {/* Far right of the card's own header — it annotates the AGENT,
+                    which is what this card is, and it is the only per-agent
+                    surface that exists whether or not the agent ran this
+                    period. `marginLeft: auto` of its own so it still sits right
+                    when there is no "stale" label to push it there. */}
+                <View style={s.updateSlot}>
+                  <AgentUpdateBadge
+                    version={versionFor(q.hostId, q.agent)}
+                    busy={!!updateBusy[`${q.hostId}:${q.agent}`]}
+                    onUpdate={() => {
+                      const v = versionFor(q.hostId, q.agent);
+                      if (v) void runUpdate(q.hostId, v);
+                    }}
+                  />
+                </View>
               </View>
               {/* METERS FIRST, on every card. The reported windows are the
                 headline — the one thing every agent that has them says in the
@@ -257,6 +289,7 @@ const s = StyleSheet.create((theme) => ({
     color: theme.colors.accent,
   },
   stale: { marginLeft: "auto", fontSize: 10, color: theme.colors.fgFaint },
+  updateSlot: { marginLeft: "auto" },
   note: { fontSize: 11.5, color: theme.colors.fgFaint },
   blockBox: { gap: 2 },
   pressed: { opacity: 0.7 },

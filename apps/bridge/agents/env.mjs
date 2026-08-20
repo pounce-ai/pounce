@@ -261,6 +261,15 @@ export function resolveBin(name) {
  *
  * Keyed on the binary's absolute path plus its mtime and size, so an upgraded
  * CLI misses the cache and gets re-probed while an unchanged one never does.
+ *
+ * ...with a TTL on top, because that stamp is not always the tool. Several of
+ * these CLIs are reached through a WRAPPER SCRIPT — a few hundred bytes that
+ * finds the real binary on PATH — and a wrapper's mtime and size never change
+ * when the thing behind it updates. On a machine set up that way the stamp
+ * freezes on the first answer and the bridge reports that version forever: it
+ * had Claude Code pinned at 2.1.220 while the CLI on disk was 2.1.237. The
+ * stamp still carries the common case (a real binary, replaced in place, missed
+ * instantly); the TTL is what stops a shim turning a cache into a lie.
  */
 const VERSION_FILE = path.join(os.homedir(), ".pounce", "bin-versions.json");
 let versionCache;
@@ -295,7 +304,11 @@ function saveVersionCache() {
  * and cost 1.4s of a 2.1s cold start (measured, 4 agents). A missing binary now
  * costs one stat, and an unchanged one costs a stat plus a JSON lookup.
  */
-export async function binVersion(bin, args = ["--version"]) {
+/** How long an unchanged stamp is still believed. One cheap spawn per binary
+ *  per quarter hour, against a version that would otherwise never move. */
+const VERSION_TTL_MS = 15 * 60_000;
+
+export async function binVersion(bin, args = ["--version"], { fresh = false } = {}) {
   const resolved = resolveBin(binPath(bin));
   if (!resolved) return null; // not installed — nothing to spawn
 
@@ -309,11 +322,16 @@ export async function binVersion(bin, args = ["--version"]) {
   const key = `${resolved}|${args.join(" ")}`;
   const cache = loadVersionCache();
   const hit = cache[key];
-  if (hit && hit.stamp === stamp) return hit.version;
+  // `fresh` is for right after we ran an updater: the whole question then is
+  // whether the version MOVED, and answering that from a cache keyed on a
+  // wrapper that never changes would report every update as a no-op.
+  if (!fresh && hit && hit.stamp === stamp && Date.now() - (hit.at ?? 0) < VERSION_TTL_MS) {
+    return hit.version;
+  }
 
   const { code, out } = await runCollect(resolved, args, { env: agentEnv(), maxBytes: 4096 });
   const version = code === 0 ? out.trim().split("\n")[0] || "" : null;
-  cache[key] = { stamp, version };
+  cache[key] = { stamp, version, at: Date.now() };
   saveVersionCache();
   return version;
 }

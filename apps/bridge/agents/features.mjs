@@ -91,6 +91,8 @@ export const FEATURES = {
   attribution: ["/v1/attribution", "/v1/attribution/export"],
   /** The same report streamed with progress, instead of one silent request. */
   "attribution-stream": ["/v1/attribution/stream"],
+  /** Reporting agent CLI versions, and running their own updaters. */
+  "agent-updates": ["/v1/agents/versions", "/v1/agents/update"],
   /** Cost, quota and spend reporting. */
   quota: ["/v1/quota", "/v1/activity", "/v1/usage", "/v1/trajectory"],
   /** Scoped, expiring peer access grants. */

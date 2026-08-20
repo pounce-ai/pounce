@@ -84,6 +84,7 @@ import { readQuota } from "./agents/quota.mjs";
 import { readBlocks } from "./agents/blocks.mjs";
 import { readAttribution } from "./agents/attribution.mjs";
 import { featureNames } from "./agents/features.mjs";
+import { agentVersions, updateAgent } from "./agents/agent-versions.mjs";
 import { chooseSavePath, defaultSaveDir } from "./agents/save-dialog.mjs";
 import { dailyCost, resetCostCache } from "./agents/admin-cost.mjs";
 import {
@@ -3052,6 +3053,38 @@ const server = http.createServer(async (req, res) => {
     // paths. Cached separately from /v1/quota because the scan is a much
     // heavier parse (every content block, not just `usage`) and the quota card
     // refreshes far more often than anyone opens the report.
+    /**
+     * What version of each agent CLI this machine has, and whether it is behind.
+     *
+     * `check=1` is what reaches the network. Without it this answers from disk
+     * only — the page it feeds re-syncs every 20 seconds and a registry lookup
+     * per agent per sync would be both rude and pointless, since CLIs do not
+     * ship that often. Same rule as /v1/tunnel/version.
+     */
+    if (url.pathname === "/v1/agents/versions") {
+      const check = url.searchParams.get("check") === "1";
+      return send(res, 200, { agents: await agentVersions({ check }) });
+    }
+    /**
+     * Run an agent's own updater.
+     *
+     * Its OWN, deliberately: these CLIs were installed four different ways (npm,
+     * homebrew, a curl script) and only each one knows which. Running `npm i -g`
+     * for all of them would be wrong for at least two and would leave a second
+     * copy shadowing the real one.
+     *
+     * Owner-only. This spawns an installer as the user on their machine, which
+     * is not something a scoped read-only grant may do — see FULL_ONLY_ROUTES.
+     */
+    if (url.pathname === "/v1/agents/update" && req.method === "POST") {
+      const body = await readBody(req).catch(() => null);
+      const agent = body?.agent;
+      if (!agent) return send(res, 400, { error: "agent required" });
+      const result = await updateAgent(agent);
+      // The version is re-read from disk afterwards, so `changed` is the disk's
+      // opinion rather than the updater's exit code.
+      return send(res, result.ok ? 200 : 500, result);
+    }
     if (url.pathname === "/v1/attribution") {
       const want = attributionWindow(url.searchParams.get("window"), url.searchParams.get("hours"));
       if (url.searchParams.get("fresh") === "1") cache.delete(want.key);
