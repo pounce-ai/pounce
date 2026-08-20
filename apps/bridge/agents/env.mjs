@@ -308,6 +308,24 @@ function saveVersionCache() {
  *  per quarter hour, against a version that would otherwise never move. */
 const VERSION_TTL_MS = 15 * 60_000;
 
+/**
+ * Forget every cached CLI version.
+ *
+ * Called right after an agent updates itself: the entries describe the binary
+ * that was just replaced, and the mtime+size stamp they are keyed on does not
+ * move when the CLI is reached through a wrapper script. Without this the
+ * bridge keeps reporting the old version — the badge cannot clear and the app
+ * shows a stale answer that only a restart fixes.
+ */
+export function resetBinVersions() {
+  versionCache = {};
+  try {
+    writeFileSync(VERSION_FILE, "{}");
+  } catch {
+    // In-memory clear is the part that matters; a stale file loses to it.
+  }
+}
+
 export async function binVersion(bin, args = ["--version"], { fresh = false } = {}) {
   const resolved = resolveBin(binPath(bin));
   if (!resolved) return null; // not installed — nothing to spawn
