@@ -236,6 +236,18 @@ export interface DoctorReport {
     readonly ok: boolean;
     readonly path: string | null;
     readonly mode: "internet" | "lan-only";
+    /** Whether `serve` is actually up, when a bridge is supervising one — null
+     *  when nobody is (a doctor run outside the bridge), which is why `ok`
+     *  falls back to "is a binary installed" there. A binary that exists but
+     *  cannot run reads as installed-but-down, the state that used to be
+     *  indistinguishable from healthy. */
+    readonly running?: boolean | null;
+    /** Why it is down: the binary tried, how it died, and when. */
+    readonly error?: {
+      readonly bin: string;
+      readonly detail: string;
+      readonly at: string;
+    } | null;
   };
   readonly sessionsTotal: number;
   readonly host: string;

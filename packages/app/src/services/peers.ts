@@ -158,10 +158,26 @@ export async function setDiscoverable(enabled: boolean): Promise<DiscoveryState 
  * this machine?" that omitted your phone would be answering it wrongly.
  */
 export interface PairedDevice {
-  readonly bridgeId: string;
-  readonly hostName: string;
+  /**
+   * Field names here MUST match what `mergeDeviceRows` emits on the bridge.
+   *
+   * They did not. This said `bridgeId`/`hostName` while the bridge normalises
+   * every row — its own credentials AND the legacy access rows — to `id`/`name`
+   * (server.mjs mergeDeviceRows maps `bridgeId`→`id`, `hostName`→`name`). The
+   * payload is JSON `as`-cast, so TypeScript could not catch the lie: the UI
+   * read `undefined` for every device's name and rendered a blank line, which
+   * made four DIFFERENT phones look like four copies of one. The same
+   * undefined keyed the list, so every row shared `key={undefined}`.
+   */
+  readonly id: string;
+  readonly name: string;
   readonly platform: string;
   readonly pairedAt: string;
+  /** Null until the device has synced at least once. */
+  readonly lastSeenAt?: string | null;
+  /** False for a legacy row that predates per-device credentials — there is no
+   *  credential of its own to revoke, so removal cannot be offered for it. */
+  readonly revocable?: boolean;
 }
 
 /** Who is asking US for access, and what we have already given out. */

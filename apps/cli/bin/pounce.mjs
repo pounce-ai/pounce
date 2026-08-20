@@ -190,11 +190,30 @@ function rustTriple() {
   return arch && osPart ? `${arch}-${osPart}` : null;
 }
 
-/** Make sure ~/.pounce/bin/pounce-tunnel exists, downloading a platform build
- *  from the GitHub release when missing. Returns "present" | "downloaded" |
- *  a `{ skipped: reason }` — pairing continues LAN-only on skip. */
+/**
+ * Does the file at TUNNEL_BIN actually behave like the tunnel?
+ *
+ * Run it with no arguments: every real build prints usage naming `serve` and
+ * exits non-zero. A stub left by a rolled back update, or a build for another
+ * architecture, does not — and both of those EXIST, which is all this used to
+ * check. A machine in that state stayed silently LAN-only no matter how many
+ * times its owner re-ran the installer.
+ */
+function tunnelBinaryRuns() {
+  try {
+    const r = spawnSync(TUNNEL_BIN, [], { encoding: "utf8", timeout: 5000 });
+    return !r.error && `${r.stdout || ""}${r.stderr || ""}`.includes("serve");
+  } catch {
+    return false;
+  }
+}
+
+/** Make sure ~/.pounce/bin/pounce-tunnel exists AND runs, downloading a platform
+ *  build from the GitHub release when it is missing or unusable. Returns
+ *  "present" | "downloaded" | a `{ skipped: reason }` — pairing continues
+ *  LAN-only on skip. */
 async function ensureTunnelBinary(opts) {
-  if (existsSync(TUNNEL_BIN)) return "present";
+  if (existsSync(TUNNEL_BIN) && tunnelBinaryRuns()) return "present";
   if (opts.lan) return { skipped: "--lan" };
   const triple = rustTriple();
   if (!triple) return { skipped: `no tunnel build for ${process.platform}/${process.arch}` };

@@ -230,3 +230,58 @@ describe("finding the newest release", () => {
     }
   });
 });
+
+/**
+ * The check that tells a tunnel from a file with the right name.
+ *
+ * This is what a rolled back update leaves behind, and for six days it read as
+ * a healthy install on every surface — doctor said "internet", the QR carried a
+ * node id, and the phone could reach nothing the moment it left the Wi-Fi.
+ */
+describe("is this actually a tunnel", () => {
+  it("accepts a binary that prints its usage", () => {
+    installFake("0.2.0");
+    // Both the 0.1.x and 0.2.x builds print usage naming `serve` and exit 2.
+    writeFileSync(BIN, `#!/bin/sh\necho 'usage:\\n  pounce-tunnel serve --token <t>'\nexit 2\n`);
+    chmodSync(BIN, 0o755);
+    expect(mod.binaryRuns(BIN)).toBe(true);
+  });
+
+  it("rejects a stub that answers `version` and nothing else", () => {
+    // Exactly the file a rolled back update leaves: it can name a version, so
+    // every version-based check passes — but it cannot serve.
+    installFake("0.2.0", { speaks: true });
+    writeFileSync(
+      BIN,
+      `#!/bin/sh\nif [ "$1" = version ]; then echo '{"version":"0.2.0"}'; exit 0; fi\nexit 2\n`,
+    );
+    chmodSync(BIN, 0o755);
+    expect(mod.binaryRuns(BIN)).toBe(false);
+  });
+
+  it("rejects a file that isn't there", () => {
+    expect(mod.binaryRuns(path.join(BIN_DIR, "nope"))).toBe(false);
+  });
+});
+
+describe("is the tunnel up", () => {
+  beforeEach(() => mod._resetServeState());
+
+  it("says nothing is known until a supervisor reports", () => {
+    // The state doctor falls back on: nobody is running `serve` here, so
+    // claiming it is down would be a made-up outage.
+    expect(mod.serveHealth()).toEqual({ known: false, up: false, error: null });
+  });
+
+  it("carries the reason a serve failed", () => {
+    mod.reportServeState({ up: false, error: { bin: "/x", detail: "exit 2", at: "now" } });
+    expect(mod.serveHealth()).toMatchObject({ known: true, up: false });
+    expect(mod.serveHealth().error.detail).toBe("exit 2");
+  });
+
+  it("drops the reason once one comes up", () => {
+    mod.reportServeState({ up: false, error: { bin: "/x", detail: "exit 2", at: "now" } });
+    mod.reportServeState({ up: true });
+    expect(mod.serveHealth()).toEqual({ known: true, up: true, error: null });
+  });
+});

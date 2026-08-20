@@ -492,6 +492,10 @@ const s = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.overlay,
   },
   modalCard: {
+    // Above the scrim rendered immediately before it — same reason as
+    // AnchoredMenu's card: relying on document order alone is what lets the
+    // dismiss layer win hit-testing and swallow clicks meant for the sheet.
+    zIndex: 1,
     overflow: "hidden",
     borderRadius: 12,
     borderWidth: 1,

@@ -84,6 +84,12 @@ export function AnchoredMenu({
 const s = StyleSheet.create((theme) => ({
   menu: {
     position: "absolute",
+    // Explicitly ABOVE the full-window dismiss catcher rendered before it.
+    // Document order alone is not enough here: this shell has been bitten
+    // twice by macOS Fabric painting an absolute sibling out of tree order
+    // (see AccessAlert's docblock and Shell's pane comment), and when the
+    // catcher wins, every click on the menu dismisses it instead.
+    zIndex: 1,
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.borderStrong,
