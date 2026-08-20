@@ -657,18 +657,24 @@ export default function DashboardScreen() {
                   {agents.map((a) => (
                     <View key={a.agent} style={s.agentRow}>
                       <AgentLogo agent={a.agent} size={15} />
-                      <Text style={s.agentName}>{agentLabel(a.agent)}</Text>
-                      {/* Sits with the agent's NAME rather than with its numbers:
-                          it is a fact about the CLI, not about the usage, and
-                          putting it among the token counts read as a stat. */}
-                      <AgentUpdateBadge
-                        version={agentVersions.find((v) => v.id === a.agent)}
-                        busy={!!updateBusy[a.agent]}
-                        onUpdate={() => {
-                          const v = agentVersions.find((x) => x.id === a.agent);
-                          if (v) void runUpdate(v);
-                        }}
-                      />
+                      {/* Name and badge share the flexible cell so the badge sits
+                          WITH the name. Hung off the name directly it would be
+                          pushed the full width by `flex: 1` and land among the
+                          token counts, where a version number reads as one more
+                          stat instead of a fact about the CLI. */}
+                      <View style={s.agentNameCell}>
+                        <Text style={s.agentName} numberOfLines={1}>
+                          {agentLabel(a.agent)}
+                        </Text>
+                        <AgentUpdateBadge
+                          version={agentVersions.find((v) => v.id === a.agent)}
+                          busy={!!updateBusy[a.agent]}
+                          onUpdate={() => {
+                            const v = agentVersions.find((x) => x.id === a.agent);
+                            if (v) void runUpdate(v);
+                          }}
+                        />
+                      </View>
                       {/* An agent that reports no usage still did work — show its
                       session count rather than a bare "0 · $0.00", which reads
                       as "you never used it". */}
@@ -845,7 +851,8 @@ const s = StyleSheet.create((theme, rt) => ({
   },
   detailLine: { fontSize: 12, color: theme.colors.fgMuted },
   agentRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  agentName: { flex: 1, fontSize: 14, color: theme.colors.fg },
+  agentNameCell: { flex: 1, flexDirection: "row", alignItems: "center", gap: 6 },
+  agentName: { flexShrink: 1, fontSize: 14, color: theme.colors.fg },
   agentStat: { fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fgMuted },
   agentCost: {
     minWidth: 68,
