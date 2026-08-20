@@ -10,7 +10,7 @@
   },
   "description": "Pounce — a mobile-first React Native + Expo client (plus a desktop app and a native bridge) for driving Claude Code / agent sessions on your own machine.",
   "engines": {
-    "bun": ">=1.3.0",
+    "bun": ">=1.4.0",
     "node": ">=20"
   },
   "overrides": {
@@ -18,7 +18,7 @@
     "react": "19.2.3",
     "react-dom": "19.2.3"
   },
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.0",
   "patchedDependencies": {
     "metro@0.84.4": "patches/metro@0.84.4.patch",
     "metro-runtime@0.84.4": "patches/metro-runtime@0.84.4.patch",
