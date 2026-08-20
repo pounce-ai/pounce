@@ -14,9 +14,18 @@
  * own compatibility stories — so dragging them to the app's number would make
  * their versions say nothing about what changed in them.
  *
- * Build counters are also left alone. CFBundleVersion, iOS buildNumber and
- * Android versionCode are monotonic per store and get bumped per upload, which
- * is a different concern from the version users read.
+ * ONE build counter is not left alone: CFBundleVersion. Sparkle compares THAT,
+ * not the version users read, to decide whether an update exists — so a release
+ * shipping a new CFBundleShortVersionString with the old CFBundleVersion is
+ * invisible to every installed Mac. It used to be bumped by hand on each
+ * `desktop-v*` release PR; unified releases (#165) retired those PRs and nothing
+ * inherited the step, so it sat at 47 through 1.5.1, 1.5.2, 1.6.0 and 1.6.1 and
+ * macOS auto-update quietly stopped working. A counter that must advance on
+ * every release belongs to the command that runs on every release.
+ *
+ * iOS buildNumber and Android versionCode ARE still left alone: those are
+ * per-upload counters owned by the stores, and a rejected build burns one
+ * without any version change.
  *
  * Usage:
  *   node scripts/set-app-version.mjs 1.5.1   # stamp
@@ -50,8 +59,9 @@ const TARGETS = [
   {
     label: "macOS desktop app",
     path: file("desktop/macos/PounceDesktop-macOS/Info.plist"),
-    // CFBundleShortVersionString is the version users read. CFBundleVersion,
-    // the build counter directly below it, is deliberately untouched.
+    // CFBundleShortVersionString is the version users read; CFBundleVersion,
+    // the build counter directly below it, is what Sparkle actually compares —
+    // see bumpMacBuild.
     pattern: /(<key>CFBundleShortVersionString<\/key>\s*\n\s*<string>)([^<]+)(<\/string>)/,
   },
   {
@@ -67,6 +77,39 @@ const TARGETS = [
     pattern: /(app\s*:\s*\{[\s\S]*?version\s*:\s*")([^"]+)(")/,
   },
 ];
+
+const MAC_PLIST = file("desktop/macos/PounceDesktop-macOS/Info.plist");
+const MAC_BUILD_PATTERN = /(<key>CFBundleVersion<\/key>\s*\n\s*<string>)(\d+)(<\/string>)/;
+
+/** The macOS build counter, as an integer. */
+function macBuild() {
+  const match = readFileSync(MAC_PLIST, "utf8").match(MAC_BUILD_PATTERN);
+  if (!match) {
+    throw new Error(
+      "macOS: no numeric CFBundleVersion in desktop/macos/PounceDesktop-macOS/Info.plist\n" +
+        "the file's shape changed — update MAC_BUILD_PATTERN in scripts/set-app-version.mjs",
+    );
+  }
+  return Number(match[2]);
+}
+
+/**
+ * Advance the macOS build counter by one.
+ *
+ * Sparkle's comparator reads `sparkle:version`, generated from the built app's
+ * CFBundleVersion, and treats an equal value as "no update available". So this
+ * has to move on every release, and it has to move MONOTONICALLY: advertising a
+ * build the installed app already claims offers nothing, and advertising one
+ * higher than the DMG actually installs is worse — the update then re-offers
+ * itself forever.
+ */
+function bumpMacBuild() {
+  const source = readFileSync(MAC_PLIST, "utf8");
+  const from = macBuild();
+  const to = from + 1;
+  writeFileSync(MAC_PLIST, source.replace(MAC_BUILD_PATTERN, `$1${to}$3`));
+  return { from, to };
+}
 
 function readTarget(target) {
   const source = readFileSync(target.path, "utf8");
@@ -92,18 +135,33 @@ function stamp(version) {
   }
 
   const manifest = JSON.parse(readFileSync(VERSION_FILE, "utf8"));
+  const previous = manifest.app;
   manifest.app = version;
   writeFileSync(VERSION_FILE, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  // Only on a real version change: re-stamping the same number (repairing a
+  // drift, re-running the command) must not hand out a build the shipped DMG
+  // does not carry.
+  const build = previous === version ? null : bumpMacBuild();
 
   console.log(`  Pounce ${version}\n`);
   for (const { target, current } of changes) {
     const state = current === version ? "already" : `${current} →`;
     console.log(`  ${state.padStart(9)} ${version}  ${target.label}`);
   }
-  console.log(
-    "\n  Build counters are untouched — bump CFBundleVersion, iOS buildNumber and\n" +
-      "  Android versionCode per upload as usual.",
-  );
+  if (build) {
+    console.log(`  ${String(build.from).padStart(9)} → ${build.to}  macOS build (CFBundleVersion)`);
+    console.log(
+      "\n  The macOS build counter moved with it — Sparkle compares THAT, so a\n" +
+        "  release that leaves it alone is invisible to installed Macs.\n" +
+        "  iOS buildNumber and Android versionCode stay per-upload, as usual.",
+    );
+  } else {
+    console.log(
+      `\n  Already ${version} — the macOS build counter stays at ${macBuild()}, since\n` +
+        "  the shipped DMG carries that number and nothing new is being released.",
+    );
+  }
 }
 
 function check() {

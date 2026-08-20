@@ -224,6 +224,27 @@ jobs:
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "Pounce $V (macOS build $B)"
 
+          # CFBundleVersion is what Sparkle compares — `sparkle:version` in the
+          # appcast is generated from it, and an equal value means "no update
+          # available" no matter how much CFBundleShortVersionString changed.
+          # This check only ever PRINTED it, so when unified releases retired
+          # the desktop-v* PRs that bumped it by hand, four releases shipped
+          # advertising build 47 and every installed Mac stopped updating. The
+          # neighbouring field was verified; the one that decides was not.
+          PUBLISHED=$(curl -fsSL --max-time 20 \
+            https://github.com/pounce-ai/pounce/releases/latest/download/appcast.xml 2>/dev/null \
+            | sed -n 's/.*<sparkle:version>\([0-9][0-9]*\)<\/sparkle:version>.*/\1/p' | head -1)
+          if [ -z "$PUBLISHED" ]; then
+            # No appcast published yet, or GitHub is having a moment. Not worth
+            # failing a release over something that is only advisory.
+            echo "::warning::could not read the published appcast — skipping the build-counter check"
+          elif [ "$B" -le "$PUBLISHED" ]; then
+            echo "::error::CFBundleVersion is $B but the published release already advertises $PUBLISHED — Sparkle would offer no update. Bump it (bun run version:set does this) before releasing."
+            exit 1
+          else
+            echo "build counter advances: $PUBLISHED -> $B"
+          fi
+
       - name: Import signing certificate
         env:
           CERT_P12: ${{ secrets.MAC_CERT_P12_BASE64 }}
