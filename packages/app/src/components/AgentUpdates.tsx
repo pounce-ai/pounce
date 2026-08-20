@@ -35,42 +35,61 @@ import {
 /** Per-agent update state, so one row's spinner doesn't freeze the others. */
 type Busy = Record<string, boolean>;
 
-export function useAgentUpdates(hostId: string | null) {
-  const [versions, setVersions] = useState<AgentVersion[]>([]);
+/**
+ * Agent versions for every machine whose cards are on screen.
+ *
+ * Keyed by host, not global: an agent CLI is installed PER MACHINE, so two
+ * paired Macs can be on different versions of the same agent and a single flat
+ * list would show one machine's staleness on the other's card.
+ *
+ * `hostIds` is joined into a string for the effect's dependency because the
+ * array is rebuilt on every sync tick — depending on the array itself re-ran
+ * this every 20 seconds, which is exactly the network chatter the host-side
+ * cache exists to avoid.
+ */
+export function useAgentUpdates(hostIds: readonly string[]) {
+  const [byHost, setByHost] = useState<Record<string, AgentVersion[]>>({});
   const [busy, setBusy] = useState<Busy>({});
+  const key = [...new Set(hostIds)].sort().join(",");
 
-  const load = useCallback(
-    async (check: boolean) => {
-      if (!hostId) return;
-      // Gate on the contract rather than discovering absence via a 404 — an
-      // older bridge simply has no agent-updates feature and this stays empty.
-      if (!(await hostSupports(hostId, "agent-updates"))) return;
-      try {
-        setVersions(await fetchAgentVersions(hostId, { check }));
-      } catch {
-        // A machine that can't be reached is not a machine that's up to date;
-        // showing nothing is the honest answer either way.
-        setVersions([]);
-      }
-    },
-    [hostId],
-  );
+  const load = useCallback(async () => {
+    const ids = key ? key.split(",") : [];
+    await Promise.all(
+      ids.map(async (id) => {
+        // Gate on the contract rather than discovering absence via a 404 — an
+        // older bridge simply has no agent-updates feature and stays empty.
+        if (!(await hostSupports(id, "agent-updates"))) return;
+        try {
+          const agents = await fetchAgentVersions(id, { check: true });
+          setByHost((prev) => ({ ...prev, [id]: agents }));
+        } catch {
+          // Unreachable is not the same as up to date; showing nothing is the
+          // honest answer either way.
+        }
+      }),
+    );
+  }, [key]);
 
   useEffect(() => {
-    void load(true);
+    void load();
   }, [load]);
 
+  /** The version record for one agent on one machine, if we have it. */
+  const versionFor = useCallback(
+    (hostId: string, agent: string) => (byHost[hostId] ?? []).find((v) => v.id === agent),
+    [byHost],
+  );
+
   const update = useCallback(
-    async (agent: AgentVersion) => {
-      if (!hostId) return;
-      setBusy((b) => ({ ...b, [agent.id]: true }));
+    async (hostId: string, agent: AgentVersion) => {
+      const slot = `${hostId}:${agent.id}`;
+      setBusy((b) => ({ ...b, [slot]: true }));
       try {
         const r = await runAgentUpdate(hostId, agent.id);
         // `changed` comes from re-reading the binary on the host. An updater
         // that exits 0 and replaces nothing is common enough — a Homebrew
-        // install it can't write, a version already current behind a stale
-        // cache — that reporting it as success would train people to distrust
-        // the badge.
+        // install it can't write, a version already current — that reporting it
+        // as success would train people to distrust the badge.
         if (r.ok && r.changed) {
           Alert.alert("Updated", `${agent.bin} is now ${r.installed ?? "up to date"}.`);
         } else if (r.ok) {
@@ -82,15 +101,15 @@ export function useAgentUpdates(hostId: string | null) {
         } else {
           Alert.alert("Update failed", `Try \`${agent.updateCommand}\` in a terminal.`);
         }
-        await load(true);
+        await load();
       } finally {
-        setBusy((b) => ({ ...b, [agent.id]: false }));
+        setBusy((b) => ({ ...b, [slot]: false }));
       }
     },
-    [hostId, load],
+    [load],
   );
 
-  return { versions, busy, update };
+  return { versionFor, busy, update };
 }
 
 /**
@@ -140,7 +159,12 @@ export function AgentUpdateBadge({
       hitSlop={8}
       style={({ pressed }) => [s.badge, pressed && s.pressed]}
     >
-      <Ionicons name="arrow-up-circle" size={14} style={s.badgeIcon} />
+      {/* OUTLINE, not the filled variant. Filled, this is a solid accent disc
+          that reads as an alert and comes out brighter than the agent's own
+          logo next to it — three rows of them made the card look like three
+          warnings. A stroke keeps the affordance (a circle you can press)
+          without claiming the eye first. */}
+      <Ionicons name="arrow-up-circle-outline" size={14} style={s.badgeIcon} />
     </Pressable>
   );
 }
