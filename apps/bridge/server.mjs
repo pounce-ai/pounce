@@ -83,6 +83,7 @@ import { createActivityIndex } from "./agents/activity-index.mjs";
 import { readQuota } from "./agents/quota.mjs";
 import { readBlocks } from "./agents/blocks.mjs";
 import { readAttribution } from "./agents/attribution.mjs";
+import { featureNames } from "./agents/features.mjs";
 import { chooseSavePath, defaultSaveDir } from "./agents/save-dialog.mjs";
 import { dailyCost, resetCostCache } from "./agents/admin-cost.mjs";
 import {
@@ -257,7 +258,7 @@ function attributionWindow(window, hours) {
 
 /** The report for a resolved range, memoised — the scan reads up to 192MB per
  *  transcript, so it must not run twice for one question. */
-function attributionReport({ asBlock, hours, key }) {
+function attributionReport({ asBlock, hours, key }, onProgress = null) {
   return cached(key, 60_000, async () => {
     let since = null;
     if (asBlock) {
@@ -265,7 +266,11 @@ function attributionReport({ asBlock, hours, key }) {
       const started = Date.parse(blocks?.current?.startedAt ?? "");
       if (Number.isFinite(started)) since = started;
     }
-    return { attribution: await readAttribution({ windowHours: hours, since }).catch(() => null) };
+    return {
+      attribution: await readAttribution({ windowHours: hours, since, onProgress }).catch(
+        () => null,
+      ),
+    };
   });
 }
 
@@ -2107,6 +2112,12 @@ const server = http.createServer(async (req, res) => {
       platform: process.platform,
       port: ACTIVE_PORT,
       appVersion: APP_VERSION,
+      // What this bridge can actually do, by name — see agents/features.mjs.
+      // A client reads this ONCE and hides what this machine cannot serve,
+      // instead of finding out by calling a route that isn't there and
+      // reporting the 404 as a network problem. An older bridge omits the
+      // field entirely, which is itself the answer: gate everything optional.
+      features: featureNames(),
     });
   }
 
@@ -3046,6 +3057,55 @@ const server = http.createServer(async (req, res) => {
       if (url.searchParams.get("fresh") === "1") cache.delete(want.key);
       return send(res, 200, await attributionReport(want));
     }
+    /**
+     * The same report, streamed — because reading a window is a walk of every
+     * transcript it touched, and on a busy day that outlasts any timeout the
+     * caller is willing to set.
+     *
+     * The one-shot GET above cannot be fixed by raising that timeout: the
+     * connection is silent for the whole scan, so a client has no way to tell a
+     * slow machine from a dead one, and picking a number just moves where it
+     * gives up. Here the sessions queue up as they are read and each one is
+     * announced, so the connection is never idle and the page can show the
+     * queue filling rather than a spinner with a cliff at the end.
+     *
+     * The ANALYTICS still run once, on the complete set — merging a partial
+     * scan would put a total on screen that is wrong rather than unfinished,
+     * and this page exists because two numbers disagreed by 140M.
+     *
+     * Fills the same cache the GET and the export read, so pressing Download
+     * after watching it stream does not walk the corpus a second time.
+     */
+    if (url.pathname === "/v1/attribution/stream") {
+      const want = attributionWindow(url.searchParams.get("window"), url.searchParams.get("hours"));
+      if (url.searchParams.get("fresh") === "1") cache.delete(want.key);
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+        "access-control-allow-origin": "*",
+      });
+      const write = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      let closed = false;
+      req.on("close", () => {
+        closed = true;
+      });
+      try {
+        // Through the SAME memo the GET and the export use, so watching it
+        // stream and then pressing Download does not walk the corpus twice.
+        // A cached or already-in-flight report answers without a scan of its
+        // own and so reports no progress — right in both cases: there is no
+        // queue of ours to fill.
+        const { attribution } = await attributionReport(want, (p) => {
+          if (!closed) write({ progress: p });
+        });
+        if (!closed) write({ attribution });
+        if (!closed) write({ done: true });
+      } catch (e) {
+        if (!closed) write({ error: String(e?.message || e) });
+      }
+      return res.end();
+    }
     // Write the report to a file on THIS machine and say where it landed.
     //
     // Saved host-side rather than handed back as a download because that is
@@ -3718,16 +3778,17 @@ function localIp() {
 /** Is the thing on this port a Pounce bridge? /v1/hello is unauthenticated and
  *  answers with a bridgeId; anything else — connection refused, HTML, a
  *  different JSON shape — is some other program that happens to hold the port. */
-async function isBridgeOnPort(port) {
+/** The Pounce already on this port, as it introduces itself — or null. */
+async function bridgeOnPort(port) {
   try {
     const r = await fetch(`http://127.0.0.1:${port}/v1/hello`, {
       signal: AbortSignal.timeout(1500),
     });
-    if (!r.ok) return false;
+    if (!r.ok) return null;
     const d = await r.json();
-    return !!(d && d.ok && d.bridgeId);
+    return d && d.ok && d.bridgeId ? d : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -3778,9 +3839,32 @@ export async function startBridge({
     // two instances collapse into one. Anything else is a foreign squatter,
     // and "a Pounce is already running" would have pointed the window at it —
     // hunt the next free port instead and stay usable.
-    if (await isBridgeOnPort(port)) {
-      if (!quiet) console.error(`A Pounce bridge is already running on port ${port}.`);
-      return { error: "EADDRINUSE", alreadyRunning: true, port };
+    const running = await bridgeOnPort(port);
+    if (running) {
+      // Attaching is right — killing a bridge that may be mid-turn, or serving
+      // somebody's phone, is worse than sharing it. But it has a consequence
+      // nobody was told about: UPDATING THIS APP DOES NOT UPDATE THAT BRIDGE.
+      // A desktop app that shipped a newer bridge in its own Resources will sit
+      // on top of whatever was already listening — a `node apps/bridge/server.mjs`
+      // from a checkout weeks behind, say — and then serve UI whose routes that
+      // bridge has never heard of. The symptom is a page that 404s instantly
+      // and blames the network.
+      //
+      // `/v1/hello` has always carried `appVersion`; this only ever looked at
+      // `bridgeId`. Now it compares, and says so.
+      const theirs = running.appVersion ?? null;
+      const stale = theirs !== APP_VERSION;
+      if (!quiet) {
+        console.error(`A Pounce bridge is already running on port ${port}.`);
+        if (stale) {
+          console.warn(
+            `[bridge] it reports version ${theirs ?? "unknown"}, this app is ${APP_VERSION ?? "unknown"} — ` +
+              `the OLDER one keeps the port, so features added since it started will 404. ` +
+              `Restart that bridge to pick this app's up.`,
+          );
+        }
+      }
+      return { error: "EADDRINUSE", alreadyRunning: true, port, theirVersion: theirs, stale };
     }
     let free = null;
     for (let p = port + 1; p <= port + 10; p++) {
