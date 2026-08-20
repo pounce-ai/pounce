@@ -36,7 +36,6 @@ import {
 import { Animated, LinearTransition } from "../components/animation";
 import { ContributionGraph } from "../components/ContributionGraph";
 import { QuotaCard } from "../components/QuotaCard";
-import { AgentUpdateBadge, useAgentUpdates } from "../components/AgentUpdates";
 import { CHART_GUTTER, UsageChart } from "../components/UsageChart";
 import { bucketByMonth } from "../components/usageSeries";
 import { PeriodPicker } from "../components/PeriodPicker";
@@ -125,22 +124,6 @@ export default function DashboardScreen() {
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
-
-  /**
-   * Agent CLI versions, for the "update available" badges below.
-   *
-   * Hung off the quota card's host rather than every paired machine: this page
-   * aggregates across hosts, but an agent CLI is installed PER MACHINE, and a
-   * badge that silently meant "one of your machines is behind" would send you to
-   * update the wrong one. The quota rows already name the host whose numbers
-   * this page is showing, so the badge describes that same machine.
-   */
-  const versionHostId = quotaQ.data?.[0]?.hostId ?? null;
-  const {
-    versions: agentVersions,
-    busy: updateBusy,
-    update: runUpdate,
-  } = useAgentUpdates(versionHostId);
 
   // Worktree disk. Its own query because it answers a different question from
   // everything else here ("what is on the disk now", not "what happened in this
@@ -657,24 +640,7 @@ export default function DashboardScreen() {
                   {agents.map((a) => (
                     <View key={a.agent} style={s.agentRow}>
                       <AgentLogo agent={a.agent} size={15} />
-                      {/* Name and badge share the flexible cell so the badge sits
-                          WITH the name. Hung off the name directly it would be
-                          pushed the full width by `flex: 1` and land among the
-                          token counts, where a version number reads as one more
-                          stat instead of a fact about the CLI. */}
-                      <View style={s.agentNameCell}>
-                        <Text style={s.agentName} numberOfLines={1}>
-                          {agentLabel(a.agent)}
-                        </Text>
-                        <AgentUpdateBadge
-                          version={agentVersions.find((v) => v.id === a.agent)}
-                          busy={!!updateBusy[a.agent]}
-                          onUpdate={() => {
-                            const v = agentVersions.find((x) => x.id === a.agent);
-                            if (v) void runUpdate(v);
-                          }}
-                        />
-                      </View>
+                      <Text style={s.agentName}>{agentLabel(a.agent)}</Text>
                       {/* An agent that reports no usage still did work — show its
                       session count rather than a bare "0 · $0.00", which reads
                       as "you never used it". */}
@@ -851,8 +817,7 @@ const s = StyleSheet.create((theme, rt) => ({
   },
   detailLine: { fontSize: 12, color: theme.colors.fgMuted },
   agentRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  agentNameCell: { flex: 1, flexDirection: "row", alignItems: "center", gap: 6 },
-  agentName: { flexShrink: 1, fontSize: 14, color: theme.colors.fg },
+  agentName: { flex: 1, fontSize: 14, color: theme.colors.fg },
   agentStat: { fontFamily: "JetBrainsMono", fontSize: 12, color: theme.colors.fgMuted },
   agentCost: {
     minWidth: 68,
