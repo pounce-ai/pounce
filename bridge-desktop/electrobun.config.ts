@@ -38,7 +38,7 @@ export default {
   app: {
     name: "Pounce",
     identifier: "app.pounce.bridge",
-    version: "1.6.4",
+    version: "1.6.5",
   },
   // Auto-update: the app checks this URL on launch and self-updates (tiny BSDIFF
   // deltas, full bundle fallback).
