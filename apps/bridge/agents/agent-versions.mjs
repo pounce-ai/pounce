@@ -179,7 +179,11 @@ export async function updateAgent(id, { timeoutMs = 300_000 } = {}) {
   if (!resolved) return { ok: false, error: `${spec.bin} is not installed` };
 
   // What it was, so "ran fine and changed nothing" can be told from "updated".
-  const before = normalizeVersion(await binVersion(spec.bin).catch(() => null));
+  // Fresh as well: a stale `before` would compare the new version against a
+  // months-old cached one and call an unchanged install an update.
+  const before = normalizeVersion(
+    await binVersion(spec.bin, ["--version"], { fresh: true }).catch(() => null),
+  );
 
   return new Promise((resolve) => {
     const child = spawn(resolved, spec.update, {
@@ -205,10 +209,18 @@ export async function updateAgent(id, { timeoutMs = 300_000 } = {}) {
     });
     child.on("close", async (code) => {
       clearTimeout(timer);
-      // Ask the binary what it is NOW. binVersion keys its cache on the file's
-      // mtime+size, so a replaced binary re-reads rather than answering with the
-      // version it had before the update.
-      const installed = normalizeVersion(await binVersion(spec.bin).catch(() => null));
+      // Ask the binary what it is NOW, bypassing the cache.
+      //
+      // `fresh` is not optional here, and forgetting it is not a small mistake:
+      // binVersion keys on the file's mtime+size, which for a CLI reached
+      // through a WRAPPER SCRIPT never changes when the tool behind it updates.
+      // Without this the read lands on the entry written seconds ago by
+      // `before`, and a successful update reports `changed: false` — which the
+      // app shows as "Nothing changed" directly after it changed something.
+      // (Observed: codex 0.146.0 → 0.148.0 reported as unchanged.)
+      const installed = normalizeVersion(
+        await binVersion(spec.bin, ["--version"], { fresh: true }).catch(() => null),
+      );
       resolve({
         ok: !killed && code === 0,
         code,
