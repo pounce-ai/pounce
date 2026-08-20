@@ -36,6 +36,7 @@ import {
 import { Animated, LinearTransition } from "../components/animation";
 import { ContributionGraph } from "../components/ContributionGraph";
 import { QuotaCard } from "../components/QuotaCard";
+import { AgentUpdateBadge, useAgentUpdates } from "../components/AgentUpdates";
 import { CHART_GUTTER, UsageChart } from "../components/UsageChart";
 import { bucketByMonth } from "../components/usageSeries";
 import { PeriodPicker } from "../components/PeriodPicker";
@@ -124,6 +125,22 @@ export default function DashboardScreen() {
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
+
+  /**
+   * Agent CLI versions, for the "update available" badges below.
+   *
+   * Hung off the quota card's host rather than every paired machine: this page
+   * aggregates across hosts, but an agent CLI is installed PER MACHINE, and a
+   * badge that silently meant "one of your machines is behind" would send you to
+   * update the wrong one. The quota rows already name the host whose numbers
+   * this page is showing, so the badge describes that same machine.
+   */
+  const versionHostId = quotaQ.data?.[0]?.hostId ?? null;
+  const {
+    versions: agentVersions,
+    busy: updateBusy,
+    update: runUpdate,
+  } = useAgentUpdates(versionHostId);
 
   // Worktree disk. Its own query because it answers a different question from
   // everything else here ("what is on the disk now", not "what happened in this
@@ -641,6 +658,17 @@ export default function DashboardScreen() {
                     <View key={a.agent} style={s.agentRow}>
                       <AgentLogo agent={a.agent} size={15} />
                       <Text style={s.agentName}>{agentLabel(a.agent)}</Text>
+                      {/* Sits with the agent's NAME rather than with its numbers:
+                          it is a fact about the CLI, not about the usage, and
+                          putting it among the token counts read as a stat. */}
+                      <AgentUpdateBadge
+                        version={agentVersions.find((v) => v.id === a.agent)}
+                        busy={!!updateBusy[a.agent]}
+                        onUpdate={() => {
+                          const v = agentVersions.find((x) => x.id === a.agent);
+                          if (v) void runUpdate(v);
+                        }}
+                      />
                       {/* An agent that reports no usage still did work — show its
                       session count rather than a bare "0 · $0.00", which reads
                       as "you never used it". */}
