@@ -26,7 +26,8 @@ import {
   type Attribution,
   type AttributionNode,
   exportAttribution,
-  fetchAttribution,
+  RouteMissingError,
+  streamAttribution,
 } from "../services/bridge";
 import { newDraft } from "../state/drafts";
 import { ActivitySkeleton } from "../components/Skeleton";
@@ -417,9 +418,29 @@ export default function AttributionScreen() {
    *  doesn't push a tab per level on desktop. */
   const [path, setPath] = useState<string[]>([]);
 
+  /**
+   * How far the host has got through the window's transcripts.
+   *
+   * Reading a window is a walk of every transcript it touched, which on a busy
+   * machine is minutes. This used to be one silent request with a 30s abort, so
+   * a working machine mid-scan was reported as one that "didn't answer in
+   * time". The read streams now and this is what it says while it fills — kept
+   * out of the query so a progress frame doesn't re-render the finished tree.
+   */
+  const [progress, setProgress] = useState<{ scanned: number; total: number } | null>(null);
+
   const q = useQuery({
     queryKey: ["attribution", hostId, win],
-    queryFn: () => fetchAttribution(hostId, win),
+    queryFn: async () => {
+      setProgress(null);
+      try {
+        return await streamAttribution(hostId, win, setProgress);
+      } finally {
+        // Whatever happened, the scan is over — a stale bar under a rendered
+        // report reads as one still running.
+        setProgress(null);
+      }
+    },
     enabled: !!hostId,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
@@ -531,13 +552,41 @@ export default function AttributionScreen() {
       </View>
 
       {q.isPending ? (
-        <ActivitySkeleton />
+        <>
+          {/* Say what it is doing and how far it has got. A scan that takes a
+              minute is fine; a minute of nothing is what made a working machine
+              look broken. */}
+          {progress ? (
+            <Text style={s.progressLabel}>
+              {`Reading this window — ${progress.scanned} of ${progress.total} session${
+                progress.total === 1 ? "" : "s"
+              }`}
+            </Text>
+          ) : null}
+          <ActivitySkeleton />
+        </>
+      ) : q.error instanceof RouteMissingError ? (
+        // The machine answered instantly and said it has no such route: its
+        // Pounce predates this report. That is not a timeout, and it used to be
+        // described as one — under a "Try again" that could never work, because
+        // no amount of retrying adds a route to a running bridge. The quota
+        // card that links here keeps working throughout, which is what makes
+        // the page look reachable and then fail.
+        <View style={s.errorBox}>
+          <Text style={s.errorTitle}>That machine&apos;s bridge is too old</Text>
+          <Text style={s.errorBody}>
+            It answered, and it has no token report — so it&apos;s running an older Pounce than this
+            one. Updating the app is often not enough: if a bridge was already running on its port,
+            the new app attaches to that one instead of starting its own. Restart the bridge on that
+            machine and this page will fill in.
+          </Text>
+        </View>
       ) : q.isError ? (
         <View style={s.errorBox}>
           <Text style={s.errorTitle}>Couldn&apos;t read this window</Text>
           <Text style={s.errorBody}>
-            The machine didn&apos;t answer in time. Reading a window means walking every transcript
-            it touched, so this can take a moment on a busy day.
+            The machine stopped answering partway through. Reading a window means walking every
+            transcript it touched, so this can take a moment on a busy day.
           </Text>
           <Pressable
             onPress={() => void q.refetch()}
@@ -867,6 +916,12 @@ const s = StyleSheet.create((theme, rt) => ({
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surfaceAlt,
     padding: 14,
+  },
+  progressLabel: {
+    fontSize: 12.5,
+    lineHeight: 17,
+    color: theme.colors.fgMuted,
+    paddingBottom: 10,
   },
   errorTitle: { fontSize: 15, fontWeight: "600", color: theme.colors.fg },
   errorBody: { fontSize: 12.5, lineHeight: 17, color: theme.colors.fgMuted },

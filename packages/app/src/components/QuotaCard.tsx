@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Ionicons } from "@expo/vector-icons";
@@ -5,7 +6,7 @@ import { useRouter } from "expo-router";
 import { AgentLogo, IS_DESKTOP } from "../ui";
 import { agentLabel } from "../ui/tokens";
 import { fmtTokens } from "../ui/format";
-import type { AgentQuota } from "../services/bridge";
+import { hostSupports, type AgentQuota } from "../services/bridge";
 
 /** "in 4h 12m" / "in 2d" — how long until a window rolls over. */
 function untilReset(iso: string | null, now: number): string | null {
@@ -61,6 +62,36 @@ export function QuotaCard({
    *  the per-agent table. An agent with no quota entry still gets a column. */
   agents?: readonly string[];
 }) {
+  /**
+   * Which of these machines can actually serve the breakdown.
+   *
+   * The block box links to it unconditionally before this, so a bridge without
+   * the report gave you a tappable box that opened a page which 404'd and then
+   * blamed the network. Offering a route the far end has never heard of is the
+   * bug; asking first is the fix.
+   *
+   * A host stays ABSENT from the map until its answer lands rather than
+   * defaulting to false — hiding the box on first render and putting it back a
+   * moment later is a flicker on every card, and the far more common case is a
+   * bridge that does support it.
+   *
+   * Above the early return below, and keyed off the ids rather than the quota
+   * objects: a sync tick rewrites those every time and would re-ask forever.
+   */
+  const [reportOk, setReportOk] = useState<Record<string, boolean>>({});
+  const hostIds = quotas.map((r) => r.hostId).join(",");
+  useEffect(() => {
+    let live = true;
+    for (const id of hostIds ? hostIds.split(",") : []) {
+      void hostSupports(id, "attribution").then((ok) => {
+        if (live) setReportOk((prev) => (prev[id] === ok ? prev : { ...prev, [id]: ok }));
+      });
+    }
+    return () => {
+      live = false;
+    };
+  }, [hostIds]);
+
   const { theme } = useUnistyles();
   const router = useRouter();
   const now = Date.now();
@@ -129,7 +160,7 @@ export function QuotaCard({
                 how much has gone in, how fast, when it rolls over — is worth
                 more than a fabricated gauge. Below the reported bars, because
                 it is the footnote to them and not the headline. */}
-              {q.blocks?.current ? (
+              {q.blocks?.current && reportOk[q.hostId] !== false ? (
                 // The block box is the TAP TARGET, not the whole card. It is
                 // the only part of the card the breakdown explains, and only
                 // Claude has one — so the other agents' cards read as

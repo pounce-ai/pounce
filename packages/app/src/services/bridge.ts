@@ -726,6 +726,10 @@ async function get<T>(cfg: BridgeConfig, path: string, timeoutMs = 90_000): Prom
     });
     if (!res.ok) {
       if (res.status === 401) await throwIfGrantEnded(res);
+      // A route this bridge does not have is a stale bridge, not a failure of
+      // the machine or the network — and callers that can say so usefully need
+      // to be able to tell the difference.
+      if (res.status === 404) throw new RouteMissingError(path);
       throw new Error(`bridge ${path} -> ${res.status}`);
     }
     return (await res.json()) as T;
@@ -1783,6 +1787,141 @@ export async function fetchAttribution(
     30_000,
   );
   return attribution ?? null;
+}
+
+/**
+ * The same report, streamed — and the reason this page stopped timing out.
+ *
+ * Reading a window means walking every transcript it touched. The one-shot GET
+ * above is silent for that entire walk, so on a busy machine it outlived the
+ * 30s abort and the page said "the machine didn't answer in time" about a
+ * machine that was working perfectly and would have answered a minute later.
+ * Raising the timeout only moves the cliff; the fix is a connection that is
+ * never idle.
+ *
+ * So the sessions queue up host-side as they are read, each one announced as it
+ * lands, and `onProgress` lets the page show the queue filling. The analytics
+ * still arrive in one piece at the end, on the complete set — a partial merge
+ * would render a total that is wrong rather than unfinished.
+ *
+ * Falls back to {@link fetchAttribution} against a bridge that predates the
+ * route: that machine keeps the old cliff, but it keeps working.
+ */
+/**
+ * What a paired machine can do, by name — asked once, cached per host.
+ *
+ * This is the app's half of the contract in apps/bridge/agents/features.mjs.
+ * Before it existed, a client found out what a bridge could do by calling it
+ * and seeing what came back — which is how a desktop app on 1.6.2, attached to
+ * a bridge five weeks older, ended up offering a page whose route that bridge
+ * had never heard of and reporting the instant 404 as "didn't answer in time".
+ *
+ * An older bridge omits `features` entirely. That is not a failure to handle,
+ * it IS the answer: a bridge that cannot name its capabilities is one from
+ * before capabilities were named, so everything optional is off. Returned as an
+ * empty set, which `hostSupports` reads as "gate it".
+ *
+ * Cached because it changes only when the bridge restarts, and a per-render
+ * probe would put a network round trip in front of every screen that asks.
+ */
+const featureCache = new Map<string, { at: number; names: Set<string> }>();
+const FEATURES_TTL_MS = 60_000;
+
+export async function hostFeatures(hostId: string): Promise<Set<string>> {
+  const hit = featureCache.get(hostId);
+  if (hit && Date.now() - hit.at < FEATURES_TTL_MS) return hit.names;
+  const cfg = (await hostsToQuery()).find((d) => d.id === hostId);
+  if (!cfg) return new Set();
+  try {
+    const hello = await get<{ features?: string[] }>(cfg, "/v1/hello", 8_000);
+    const names = new Set(hello.features ?? []);
+    featureCache.set(hostId, { at: Date.now(), names });
+    return names;
+  } catch {
+    // Unreachable is NOT the same as old, so this must not be cached — a
+    // machine that was merely asleep would otherwise have every optional
+    // feature hidden for a minute after it woke up.
+    return new Set();
+  }
+}
+
+/** Can this machine do `feature`? See FEATURES in the bridge for the names. */
+export async function hostSupports(hostId: string, feature: string): Promise<boolean> {
+  return (await hostFeatures(hostId)).has(feature);
+}
+
+/**
+ * The machine answered, and said it has never heard of the route.
+ *
+ * Worth its own type because the page's advice is the opposite of the usual
+ * one: a 404 here is a bridge too old to have the feature, so "Try again"
+ * cannot ever work and telling someone to wait is telling them to wait
+ * forever. It is also what a stale bridge looks like from the app — the quota
+ * card beside it keeps working, because /v1/quota has existed for far longer,
+ * which is exactly why the page appears reachable and then fails.
+ */
+export class RouteMissingError extends Error {
+  constructor(readonly path: string) {
+    super(`bridge ${path} -> 404`);
+    this.name = "RouteMissingError";
+  }
+}
+
+export async function streamAttribution(
+  hostId: string,
+  window: "block" | number = "block",
+  onProgress?: (p: { scanned: number; total: number }) => void,
+): Promise<Attribution | null> {
+  const cfg = (await hostsToQuery()).find((d) => d.id === hostId);
+  if (!cfg) return null;
+  const q = window === "block" ? "window=block" : `hours=${window}`;
+  const base = await bridgeBase(cfg);
+  let buf = "";
+  let report: Attribution | null = null;
+  let streamError: string | null = null;
+  let finished = false;
+  let sawFrame = false;
+  try {
+    await streamTurn(
+      `${base}/v1/attribution/stream?${q}`,
+      { method: "GET", headers: { authorization: `Bearer ${cfg.token}` } },
+      (chunk) => {
+        sawFrame = true;
+        buf += chunk;
+        let idx: number;
+        while ((idx = buf.indexOf("\n\n")) !== -1) {
+          const frame = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const line = frame.split("\n").find((l) => l.startsWith("data:"));
+          if (!line) continue;
+          let d: {
+            progress?: { scanned: number; total: number };
+            attribution?: Attribution | null;
+            done?: boolean;
+            error?: string;
+          } | null = null;
+          try {
+            d = JSON.parse(line.slice(5).trim());
+          } catch {
+            continue;
+          }
+          if (d?.progress) onProgress?.(d.progress);
+          if (d?.attribution !== undefined) report = d.attribution;
+          if (d?.error) streamError = d.error;
+          if (d?.done || d?.error) finished = true;
+        }
+        return finished;
+      },
+    );
+  } catch (e) {
+    // Nothing came back at all — an older bridge 404s the route. One that
+    // streamed and then died is a real failure and must not be retried as a
+    // blocking read that would only time out again.
+    if (sawFrame) throw e;
+    return fetchAttribution(hostId, window);
+  }
+  if (streamError) throw new Error(streamError);
+  return report;
 }
 
 /**

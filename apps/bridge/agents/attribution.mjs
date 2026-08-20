@@ -752,6 +752,18 @@ export async function readAttribution({
    */
   since = null,
   now = Date.now(),
+  /**
+   * Called as each session finishes scanning, with `{ scanned, total }`.
+   *
+   * The whole read is a walk of every transcript the window touched, which on a
+   * busy day is minutes — long enough that a caller waiting on one response
+   * gives up and shows a timeout, having been told nothing at all in the
+   * meantime. This is what lets /v1/attribution/stream report the queue filling
+   * instead. Purely observational: the analytics below still run once, on the
+   * complete set of parts, because a partial merge would put a number on screen
+   * that is simply wrong rather than merely incomplete.
+   */
+  onProgress = null,
 } = {}) {
   if (agent !== "claude") return null;
   const sinceMs = since ?? now - windowHours * HOUR_MS;
@@ -770,10 +782,16 @@ export async function readAttribution({
   const parts = [];
   let requests = 0;
   let next = 0;
+  let scanned = 0;
   await Promise.all(
     Array.from({ length: Math.min(SCAN_CONCURRENCY, files.length) }, async () => {
       for (let i = next++; i < files.length; i = next++) {
         const done = await scanFile(files[i], sinceMs, tailBytes, coverage).catch(() => null);
+        scanned += 1;
+        // Reported for every file, INCLUDING one that failed to scan: progress
+        // has to reach `total` or the caller's bar stops short of the end on a
+        // corrupt transcript and looks hung.
+        onProgress?.({ scanned, total: files.length });
         if (!done) continue;
         parts.push(done.part);
         requests += done.requests;

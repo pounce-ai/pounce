@@ -35,6 +35,14 @@ jobs:
       - name: File naming
         run: bun run check:naming
 
+      # The app and the bridge ship separately and meet at runtime weeks apart.
+      # This fails the build when they stop agreeing about what exists — a new
+      # route that no client can gate on, or a client calling one no bridge
+      # serves. Both used to be found by a user, as a screen blaming the network
+      # for an instant 404.
+      - name: App ↔ bridge compatibility
+        run: bun run check:compat
+
       # The phone app, the macOS app and the Windows/Linux app each keep the
       # version in their own manifest. They drifted to 1.5.0 / 1.0.46 / 1.2.0
       # and the releases page became unreadable as a result, so agreement with
