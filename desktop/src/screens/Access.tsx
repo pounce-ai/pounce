@@ -96,10 +96,10 @@ export default function AccessScreen() {
             <Text style={s.sectionTitle}>Your devices</Text>
             <View style={s.card}>
               {devices.map((d, i) => (
-                <View key={d.bridgeId} style={[s.deviceRow, i > 0 && s.deviceRowDivided]}>
+                <View key={d.id} style={[s.deviceRow, i > 0 && s.deviceRowDivided]}>
                   <Ionicons name="phone-portrait-outline" size={16} color={COLOR.fgMuted} />
                   <View style={s.grow}>
-                    <Text style={s.deviceName}>{d.hostName}</Text>
+                    <Text style={s.deviceName}>{d.name}</Text>
                     <Text style={s.deviceMeta}>
                       Everything · paired {new Date(d.pairedAt).toLocaleDateString()}
                     </Text>
@@ -214,7 +214,13 @@ function RequestCard({
         repoKeys: [...picked],
         threads: [...threads.values()].map((t) => ({ agent: t.agent, id: t.id })),
       };
-  const nothingPicked = !everything && !picked.size && !threads.size;
+  // A DEVICE approval has no scope to pick — it is full access by definition,
+  // the same authority as scanning the pairing code. Gating its button on a
+  // scope selection would leave "Pair device" permanently dead the moment such
+  // a request ever arrives carrying a scoped suggestion. Today `everything`
+  // defaults true for a scopeless request and hides that; this stops it being
+  // one field away from a button nobody can press.
+  const nothingPicked = !isDevice && !everything && !picked.size && !threads.size;
 
   const act = async (approve: boolean) => {
     setBusy(true);

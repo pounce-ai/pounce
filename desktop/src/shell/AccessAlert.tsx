@@ -80,9 +80,18 @@ export function AccessAlert() {
   const existing = request.existing ?? null;
   return (
     // box-none, not "none": the card below must stay clickable while every
-    // other pixel of this layer belongs to the app underneath. In `style`
-    // rather than as a prop — the prop form is deprecated and warns.
-    <View style={s.host}>
+    // other pixel of this layer belongs to the app underneath.
+    //
+    // As a PROP, not in `style`. The style form is what react-native core
+    // deprecated the prop in favour of, but react-native-macos does not honour
+    // it — the whole subtree stops hit-testing, so the card renders perfectly
+    // and every button in it is dead. That is exactly the failure this file
+    // already warns about for opacity: a thing whose job is to be acted on
+    // must never depend on a path this platform silently drops. Every other
+    // pointerEvents in this codebase (Motion, Sidebar, GlassCard, Session,
+    // Attribution) uses the prop; this was the one that didn't, and the one
+    // that broke.
+    <View pointerEvents="box-none" style={s.host}>
       <Animated.View
         style={[
           s.card,
@@ -169,7 +178,6 @@ const s = StyleSheet.create((theme) => ({
     right: 0,
     alignItems: "center",
     paddingTop: 12,
-    pointerEvents: "box-none",
     // Over the transcript and the diff dock beside it. The modal host is a
     // level up and paints later regardless, so opening /access still covers
     // this rather than fighting it.
@@ -228,7 +236,13 @@ const s = StyleSheet.create((theme) => ({
     letterSpacing: 1,
     color: theme.colors.fgMuted,
   },
+  // A hand, not an arrow. react-native-macos honours the `cursor` style
+  // (RCTViewComponentView adds a cursor rect for the view's bounds), and
+  // nothing else in this app sets it — so every button here reads as inert
+  // until you click it. On a control whose whole job is to be acted on
+  // quickly, that is worth the three lines.
   primaryBtn: {
+    cursor: "pointer",
     borderRadius: 999,
     backgroundColor: theme.colors.accent,
     paddingHorizontal: 14,
@@ -236,6 +250,7 @@ const s = StyleSheet.create((theme) => ({
   },
   primaryLabel: { fontSize: 12.5, fontWeight: "600", color: theme.colors.onAccent },
   ghostBtn: {
+    cursor: "pointer",
     borderRadius: 999,
     borderWidth: 1,
     borderColor: theme.colors.borderStrong,
@@ -243,6 +258,12 @@ const s = StyleSheet.create((theme) => ({
     paddingVertical: 6,
   },
   ghostLabel: { fontSize: 12.5, color: theme.colors.fgMuted },
-  close: { height: 20, width: 20, alignItems: "center", justifyContent: "center" },
+  close: {
+    cursor: "pointer",
+    height: 20,
+    width: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   pressed: { opacity: 0.8 },
 }));
