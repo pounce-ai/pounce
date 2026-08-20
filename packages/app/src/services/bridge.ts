@@ -1850,6 +1850,65 @@ export async function hostSupports(hostId: string, feature: string): Promise<boo
   return (await hostFeatures(hostId)).has(feature);
 }
 
+/** One agent CLI's version, and whether this machine is behind on it. */
+export interface AgentVersion {
+  readonly id: string;
+  readonly bin: string;
+  readonly installed: string | null;
+  readonly latest: string | null;
+  /** null = we did not look, or the two versions cannot be honestly ranked
+   *  (cursor-agent is a date plus a build sha). Render that as SILENCE — a
+   *  missing badge is fine, a wrong one sends someone to reinstall a CLI that
+   *  was already current. */
+  readonly updateAvailable: boolean | null;
+  /** The CLI's own updater, e.g. `opencode upgrade`. */
+  readonly updateCommand: string | null;
+}
+
+/**
+ * What each agent CLI on `hostId` is, and optionally whether it is behind.
+ *
+ * `check` is what costs a network round trip on the HOST — it asks npm (and,
+ * for cursor-agent, reads the version out of its install script). Off by
+ * default because the dashboard re-syncs every 20 seconds and nothing about a
+ * CLI release schedule rewards asking that often.
+ */
+export async function fetchAgentVersions(
+  hostId: string,
+  { check = false }: { check?: boolean } = {},
+): Promise<AgentVersion[]> {
+  const cfg = (await hostsToQuery()).find((d) => d.id === hostId);
+  if (!cfg) return [];
+  const { agents } = await get<{ agents: AgentVersion[] }>(
+    cfg,
+    `/v1/agents/versions${check ? "?check=1" : ""}`,
+    check ? 30_000 : 10_000,
+  );
+  return agents ?? [];
+}
+
+/**
+ * Run an agent's own updater on `hostId`.
+ *
+ * `changed` is read back off disk afterwards rather than inferred from the exit
+ * code: an updater that exits 0 without replacing anything (already current, or
+ * an install it lacks permission to write) is a real case, and the caller has to
+ * be able to tell it from an update that landed.
+ */
+export async function runAgentUpdate(
+  hostId: string,
+  agent: string,
+): Promise<{ ok: boolean; changed?: boolean; installed?: string | null; output?: string }> {
+  const cfg = (await hostsToQuery()).find((d) => d.id === hostId);
+  if (!cfg) return { ok: false };
+  const res = await fetch(`${await bridgeBase(cfg)}/v1/agents/update`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+    body: JSON.stringify({ agent }),
+  });
+  return (await res.json()) as { ok: boolean; changed?: boolean; installed?: string | null };
+}
+
 /**
  * The machine answered, and said it has never heard of the route.
  *
