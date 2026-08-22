@@ -76,6 +76,11 @@ const CLAUDE_CLIENT_STATE = path.join(os.homedir(), ".claude.json");
 // last one is the model the thread most recently ran on.
 const MODEL_SCAN_FILES = 40;
 const MODEL_SCAN_TAIL_BYTES = 32 * 1024;
+// ...and how far back that scan is allowed to reach. A machine that ran forty
+// threads last year would otherwise keep resurrecting the models they ended on,
+// which is exactly how superseded ids stayed in the picker. Past this, a model
+// is something this machine USED to run; the aliases still cover you.
+const MODEL_SCAN_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
 
 /** Family aliases the CLI resolves to the CURRENT model in each family
  *  ("Provide an alias for the latest model … or a model's full name").
@@ -106,6 +111,66 @@ function prettyModel(id) {
     .replace(/-(\d+)-(\d+)(?=\[|$)/, " $1.$2")
     .replace(/-(\d+)(?=\[|$)/, " $1")
     .replace(/\b[a-z]/, (c) => c.toUpperCase());
+}
+
+/**
+ * `{ family, version }` for a versioned model id, or null for one that names no
+ * version — the aliases, which mean "latest" and so can never be superseded.
+ *
+ * Nothing here names a family or a version: the family is just the id's first
+ * word-shaped token, so a family that ships tomorrow parses like the ones that
+ * shipped yesterday. Two deliberate details:
+ *   - the context variant is part of the family key, because `claude-fable-5[1m]`
+ *     and `claude-fable-5` are different products and neither retires the other;
+ *   - the 8-digit snapshot date is dropped, so `haiku-4-5-20251001` and
+ *     `haiku-4-5` compare equal instead of one appearing to supersede the other.
+ */
+function modelVersion(id) {
+  const lower = String(id).toLowerCase();
+  const variant = /\[([^\]]*)\]/.exec(lower)?.[1] ?? "";
+  const parts = lower
+    .replace(/\[[^\]]*\]/, "")
+    .split("-")
+    .filter(Boolean);
+  const family = parts.find((p) => p !== "claude" && !/^\d+$/.test(p));
+  // Legacy ids put the version first ("claude-3-5-sonnet-…"); order doesn't
+  // matter here, only which tokens are numbers and which is the family word.
+  const version = parts.filter((p) => /^\d+$/.test(p) && p.length !== 8).map(Number);
+  if (!family || !version.length) return null;
+  return { family: variant ? `${family}[${variant}]` : family, version };
+}
+
+/** Compare dotted versions: [4,8] < [5], [4,5] == [4,5]. */
+function cmpVersion(a, b) {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0);
+    if (d) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * Flag every model a newer sibling in its own family has superseded, in place.
+ *
+ * This is the "the picker still offers Opus 4.8" fix, and it is deliberately a
+ * flag rather than a filter: a thread that ran on an older model has to be able
+ * to go back to it, so the entry stays selectable — it just says what it is and
+ * sorts below the current models. Detection is relative, never a pinned list:
+ * whatever this machine can see is the newest of a family defines the rest.
+ */
+function markSuperseded(models) {
+  const newest = new Map();
+  for (const m of models) {
+    const v = modelVersion(m.id);
+    if (!v) continue;
+    const cur = newest.get(v.family);
+    if (!cur || cmpVersion(v.version, cur) > 0) newest.set(v.family, v.version);
+  }
+  for (const m of models) {
+    const v = modelVersion(m.id);
+    m.deprecated = !!v && cmpVersion(v.version, newest.get(v.family)) < 0;
+  }
+  return models;
 }
 
 /** The model Claude Code itself is configured to use, if any. */
@@ -145,8 +210,12 @@ async function observedModels(index) {
   } catch {
     return [];
   }
+  const cutoff = Date.now() - MODEL_SCAN_MAX_AGE_MS;
   for (const meta of metas.slice(0, MODEL_SCAN_FILES)) {
     if (!meta?.filePath) continue;
+    // list() is newest-first, so the first thread past the window ends the scan.
+    const touched = meta.updatedAt ? Date.parse(meta.updatedAt) : NaN;
+    if (Number.isFinite(touched) && touched < cutoff) break;
     for (const line of readTailLines(meta.filePath, MODEL_SCAN_TAIL_BYTES).reverse()) {
       if (!line.includes('"model"')) continue;
       let id;
@@ -338,6 +407,8 @@ export class ClaudeAdapter {
     if (!file) return noUsage("no-transcript");
     const tokens = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
     const outByModel = new Map();
+    let lastModel = null;
+    let lastModelAt = null;
     let messages = 0;
     let contextUsed = null;
     let rl;
@@ -367,8 +438,17 @@ export class ClaudeAdapter {
       // (API error text, interrupt notices) — not a model anyone ran, so it
       // must not show up in the thread's model list.
       const m = o.message?.model;
-      if (m && m !== "<synthetic>")
+      if (m && m !== "<synthetic>") {
         outByModel.set(m, (outByModel.get(m) || 0) + (u.output_tokens || 0));
+        // Records are in order, so the last one wins: this is what the thread is
+        // running on NOW, which is a different question from `model` below (the
+        // thread's dominant model) and the one that catches a mid-thread change.
+        // Sidechains are subagents on their own model and don't move the thread.
+        if (!o.isSidechain) {
+          lastModel = m;
+          lastModelAt = typeof o.timestamp === "string" ? o.timestamp : null;
+        }
+      }
       // Context fill = the prompt of the most recent real request. Sidechains
       // (Task-tool subagents) carry their own separate context, and synthetic
       // records aren't requests at all — either would understate the main
@@ -393,6 +473,8 @@ export class ClaudeAdapter {
       costSource: ledger?.cost != null ? "agent" : null,
       model: models.slice().sort((a, b) => outByModel.get(b) - outByModel.get(a))[0] || null,
       models,
+      lastModel,
+      lastModelAt,
       messages,
       // Claude Code never writes the context window to its transcript — the
       // only official source is the live result envelope, so the window is
@@ -756,11 +838,28 @@ export class ClaudeAdapter {
     // seen still gets offered, so the picker can show it as active.
     const configured = configuredModel();
     if (configured) push(configured, prettyModel(configured), "From your Claude Code settings");
-    for (const m of out) {
-      m.isDefault = configured != null && m.id === configured;
-      m.deprecated = false;
-    }
-    return out;
+    for (const m of out) m.isDefault = configured != null && m.id === configured;
+
+    // A model a newer sibling has replaced is still offered — a thread that ran
+    // on it must be able to return to it — but it never sits above a current one.
+    markSuperseded(out);
+    return [...out.filter((m) => !m.deprecated), ...out.filter((m) => m.deprecated)];
+  }
+
+  /**
+   * What the config half of the catalog currently says, as a cache key. Change
+   * your model in Claude Code and the next /v1/models request re-reads, instead
+   * of serving the old answer until a blind TTL happens to lapse.
+   *
+   * It stamps the MEANING, not the files: an mtime moves every time Claude Code
+   * touches ~/.claude.json for unrelated reasons, and this is a cache key, so a
+   * spurious change costs a re-read for nothing. Transcripts are deliberately
+   * absent for the same reason — they change on every turn, and stamping them
+   * would re-read forty file tails per request. A newly-observed model arrives
+   * with the ordinary TTL instead.
+   */
+  modelsSignature() {
+    return JSON.stringify([configuredModel(), cachedModelOptions().map((m) => m.id)]);
   }
 
   /**

@@ -37,8 +37,10 @@ export type SyncLogRow = {
 export type FavoriteRow = { id: string; kind: "thread" | "repo"; ref: string };
 /** A permanently-hidden folder. `id` = repoId. */
 export type IgnoredRepoRow = { id: string };
-/** Sticky per-thread model choice. `id` = threadId. */
-export type ThreadModelRow = { id: string; model: string };
+/** Sticky per-thread model choice. `id` = threadId.
+ *  `at` (ms) is when the choice was made — it lets an observed model change on
+ *  the host be adopted without stomping a pick that hasn't been sent yet. */
+export type ThreadModelRow = { id: string; model: string; at?: number };
 /** Local presentation override for a device. `id` = deviceId. */
 export type DeviceOverrideRow = { id: string; name?: string; emoji?: string };
 /** A marker override. `id` = `${sessionId}|${messageId}`. */

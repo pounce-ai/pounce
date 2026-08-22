@@ -10,11 +10,19 @@
  * `npm publish` always ship a fresh bundle).
  */
 import { execFileSync } from "node:child_process";
+import { rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, "..");
+
+// Start from nothing. `bun build` writes its outfile and leaves everything else
+// in dist/ alone, and `files: [bin, dist]` ships whatever is sitting there — so
+// a bundle from a branch you have since left rides along in `npm publish`
+// silently. Observed exactly that: a dist/update.mjs built here appeared in a
+// pack run from a checkout that had no update command in it at all.
+rmSync(path.join(PKG, "dist"), { recursive: true, force: true });
 
 // Published packages imported by the bridge source — keep external (zigpty
 // also has subpath imports, e.g. zigpty/idle).
@@ -73,4 +81,18 @@ execFileSync(
   ],
   { stdio: "inherit", cwd: PKG },
 );
-console.log("built dist/launcher.mjs + dist/mcp.mjs + dist/configure.mjs");
+// `pounce update` — same again. It imports configure.mjs for the login-service
+// paths, which the bundler inlines, so the two can never drift apart on disk.
+execFileSync(
+  process.env.BUN_BIN || "bun",
+  [
+    "build",
+    path.join(PKG, "src/update.mjs"),
+    "--target=node",
+    ...EXTERNAL.flatMap((e) => ["--external", e]),
+    "--outfile",
+    path.join(PKG, "dist/update.mjs"),
+  ],
+  { stdio: "inherit", cwd: PKG },
+);
+console.log("built dist/launcher.mjs + dist/mcp.mjs + dist/configure.mjs + dist/update.mjs");

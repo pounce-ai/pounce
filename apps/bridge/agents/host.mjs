@@ -148,6 +148,19 @@ export function createHost({ version = () => null } = {}) {
       return adapter(agent).listModels();
     },
 
+    /** Cheap stamp of an agent's model config, for cache keys — "" when the
+     *  adapter has nothing to stamp, which just means a plain TTL. Never
+     *  throws: it feeds a cache key, so an unknown agent must still reach
+     *  listModels() and fail there, the way it always did. */
+    modelsSignature(agent) {
+      try {
+        const a = adapter(agent);
+        return a.modelsSignature ? a.modelsSignature() : "";
+      } catch {
+        return "";
+      }
+    },
+
     /** Run a turn; events flow to onEvent as they stream. Returns
      *  { stop(), done: Promise<realThreadId> }. Never throws synchronously in a
      *  way callers must handle — capacity/spawn failures surface as an error

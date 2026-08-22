@@ -51,6 +51,8 @@ export function usageResult({
   costSource = null,
   model = null,
   models = [],
+  lastModel = null,
+  lastModelAt = null,
   messages = 0,
   contextWindow = null,
   contextUsed = null,
@@ -70,6 +72,13 @@ export function usageResult({
     available: true,
     model,
     models,
+    // What the thread's most recent turn actually ran on, and when. Distinct
+    // from `model` (its dominant one, by output tokens): a thread that spent
+    // most of its life on one model and was then moved — by a fallback, or by
+    // someone typing /model in a terminal — still reports the old one there.
+    // This pair is what lets a client notice the move.
+    lastModel,
+    lastModelAt,
     tokens: { ...t, total },
     // Round only for display sanity; never invent a value that wasn't reported.
     cost: cost == null ? null : Math.round(cost * 10000) / 10000,

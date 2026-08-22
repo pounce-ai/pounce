@@ -25,6 +25,7 @@ Installed globally (`npm i -g use-pounce`), the command is just `pounce`.
 | `pounce status`             | Bridge / tunnel / phone status                                 |
 | `pounce stop`               | Stop the background Bridge and its tunnel                      |
 | `pounce logs [-f]`          | Show (or follow) the Bridge log                                |
+| `pounce update`             | Update what Pounce has installed on this machine               |
 | `pounce peers`              | Machines nearby, who's asking, who has access                  |
 | `pounce peers --visible on` | Let other computers here find this one                         |
 | `pounce ask <machine>`      | Ask another computer to share its threads with you             |
@@ -40,6 +41,7 @@ Installed globally (`npm i -g use-pounce`), the command is just `pounce`.
 | `--token <t>`  | Pairing token (default: random, kept in `~/.pounce`) |
 | `--lan`        | Skip the tunnel — the QR pairs on this Wi-Fi only    |
 | `--foreground` | Run the Bridge attached to this terminal             |
+| `--check`      | On `update`: report what's behind, change nothing    |
 
 Setup flags (see [Setting a machine up for good](#setting-a-machine-up-for-good)):
 
@@ -129,6 +131,28 @@ claude mcp add pounce -- npx use-pounce mcp
 
 It's read-only — see [MCP server](/docs/mcp) for the tools and setup.
 
+## Keeping a machine up to date
+
+`npx use-pounce` fetches a fresh CLI every run, so the command never goes stale.
+What it leaves behind does. `pounce configure --bridge` installs its own copy of
+`use-pounce` under `~/.pounce/app` and points the login service at that copy —
+deliberately, so npm's cache can't be pruned out from under a running Bridge —
+and the copy stays on whatever version it was installed at. The `pounce-tunnel`
+binary is downloaded once and never looked at again.
+
+```sh
+npx use-pounce update          # bring them up to date and restart what needs it
+npx use-pounce update --check  # just say what's behind
+```
+
+`update` replaces the permanent copy, restarts the login service (and any Bridge
+this CLI started) so the new code is actually the code running, and asks the
+Bridge to swap its tunnel binary — verified and rolled back automatically if the
+new one doesn't run.
+
+The desktop app is reported but never touched: it updates itself, and two
+updaters fighting over one install is worse than one being a version behind.
+
 ## What it puts on your machine
 
 - **Bridge** — an HTTP server on port `8099` that reads your coding-agent
@@ -139,6 +163,9 @@ It's read-only — see [MCP server](/docs/mcp) for the tools and setup.
   same Wi-Fi.
 - **Auth** — requests need the pairing token from the QR. The token is minted
   randomly per machine.
+- **A permanent copy** — only after `pounce configure --bridge`: `~/.pounce/app`
+  holds the `use-pounce` the login service runs. `pounce update` is what moves
+  it forward.
 
 Everything lives under `~/.pounce/` — run `pounce stop` and delete that
 directory to remove all of it.

@@ -15,6 +15,7 @@
  *   pounce status     bridge/tunnel/phone status
  *   pounce stop       stop the background bridge (and its tunnel)
  *   pounce logs [-f]  show the bridge log
+ *   pounce update     update the pieces of Pounce installed on this machine
 
  *
  *   pounce peers            machines nearby, who is asking, who has access
@@ -471,6 +472,33 @@ async function cmdStop(opts) {
     spawnSync("pkill", ["-f", "pounce-tunnel serve"], { stdio: "ignore" });
 }
 
+/**
+ * Stop the bridge this CLI started and start it again on the code we're running
+ * now. Only ever ours: a bridge belonging to the desktop app or a login service
+ * is that owner's to restart, and killing it out from under them is how a
+ * "harmless" update takes someone's phone offline.
+ *
+ * The token comes from the RUNNING bridge before it dies — a restart must not
+ * silently re-mint one, or every paired phone would have to pair again.
+ */
+async function restartBridge(port) {
+  const meta = daemonMeta(port);
+  if (!meta || !pidAlive(meta.pid)) throw new Error("that bridge wasn't started by this CLI");
+  const token = (await uiInfo(port).catch(() => null))?.token || effectiveToken({});
+  process.kill(meta.pid, "SIGTERM");
+  const deadline = Date.now() + 8000;
+  while (pidAlive(meta.pid) && Date.now() < deadline) await sleep(150);
+  if (pidAlive(meta.pid)) throw new Error(`pid ${meta.pid} didn't exit`);
+  rmSync(metaFile(port), { force: true });
+  await startDaemon({ port, token, foreground: false });
+}
+
+/** Is the bridge on this port one we started? Decides what `update` may touch. */
+function startedByUs(port) {
+  const meta = daemonMeta(port);
+  return !!(meta && meta.port === port && pidAlive(meta.pid));
+}
+
 function cmdLogs(opts) {
   if (!existsSync(LOG_FILE)) {
     console.log(dim(`no log yet at ${LOG_FILE}`));
@@ -791,6 +819,8 @@ function parseArgs(argv) {
     want: null,
     yes: false,
     remove: false,
+    // `pounce update` — report what's behind without changing anything.
+    check: false,
   };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
@@ -809,6 +839,7 @@ function parseArgs(argv) {
     else if (a === "--desktop" || a === "--app") opts.want = "desktop";
     else if (a === "--bridge") opts.want = "bridge";
     else if (a === "--yes" || a === "-y") opts.yes = true;
+    else if (a === "--check" || a === "--dry-run") opts.check = true;
     else if (a === "--remove" || a === "--uninstall") opts.remove = true;
     else if (a === "--help" || a === "-h") rest.unshift("help");
     else if (a === "--version" || a === "-V") rest.unshift("version");
@@ -828,6 +859,7 @@ ${bold("pounce")} — pair your phone with this machine ${dim(`(use-pounce v${PK
   ${bold("pounce status")}     bridge / tunnel / phone status
   ${bold("pounce stop")}       stop the background bridge and its tunnel
   ${bold("pounce logs")} [-f]  show (or follow) the bridge log
+  ${bold("pounce update")}     update what's installed here ${dim("(--check just says what's behind)")}
   ${bold("pounce mcp")}        serve your agent history to other AI tools over MCP ${dim("(stdio)")}
 
 ${bold("Sharing with another computer")} ${dim("— read-only, scoped, and it expires")}
@@ -879,7 +911,27 @@ try {
   else if (cmd === "status") await cmdStatus(opts);
   else if (cmd === "stop") await cmdStop(opts);
   else if (cmd === "logs") cmdLogs(opts);
-  else if (cmd === "peers") await cmdPeers(opts);
+  else if (cmd === "update" || cmd === "upgrade") {
+    // Lazy, like `configure` and `mcp`: pairing is the hot path.
+    const entry = [
+      path.join(HERE, "..", "dist", "update.mjs"),
+      path.join(HERE, "..", "src", "update.mjs"),
+    ].find(existsSync);
+    if (!entry) throw new Error("update missing — run `bun run build` in apps/cli");
+    const { runUpdate } = await import(pathToFileURL(entry).href);
+    await runUpdate({
+      port: opts.port,
+      version: PKG.version,
+      check: opts.check,
+      io: {
+        bridgeAlive,
+        uiInfo,
+        startedByUs,
+        restartBridge,
+        bridgeFetch: (p, o) => bridge(opts.port, p, o),
+      },
+    });
+  } else if (cmd === "peers") await cmdPeers(opts);
   else if (cmd === "ask") await cmdAsk(opts, args[0]);
   else if (cmd === "approve") await cmdApprove(opts, args[0]);
   else if (cmd === "deny") await cmdDeny(opts, args[0]);

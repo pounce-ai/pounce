@@ -609,6 +609,45 @@ async function installBridge(det, { port, version, confirm }) {
   return { what, log, copied, launcher, up, port };
 }
 
+/**
+ * Restart the login service in place, so it picks up a replaced copy of
+ * use-pounce. Returns what was restarted, or null if there is no service here.
+ *
+ * Lives beside the installers rather than in `update.mjs` on purpose: the
+ * label, unit name and task name have to stay in lockstep with whatever
+ * installed them, and a second copy of those three strings is a bug waiting
+ * for the day one of them changes.
+ */
+export function restartService(det) {
+  if (det.platform === "darwin" && existsSync(LAUNCHD_PLIST)) {
+    // kickstart -k replaces the running process without unloading the agent;
+    // unload+load is the fallback for a launchd too old to know it.
+    const uid = typeof process.getuid === "function" ? process.getuid() : null;
+    const kicked =
+      uid != null &&
+      spawnSync("launchctl", ["kickstart", "-k", `gui/${uid}/${LAUNCHD_LABEL}`], {
+        stdio: "ignore",
+      }).status === 0;
+    if (!kicked) {
+      spawnSync("launchctl", ["unload", LAUNCHD_PLIST], { stdio: "ignore" });
+      spawnSync("launchctl", ["load", "-w", LAUNCHD_PLIST], { stdio: "ignore" });
+    }
+    return `launchd agent ${LAUNCHD_LABEL}`;
+  }
+  if (det.platform === "linux" && existsSync(SYSTEMD_PATH) && has("systemctl")) {
+    spawnSync("systemctl", ["--user", "restart", SYSTEMD_UNIT], { stdio: "ignore" });
+    return `systemd user service ${SYSTEMD_UNIT}`;
+  }
+  if (det.platform === "win32" && serviceInstalled(det)) {
+    // /End kills the wrapper .cmd; its restart loop dies with it, so /Run is
+    // what actually brings the bridge back.
+    spawnSync("schtasks", ["/End", "/TN", WIN_TASK], { stdio: "ignore" });
+    spawnSync("schtasks", ["/Run", "/TN", WIN_TASK], { stdio: "ignore" });
+    return `scheduled task ${WIN_TASK}`;
+  }
+  return null;
+}
+
 /** Take the login service back off. Mirrors every install path above. */
 export function removeService(det) {
   const done = [];
