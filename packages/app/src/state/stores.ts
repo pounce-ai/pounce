@@ -440,6 +440,13 @@ export function modelForThread(id: string): string | undefined {
   return threadModels.get(id)?.model;
 }
 
+/** When this thread's model was last chosen here (ms), or undefined if it never
+ *  was. Rows written before `at` existed read as undefined, which is honest:
+ *  nothing is known about when they were picked. */
+export function modelPickedAt(id: string): number | undefined {
+  return threadModels.get(id)?.at;
+}
+
 export function isFavThread(id: string): boolean {
   return favorites.has(`thread:${id}`);
 }
@@ -499,8 +506,8 @@ export function toggleRepoIgnore(repoId: string): void {
   }
 }
 
-export function setThreadModel(id: string, model: string | null): void {
-  if (model) upsertRows(threadModels, [{ id, model }]);
+export function setThreadModel(id: string, model: string | null, at = Date.now()): void {
+  if (model) upsertRows(threadModels, [{ id, model, at }]);
   else if (threadModels.has(id)) threadModels.delete(id);
 }
 
@@ -697,10 +704,13 @@ export function rekeyThread(oldId: string, s: Session): void {
     favorites.delete(`thread:${oldId}`);
     upsertRows(favorites, [{ id: `thread:${s.id}`, kind: "thread", ref: s.id }]);
   }
-  const model = threadModels.get(oldId)?.model;
-  if (model) {
+  const picked = threadModels.get(oldId);
+  if (picked?.model) {
     threadModels.delete(oldId);
-    upsertRows(threadModels, [{ id: s.id, model }]);
+    // Carries `at` across the rekey — a first turn on a new_ id is the freshest
+    // pick there is, and losing its timestamp would let the observed model
+    // overwrite it before it has even run.
+    upsertRows(threadModels, [{ ...picked, id: s.id }]);
   }
   rekeyThreadObservables(oldId, s.id);
 }

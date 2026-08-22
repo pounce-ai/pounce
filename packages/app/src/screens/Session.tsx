@@ -52,6 +52,7 @@ import {
   markOpened,
   mergeRemoteMarkers,
   modelForThread,
+  modelPickedAt,
   pendingPrompts$,
   pendingTurns$,
   rekeyThread,
@@ -347,6 +348,59 @@ export default function SessionScreen() {
   useEffect(() => {
     refreshUsage();
   }, [refreshUsage]);
+
+  /**
+   * Adopt a model change Pounce didn't make.
+   *
+   * A thread's model moves without us in two ordinary ways: the agent falls
+   * back when a limit is hit, and someone types /model in a terminal session on
+   * the host. `usage.lastModel` is what the newest turn actually ran on, so when
+   * it disagrees with the sticky selection, the selection is the thing that is
+   * wrong — and it is not cosmetic, because it is also what the NEXT turn is
+   * sent with. Left alone, Pounce would keep asking for a model the thread had
+   * already left.
+   *
+   * The timestamps are the whole safety of this: a pick made here after that
+   * turn hasn't been sent yet, so it must not be overwritten by an older
+   * observation. With no recorded pick (the thread predates `at`, or was never
+   * chosen here) there is nothing to protect and the observation simply wins.
+   */
+  useEffect(() => {
+    const ran = usage?.lastModel;
+    if (!session?.id || !ran || ran === selectedModel) return;
+    const pickedAt = modelPickedAt(session.id);
+    const ranAt = usage?.lastModelAt ? Date.parse(usage.lastModelAt) : NaN;
+    if (pickedAt != null && !(Number.isFinite(ranAt) && ranAt > pickedAt)) return;
+    // Stamped with the turn's own time, not now: adopting must not make the
+    // selection look freshly picked and shield it from the next real change.
+    setThreadModel(session.id, ran, Number.isFinite(ranAt) ? ranAt : 0);
+    // Never silently: a limit-driven fallback would otherwise pin the thread to
+    // a lesser model for good with nothing on screen to explain it. Said once
+    // per model (mergeById keys on the id), and one tap in the picker undoes it.
+    if (!selectedModel) return; // nothing was displaced — nothing to report
+    const name =
+      cachedModels(session.hostId, session.agent)?.find((m) => m.id === ran)?.name ?? ran;
+    setLiveEvents((e) =>
+      mergeById(e, [
+        {
+          id: `moved:${ran}`,
+          conversationId: session.id,
+          seq: Number.MAX_SAFE_INTEGER,
+          ts: new Date(Number.isFinite(ranAt) ? ranAt : Date.now()).toISOString(),
+          type: "system_event",
+          level: "info",
+          message: `This thread is now running on ${name} — it moved outside Pounce. Later messages go to it unless you pick another model.`,
+        },
+      ]),
+    );
+  }, [
+    session?.id,
+    session?.hostId,
+    session?.agent,
+    selectedModel,
+    usage?.lastModel,
+    usage?.lastModelAt,
+  ]);
 
   // Pull markers made on another device once per thread open. Additive: a
   // local override always wins, so a partial read can't undo one (and a failed
@@ -1071,7 +1125,7 @@ export default function SessionScreen() {
     );
 
   // Combined model·effort pill label for the composer, e.g. "opus 4.7 · High".
-  const activeModel = selectedModel ?? usage?.model ?? null;
+  const activeModel = selectedModel ?? usage?.lastModel ?? usage?.model ?? null;
   const modelName = activeModel ? shortModel(activeModel) : "Model";
   const modelPillLabel =
     showEffort && effort && effort !== "off" ? `${modelName} · ${effortLabel}` : modelName;
@@ -1355,8 +1409,8 @@ export default function SessionScreen() {
           visible={modelSheet}
           hostId={session.hostId}
           agent={session.agent}
-          current={selectedModel ?? usage?.model ?? null}
-          pinned={[selectedModel, usage?.model, ...(usage?.models ?? [])].filter(
+          current={selectedModel ?? usage?.lastModel ?? usage?.model ?? null}
+          pinned={[selectedModel, usage?.lastModel, usage?.model, ...(usage?.models ?? [])].filter(
             (m): m is string => !!m && m !== "<synthetic>",
           )}
           onSelect={(modelId) => {

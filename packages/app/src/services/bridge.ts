@@ -1344,6 +1344,17 @@ export interface ThreadUsage {
   available: boolean;
   model?: string | null;
   models?: string[];
+  /**
+   * The model the thread's most recent turn actually ran on — NOT the same
+   * question as `model`, which is the thread's dominant one by output tokens.
+   * A thread moved late in its life (an agent-side fallback, or someone typing
+   * /model in a terminal) keeps reporting the old model there and the new one
+   * here. This is what lets the app notice a model change it didn't make.
+   */
+  lastModel?: string | null;
+  /** ISO timestamp of that turn, so a selection made *since* it isn't
+   *  overwritten by an older observation. */
+  lastModelAt?: string | null;
   tokens?: {
     input: number;
     output: number;
@@ -2030,27 +2041,40 @@ export interface ModelInfo {
 /** Fetch models and cache them into `agentModels$`, so the picker opens
  *  instantly. Throttled per device+agent and skipped while a recent cache
  *  exists — safe to call on every sync and on sheet-open (stale-while-revalidate).
- *  Never overwrites a good cache with an empty (error) result. */
+ *  Never overwrites a good cache with an empty (error) result.
+ *
+ *  `force` skips both this throttle and the bridge's own cache. Opening the
+ *  picker is a deliberate "show me the models", and answering that out of a
+ *  cache up to two TTLs old is how the list came to look stale on a desktop app
+ *  that had been open all week. */
 const modelWarmAt = new Map<string, number>();
 const MODEL_WARM_TTL = 10 * 60_000;
-export async function warmModels(hostId: string, agent: string): Promise<void> {
+export async function warmModels(
+  hostId: string,
+  agent: string,
+  opts?: { force?: boolean },
+): Promise<void> {
   const key = `${hostId}:${agent}`;
   const last = modelWarmAt.get(key) ?? 0;
-  if (cachedModels(hostId, agent) && Date.now() - last < MODEL_WARM_TTL) return;
+  if (!opts?.force && cachedModels(hostId, agent) && Date.now() - last < MODEL_WARM_TTL) return;
   modelWarmAt.set(key, Date.now());
-  const models = await fetchModels(hostId, agent);
+  const models = await fetchModels(hostId, agent, opts);
   if (models.length) setCachedModels(hostId, agent, models);
   else modelWarmAt.delete(key); // let a failed warm retry sooner
 }
 
 /** Available models for an agent on a device (daemon model/list). [] on error. */
-export async function fetchModels(hostId: string, agent: string): Promise<ModelInfo[]> {
+export async function fetchModels(
+  hostId: string,
+  agent: string,
+  opts?: { force?: boolean },
+): Promise<ModelInfo[]> {
   const cfg = await deviceForHost(hostId);
   if (!cfg) return [];
   try {
     const { models } = await get<{ models: ModelInfo[] }>(
       cfg,
-      `/v1/models?agent=${encodeURIComponent(agent)}`,
+      `/v1/models?agent=${encodeURIComponent(agent)}${opts?.force ? "&fresh=1" : ""}`,
     );
     return models ?? [];
   } catch {

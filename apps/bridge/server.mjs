@@ -914,7 +914,16 @@ function startActivityPopulate() {
 const MODELS_CACHE_MS = 300_000;
 
 function getModels(agent) {
-  return cached(`models:${agent}`, MODELS_CACHE_MS, () => host.listModels(agent));
+  // Keyed on a stamp of the agent's own model config, so changing your model on
+  // the host shows up on the next request instead of up to MODELS_CACHE_MS later.
+  return cached(`models:${agent}:${host.modelsSignature(agent)}`, MODELS_CACHE_MS, () =>
+    host.listModels(agent),
+  );
+}
+
+/** Drop an agent's cached catalog whatever signature it was keyed on. */
+function dropModelsCache(agent) {
+  for (const k of [...cache.keys()]) if (k.startsWith(`models:${agent}:`)) cache.delete(k);
 }
 
 // How many threads to keep hot in the background at once.
@@ -2788,7 +2797,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/v1/models") {
       const agent = url.searchParams.get("agent");
       if (!agent) return send(res, 400, { error: "agent required" });
-      if (url.searchParams.get("fresh") === "1") cache.delete(`models:${agent}`);
+      if (url.searchParams.get("fresh") === "1") dropModelsCache(agent);
       return send(res, 200, { models: await getModels(agent) });
     }
     if (url.pathname === "/v1/status") return send(res, 200, { status: await status() });

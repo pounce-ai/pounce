@@ -78,7 +78,9 @@ export function ModelSheet({
     if (!visible) return;
     setQuery("");
     setAttempted(false);
-    void warmModels(hostId, agent).finally(() => setAttempted(true));
+    // Deliberate open = deliberate refresh: bypass both caches rather than
+    // answer with a list that may be two TTLs old.
+    void warmModels(hostId, agent, { force: true }).finally(() => setAttempted(true));
   }, [visible, hostId, agent]);
 
   // Merge the daemon catalog with pinned ids (current + thread-used models) so

@@ -37,13 +37,15 @@ const NONE = () => {
 };
 
 /** An adapter whose session index serves the given transcripts, newest first.
- *  Each entry is a list of raw JSONL records for one thread. */
+ *  Each entry is a list of raw JSONL records for one thread, or
+ *  `{ records, updatedAt }` to place that thread at a point in time. */
 function adapterFor(transcripts = []) {
   const dir = mkdtempSync(path.join(tmpdir(), "claude-models-"));
-  const metas = transcripts.map((records, i) => {
+  const metas = transcripts.map((t, i) => {
+    const { records, updatedAt } = Array.isArray(t) ? { records: t } : t;
     const filePath = path.join(dir, `t${i}.jsonl`);
     writeFileSync(filePath, records.map((r) => JSON.stringify(r)).join("\n"));
-    return { filePath };
+    return updatedAt ? { filePath, updatedAt } : { filePath };
   });
   const a = new ClaudeAdapter({ turns: { isRunning: () => false } });
   a.index = { list: async () => metas };
@@ -123,6 +125,74 @@ describe("claude listModels", () => {
       name: "Mythos 5",
       isDefault: true,
     });
+  });
+
+  it("retires a model a newer one in its family has replaced, without dropping it", async () => {
+    NONE();
+    const got = await models([[said("claude-opus-5")], [said("claude-opus-4-8")]]);
+    const byId = Object.fromEntries(got.map((m) => [m.id, m]));
+    // Still selectable — a thread that ran on it has to be able to go back...
+    expect(byId["claude-opus-4-8"]).toBeTruthy();
+    expect(byId["claude-opus-4-8"].deprecated).toBe(true);
+    expect(byId["claude-opus-5"].deprecated).toBe(false);
+    // ...but never above a current model.
+    const ids = got.map((m) => m.id);
+    expect(ids.indexOf("claude-opus-5")).toBeLessThan(ids.indexOf("claude-opus-4-8"));
+  });
+
+  it("retires only within a family, and never an alias", async () => {
+    NONE();
+    const got = await models([[said("claude-opus-5")], [said("claude-haiku-4-5-20251001")]]);
+    const dead = got.filter((m) => m.deprecated).map((m) => m.id);
+    // Opus 5 does not supersede Haiku 4.5 — different families, both current.
+    expect(dead).toEqual([]);
+    expect(got.find((m) => m.id === "opus").deprecated).toBe(false);
+  });
+
+  it("treats a context variant as its own family, not a superseded sibling", async () => {
+    NONE();
+    stub.files.set(
+      ".claude.json",
+      JSON.stringify({
+        additionalModelOptionsCache: [{ value: "claude-fable-5[1m]", label: "Fable" }],
+      }),
+    );
+    const got = await models([[said("claude-fable-5")]]);
+    expect(got.filter((m) => m.deprecated).map((m) => m.id)).toEqual([]);
+  });
+
+  it("counts a dated snapshot as the same version as its undated name", async () => {
+    NONE();
+    const got = await models([[said("claude-haiku-4-5-20251001")], [said("claude-haiku-4-5")]]);
+    expect(got.filter((m) => m.deprecated).map((m) => m.id)).toEqual([]);
+  });
+
+  it("stops offering models from threads nobody has touched in a month", async () => {
+    NONE();
+    const day = 24 * 60 * 60_000;
+    const at = (d) => new Date(Date.now() - d * day).toISOString();
+    const ids = (
+      await models([
+        { records: [said("claude-opus-5")], updatedAt: at(1) },
+        { records: [said("claude-opus-4-8")], updatedAt: at(90) },
+      ])
+    ).map((m) => m.id);
+    expect(ids).toContain("claude-opus-5");
+    // Ninety days cold is not "a model this machine runs" — the aliases cover it.
+    expect(ids).not.toContain("claude-opus-4-8");
+  });
+
+  it("changes signature when the configured model changes, and not otherwise", async () => {
+    NONE();
+    const { a, cleanup } = adapterFor([]);
+    try {
+      const before = a.modelsSignature();
+      expect(a.modelsSignature()).toBe(before);
+      stub.files.set(".claude/settings.json", JSON.stringify({ model: "claude-opus-5" }));
+      expect(a.modelsSignature()).not.toBe(before);
+    } finally {
+      cleanup();
+    }
   });
 
   it("survives a machine with no Claude state at all", async () => {
