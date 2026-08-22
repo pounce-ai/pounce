@@ -73,4 +73,18 @@ execFileSync(
   ],
   { stdio: "inherit", cwd: PKG },
 );
-console.log("built dist/launcher.mjs + dist/mcp.mjs + dist/configure.mjs");
+// `pounce update` — same again. It imports configure.mjs for the login-service
+// paths, which the bundler inlines, so the two can never drift apart on disk.
+execFileSync(
+  process.env.BUN_BIN || "bun",
+  [
+    "build",
+    path.join(PKG, "src/update.mjs"),
+    "--target=node",
+    ...EXTERNAL.flatMap((e) => ["--external", e]),
+    "--outfile",
+    path.join(PKG, "dist/update.mjs"),
+  ],
+  { stdio: "inherit", cwd: PKG },
+);
+console.log("built dist/launcher.mjs + dist/mcp.mjs + dist/configure.mjs + dist/update.mjs");

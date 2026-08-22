@@ -21,6 +21,7 @@ pounce configure  set this machine up for good — the app, or a login-time brid
 pounce status     bridge / tunnel / phone status
 pounce stop       stop the background bridge and its tunnel
 pounce logs [-f]  show (or follow) the bridge log
+pounce update     update what's installed here    (--check just says what's behind)
 pounce mcp        serve this machine's agent history over MCP (stdio)
 
 --port <n>        bridge port                 (default 8099)
@@ -28,6 +29,25 @@ pounce mcp        serve this machine's agent history over MCP (stdio)
 --lan             skip the tunnel — QR pairs on this Wi-Fi only
 --foreground      run the bridge attached to this terminal
 ```
+
+## Keeping a machine up to date
+
+`npx use-pounce` fetches a fresh CLI every run, so the command itself never goes
+stale. What it leaves behind does. `pounce configure --bridge` installs its own
+copy of `use-pounce` under `~/.pounce/app` and points the login service at it —
+deliberately, so npm can't prune the running bridge out from under you — and
+that copy stays on whatever version it was installed at. The `pounce-tunnel`
+binary is downloaded once and never looked at again.
+
+```sh
+npx use-pounce update          # bring them all up to date, restart what needs it
+npx use-pounce update --check  # just say what's behind
+```
+
+It updates the permanent copy, restarts the login service (and any bridge this
+CLI started) so the new code is actually running, and asks the bridge to replace
+its tunnel binary. The desktop app is reported but never touched — it has its
+own updater.
 
 ## Setting a machine up for good
 
