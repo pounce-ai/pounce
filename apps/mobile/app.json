@@ -4,7 +4,7 @@
     "slug": "pounce",
     "owner": "peppyhop",
     "scheme": "pounce",
-    "version": "1.6.5",
+    "version": "1.6.6",
     "runtimeVersion": {
       "policy": "appVersion"
     },
