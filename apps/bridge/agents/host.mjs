@@ -16,7 +16,7 @@ import { OpencodeAdapter } from "./opencode.mjs";
 import { CursorAdapter } from "./cursor.mjs";
 import { canonicalAdapters } from "./canonical.mjs";
 import { acpAvailable, startAcpTurn } from "./acp.mjs";
-import { threadCost } from "./ccusage.mjs";
+import { threadCost } from "./meter.mjs";
 import { buildDoctorReport } from "./doctor.mjs";
 import { bridgeId } from "./identity.mjs";
 

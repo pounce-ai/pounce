@@ -33,7 +33,7 @@ import {
   clampMarkdown,
 } from "./events.mjs";
 import { agentEnv, binVersion, binPath, liveAgentCwds } from "./env.mjs";
-import { noUsage, usageResult } from "./usage.mjs";
+import { noUsage, usageResult } from "./meter.mjs";
 
 const ROOT = path.join(os.homedir(), ".codex", "sessions");
 const INDEX_FILE = path.join(os.homedir(), ".codex", "session_index.jsonl");

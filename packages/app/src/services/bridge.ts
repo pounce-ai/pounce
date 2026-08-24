@@ -1494,7 +1494,7 @@ export interface QuotaWindow {
  * Rolling-window usage MEASURED from the agent's own transcripts, for agents
  * that publish no meter. Deliberately carries no percentage: the window's size
  * isn't knowable locally, and inferring a ceiling from your busiest past window
- * turns a guess into a gauge (see agents/blocks.mjs).
+ * turns a guess into a gauge (see @pounce/meter blocks).
  */
 export interface UsageBlocks {
   agent: string;

@@ -45,7 +45,7 @@ function resultText(content) {
 /**
  * Build an ATIF document from a thread's timeline events.
  *
- * `usage` is the official-only usage record (agents/usage.mjs) — its cost is
+ * `usage` is the official-only usage record (@pounce/meter usage) — its cost is
  * omitted rather than estimated when the agent never reported one, so a
  * consumer can trust `final_metrics.cost_usd` to be real or absent.
  */
@@ -254,7 +254,7 @@ export function toAtif({
  *
  * `cost_usd` appears only when the agent itself reported dollars. Codex threads
  * therefore export token counts with no cost key at all, which is the honest
- * answer — see agents/usage.mjs.
+ * answer — see @pounce/meter usage.
  */
 function finalMetrics(usage) {
   if (!usage?.available) return {};

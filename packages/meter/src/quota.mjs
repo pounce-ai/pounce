@@ -42,7 +42,7 @@ import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
 
-import { agentEnv, binPath } from "./env.mjs";
+import { agentEnv, binPath } from "./host.mjs";
 
 const execFile = promisify(execFileCb);
 

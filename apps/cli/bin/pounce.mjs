@@ -521,7 +521,7 @@ function cmdLogs(opts) {
 
 /** Authenticated call to OUR bridge. Fails with a clear line rather than a
  *  stack when the bridge isn't up — that is the common case, not an error. */
-async function bridge(port, path, { method = "GET", body = null } = {}) {
+async function bridge(port, path, { method = "GET", body = null, withHeaders = false } = {}) {
   let token;
   try {
     token = (await uiInfo(port)).token;
@@ -543,7 +543,10 @@ async function bridge(port, path, { method = "GET", body = null } = {}) {
   const res = await fetch(`http://127.0.0.1:${port}${path}`, init);
   const out = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(out.error || `${path} -> ${res.status}`);
-  return out;
+  // Some routes say the interesting part in headers rather than the body —
+  // the trajectory export reports what it stripped there, so that the ATIF
+  // document it returns stays conformant. See `pounce redact`.
+  return withHeaders ? { body: out, headers: res.headers } : out;
 }
 
 function fmtCode(c) {
@@ -801,6 +804,148 @@ async function cmdRevoke(opts, key) {
   console.log(`${green("✓")} revoked ${hit.requester.hostName}`);
 }
 
+// --- pounce redact ------------------------------------------------------------
+
+/** Bytes, in the unit a human would say out loud. */
+function fmtBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * One line of context around a redaction, with the placeholder in the middle.
+ * The value is already gone by the time we see the document, so this is safe
+ * to print — which is the whole idea.
+ */
+function redactionContext(json, width = 46) {
+  const out = [];
+  const re = /\[redacted:([a-z-]+)\]/g;
+  let m;
+  while ((m = re.exec(json)) && out.length < 40) {
+    // The slice comes out of a JSON string, so it still carries JSON's own
+    // escaping. Undo the three that show up constantly in transcript text,
+    // or every context line reads as `\"foo\\n` and the eye slides off it.
+    const before = json
+      .slice(Math.max(0, m.index - width), m.index)
+      .replace(/\\[nrt]/g, " ")
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, "\\")
+      .replace(/\s+/g, " ");
+    out.push({ rule: m[1], before });
+  }
+  return out;
+}
+
+/**
+ * Show what would leave this machine if a thread were exported.
+ *
+ * This is a TRUST TOOL, so it is built to be doubted: it prints the payload
+ * exactly as a recipient would receive it, never the unredacted one. That is
+ * also why it does not try to prove the scrubber is complete — it can't be.
+ * What it can do is put the real output in front of you, so a credential that
+ * survived is something you can SEE rather than something you have to take on
+ * faith.
+ */
+async function cmdRedact(opts, threadArg) {
+  const wanted = threadArg || opts.thread;
+
+  // No thread named: show what's around rather than an error. The id is what
+  // the next invocation needs, so it goes first on the line.
+  if (!wanted) {
+    const { threads = [] } = await bridge(opts.port, "/v1/threads");
+    if (!threads.length) throw new Error("no threads on this machine yet");
+    console.log(`\n${bold("Which thread?")} ${dim("pounce redact <id>")}\n`);
+    for (const t of threads.slice(0, 10)) {
+      const when = t.updatedAt ? new Date(t.updatedAt).toISOString().slice(0, 10) : "";
+      // Fold the home path here too. Nothing leaves the machine on this
+      // screen, but a tool whose whole subject is "what am I about to leak"
+      // should not be the one printing your account name back at you.
+      const where = String(t.title || t.cwd || "")
+        .split(os.homedir())
+        .join("~");
+      console.log(`  ${bold(String(t.id).slice(0, 8))}  ${dim(t.agent)}  ${where} ${dim(when)}`);
+    }
+    console.log("");
+    return;
+  }
+
+  // An id alone is enough: look up which agent owns it rather than making the
+  // caller remember. `--agent` stays as the escape hatch for an id we can't
+  // find (a thread the index hasn't caught up with).
+  let agent = opts.agent;
+  let thread = wanted;
+  if (!agent) {
+    const { threads = [] } = await bridge(opts.port, "/v1/threads").catch(() => ({ threads: [] }));
+    const hit = threads.find((t) => t.id === wanted || String(t.id).startsWith(wanted));
+    if (hit) {
+      agent = hit.agent;
+      thread = hit.id;
+    }
+  }
+  if (!agent) {
+    throw new Error(`can't tell which agent owns "${wanted}" — pass ${bold("--agent claude")}`);
+  }
+
+  const q = `agent=${encodeURIComponent(agent)}&thread=${encodeURIComponent(thread)}`;
+  const { body: doc, headers } = await bridge(opts.port, `/v1/trajectory?${q}`, {
+    withHeaders: true,
+  });
+
+  const count = Number(headers.get("x-pounce-redactions") || 0);
+  let rules = {};
+  try {
+    rules = JSON.parse(headers.get("x-pounce-redaction-rules") || "{}");
+  } catch {
+    rules = {};
+  }
+  const json = JSON.stringify(doc);
+
+  if (opts.json) {
+    console.log(JSON.stringify({ agent, thread, redactions: count, rules, document: doc }));
+    return;
+  }
+
+  console.log(
+    `\n${bold(`${agent}:${String(thread).slice(0, 8)}`)}  ${dim(
+      `${doc.steps?.length ?? 0} steps · ${fmtBytes(json.length)} · ATIF ${doc.schema_version}`,
+    )}\n`,
+  );
+
+  if (!count) {
+    console.log(`  ${green("✓")} nothing matched — no credential-shaped value in this thread\n`);
+  } else {
+    console.log(
+      `  ${green("✓")} ${bold(String(count))} stripped before anything left this machine`,
+    );
+    for (const [rule, n] of Object.entries(rules).sort((a, b) => b[1] - a[1])) {
+      console.log(`      ${String(n).padStart(3)}  ${rule}`);
+    }
+    console.log("");
+    for (const { rule, before } of redactionContext(json)) {
+      console.log(`  ${dim("…" + before)}${yellow(`[redacted:${rule}]`)}`);
+    }
+    console.log("");
+  }
+
+  if (opts.out) {
+    writeFileSync(opts.out, JSON.stringify(doc, null, 2));
+    console.log(`  ${green("✓")} written to ${bold(opts.out)}\n`);
+  } else {
+    console.log(
+      `  ${dim(`This is the payload a recipient would get. Save it with --out <file>.`)}`,
+    );
+  }
+
+  // The honest caveat, printed every time on purpose. A scrubber people
+  // over-trust is more dangerous than one they check.
+  console.log(
+    `  ${dim("Best-effort: a secret with no name and no known shape can survive.")}\n${dim(
+      "  Read the output before you share it, and report a miss so the rules can learn it.",
+    )}\n`,
+  );
+}
+
 function parseArgs(argv) {
   const opts = {
     port: Number(process.env.BRIDGE_PORT || 8099),
@@ -821,6 +966,11 @@ function parseArgs(argv) {
     remove: false,
     // `pounce update` — report what's behind without changing anything.
     check: false,
+    // `pounce redact` — which thread, where to put it, how to print it.
+    agent: null,
+    thread: null,
+    out: null,
+    json: false,
   };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
@@ -841,6 +991,14 @@ function parseArgs(argv) {
     else if (a === "--yes" || a === "-y") opts.yes = true;
     else if (a === "--check" || a === "--dry-run") opts.check = true;
     else if (a === "--remove" || a === "--uninstall") opts.remove = true;
+    else if (a === "--agent") opts.agent = argv[++i];
+    else if (a === "--thread") opts.thread = argv[++i];
+    else if (a === "--out" || a === "-o") opts.out = argv[++i];
+    else if (a === "--json") opts.json = true;
+    // `--dry-run` is claimed above (as a `pounce update --check` alias) and
+    // that branch already wins here — harmless for `pounce redact`, which
+    // never reads opts.check, and it's the flag's default and only behaviour
+    // anyway, so the habit of typing it just works.
     else if (a === "--help" || a === "-h") rest.unshift("help");
     else if (a === "--version" || a === "-V") rest.unshift("version");
     else rest.push(a);
@@ -861,6 +1019,12 @@ ${bold("pounce")} — pair your phone with this machine ${dim(`(use-pounce v${PK
   ${bold("pounce logs")} [-f]  show (or follow) the bridge log
   ${bold("pounce update")}     update what's installed here ${dim("(--check just says what's behind)")}
   ${bold("pounce mcp")}        serve your agent history to other AI tools over MCP ${dim("(stdio)")}
+  ${bold("pounce redact")} <id> see exactly what would leave this machine if you shared
+                    a thread ${dim("— credentials stripped, nothing written unless --out")}
+
+  --agent <name>  which agent owns the thread  ${dim("(usually worked out from the id)")}
+  --out <file>    save the redacted export     ${dim("(otherwise it just shows you)")}
+  --json          machine-readable, for piping
 
 ${bold("Sharing with another computer")} ${dim("— read-only, scoped, and it expires")}
 
@@ -936,6 +1100,7 @@ try {
   else if (cmd === "approve") await cmdApprove(opts, args[0]);
   else if (cmd === "deny") await cmdDeny(opts, args[0]);
   else if (cmd === "revoke") await cmdRevoke(opts, args[0]);
+  else if (cmd === "redact") await cmdRedact(opts, args[0]);
   else if (cmd === "configure" || cmd === "setup") {
     // Lazy for the same reason as `mcp` below: pairing is the hot path and
     // shouldn't load the installer.

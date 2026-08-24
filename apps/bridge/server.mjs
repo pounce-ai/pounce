@@ -45,7 +45,8 @@ import {
 import { baseName, createWorktreeIndex, normPath } from "./agents/worktrees.mjs";
 import { forgetSize, readDisk, removeWorktree } from "./agents/disk.mjs";
 import { readSkillDoc, readSkills } from "./agents/skills.mjs";
-import { toAtif } from "./agents/atif.mjs";
+import { toAtif } from "./agents/meter.mjs";
+import { redactDocument } from "./agents/redact.mjs";
 import { acpAvailable, readAcpCommands, resolvePermission } from "./agents/acp.mjs";
 import { cachedCommands, readCliCommands } from "./agents/commands.mjs";
 import {
@@ -80,19 +81,20 @@ import {
 import { readContextFiles, writeContextFile } from "./agents/context.mjs";
 import { createHistorySearch } from "./agents/search.mjs";
 import { createActivityIndex } from "./agents/activity-index.mjs";
-import { readQuota } from "./agents/quota.mjs";
-import { readBlocks } from "./agents/blocks.mjs";
-import { readAttribution } from "./agents/attribution.mjs";
 import { featureNames } from "./agents/features.mjs";
 import { agentVersions, updateAgent } from "./agents/agent-versions.mjs";
 import { chooseSavePath, defaultSaveDir } from "./agents/save-dialog.mjs";
-import { dailyCost, resetCostCache } from "./agents/admin-cost.mjs";
 import {
+  adminDailyCost as dailyCost,
   dailyCost as estimatedDailyCost,
   dailyUsage as ccusageDailyUsage,
-  SUPPORTED as ccusageReads,
+  readAttribution,
+  readBlocks,
+  readQuota,
   resetCcusageCache,
-} from "./agents/ccusage.mjs";
+  resetCostCache,
+  SUPPORTED as ccusageReads,
+} from "./agents/meter.mjs";
 import { listSettled, setSettled } from "./agents/settled.mjs";
 import { mergeBilledCost, mergeEstimatedCost, mergeTokens } from "./agents/series-overlay.mjs";
 import { listEditors, openIn } from "./agents/editors.mjs";
@@ -833,7 +835,7 @@ async function getMessages(agent, threadId, fresh = false, limit) {
 }
 
 // --- Per-thread token usage ------------------------------------------------
-// Owned by the adapters now (agents/usage.mjs): each one reads its own agent's
+// Owned by the adapters now (@pounce/meter usage): each one reads its own agent's
 // records, and a dollar figure is reported ONLY when that agent itself states
 // one. The price table that used to live here — which multiplied tokens by
 // hardcoded per-model rates — was deliberately deleted: it silently drifted
@@ -2907,6 +2909,34 @@ const server = http.createServer(async (req, res) => {
         agentVersion: await binVersion(agent).catch(() => null),
         cwd: url.searchParams.get("cwd") || null,
       });
+      // SCRUB BEFORE IT LEAVES. This is the one route that ships a whole
+      // conversation off the machine, so credentials are stripped here rather
+      // than wherever the file lands. On by default — an export is for a bug
+      // report or someone else's eval harness, and neither wants your keys —
+      // with `raw=1` for the owner who deliberately wants fidelity.
+      //
+      // FAIL CLOSED. If redaction throws we refuse the export rather than fall
+      // back to the unredacted document: a scrubber that silently passes the
+      // input through on error is worse than none, because nobody can tell.
+      let out = doc;
+      if (url.searchParams.get("raw") !== "1") {
+        try {
+          const { value, findings, count } = redactDocument(doc, {
+            cwd: url.searchParams.get("cwd") || null,
+          });
+          out = value;
+          // Reported in headers, not in the body: ATIF is a published schema
+          // and a Pounce-specific key would make the export non-conforming.
+          // Counts by rule, never values — enough to see the ruleset fired.
+          res.setHeader("x-pounce-redactions", String(count));
+          if (count) res.setHeader("x-pounce-redaction-rules", JSON.stringify(findings));
+        } catch (err) {
+          return send(res, 500, {
+            error: "redaction failed; export refused",
+            detail: err?.message || String(err),
+          });
+        }
+      }
       if (url.searchParams.get("download") === "1") {
         // `agent` and `thread` are request parameters, so they do not belong in
         // a header value unescaped: a quote in either closes the filename early
@@ -2918,7 +2948,7 @@ const server = http.createServer(async (req, res) => {
           `attachment; filename="${safe(agent)}-${safe(thread)}.atif.json"`,
         );
       }
-      return send(res, 200, doc);
+      return send(res, 200, out);
     }
     if (url.pathname === "/v1/file") {
       // Serve a local IMAGE file by absolute path — used to preview a Read of an

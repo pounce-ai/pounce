@@ -30,9 +30,8 @@ import {
   clampMarkdown,
 } from "./events.mjs";
 import { agentEnv, binVersion, binPath, liveAgentCwds } from "./env.mjs";
-import { recordTurn, threadTotals } from "./cost-ledger.mjs";
+import { noUsage, recordTurn, threadTotals, usageResult } from "./meter.mjs";
 import { normalizeCliCommands, rememberCommands } from "./commands.mjs";
-import { noUsage, usageResult } from "./usage.mjs";
 
 const CLAUDE_HOME = path.join(os.homedir(), ".claude");
 const ROOT = path.join(CLAUDE_HOME, "projects");

@@ -1,0 +1,22 @@
+{
+  "name": "@pounce/meter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Read what a coding agent (Claude Code, Codex, Cursor, opencode, …) cost on the machine it ran on: agent-reported dollars, org billing, transcript estimates, subscription plan-window burn, token attribution, and ATIF trajectory export. Reads only — no agent is driven, no socket is opened.",
+  "license": "MIT",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0"
+  }
+}
