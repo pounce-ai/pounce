@@ -97,5 +97,144 @@ export function collapseToolResults(events: TimelineEvent[]): TimelineEvent[] {
     out.push(e);
   }
   out.reverse();
+  return dropRepeatedThought(out);
+}
+
+/**
+ * Drop a Thought that only restates the one directly above it.
+ *
+ * The same reasoning reaches the list twice more easily than it looks: an agent
+ * re-persists a reasoning record when it rebuilds context, and a live event and
+ * its transcript twin can slip past the id/content match upstream. Both draw two
+ * cards a reader cannot tell apart — pure noise in a view where a Thought is
+ * already the least interesting row on screen.
+ *
+ * ADJACENT only, and by rendered text. A thought repeated later in a thread is
+ * the agent genuinely circling back, which is worth seeing; one repeated with
+ * nothing in between never is.
+ */
+function dropRepeatedThought(events: TimelineEvent[]): TimelineEvent[] {
+  let prev: string | null = null;
+  return events.filter((e) => {
+    if (e.type !== "thinking_finished") {
+      prev = null;
+      return true;
+    }
+    const text = normalizeText(e.text);
+    const repeat = text.length > 0 && text === prev;
+    prev = text;
+    return !repeat;
+  });
+}
+
+/** Text as it will READ once rendered — whitespace runs collapsed and trimmed.
+ *  Only for comparing two copies of the same words, never for display. */
+function normalizeText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function sameText(a: string, b: string): boolean {
+  return a === b || normalizeText(a) === normalizeText(b);
+}
+
+/** True when `b` is the transcript re-parse of streamed event `a`. The daemon
+ *  mints fresh event ids when it re-reads the transcript after a turn, so id
+ *  equality alone can't collapse a finished turn's streamed copy against the
+ *  fetched one — without this, the whole reply renders twice at completion. */
+export function isEquivalentEvent(a: TimelineEvent, b: TimelineEvent): boolean {
+  if (a.type !== b.type) return false;
+  switch (a.type) {
+    case "user_message":
+    case "assistant_message":
+    case "thinking_finished":
+      // Compare NORMALIZED text, not raw. The live stream and the transcript
+      // re-parse of the same words are assembled differently by every adapter —
+      // codex joins a reasoning item's summary parts with "\n" on the way out of
+      // the rollout while the live event carries the CLI's own `it.text`, and
+      // assistant history additionally goes through fenceJson. Under strict
+      // equality a separator's worth of whitespace was enough to miss the match,
+      // and the two copies then rendered as two rows that markdown drew
+      // identically: the duplicated "Thought" card in a codex session.
+      return sameText(a.text, (b as typeof a).text);
+    case "tool_call":
+      return a.call.id === (b as typeof a).call.id;
+    case "tool_result":
+      return a.result.toolCallId === (b as typeof a).result.toolCallId;
+    default:
+      return false;
+  }
+}
+
+export function mergeById(cur: TimelineEvent[], inc: TimelineEvent[]): TimelineEvent[] {
+  const out = cur.slice();
+  const idx = new Map(out.map((e, i) => [e.id, i] as const));
+  for (const ev of inc) {
+    const i = idx.get(ev.id);
+    if (i != null) out[i] = ev;
+    else {
+      idx.set(ev.id, out.length);
+      out.push(ev);
+    }
+  }
   return out;
+}
+
+/** Fold a fetched transcript into the rendered list without disturbing rows
+ *  already on screen. A fetched event matching a rendered one only by content
+ *  (re-parses mint fresh ids) is dropped in favor of the RENDERED event — its
+ *  row keeps its key, so the just-streamed reply never remounts/re-measures at
+ *  the exact moment the anchor spacer collapses. (Swapping to the fetched copy
+ *  reset the row to its estimated size and scroll-to-end then landed at the
+ *  START of the message.) Rendered extras the transcript hasn't flushed yet are
+ *  kept — the render list only ever accretes. */
+export function reconcileFetched(cur: TimelineEvent[], fetched: TimelineEvent[]): TimelineEvent[] {
+  if (!cur.length) return fetched;
+  const used = new Set<string>();
+  const next = fetched.map((f) => {
+    const match = cur.find((e) => !used.has(e.id) && (e.id === f.id || isEquivalentEvent(e, f)));
+    if (!match) return f;
+    used.add(match.id);
+    // Adopt the fetched (canonical) payload — it carries the settled flags,
+    // e.g. assistant_message.streaming=false, which flips the row off the
+    // streaming renderer — but under the RENDERED id, so the row's key and
+    // measurement survive.
+    return match.id === f.id ? f : { ...f, id: match.id };
+  });
+  const extras = cur.filter(
+    (e) => !used.has(e.id) && !e.id.startsWith("opt:") && !next.some((f) => f.id === e.id),
+  );
+  return extras.length ? mergeById(next, extras) : next;
+}
+
+/**
+ * What the render list should hold after a turn finishes and its thread's
+ * transcript has been re-read.
+ *
+ * The re-read is authoritative only when it covers at least the history that
+ * was already on screen before this turn. Anything shorter is a FAILED or
+ * PARTIAL read, not a shorter thread: the transcript can be missing (a turn
+ * that died before the agent wrote one — the plan's usage running out mid-turn
+ * does this), not flushed yet, or belong to a different session than the thread
+ * we are in. Adopting one of those replaced the whole timeline with the single
+ * turn that just ran, which is how a thread lost its past to one failed send.
+ *
+ * Folding the short read in anyway is not an option either: reconcileFetched
+ * appends unmatched rendered rows AFTER the fetched ones, which is right for a
+ * flush-lagging tail and wrong for a whole history. So keep what's rendered and
+ * let the next sync tick supersede it.
+ *
+ * @param cur        the render list as it stands (already carries `streamed`)
+ * @param streamed   events this turn streamed
+ * @param fetched    the re-read transcript, in chronological order
+ */
+export function foldTurnRefetch(
+  cur: TimelineEvent[],
+  streamed: TimelineEvent[],
+  fetched: TimelineEvent[],
+): TimelineEvent[] {
+  const prior = Math.max(0, cur.length - streamed.length);
+  if (fetched.length < prior) return mergeById(cur, streamed);
+  // Older history is id-stable across fetches; only this turn's streamed rows
+  // need their identity preserved (see reconcileFetched).
+  return reconcileFetched(streamed, fetched);
 }
