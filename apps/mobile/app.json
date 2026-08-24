@@ -19,7 +19,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.pounce.app",
-      "buildNumber": "30",
+      "buildNumber": "31",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSLocalNetworkUsageDescription": "Pounce connects to the Pounce Bridge running on your local network to load your projects and conversations.",
@@ -32,7 +32,7 @@
     },
     "android": {
       "package": "com.pounce.app",
-      "versionCode": 21,
+      "versionCode": 22,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FEF1E3"
