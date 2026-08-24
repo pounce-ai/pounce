@@ -16,6 +16,10 @@ import type { LegendListRef } from "@legendapp/list/react-native";
 import { adoptedMode } from "../state/permissionModes";
 import type { PermissionMode, TimelineEvent } from "@pounce/shared";
 import { collapseToolResults, Timeline } from "../components/Timeline";
+// Pure list-merge helpers (RN-free module, unit-tested there): folding a fetched
+// transcript into what is already rendered, and the rule for when a re-read is
+// authoritative at all.
+import { foldTurnRefetch, mergeById, reconcileFetched } from "../components/timelineEvents";
 import { deriveTaskTimeline } from "../components/taskEvents";
 import { TaskProgressBar } from "../components/TaskProgress";
 import { ShimmerLabel } from "../components/ShimmerLabel";
@@ -139,67 +143,6 @@ function mimeForImage(name: string): string {
   return map[ext] ?? "image/png";
 }
 
-/** True when `b` is the transcript re-parse of streamed event `a`. The daemon
- *  mints fresh event ids when it re-reads the transcript after a turn, so id
- *  equality alone can't collapse a finished turn's streamed copy against the
- *  fetched one — without this, the whole reply renders twice at completion. */
-function isEquivalentEvent(a: TimelineEvent, b: TimelineEvent): boolean {
-  if (a.type !== b.type) return false;
-  switch (a.type) {
-    case "user_message":
-    case "assistant_message":
-    case "thinking_finished":
-      return a.text === (b as typeof a).text;
-    case "tool_call":
-      return a.call.id === (b as typeof a).call.id;
-    case "tool_result":
-      return a.result.toolCallId === (b as typeof a).result.toolCallId;
-    default:
-      return false;
-  }
-}
-
-function mergeById(cur: TimelineEvent[], inc: TimelineEvent[]): TimelineEvent[] {
-  const out = cur.slice();
-  const idx = new Map(out.map((e, i) => [e.id, i] as const));
-  for (const ev of inc) {
-    const i = idx.get(ev.id);
-    if (i != null) out[i] = ev;
-    else {
-      idx.set(ev.id, out.length);
-      out.push(ev);
-    }
-  }
-  return out;
-}
-
-/** Fold a fetched transcript into the rendered list without disturbing rows
- *  already on screen. A fetched event matching a rendered one only by content
- *  (re-parses mint fresh ids) is dropped in favor of the RENDERED event — its
- *  row keeps its key, so the just-streamed reply never remounts/re-measures at
- *  the exact moment the anchor spacer collapses. (Swapping to the fetched copy
- *  reset the row to its estimated size and scroll-to-end then landed at the
- *  START of the message.) Rendered extras the transcript hasn't flushed yet are
- *  kept — the render list only ever accretes. */
-function reconcileFetched(cur: TimelineEvent[], fetched: TimelineEvent[]): TimelineEvent[] {
-  if (!cur.length) return fetched;
-  const used = new Set<string>();
-  const next = fetched.map((f) => {
-    const match = cur.find((e) => !used.has(e.id) && (e.id === f.id || isEquivalentEvent(e, f)));
-    if (!match) return f;
-    used.add(match.id);
-    // Adopt the fetched (canonical) payload — it carries the settled flags,
-    // e.g. assistant_message.streaming=false, which flips the row off the
-    // streaming renderer — but under the RENDERED id, so the row's key and
-    // measurement survive.
-    return match.id === f.id ? f : { ...f, id: match.id };
-  });
-  const extras = cur.filter(
-    (e) => !used.has(e.id) && !e.id.startsWith("opt:") && !next.some((f) => f.id === e.id),
-  );
-  return extras.length ? mergeById(next, extras) : next;
-}
-
 export default function SessionScreen() {
   // `at` (optional, ISO timestamp) deep-links to a specific message — search
   // hits pass the matched event's time so we can land on it, not just the
@@ -250,6 +193,14 @@ export default function SessionScreen() {
 
   const demoTl = useTimeline(id!, undefined, !live);
   const [liveEvents, setLiveEvents] = useState<TimelineEvent[]>([]);
+  // What the list currently holds, readable outside render — the post-turn
+  // refetch needs to compare the transcript it just re-read against the history
+  // already on screen (see the submit path) without taking liveEvents as a dep
+  // and re-creating the submit callback on every streamed token.
+  const liveEventsRef = useRef<TimelineEvent[]>([]);
+  useEffect(() => {
+    liveEventsRef.current = liveEvents;
+  }, [liveEvents]);
   // Whether the timeline is pinned to the newest message — drives the floating
   // "jump to latest" pill that shows when the user has scrolled up.
   const [atBottom, setAtBottom] = useState(true);
@@ -824,6 +775,15 @@ export default function SessionScreen() {
           return;
         }
         if (threadId) {
+          // Which thread's transcript to re-read. Normally the id the turn came
+          // back with — that's the daemon's real id for a new_* thread. But a
+          // turn that reports a DIFFERENT id for a thread we already knew by a
+          // real one forked somewhere on the host (an ACP resume that couldn't
+          // load the session used to do exactly this): the thread on screen is
+          // still ours, so read ITS history rather than the stranger's, which
+          // would be a one-message transcript that erases everything above.
+          const historyId =
+            threadId !== session.id && !session.id.startsWith("new_") ? session.id : threadId;
           // fresh: the host's message cache can predate this turn. And if the
           // re-parse STILL misses streamed events (transcript flush lag), keep
           // them — replacing the list with an incomplete fetch made the reply
@@ -831,18 +791,20 @@ export default function SessionScreen() {
           // delivered, so a refetch failure must not bubble up and restore the
           // draft — the streamed events stay on screen and sync catches up.
           try {
-            const fetched = await fetchMessages(session.hostId, session.agent, threadId, {
+            const fetched = await fetchMessages(session.hostId, session.agent, historyId, {
               fresh: true,
             });
-            // Older history is id-stable across fetches; only this turn's
-            // streamed rows need their identity preserved (see reconcileFetched).
-            const merged = reconcileFetched(turnEvents, chrono(fetched));
+            // A re-read that doesn't even cover the history already on screen is
+            // a failed or partial read, not a shorter thread — see
+            // foldTurnRefetch, which keeps the rendered list in that case rather
+            // than letting one failed send erase the thread's past.
+            const merged = foldTurnRefetch(liveEventsRef.current, turnEvents, chrono(fetched));
             setLiveEvents(merged);
-            saveThreadMessages(threadId, merged); // one persist per completed turn
+            saveThreadMessages(historyId, merged); // one persist per completed turn
           } catch {
             // Refetch failed but the turn happened — persist what we streamed so
             // the rekey below (which remounts the route) doesn't blank the thread.
-            if (turnEvents.length) saveThreadMessages(threadId, chrono(turnEvents));
+            if (turnEvents.length) saveThreadMessages(historyId, chrono(turnEvents));
           }
         }
         refreshUsage();

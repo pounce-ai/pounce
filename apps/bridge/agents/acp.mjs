@@ -460,13 +460,23 @@ export function startAcpTurn(
       // replays history as updates — gate forwarding until the prompt so only the
       // new turn reaches the app.
       if (!fresh) {
+        // Resuming an EXISTING thread: session/load or nothing. Falling back to
+        // session/new here silently forked the thread — the turn ran with none
+        // of its history, and it came back under a stranger id, so the app then
+        // fetched THAT session's transcript and rendered a thread with its own
+        // past missing. (Reliably reachable on codex once the plan's usage was
+        // exhausted, but nothing about it is codex-specific.)
+        //
+        // A load that fails is a reason to use the agent's classic CLI
+        // transport, which resumes the real thread under its real id: throw
+        // before anything has streamed, and startTurn()'s pre-stream branch
+        // rejects `done`, which is exactly the signal host.mjs retries on.
         try {
           await ctx.request("session/load", { sessionId: threadId, cwd: dir, mcpServers: [] });
-          realThreadId = threadId;
-        } catch {
-          const r = await ctx.request("session/new", { cwd: dir, mcpServers: [] });
-          realThreadId = r.sessionId;
+        } catch (e) {
+          throw new Error(`session/load failed for ${threadId}: ${e?.message || e}`);
         }
+        realThreadId = threadId;
       } else {
         const r = await ctx.request("session/new", { cwd: dir, mcpServers: [] });
         realThreadId = r.sessionId;

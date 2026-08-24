@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineEvent } from "@pounce/shared";
-import { collapseToolResults, formatElapsed, runElapsedByRun } from "./timelineEvents";
+import {
+  collapseToolResults,
+  foldTurnRefetch,
+  formatElapsed,
+  runElapsedByRun,
+} from "./timelineEvents";
 
 // Minimal fixtures — collapseToolResults only reads .type, .id, .call.id and
 // .result.toolCallId, so we build just those shapes and cast.
@@ -12,6 +17,7 @@ const msg = (id: string): TimelineEvent =>
   ({ type: "assistant_message", id, text: "", streaming: false }) as unknown as TimelineEvent;
 
 const ids = (events: TimelineEvent[]) => events.map((e) => e.id);
+const texts = (events: TimelineEvent[]) => events.map((e) => (e as { text?: string }).text ?? "");
 
 describe("collapseToolResults", () => {
   it("drops a tool_result whose tool_call is present (rendered inline)", () => {
@@ -161,5 +167,104 @@ describe("formatElapsed", () => {
     [120_000, "2m"],
   ])("formats %ims as %s", (ms, expected) => {
     expect(formatElapsed(ms)).toBe(expected);
+  });
+});
+
+// --- foldTurnRefetch --------------------------------------------------------
+// A turn just finished and the host re-read the thread's transcript. What the
+// render list should hold depends on whether that read is trustworthy.
+
+const userMsg = (id: string, text: string): TimelineEvent =>
+  ({ type: "user_message", id, text }) as unknown as TimelineEvent;
+const asstMsg = (id: string, text: string, streaming = false): TimelineEvent =>
+  ({ type: "assistant_message", id, text, streaming }) as unknown as TimelineEvent;
+
+describe("foldTurnRefetch", () => {
+  const history = [userMsg("h1", "older ask"), asstMsg("h2", "older reply")];
+
+  it("adopts a re-read that covers the history it replaces", () => {
+    const streamed = [asstMsg("s1", "reply", true)];
+    const cur = [...history, ...streamed];
+    const fetched = [...history, asstMsg("f1", "reply")];
+    const out = foldTurnRefetch(cur, streamed, fetched);
+    expect(texts(out)).toEqual(["older ask", "older reply", "reply"]);
+    // the streamed row keeps its identity (and so its measured height) while
+    // taking the fetched payload's settled flag
+    expect(out[2].id).toBe("s1");
+    expect((out[2] as { streaming?: boolean }).streaming).toBe(false);
+  });
+
+  // The regression this exists for: a turn that fails before the agent writes a
+  // transcript (a plan's usage running out mid-turn) re-reads as nothing, and
+  // adopting that emptied the whole thread.
+  it("keeps the thread when the re-read comes back empty", () => {
+    const streamed = [userMsg("s0", "new ask"), asstMsg("s1", "you've hit your usage limit")];
+    const cur = [...history, ...streamed];
+    expect(foldTurnRefetch(cur, streamed, [])).toEqual(cur);
+  });
+
+  // Same defect one step along: reading the WRONG session (an ACP resume that
+  // forked) answers with a short, real-looking transcript.
+  it("keeps the thread when the re-read is shorter than the history it replaces", () => {
+    const streamed = [userMsg("s0", "new ask")];
+    const cur = [...history, ...streamed];
+    const strangerThread = [userMsg("x1", "new ask")];
+    expect(foldTurnRefetch(cur, streamed, strangerThread)).toEqual(cur);
+  });
+
+  it("still appends streamed rows the transcript hasn't flushed yet", () => {
+    const streamed = [userMsg("s0", "new ask"), asstMsg("s1", "reply")];
+    const cur = [...history];
+    const fetched = [...history];
+    const out = foldTurnRefetch(cur, streamed, fetched);
+    expect(texts(out)).toEqual(["older ask", "older reply", "new ask", "reply"]);
+  });
+
+  it("seeds an empty list from the fetch", () => {
+    expect(foldTurnRefetch([], [], history)).toEqual(history);
+  });
+});
+
+// --- duplicate Thought cards ------------------------------------------------
+
+const thought = (id: string, text: string): TimelineEvent =>
+  ({ type: "thinking_finished", id, text }) as unknown as TimelineEvent;
+
+describe("duplicate reasoning", () => {
+  // The two identical "Thought · 14 words" cards seen in a codex session.
+  it("drops a Thought that repeats the one directly above it", () => {
+    const out = collapseToolResults([
+      thought("t1", "Enhancing canary snapshot fields\nPlanning candidate field updates"),
+      thought("t2", "Enhancing canary snapshot fields\nPlanning candidate field updates"),
+      msg("m1"),
+    ]);
+    expect(ids(out)).toEqual(["t1", "m1"]);
+  });
+
+  // The separator difference that made the upstream content match miss in the
+  // first place: the same words, assembled with different whitespace.
+  it("treats the same words with different whitespace as a repeat", () => {
+    const out = collapseToolResults([thought("t1", "one\ntwo"), thought("t2", "one\n\ntwo  ")]);
+    expect(ids(out)).toEqual(["t1"]);
+  });
+
+  it("keeps a thought repeated later in the thread", () => {
+    const out = collapseToolResults([thought("t1", "same"), msg("m1"), thought("t2", "same")]);
+    expect(ids(out)).toEqual(["t1", "m1", "t2"]);
+  });
+
+  it("keeps consecutive thoughts that differ", () => {
+    const out = collapseToolResults([thought("t1", "first"), thought("t2", "second")]);
+    expect(ids(out)).toEqual(["t1", "t2"]);
+  });
+
+  // The real dedupe still has to happen upstream, where the row's identity (and
+  // so its measured height) is preserved rather than a row being removed.
+  it("matches a live thought against its transcript twin despite whitespace", () => {
+    const live = [thought("live1", "one\ntwo")];
+    const fetched = [thought("r:2026", "one\n\ntwo")];
+    const out = foldTurnRefetch(live, live, fetched);
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe("live1"); // the rendered row keeps its key
   });
 });
