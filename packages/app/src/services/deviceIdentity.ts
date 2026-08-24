@@ -117,6 +117,55 @@ export function applyBridgeToken<T extends DeviceIdentity>(
   return { configs: changed ? configs : [...list], changed };
 }
 
+/** What a device row contributes to an off-LAN dial decision. */
+export interface TunnelReachSource {
+  readonly token: string;
+  readonly nodeId?: string;
+  readonly relay?: string | null;
+  readonly tunnelToken?: string;
+}
+
+/** A dialable tunnel target: whose node, through which relay, with what
+ *  handshake secret. */
+export interface TunnelReach {
+  readonly nodeId: string;
+  readonly relay: string | null;
+  readonly token: string;
+}
+
+/**
+ * Which tunnel to dial for a device, and with what handshake secret.
+ *
+ * The device row's OWN identity always wins. The global pairing below it can
+ * only ever describe one machine — whichever scanned a QR last — so treating it
+ * as anything but a last resort dials every other machine at the wrong node,
+ * with a secret that node refuses. That lottery is exactly how "works on Wi-Fi,
+ * dead on cellular" kept coming back: which machine got dialled off-LAN
+ * depended on stored order and scan recency, not on which machine was asked
+ * for.
+ *
+ * Secrets pair with identities: a row's `tunnelToken` was issued by the row's
+ * own machine, so it accompanies the row's `nodeId`. In the global fallback the
+ * row's secret is still preferred — for a phone whose one machine predates
+ * per-row identity, the freshly adopted secret beats a pairing token that may
+ * be a stale pre-split bearer token — and the bearer token itself is the last
+ * resort only a pre-split serve still accepts.
+ */
+export function resolveTunnelReach(
+  dev: TunnelReachSource,
+  pairing: { nodeId?: string | null; relay?: string | null; token?: string | null } | null,
+): TunnelReach | null {
+  if (dev.nodeId) {
+    return { nodeId: dev.nodeId, relay: dev.relay ?? null, token: dev.tunnelToken ?? dev.token };
+  }
+  if (!pairing?.nodeId) return null;
+  return {
+    nodeId: pairing.nodeId,
+    relay: pairing.relay ?? null,
+    token: dev.tunnelToken ?? pairing.token ?? dev.token,
+  };
+}
+
 export interface AdoptResolution<T extends DeviceIdentity> {
   readonly configs: T[];
   /** The id everything about this machine should live under. */
