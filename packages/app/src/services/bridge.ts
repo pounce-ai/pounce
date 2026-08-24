@@ -43,6 +43,7 @@ import {
   hostFromUrl,
   resolveAdoption,
   resolvePairing,
+  resolveTunnelReach,
 } from "./deviceIdentity";
 import { addedViaFor, type AddedVia } from "./deviceProvenance";
 import type { SettleOverrides } from "../state/settled";
@@ -442,6 +443,48 @@ export async function adoptDeviceToken(cfg: DeviceConfig): Promise<DeviceConfig>
  * otherwise lock the app out of its own machine for good, with a device list
  * that just says nothing is online.
  */
+/** Write a machine's tunnel identity onto its own device row, skipping the
+ *  write when the row already says exactly this. Safe to call from racing
+ *  healing paths — a lost update is re-stamped on the next connect. */
+async function stampDeviceTunnelIdentity(
+  id: string,
+  nodeId: string,
+  relay: string | null,
+): Promise<void> {
+  const list = await listDeviceConfigs();
+  const cur = list.find((d) => d.id === id);
+  if (!cur || (cur.nodeId === nodeId && (cur.relay ?? null) === relay)) return;
+  await writeDeviceConfigs(list.map((d) => (d.id === id ? { ...d, nodeId, relay } : d)));
+}
+
+/**
+ * Make sure a device row carries its OWN tunnel identity (nodeId/relay), so
+ * off-LAN dialling never depends on the single global pairing.
+ *
+ * The global pairing can only ever describe one machine — whichever scanned a
+ * QR last — so with two paired Macs every other machine used to dial the wrong
+ * node off-LAN, presenting a handshake secret that node refuses. Which machine
+ * the app dialled depended on stored order and scan recency, so "works on
+ * cellular" was a lottery: one asleep laptop, or one re-scan at the other Mac,
+ * and the phone was dead off Wi-Fi while the LAN path hid it all day.
+ * Stamping the identity on the row while the machine IS reachable is what lets
+ * tunnelReach dial each machine as itself.
+ *
+ * Best-effort like its siblings above: an unreachable machine, or a bridge too
+ * old for /v1/pair, leaves the row untouched and gets another go next connect.
+ */
+export async function ensureTunnelIdentity(cfg: DeviceConfig): Promise<DeviceConfig> {
+  // A grant's identity is fixed at approval time (per-grant tunnel) — never
+  // overwrite it with the machine-wide identity its /v1/pair would report.
+  if (cfg.grant) return cfg;
+  const pairing = await fetchPairing(cfg);
+  if (!pairing?.nodeId) return cfg;
+  const relay = pairing.relay ?? null;
+  if (cfg.nodeId === pairing.nodeId && (cfg.relay ?? null) === relay) return cfg;
+  await stampDeviceTunnelIdentity(cfg.id, pairing.nodeId, relay);
+  return { ...cfg, nodeId: pairing.nodeId, relay };
+}
+
 export async function adoptBridgeToken(url: string, token: string): Promise<boolean> {
   const { configs, changed } = applyBridgeToken(await listDeviceConfigs(), url, token);
   if (changed) await writeDeviceConfigs(configs);
@@ -565,6 +608,13 @@ async function probeHealth(base: string, timeoutMs: number): Promise<boolean> {
   }
 }
 
+/** Resolutions already underway, so a burst of parallel requests to one
+ *  machine (a sync's status/agents/threads) shares a single LAN-probe/tunnel
+ *  dial instead of racing three of them — which off-LAN meant three concurrent
+ *  20s dial attempts per unreachable machine, serially delaying the whole
+ *  sync's completion. */
+const inflightBase = new Map<string, Promise<string>>();
+
 /** The base URL requests should actually use for `cfg`: the LAN address when
  *  reachable, else the Iroh loopback proxy when a pairing is saved and the
  *  native tunnel is in this build. Cached briefly so every request doesn't
@@ -572,6 +622,14 @@ async function probeHealth(base: string, timeoutMs: number): Promise<boolean> {
 export async function bridgeBase(cfg: BridgeConfig): Promise<string> {
   const hit = effectiveBase.get(cfg.url);
   if (hit && Date.now() < hit.until) return hit.base;
+  const underway = inflightBase.get(cfg.url);
+  if (underway) return underway;
+  const resolution = resolveBridgeBase(cfg).finally(() => inflightBase.delete(cfg.url));
+  inflightBase.set(cfg.url, resolution);
+  return resolution;
+}
+
+async function resolveBridgeBase(cfg: BridgeConfig): Promise<string> {
   if (await probeHealth(cfg.url, 2500)) {
     effectiveBase.set(cfg.url, { base: cfg.url, until: Date.now() + 30_000 });
     return cfg.url;
@@ -610,23 +668,12 @@ async function tunnelReach(
   cfg: BridgeConfig,
 ): Promise<{ nodeId: string; relay: string | null; token: string } | null> {
   const dev = cfg as DeviceConfig;
-  if (dev.nodeId) {
-    return { nodeId: dev.nodeId, relay: dev.relay ?? null, token: dev.tunnelToken ?? cfg.token };
-  }
+  if (dev.nodeId) return resolveTunnelReach(dev, null);
   const raw =
     (await SecureStore.getItemAsync(PAIRING_KEY)) ??
     (await SecureStore.getItemAsync(LEGACY_PAIRING_KEY));
   const pairing = raw ? (JSON.parse(raw) as PairPayload) : null;
-  // The tunnel's secret is no longer the bearer token, so prefer what adopt
-  // issued us and fall back to the pairing's own copy before the bearer token —
-  // which is only still right for a pairing made before the two were split.
-  return pairing?.nodeId
-    ? {
-        nodeId: pairing.nodeId,
-        relay: pairing.relay ?? null,
-        token: dev.tunnelToken ?? pairing.token ?? cfg.token,
-      }
-    : null;
+  return resolveTunnelReach(dev, pairing);
 }
 
 /**
@@ -965,9 +1012,12 @@ export async function syncLiveDataStreaming(): Promise<{
   await Promise.all(
     configs.map(async (rawCfg) => {
       // Before anything else this sync: retire a token that used to be public,
-      // then take out one of our own so a future rotation can't drop us. Both
-      // are no-ops after they have happened once.
-      const cfg = await adoptDeviceToken(await rotateLegacyToken(rawCfg));
+      // take out one of our own so a future rotation can't drop us, then learn
+      // this machine's own tunnel identity so it stays dialable off-LAN. All
+      // three are no-ops after they have happened once.
+      const cfg = await ensureTunnelIdentity(
+        await adoptDeviceToken(await rotateLegacyToken(rawCfg)),
+      );
       threadsByDevice[cfg.id] = { name: cfg.name, threads: [] };
       let online = true;
       let deviceName = cfg.name;
@@ -2984,6 +3034,12 @@ export async function connectBridge(cfg: BridgeConfig & Partial<DeviceExtras>): 
         const token =
           p.token ?? (held?.nodeId === p.nodeId ? held.token : null) ?? dev.tunnelToken ?? null;
         await SecureStore.setItemAsync(PAIRING_KEY, JSON.stringify({ ...p, token }));
+        // Stamp the identity on the device's own row as well — tunnelReach
+        // prefers the row, so this machine keeps dialling ITSELF off-LAN even
+        // after another machine's QR replaces the global pairing above. Never
+        // for a grant: its row carries the per-grant tunnel, and the machine-
+        // wide identity /v1/pair reports is one a guest cannot dial.
+        if (!dev.grant) await stampDeviceTunnelIdentity(dev.id, p.nodeId, p.relay ?? null);
       })
       .catch(() => {});
     // Progressive connect: stream threads so the list fills in as pages land.

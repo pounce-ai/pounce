@@ -137,6 +137,21 @@ export async function bootstrap(): Promise<void> {
     void registerForPush();
     return;
   }
+  // Off Wi-Fi, loadBridgeConfig's LAN probes all fail and it falls back to the
+  // first STORED device — which may be a machine that is asleep or gone. Its
+  // failed connect must not end the boot while another paired machine is
+  // dialable through its tunnel, so try the rest in order before giving up.
+  // Sequential on purpose: connectBridge owns the global connection state and
+  // runs a full sync, and two of those racing would fight over both.
+  if (bridge) {
+    for (const d of (await listDeviceConfigs()).filter((d) => d.url !== bridge.url)) {
+      if (await connectBridge(d)) {
+        const { registerForPush } = await import("./push");
+        void registerForPush();
+        return;
+      }
+    }
+  }
   const pairing = await loadPairing();
   if (pairing && (await connectSaved())) return;
   // Not paired yet — stay disconnected; the app prompts to sync a device.

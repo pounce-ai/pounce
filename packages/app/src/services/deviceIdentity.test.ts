@@ -5,6 +5,7 @@ import {
   deviceId,
   resolveAdoption,
   resolvePairing,
+  resolveTunnelReach,
 } from "./deviceIdentity";
 
 interface Cfg extends DeviceIdentity {
@@ -209,5 +210,61 @@ describe("applyBridgeToken", () => {
   it("matches addresses that differ only by a trailing slash", () => {
     const list: Cfg[] = [{ id: "d", url: `${LOCAL}/`, token: "stale", name: "m" }];
     expect(applyBridgeToken(list, LOCAL, "fresh").changed).toBe(true);
+  });
+});
+
+describe("resolveTunnelReach", () => {
+  // Two machines, each with its own tunnel identity and its own secret.
+  const mini = {
+    token: "mini-bearer",
+    nodeId: "node-mini",
+    relay: "r-mini",
+    tunnelToken: "s-mini",
+  };
+  const air = { token: "air-bearer", nodeId: "node-air", relay: "r-air", tunnelToken: "s-air" };
+  // The single global pairing can only hold one of them — last QR scan wins.
+  const pairingForAir = { nodeId: "node-air", relay: "r-air", token: "s-air" };
+
+  it("dials a machine at its OWN node, whatever the global pairing says", () => {
+    // The recurring off-Wi-Fi outage: with the global pairing pointing at the
+    // Air, the mini used to be dialled at the Air's node — with the mini's
+    // secret, which the Air refuses. One asleep laptop then read as "the app
+    // can't connect on cellular".
+    expect(resolveTunnelReach(mini, pairingForAir)).toEqual({
+      nodeId: "node-mini",
+      relay: "r-mini",
+      token: "s-mini",
+    });
+    expect(resolveTunnelReach(air, pairingForAir)).toEqual({
+      nodeId: "node-air",
+      relay: "r-air",
+      token: "s-air",
+    });
+  });
+
+  it("pairs the row's secret with the row's identity, bearer token as last resort", () => {
+    const noSecret = { token: "bearer", nodeId: "node-x", relay: null };
+    // Only a serve from before the secret/bearer split still accepts this.
+    expect(resolveTunnelReach(noSecret, null)?.token).toBe("bearer");
+  });
+
+  it("falls back to the global pairing only when the row has no identity", () => {
+    const unstamped = { token: "bearer", tunnelToken: "s-adopted" };
+    // The adopt-issued secret beats a pairing token that may be a stale
+    // pre-split bearer token.
+    expect(resolveTunnelReach(unstamped, pairingForAir)).toEqual({
+      nodeId: "node-air",
+      relay: "r-air",
+      token: "s-adopted",
+    });
+  });
+
+  it("uses the pairing's own secret when the row never adopted one", () => {
+    expect(resolveTunnelReach({ token: "bearer" }, pairingForAir)?.token).toBe("s-air");
+  });
+
+  it("reports undialable when neither row nor pairing carries a node", () => {
+    expect(resolveTunnelReach({ token: "bearer" }, null)).toBeNull();
+    expect(resolveTunnelReach({ token: "bearer" }, { token: "s" })).toBeNull();
   });
 });

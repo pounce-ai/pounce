@@ -133,5 +133,10 @@ export async function pairFromParams(p: {
     token,
     ...(p.code ? { adopted: true } : {}),
     ...(tunnelToken ? { tunnelToken } : {}),
+    // The link's tunnel identity goes on the DEVICE ROW too, not only the
+    // global pairing above: the global slot holds one machine (last scan
+    // wins), and off-LAN dialling prefers the row — so a second machine's
+    // scan must never redirect this one's dials.
+    ...(p.node ? { nodeId: p.node, relay: p.relay ?? null } : {}),
   });
 }
