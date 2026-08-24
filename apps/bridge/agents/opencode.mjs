@@ -35,7 +35,7 @@ import {
   systemEvent,
 } from "./events.mjs";
 import { agentEnv, binVersion, binPath } from "./env.mjs";
-import { noUsage, usageResult } from "./usage.mjs";
+import { noUsage, usageResult } from "./meter.mjs";
 import { openSqliteReadOnly } from "./sqlite.mjs";
 
 const DATA_DIR = path.join(os.homedir(), ".local", "share", "opencode");

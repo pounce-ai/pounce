@@ -15,8 +15,10 @@
  * `costSource` says which of three kinds of number this is, and they are not
  * interchangeable: "agent" is what the tool reported, "admin-api" is what the
  * org was billed, and "ccusage-est" is tokens priced at public list rates by
- * ../agents/ccusage.mjs. The estimate is applied ABOVE this layer (host.mjs
- * fills a null, server.mjs fills a null day) precisely so that adapters keep
+ * ./ccusage.mjs. The estimate is applied ABOVE this layer (in the bridge:
+ * agents/host.mjs fills a null, server.mjs fills a null day — not the
+ * ./host.mjs in this package, which is the CLI-resolution adapter) precisely
+ * so that adapters keep
  * reporting only what they know, and so a real figure is never overwritten.
  *
  * `cost: null` therefore means no source at all could speak — distinct from a

@@ -41,8 +41,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { spawn } from "node:child_process";
-import { agentEnv } from "./env.mjs";
-import { binOverride } from "./config.mjs";
+import { agentEnv, binOverride } from "./host.mjs";
 
 const EXE = process.platform === "win32" ? "ccusage.exe" : "ccusage";
 const POUNCE_BIN = path.join(os.homedir(), ".pounce", "bin");

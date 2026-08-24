@@ -1,0 +1,22 @@
+{
+  "name": "@pounce/redact",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Strip credentials from a payload before it leaves the machine: a denylist built from the box's own live secrets, published key formats, named-secret assignments, and opt-in entropy. Synchronous, zero runtime dependencies, throws rather than degrading.",
+  "license": "MIT",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0"
+  }
+}

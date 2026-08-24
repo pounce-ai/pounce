@@ -15,6 +15,8 @@
     "@agentclientprotocol/claude-agent-acp": "^0.58.1",
     "@agentclientprotocol/codex-acp": "^1.1.2",
     "@agentclientprotocol/sdk": "^1.2.1",
+    "@pounce/meter": "workspace:*",
+    "@pounce/redact": "workspace:*",
     "@pounce/transcript": "workspace:*",
     "@wterm/core": "^0.3.0",
     "agent-canonical": "0.3.0",

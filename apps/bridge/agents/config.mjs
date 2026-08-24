@@ -41,7 +41,7 @@ function normalize(raw) {
   const extraPath = Array.isArray(r.extraPath)
     ? r.extraPath.filter((p) => typeof p === "string" && p.trim()).map((p) => p.trim())
     : [];
-  // Opt-in Admin API key for official org spend (agents/admin-cost.mjs). Kept
+  // Opt-in Admin API key for official org spend (@pounce/meter admin-cost). Kept
   // here rather than in an env var so it survives restarts and can be set from
   // the app; the HTTP layer never reads it back out (see publicConfig).
   const adminApiKey =
