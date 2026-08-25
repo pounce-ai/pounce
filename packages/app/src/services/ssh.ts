@@ -44,6 +44,12 @@ export interface SshDevice {
   readonly token: string;
   readonly nodeId: string;
   readonly relay: string | null;
+  /** The tunnel's own handshake secret, which is no longer the bearer token.
+   *  A machine added this way is reached over its tunnel by definition, and the
+   *  tunnel refuses the bearer token — so without this the device dials, is
+   *  refused, and falls back to a LAN address that only works on the server's
+   *  own network. Absent when the local bridge predates the split. */
+  readonly tunnelToken?: string;
   readonly hostName: string;
 }
 
@@ -176,6 +182,9 @@ export function saveSshDevice(device: SshDevice, sshHost?: string): Promise<Devi
   return addDeviceConfig(device.url, device.token, {
     nodeId: device.nodeId,
     relay: device.relay,
+    // Spread conditionally: writing `tunnelToken: undefined` on a re-add would
+    // clobber a secret the row already holds (from a previous add or adopt).
+    ...(device.tunnelToken ? { tunnelToken: device.tunnelToken } : {}),
     name: machineName(sshHost, device.hostName),
     namePinned: true,
     sshHost: sshHost?.trim() || undefined,
