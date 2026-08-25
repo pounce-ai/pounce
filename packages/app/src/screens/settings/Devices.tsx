@@ -121,6 +121,8 @@ export default function DevicesScreen() {
         node: cfg.nodeId ?? null,
         relay: cfg.relay ?? null,
         host: cfg.hostName ?? null,
+        pairNode: cfg.pairNode ?? null,
+        pairRelay: cfg.pairRelay ?? null,
       });
       if (!ok)
         throw new Error(

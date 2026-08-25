@@ -13,7 +13,7 @@ import { pairFromParams } from "../services/pairing";
  * machine.
  */
 export default function ConnectScreen() {
-  const { url, token, code, node, relay, host } = useLocalSearchParams<{
+  const { url, token, code, node, relay, host, pnode, prelay } = useLocalSearchParams<{
     url?: string;
     /** Legacy shape: the bridge's own token. Still accepted; nothing emits it. */
     token?: string;
@@ -22,6 +22,9 @@ export default function ConnectScreen() {
     node?: string;
     relay?: string;
     host?: string;
+    /** Pairing-tunnel identity: lets the code be spent from any network. */
+    pnode?: string;
+    prelay?: string;
   }>();
   const router = useRouter();
   const { theme } = useUnistyles();
@@ -36,7 +39,16 @@ export default function ConnectScreen() {
         setError("This pairing link is missing its address or code.");
         return;
       }
-      const ok = await pairFromParams({ url, token, code, node, relay, host });
+      const ok = await pairFromParams({
+        url,
+        token,
+        code,
+        node,
+        relay,
+        host,
+        pairNode: pnode,
+        pairRelay: prelay,
+      });
       if (ok) {
         const { registerForPush } = await import("../services/push");
         void registerForPush();
@@ -49,7 +61,7 @@ export default function ConnectScreen() {
         );
       }
     })();
-  }, [url, token, code, node, relay, host]);
+  }, [url, token, code, node, relay, host, pnode, prelay]);
 
   return (
     <View style={s.root}>

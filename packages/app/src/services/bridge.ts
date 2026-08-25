@@ -693,6 +693,29 @@ async function dialTunnel(
   return dialViaLocalBridge(nodeId, relay, token);
 }
 
+/**
+ * Open a loopback base URL onto a bridge's PAIRING tunnel — the door whose
+ * QUIC handshake accepts the one-time pairing code itself.
+ *
+ * This is how a fresh device spends a code against a machine whose LAN address
+ * it cannot reach (a server paired over SSH being the canonical case): the QR
+ * carries the pairing tunnel's identity (`pnode`/`prelay`), the code is the
+ * handshake secret, and what waits on the far side is the same HTTP API —
+ * where the code is still worth exactly one /v1/device/adopt.
+ */
+export async function dialPairingTunnel(
+  nodeId: string,
+  relay: string | null,
+  code: string,
+): Promise<string | null> {
+  try {
+    const port = await dialTunnel(nodeId, relay, code);
+    return port ? `http://127.0.0.1:${port}` : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Ask the bridge on THIS machine to dial the peer for us — an authenticated,
  *  loopback-only owner route; see dialPeer in ./ownBridge. */
 async function dialViaLocalBridge(

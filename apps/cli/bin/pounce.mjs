@@ -315,12 +315,20 @@ async function waitForTunnel(port, token, { timeoutMs = 25_000 } = {}) {
  * `code` falls back to the token for a bridge that predates /v1/pair/code, so
  * a new CLI against an old daemon still pairs.
  */
-function deepLink({ pairUrl, token, tunnel, code }) {
+function deepLink({ pairUrl, token, tunnel, code, pairTunnel }) {
   const param = code ? "code" : "token";
   let link = `pounce://connect?url=${encodeURIComponent(pairUrl)}&${param}=${encodeURIComponent(code || token)}`;
   if (tunnel?.nodeId) {
     link += `&node=${encodeURIComponent(tunnel.nodeId)}&host=${encodeURIComponent(os.hostname().replace(/\.local$/, ""))}`;
     if (tunnel.relay) link += `&relay=${encodeURIComponent(tunnel.relay)}`;
+  }
+  // The pairing tunnel: where a phone that does not share this machine's
+  // network SPENDS the code (its QUIC handshake accepts the code itself).
+  // Without it the code redeems over the LAN URL only — which for a phone
+  // pairing with a remote server is nowhere. Only meaningful with a code.
+  if (code && pairTunnel?.nodeId) {
+    link += `&pnode=${encodeURIComponent(pairTunnel.nodeId)}`;
+    if (pairTunnel.relay) link += `&prelay=${encodeURIComponent(pairTunnel.relay)}`;
   }
   return link;
 }
@@ -338,8 +346,8 @@ async function waitForPhone(port) {
 }
 
 // --- commands -----------------------------------------------------------------
-function printPairing(pairUrl, token, tunnel, code) {
-  const link = deepLink({ pairUrl, token, tunnel, code });
+function printPairing(pairUrl, token, tunnel, code, pairTunnel) {
+  const link = deepLink({ pairUrl, token, tunnel, code, pairTunnel });
   console.log(
     `\n  ${bold("Scan with the Pounce app")} ${dim("(Settings → Scan QR)")} ${bold("or your camera:")}\n`,
   );
@@ -394,10 +402,26 @@ async function cmdUp(opts, { wait }) {
   }
   // Best-effort: an older bridge 404s here and deepLink falls back to the token.
   let pairCode = null;
+  let pairTunnel = null;
   try {
-    pairCode = (await getJson(`http://127.0.0.1:${opts.port}/v1/pair/code`, { token })).code;
+    const r = await getJson(`http://127.0.0.1:${opts.port}/v1/pair/code`, { token });
+    pairCode = r.code;
+    pairTunnel = r.pairTunnel ?? null;
+    // Asking for the code is what starts the pairing tunnel; its identity key
+    // persists, so this wait only happens on a machine's very first run (an
+    // older bridge just never reports one). Without it, a phone that never
+    // shares this network has no way to SPEND the code — the exact machine
+    // (a fresh server, paired over SSH) this command exists for.
+    if (pairCode && !pairTunnel && !opts.lan) {
+      const until = Date.now() + 8000;
+      while (!pairTunnel && Date.now() < until) {
+        await sleep(600);
+        pairTunnel = (await getJson(`http://127.0.0.1:${opts.port}/v1/pair/code`, { token }))
+          .pairTunnel;
+      }
+    }
   } catch {}
-  printPairing(pairUrl, token, tunnel, pairCode);
+  printPairing(pairUrl, token, tunnel, pairCode, pairTunnel);
 
   if (opts.lan) {
     console.log(
