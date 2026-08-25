@@ -1641,6 +1641,7 @@ const UI_HTML = `<!DOCTYPE html>
 <header class="brand"><span class="paw">🐾</span><h1>Pounce&nbsp;Bridge</h1></header>
 <p class="sub">Scan with your iPhone to connect</p>
 <div class="qrwrap"><img id="qr" class="qr" alt="Pairing QR code"/></div>
+<div class="addr" id="codelife">one-time code · refreshes automatically</div>
 <div class="addr" id="addr">—</div>
 <div class="status"><span class="dot idle" id="dot"></span><span id="statusText">Starting…</span></div>
 <div class="syncbar" id="syncbar"><i></i></div>
@@ -1654,9 +1655,22 @@ const UI_HTML = `<!DOCTYPE html>
 </main><script>
 document.getElementById('qr').src = '/qr.svg?t=' + Date.now();
 function set(id,t){document.getElementById(id).textContent = t;}
+// The code on the QR is one-time and short-lived. When it rotates the image on
+// screen is DEAD — a window left open across the rotation used to keep showing
+// it, and every scan just "didn't work". Track the expiry the bridge reports
+// and refetch the QR the moment it names a different code's lifetime.
+var pairExp = null;
 function tick(){
   fetch('/ui',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
     set('addr', d.pairUrl || '-');
+    if(d.pairCodeExpiresAt){
+      if(pairExp && pairExp !== d.pairCodeExpiresAt){
+        document.getElementById('qr').src = '/qr.svg?t=' + Date.now();
+      }
+      pairExp = d.pairCodeExpiresAt;
+      var mins = Math.max(1, Math.round((new Date(d.pairCodeExpiresAt) - Date.now())/60000));
+      set('codelife', 'one-time code · valid ' + mins + ' min · refreshes automatically');
+    }
     var ver = 'Pounce' + (d.appVersion ? ' v' + d.appVersion : '');
     if(d.daemon && d.daemon.version) ver += '  ·  agent host v' + d.daemon.version;
     set('ver', ver);
@@ -2267,6 +2281,14 @@ const handleRequest = async (req, res) => {
     return send(res, 200, {
       ...(PAIR || {}),
       deepLink: pairDeepLink(),
+      // When the code on the deep link above stops working — the page uses it
+      // to refresh the QR on rotation and to say how long a scan has. Null in
+      // legacy-token mode, where the link carries no code. (pairDeepLink just
+      // minted/kept the live code, so current() here re-reads, never rotates.)
+      pairCodeExpiresAt:
+        process.env.BRIDGE_PAIR_LEGACY_TOKEN === "1"
+          ? null
+          : new Date(pairCodes.current().expiresAt).toISOString(),
       // The identity, only while `serve` is actually up. tunnel.json survives
       // the process that wrote it, so reading the file alone reported off-LAN
       // access as healthy for as long as the machine had ever had a tunnel.
