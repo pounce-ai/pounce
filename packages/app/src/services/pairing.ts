@@ -33,6 +33,13 @@ export interface ParsedPairing {
   relay?: string;
   /** Human label for the host machine, e.g. "dirgha-mbp". */
   hostName?: string;
+  /** Iroh node id of the host's PAIRING tunnel — the door whose handshake
+   *  accepts `code` itself, so the code can be spent from any network. Without
+   *  it a code only redeems over the LAN URL, which for a remote server the
+   *  phone never shares a network with is nowhere. */
+  pairNode?: string;
+  /** Relay for the pairing tunnel (only meaningful with pairNode). */
+  pairRelay?: string;
 }
 
 export function parsePairing(data: string): ParsedPairing | null {
@@ -47,6 +54,8 @@ export function parsePairing(data: string): ParsedPairing | null {
           nodeId: u.searchParams.get("node"),
           relay: u.searchParams.get("relay"),
           hostName: u.searchParams.get("host"),
+          pairNode: u.searchParams.get("pnode"),
+          pairRelay: u.searchParams.get("prelay"),
         });
       }
       return null;
@@ -61,12 +70,25 @@ export function parsePairing(data: string): ParsedPairing | null {
 
 function withTunnel(
   base: ParsedPairing,
-  t: { nodeId?: string | null; relay?: string | null; hostName?: string | null },
+  t: {
+    nodeId?: string | null;
+    relay?: string | null;
+    hostName?: string | null;
+    pairNode?: string | null;
+    pairRelay?: string | null;
+  },
 ): ParsedPairing {
   if (t.nodeId) {
     base.nodeId = t.nodeId;
     if (t.relay) base.relay = t.relay;
     if (t.hostName) base.hostName = t.hostName;
+  }
+  // Independent of nodeId on purpose: the pairing door is how the code gets
+  // spent at all, and gating it on the main tunnel's presence would tie the
+  // redemption path to a field it does not use.
+  if (base.code && t.pairNode) {
+    base.pairNode = t.pairNode;
+    if (t.pairRelay) base.pairRelay = t.pairRelay;
   }
   return base;
 }
@@ -96,12 +118,14 @@ export async function pairFromParams(p: {
   node?: string | null;
   relay?: string | null;
   host?: string | null;
+  pairNode?: string | null;
+  pairRelay?: string | null;
 }): Promise<boolean> {
   // Late imports keep this module a leaf for its pure helpers (parse/hostName)
   // — runtime pulls in stores and persistence, which the QR-scan path that
   // only parses must not load.
   const { savePairing } = await import("./runtime");
-  const { connectBridge, redeemPairCode } = await import("./bridge");
+  const { connectBridge, dialPairingTunnel, redeemPairCode } = await import("./bridge");
 
   // Trade the one-time code for this device's own credential BEFORE anything
   // is stored, so the code never lands in persisted config and a failed
@@ -110,7 +134,17 @@ export async function pairFromParams(p: {
   let token = p.token ?? null;
   let tunnelToken: string | null = null;
   if (p.code) {
-    const redeemed = await redeemPairCode(p.url, p.code);
+    let redeemed = await redeemPairCode(p.url, p.code);
+    // The QR's url is an address on the HOST's network. When this device isn't
+    // on it — pairing a phone with a server it will only ever reach over iroh —
+    // spend the code through the pairing tunnel instead: its handshake accepts
+    // the code itself, precisely so that a fresh device holding nothing else
+    // can get this far. LAN first, though: on the same network it's faster and
+    // works even while the tunnel is still warming up.
+    if (!redeemed && p.pairNode) {
+      const base = await dialPairingTunnel(p.pairNode, p.pairRelay ?? null, p.code);
+      if (base) redeemed = await redeemPairCode(base, p.code);
+    }
     if (!redeemed) return false;
     token = redeemed.token;
     tunnelToken = redeemed.tunnelToken ?? null;

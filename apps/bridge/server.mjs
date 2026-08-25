@@ -1245,8 +1245,10 @@ function pairDeepLink() {
   // response. BRIDGE_PAIR_LEGACY_TOKEN=1 restores the old shape for a fleet
   // whose apps predate code pairing — it puts the master token back on the
   // wire, so it is opt-in and stays that way.
-  const secret = process.env.BRIDGE_PAIR_LEGACY_TOKEN === "1" ? TOKEN : pairCodes.current().code;
-  const param = process.env.BRIDGE_PAIR_LEGACY_TOKEN === "1" ? "token" : "code";
+  const legacy = process.env.BRIDGE_PAIR_LEGACY_TOKEN === "1";
+  const live = legacy ? null : pairCodes.current();
+  const secret = legacy ? TOKEN : live.code;
+  const param = legacy ? "token" : "code";
   let link = `pounce://connect?url=${encodeURIComponent(PAIR.pairUrl)}&${param}=${encodeURIComponent(secret)}`;
   // Only advertise off-LAN reach when `serve` is genuinely up: a QR carrying a
   // node id nothing answers on pairs a phone that works on this Wi-Fi and
@@ -1257,6 +1259,15 @@ function pairDeepLink() {
   if (t) {
     link += `&node=${encodeURIComponent(t.nodeId)}&host=${encodeURIComponent(os.hostname().replace(/\.local$/, ""))}`;
     if (t.relay) link += `&relay=${encodeURIComponent(t.relay)}`;
+  }
+  // The pairing tunnel: how a phone that never shares a network with this
+  // machine spends the code. Rendering the QR is what opens the door; the
+  // door's key is the code on this very link. Legacy links skip it — their
+  // secret is the bearer token, which the machine-wide tunnel already accepts.
+  const pt = live ? ensurePairTunnel(live.code, live.expiresAt) : null;
+  if (pt) {
+    link += `&pnode=${encodeURIComponent(pt.nodeId)}`;
+    if (pt.relay) link += `&prelay=${encodeURIComponent(pt.relay)}`;
   }
   return link;
 }
@@ -1552,6 +1563,11 @@ function catalogSpaces(threads) {
 
 /** Only the machine running the bridge may read the UI surface (it leaks the token). */
 function isLoopback(req) {
+  // A tunnel splices bytes to a local port, so its requests arrive FROM
+  // 127.0.0.1 — the socket cannot tell a guest in another country from the
+  // desktop window. Guest tunnels land on their own listener and are marked;
+  // the mark always loses, whatever the socket says.
+  if (req.viaGuestTunnel) return false;
   const a = req.socket.remoteAddress || "";
   return a === "127.0.0.1" || a === "::1" || a === "::ffff:127.0.0.1";
 }
@@ -2115,7 +2131,7 @@ fetch('/ui',{cache:'no-store'}).then(function(r){ return r.json(); }).then(funct
 </script></body></html>
 `;
 
-const server = http.createServer(async (req, res) => {
+const handleRequest = async (req, res) => {
   // Everything send() needs from the request, captured once so the response
   // helper stays a (res, code, body) call at ~40 sites.
   res.reqInfo = {
@@ -2403,6 +2419,16 @@ const server = http.createServer(async (req, res) => {
     // loser gets this 401 and rescans a code the bridge has already replaced.
     if (pairCode && !pairCodes.claim(pairCode)) {
       return send(res, 401, { error: "pairing_code_spent" });
+    }
+    // The code is spent, so the pairing tunnel's handshake key opens nothing at
+    // the HTTP layer any more — close the transport too, not just the gate.
+    // AFTER the response is out, with a beat for the tunnel to flush it: this
+    // very response may be riding the pairing tunnel, and killing `serve`
+    // inline tears down the QUIC stream carrying the credentials it earned.
+    if (pairCode) {
+      res.on("close", () => {
+        setTimeout(stopPairTunnel, 2_000).unref?.();
+      });
     }
     const { key, name, platform } = await readBody(req);
     const minted = devices.mint({ key, name, platform });
@@ -3563,7 +3589,12 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/v1/pair/code") {
       if (!isLoopback(req)) return send(res, 403, { error: "local only" });
       const { code, expiresAt } = pairCodes.current();
-      return send(res, 200, { code, expiresAt: new Date(expiresAt).toISOString() });
+      // The CLI builds the deep link itself, so it needs the pairing tunnel's
+      // identity too — and asking for a code is the same "a QR is about to be
+      // rendered" moment that opens the door. Null while the tunnel is still
+      // publishing its identity; the CLI polls briefly.
+      const pairTunnel = ensurePairTunnel(code, expiresAt);
+      return send(res, 200, { code, expiresAt: new Date(expiresAt).toISOString(), pairTunnel });
     }
     if (url.pathname === "/v1/tunnel/ensure") {
       // (Re)spawn pounce-tunnel if a binary is available and it isn't running —
@@ -3896,7 +3927,48 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     return send(res, 500, { error: String(e?.message || e) });
   }
+};
+
+const server = http.createServer(handleRequest);
+
+/**
+ * The guest door: a second loopback listener that guest tunnels target.
+ *
+ * `pounce-tunnel serve` is a raw byte splice to a local TCP port, so every
+ * request that rides a tunnel arrives here from 127.0.0.1 — indistinguishable,
+ * at the socket, from the machine's own desktop app. The loopback-trusted
+ * surfaces (/ui and friends hand out TOKEN, the tunnel secret and a live
+ * pairing code, all before auth) were gated on exactly that socket check, which
+ * meant a guest holding only a scoped grant could read the master credential
+ * through their own grant tunnel.
+ *
+ * So guest transports get their own port. Requests landing here are marked
+ * before the shared handler runs, and isLoopback() refuses the mark — same
+ * routes, same auth, no loopback trust. The machine-wide tunnel deliberately
+ * keeps targeting the main port: its QUIC handshake is gated on the tunnel
+ * secret, which only the owner's own paired devices hold.
+ *
+ * Null until the door is open; the guest-tunnel spawners fail closed on it —
+ * a grant without a door stays LAN-only rather than loopback-trusted.
+ */
+let GUEST_PORT = null;
+const guestServer = http.createServer((req, res) => {
+  req.viaGuestTunnel = true;
+  void handleRequest(req, res);
 });
+
+/** Open the guest door, then run `then` — the boot path that restores grant
+ *  tunnels must not race the port they are told to target. */
+function startGuestDoor(then) {
+  guestServer.once("error", (err) => {
+    console.warn(`[guest-door] could not bind: ${err?.code || err} — guest tunnels stay down`);
+    then();
+  });
+  guestServer.listen(0, "127.0.0.1", () => {
+    GUEST_PORT = guestServer.address().port;
+    then();
+  });
+}
 
 function localIp() {
   return primaryLanIp();
@@ -4032,6 +4104,13 @@ export async function startBridge({
       const ip = localIp();
       const pairUrl = `http://${ip || "localhost"}:${port}`;
       PAIR = { ip: ip || "localhost", port, pairUrl };
+      // Open the guest door before anything that targets it: the boot deep link
+      // spawns the pairing tunnel, and restoreGrantTunnels the grants' — both
+      // need the port to exist, or they (rightly) refuse to start.
+      startGuestDoor(() => onListening());
+    });
+    function onListening() {
+      const { pairUrl } = PAIR;
       // The tunnel identity is stable (persistent key), so a tunnel.json from a
       // previous run already names this host — the boot QR is remote-ready on
       // every run after the first.
@@ -4082,7 +4161,7 @@ export async function startBridge({
       setInterval(reapShells, 5 * 60_000).unref?.();
       restoreGrantTunnels();
       resolve({ server, token: TOKEN, ...PAIR, fallbackFrom });
-    });
+    }
   });
 }
 
@@ -4129,7 +4208,10 @@ function startGrantTunnel(grantId) {
   if (grantTunnels.has(grantId)) return grantTunnelInfo(grantId);
   const bin = tunnelBinary();
   const secret = access.tunnelSecret(grantId);
-  if (!bin || !secret) return null;
+  // Guest door or nothing: pointed at the main port, a guest's requests would
+  // arrive as loopback and inherit the owner's pre-auth surfaces (/ui hands out
+  // the master token). LAN-only is the smaller failure.
+  if (!bin || !secret || !GUEST_PORT) return null;
   try {
     mkdirSync(GRANT_DIR, { recursive: true, mode: 0o700 });
     const child = spawn(
@@ -4139,7 +4221,7 @@ function startGrantTunnel(grantId) {
         "--token",
         secret,
         "--target",
-        `127.0.0.1:${ACTIVE_PORT}`,
+        `127.0.0.1:${GUEST_PORT}`,
         "--key",
         path.join(GRANT_DIR, `${grantId}.key`),
         "--info",
@@ -4191,6 +4273,111 @@ function restoreGrantTunnels() {
   for (const g of access.listGrants()) {
     if (g.tunnel) startGrantTunnel(g.id);
   }
+}
+
+// --- the pairing tunnel ---------------------------------------------------------
+// A fresh phone scanning the QR holds exactly one thing: the one-time pairing
+// code. That code redeems over HTTP — but the only HTTP address on the QR is
+// this machine's LAN URL, so a phone that never shares a network with this
+// machine (a server added over SSH is the canonical case) could scan a QR
+// carrying a perfectly good tunnel identity and still have no way to spend the
+// code: the machine-wide tunnel refuses every handshake that is not the tunnel
+// secret, and the secret is only handed out BY the redemption. This tunnel
+// breaks that cycle: its QUIC handshake accepts the live pairing code itself,
+// and it targets the guest door, where the code is worth exactly what it is
+// worth on the LAN — one POST /v1/device/adopt, and nothing loopback-trusted.
+//
+// Its lifetime is the code's. It runs only while a QR is actually being
+// rendered (pairDeepLink is what mints codes), restarts when the code rotates,
+// and dies the moment the code is spent or expires — so the door exists exactly
+// as long as the thing that opens it. The identity key persists, so the node id
+// on a re-rendered QR stays stable across restarts.
+
+const PAIR_TUNNEL_KEY = path.join(os.homedir(), ".pounce", "pair-tunnel.key");
+const PAIR_TUNNEL_INFO = path.join(os.homedir(), ".pounce", "pair-tunnel.json");
+
+/** { child, code, timer } while a pairing tunnel is up (or coming up). */
+let pairTunnel = null;
+
+/** The pairing tunnel's Iroh identity, if `serve` has ever published one. The
+ *  key file persists, so a previous run's file still names the right node. */
+function pairTunnelIdentity() {
+  try {
+    const info = JSON.parse(readFileSync(PAIR_TUNNEL_INFO, "utf8"));
+    return info?.nodeId ? { nodeId: info.nodeId, relay: info.relay || null } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Make sure a pairing tunnel is up whose handshake secret is `code`, and
+ * report its identity for the QR — or null when this machine can't run one
+ * (no binary, not the tunnel-eligible bridge, guest door closed).
+ *
+ * Synchronous by design: pairDeepLink builds the link inline in /ui. The spawn
+ * is fire-and-forget and the identity comes from the persisted info file, so
+ * the very first QR ever rendered may lack the pairing node for the second or
+ * two before `serve` publishes it — /ui re-polls and the next render carries
+ * it, the same first-run story as the machine-wide tunnel.
+ */
+function ensurePairTunnel(code, expiresAt) {
+  if (!tunnelEligible() || !GUEST_PORT) return null;
+  if (pairTunnel?.child && pairTunnel.code === code) return pairTunnelIdentity();
+  const bin = tunnelBinary();
+  if (!bin) return null;
+  stopPairTunnel();
+  try {
+    const child = spawn(
+      bin,
+      [
+        "serve",
+        "--token",
+        code,
+        "--target",
+        `127.0.0.1:${GUEST_PORT}`,
+        "--key",
+        PAIR_TUNNEL_KEY,
+        "--info",
+        PAIR_TUNNEL_INFO,
+      ],
+      { stdio: ["ignore", "ignore", "ignore"], windowsHide: true },
+    );
+    child.on("error", () => {});
+    // The code stops being redeemable at expiresAt; a door whose key no longer
+    // opens anything is only attack surface. Small grace for clock skew.
+    const timer = setTimeout(
+      () => {
+        if (pairTunnel?.child === child) stopPairTunnel();
+      },
+      Math.max(0, expiresAt - Date.now()) + 30_000,
+    );
+    timer.unref?.();
+    child.on("close", () => {
+      if (pairTunnel?.child === child) {
+        clearTimeout(pairTunnel.timer);
+        pairTunnel = null;
+      }
+    });
+    pairTunnel = { child, code, timer };
+  } catch {
+    pairTunnel = null;
+  }
+  // Only advertise a door that is actually open: a spawn that failed must not
+  // put a node id on the QR that nothing answers on.
+  return pairTunnel?.child ? pairTunnelIdentity() : null;
+}
+
+/** Close the pairing door — the code was spent, expired, or withdrawn. The
+ *  identity file stays: the node id is stable and the next code reuses it. */
+function stopPairTunnel() {
+  const t = pairTunnel;
+  pairTunnel = null;
+  if (!t) return;
+  clearTimeout(t.timer);
+  try {
+    t.child?.kill("SIGTERM");
+  } catch {}
 }
 
 // --- dialing OUT to a peer ------------------------------------------------------
@@ -4434,6 +4621,7 @@ function killAllTunnels() {
   try {
     tunnelChild?.kill("SIGTERM");
   } catch {}
+  stopPairTunnel();
   for (const child of grantTunnels.values()) {
     try {
       child.kill("SIGTERM");
