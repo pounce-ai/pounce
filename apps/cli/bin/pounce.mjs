@@ -346,13 +346,21 @@ async function waitForPhone(port) {
 }
 
 // --- commands -----------------------------------------------------------------
-function printPairing(pairUrl, token, tunnel, code, pairTunnel) {
+function printPairing(pairUrl, token, tunnel, code, pairTunnel, expiresAt) {
   const link = deepLink({ pairUrl, token, tunnel, code, pairTunnel });
   console.log(
     `\n  ${bold("Scan with the Pounce app")} ${dim("(Settings → Scan QR)")} ${bold("or your camera:")}\n`,
   );
   qrcode.generate(link, { small: true });
   console.log(`\n  ${dim("or open on the phone:")}\n  ${dim(link)}\n`);
+  // Say out loud that the code dies — today nothing did, so a QR pasted into a
+  // chat and scanned twenty minutes later just "didn't work" with no clue why.
+  if (code && expiresAt) {
+    const mins = Math.max(1, Math.round((new Date(expiresAt).getTime() - Date.now()) / 60_000));
+    console.log(
+      `  ${yellow("⏱")} This code works ONCE and expires in ${bold(`${mins} minutes`)} — re-run this command for a fresh one.\n`,
+    );
+  }
 }
 
 async function cmdUp(opts, { wait }) {
@@ -403,10 +411,12 @@ async function cmdUp(opts, { wait }) {
   // Best-effort: an older bridge 404s here and deepLink falls back to the token.
   let pairCode = null;
   let pairTunnel = null;
+  let pairExpiresAt = null;
   try {
     const r = await getJson(`http://127.0.0.1:${opts.port}/v1/pair/code`, { token });
     pairCode = r.code;
     pairTunnel = r.pairTunnel ?? null;
+    pairExpiresAt = r.expiresAt ?? null;
     // Asking for the code is what starts the pairing tunnel; its identity key
     // persists, so this wait only happens on a machine's very first run (an
     // older bridge just never reports one). Without it, a phone that never
@@ -421,7 +431,7 @@ async function cmdUp(opts, { wait }) {
       }
     }
   } catch {}
-  printPairing(pairUrl, token, tunnel, pairCode, pairTunnel);
+  printPairing(pairUrl, token, tunnel, pairCode, pairTunnel, pairExpiresAt);
 
   if (opts.lan) {
     console.log(
